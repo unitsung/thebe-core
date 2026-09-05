@@ -11,6 +11,40 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("ArcaneAdapter", () => {
+  it("pages container list until totalItems is exhausted", async () => {
+    const starts: number[] = [];
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      pageSize: 10,
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        const start = Number(url.searchParams.get("start") ?? "0");
+        const limit = Number(url.searchParams.get("limit") ?? "20");
+        starts.push(start);
+        const all = Array.from({ length: 25 }, (_, i) => ({
+          id: `id-${i}`,
+          name: `c${i}`,
+          image: "nginx:1.27",
+          state: "running",
+          status: "Up",
+          created: 1_700_000_000 + i,
+        }));
+        return jsonResponse(200, {
+          success: true,
+          data: all.slice(start, start + limit),
+          pagination: { totalItems: 25, itemsPerPage: limit },
+        });
+      },
+    });
+    const listed = await adapter.listContainers();
+    expect(listed).toHaveLength(25);
+    expect(listed[0]?.name).toBe("c0");
+    expect(listed[24]?.name).toBe("c24");
+    expect(starts).toEqual([0, 10, 20]);
+  });
+
   it("lists containers with X-Api-Key and maps summaries", async () => {
     const seen: { url: string; key: string | null }[] = [];
     const adapter = new ArcaneAdapter({
@@ -88,24 +122,40 @@ describe("ArcaneAdapter", () => {
     });
   });
 
-  it("returns container logs from the REST logs path", async () => {
+  it("reads container logs from the Arcane WebSocket path", async () => {
     let logsUrl = "";
+    let logsKey = "";
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
       environmentId: "0",
-      fetch: async (input) => {
-        logsUrl = String(input);
-        return jsonResponse(200, { success: true, data: "line1\nline2" });
+      openLogSocket: async (url, headers) => {
+        logsUrl = url;
+        logsKey = headers["X-Api-Key"] ?? "";
+        return (async function* () {
+          yield JSON.stringify({
+            seq: 1,
+            level: "stdout",
+            message: "line1",
+          });
+          yield JSON.stringify({
+            seq: 2,
+            level: "stderr",
+            message: "line2",
+          });
+        })();
       },
     });
     await expect(adapter.getContainerLogs("abc123", 50)).resolves.toBe(
       "line1\nline2",
     );
     expect(logsUrl).toContain(
-      "/api/environments/0/containers/abc123/logs",
+      "/api/environments/0/ws/containers/abc123/logs",
     );
     expect(logsUrl).toContain("tail=50");
+    expect(logsUrl).toContain("follow=false");
+    expect(logsKey).toBe("thebe-key");
+    expect(logsUrl).toContain("/ws/containers/");
   });
 
   it("maps status counts", async () => {

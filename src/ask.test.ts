@@ -235,6 +235,15 @@ describe("Ask", () => {
     expect(inspectLine).toHaveProperty("parameterHash");
     expect(inspectLine).toHaveProperty("responseBytes");
     expect(inspectLine).toHaveProperty("budgetConsumed");
+    const startLine = lines.find((row) => row.method === "container.start");
+    expect(startLine).toMatchObject({
+      timestamp: "2026-09-05T12:00:00.000Z",
+      method: "container.start",
+      budgetConsumed: 0,
+      redactionFired: false,
+    });
+    expect(startLine).toHaveProperty("parameterHash");
+    expect(startLine).toHaveProperty("responseBytes");
     const dumped = JSON.stringify(lines);
     expect(dumped).not.toContain("s3cret");
     expect(dumped).not.toContain("API_TOKEN=");

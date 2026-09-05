@@ -32,6 +32,7 @@ export function createThebeAgent(options: {
     callerId,
   });
   const allowed = new Set<string>(CONTAINER_TOOL_NAMES);
+  const auditedUnknown = new Set<string>();
   const agent = new Agent({
     initialState: {
       systemPrompt: "You are Thebe.",
@@ -39,20 +40,34 @@ export function createThebeAgent(options: {
       tools,
     },
     streamFn: options.streamFn,
-    async beforeToolCall({ toolCall }) {
-      if (allowed.has(toolCall.name)) {
-        return undefined;
+  });
+
+  async function auditUnknownToolResults(messages: AgentMessage[]): Promise<void> {
+    if (!audit) {
+      return;
+    }
+    for (const message of messages) {
+      if (message.role !== "toolResult" || !message.isError) {
+        continue;
       }
-      await audit?.append({
-        method: toolCall.name,
-        parameterHash: hashParameters(toolCall.arguments),
+      if (allowed.has(message.toolName)) {
+        continue;
+      }
+      if (auditedUnknown.has(message.toolCallId)) {
+        continue;
+      }
+      auditedUnknown.add(message.toolCallId);
+      await audit.append({
+        method: message.toolName,
+        parameterHash: hashParameters(
+          argumentsForToolCall(messages, message.toolCallId),
+        ),
         responseBytes: 0,
         budgetConsumed: 0,
         redactionFired: false,
       });
-      return { block: true, reason: `unknown tool: ${toolCall.name}` };
-    },
-  });
+    }
+  }
 
   return {
     toolNames(): string[] {
@@ -63,6 +78,7 @@ export function createThebeAgent(options: {
     },
     async ask(input: string): Promise<string> {
       await agent.prompt(input);
+      await auditUnknownToolResults(agent.state.messages);
       const last = agent.state.messages.at(-1);
       if (!last || last.role !== "assistant") {
         throw new Error("Ask did not produce an assistant reply");
@@ -70,4 +86,29 @@ export function createThebeAgent(options: {
       return contentText(last.content);
     },
   };
+}
+
+function argumentsForToolCall(
+  messages: AgentMessage[],
+  toolCallId: string,
+): unknown {
+  for (const message of messages) {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) {
+      continue;
+    }
+    for (const block of message.content) {
+      if (
+        typeof block === "object" &&
+        block !== null &&
+        "type" in block &&
+        block.type === "toolCall" &&
+        "id" in block &&
+        block.id === toolCallId &&
+        "arguments" in block
+      ) {
+        return block.arguments;
+      }
+    }
+  }
+  return {};
 }
