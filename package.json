@@ -1,0 +1,8 @@
+{
+  "name": "thebe-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Headless homelab agent built on the Pi agent harness.",
+  "license": "Apache-2.0"
+}
