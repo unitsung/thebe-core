@@ -7,12 +7,21 @@ import {
   type HostStatusSummary,
 } from "../providers/index.ts";
 
+export type ArcaneLogSocket = AsyncIterable<string>;
+
+export type OpenArcaneLogSocket = (
+  url: string,
+  headers: Record<string, string>,
+) => Promise<ArcaneLogSocket> | ArcaneLogSocket;
+
 export type ArcaneAdapterOptions = {
   baseUrl: string;
   apiKey: string;
   environmentId?: string;
   fetch?: typeof fetch;
   now?: () => number;
+  pageSize?: number;
+  openLogSocket?: OpenArcaneLogSocket;
 };
 
 type Json = Record<string, unknown>;
@@ -32,6 +41,8 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   private readonly environmentId: string;
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
+  private readonly pageSize: number;
+  private readonly openLogSocket: OpenArcaneLogSocket;
 
   constructor(options: ArcaneAdapterOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -39,14 +50,27 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     this.environmentId = options.environmentId ?? "0";
     this.fetchImpl = options.fetch ?? fetch;
     this.now = options.now ?? (() => Date.now());
+    this.pageSize = options.pageSize ?? 100;
+    this.openLogSocket = options.openLogSocket ?? defaultOpenLogSocket;
   }
 
   async listContainers(): Promise<ContainerSummary[]> {
-    const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers`,
-    );
-    const rows = asArray(body.data);
-    return rows.map(mapSummary);
+    const all: ContainerSummary[] = [];
+    let start = 0;
+    while (true) {
+      const body = await this.requestJson(
+        `/api/environments/${this.environmentId}/containers?limit=${this.pageSize}&start=${start}&order=asc`,
+      );
+      const rows = asArray(body.data).map(mapSummary);
+      all.push(...rows);
+      const total =
+        numberField(asObject(body.pagination), "totalItems") || all.length;
+      start += rows.length;
+      if (rows.length === 0 || start >= total || rows.length < this.pageSize) {
+        break;
+      }
+    }
+    return all;
   }
 
   async inspectContainer(id: string): Promise<ContainerDetail> {
@@ -57,17 +81,30 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   }
 
   async getContainerLogs(id: string, tail?: number): Promise<string> {
-    const query = tail === undefined ? "" : `?tail=${tail}`;
-    const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/${id}/logs${query}`,
-    );
-    if (typeof body.data === "string") {
-      return body.data;
+    const linesWanted = tail ?? 200;
+    const encodedId = encodeURIComponent(id);
+    const path =
+      `/api/environments/${this.environmentId}/ws/containers/${encodedId}/logs` +
+      `?follow=false&tail=${linesWanted}&timestamps=true&format=json&batched=false`;
+    const url = `${httpToWs(this.baseUrl)}${path}`;
+    const headers = { "X-Api-Key": this.apiKey };
+    let frames: string[];
+    try {
+      frames = [];
+      for await (const frame of await this.openLogSocket(url, headers)) {
+        frames.push(...parseLogWsPayload(frame));
+        if (frames.length >= linesWanted + 80) {
+          break;
+        }
+      }
+    } catch (cause) {
+      throw new ProviderError(
+        "UNREACHABLE",
+        "Arcane log stream is unreachable",
+        cause,
+      );
     }
-    if (typeof body === "string") {
-      return body;
-    }
-    return String(body.data ?? "");
+    return frames.join("\n");
   }
 
   async getStatusSummary(): Promise<HostStatusSummary> {
@@ -115,6 +152,84 @@ export class ArcaneAdapter implements ContainerInfoProvider {
       return { data: text };
     }
   }
+}
+
+function httpToWs(baseUrl: string): string {
+  if (baseUrl.startsWith("https://")) {
+    return `wss://${baseUrl.slice("https://".length)}`;
+  }
+  if (baseUrl.startsWith("http://")) {
+    return `ws://${baseUrl.slice("http://".length)}`;
+  }
+  return baseUrl;
+}
+
+function parseLogWsPayload(text: string): string[] {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return [];
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.flatMap((item) => messageFromLogObject(asObject(item)));
+    }
+    if (parsed && typeof parsed === "object") {
+      return messageFromLogObject(asObject(parsed));
+    }
+  } catch {
+    if (trimmed.includes("\n")) {
+      const parts = trimmed
+        .split("\n")
+        .flatMap((part) => parseLogWsPayload(part));
+      if (parts.length > 0) {
+        return parts;
+      }
+    }
+    return [trimmed];
+  }
+  return [trimmed];
+}
+
+function messageFromLogObject(obj: Json): string[] {
+  for (const key of ["message", "Message", "msg", "log"]) {
+    const value = obj[key];
+    if (typeof value === "string") {
+      return [value];
+    }
+  }
+  return [];
+}
+
+async function defaultOpenLogSocket(
+  url: string,
+  headers: Record<string, string>,
+): Promise<ArcaneLogSocket> {
+  const frames: string[] = [];
+  const ws = new WebSocket(url, { headers } as unknown as string[]);
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error("Arcane log websocket timed out"));
+    }, 15_000);
+    ws.addEventListener("message", (event) => {
+      frames.push(String(event.data));
+    });
+    ws.addEventListener("error", () => {
+      clearTimeout(timer);
+      reject(new Error("Arcane log websocket failed"));
+    });
+    ws.addEventListener("close", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    ws.addEventListener("open", () => {
+      setTimeout(() => ws.close(), 800);
+    });
+  });
+  return (async function* () {
+    yield* frames;
+  })();
 }
 
 function statusToCode(
