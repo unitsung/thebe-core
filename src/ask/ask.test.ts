@@ -10,8 +10,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { createThebeAgent } from "./ask.ts";
-import type { ContainerInfoProvider } from "./providers/index.ts";
-import { REDACTED, TRUNCATION_MARKER } from "./redaction.ts";
+import type { ContainerInfoProvider } from "../providers/index.ts";
 
 function emptyProvider(): ContainerInfoProvider {
   return {
@@ -53,6 +52,11 @@ describe("Ask", () => {
     const { faux, thebe } = thebeWithFaux();
     faux.setResponses([fauxAssistantMessage("pong")]);
     await expect(thebe.ask("ping")).resolves.toBe("pong");
+  });
+
+  it("runs tools sequentially", () => {
+    const { thebe } = thebeWithFaux();
+    expect(thebe.toolExecution()).toBe("sequential");
   });
 
   it("registers only the four read-only container tools", async () => {
@@ -109,7 +113,7 @@ describe("Ask", () => {
     expect(toolResult?.role).toBe("toolResult");
     if (toolResult?.role === "toolResult") {
       const text = contentText(toolResult.content);
-      expect(text).toContain(`API_TOKEN=${REDACTED}`);
+      expect(text).toContain("API_TOKEN=***REDACTED***");
       expect(text).toContain("NODE_ENV=production");
       expect(text).not.toContain("s3cret");
     }
@@ -137,9 +141,9 @@ describe("Ask", () => {
     expect(toolResult?.role).toBe("toolResult");
     if (toolResult?.role === "toolResult") {
       const text = contentText(toolResult.content);
-      expect(text).toContain(TRUNCATION_MARKER);
-      expect(text).toContain(`token=${REDACTED}`);
-      expect(text).toContain(`hex=${REDACTED}`);
+      expect(text).toContain("[... truncated ...]");
+      expect(text).toContain("token=***REDACTED***");
+      expect(text).toContain("hex=***REDACTED***");
       expect(text).not.toContain("sk-live-abc123");
     }
   });

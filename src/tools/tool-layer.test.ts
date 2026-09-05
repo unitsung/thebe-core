@@ -5,7 +5,6 @@ import type {
   ContainerSummary,
   HostStatusSummary,
 } from "../providers/index.ts";
-import { REDACTED } from "../redaction.ts";
 import { createToolLayer } from "./tool-layer.ts";
 
 function fakeProvider(opts: {
@@ -65,6 +64,44 @@ describe("Tool Layer", () => {
     ]);
   });
 
+  it("container.inspect redacts SECRET TOKEN KEY PASSWORD PASS CREDENTIAL PRIVATE keys", async () => {
+    const tools = createToolLayer(
+      fakeProvider({
+        inspect: {
+          id: "abc123",
+          name: "nginx",
+          image: "nginx:1.27",
+          state: "running",
+          config: {
+            env: [
+              "API_SECRET=s3cret",
+              "auth_token=abc",
+              "Service-Key=k",
+              "DB_PASSWORD=p",
+              "DB_PASS=p2",
+              "APP_CREDENTIAL=c",
+              "TLS_PRIVATE=x",
+              "NODE_ENV=production",
+            ],
+          },
+        },
+      }),
+    );
+    const result = (await tools.invoke("container.inspect", {
+      id: "abc123",
+    })) as { config: { env?: string[] } };
+    expect(result.config.env).toEqual([
+      "API_SECRET=***REDACTED***",
+      "auth_token=***REDACTED***",
+      "Service-Key=***REDACTED***",
+      "DB_PASSWORD=***REDACTED***",
+      "DB_PASS=***REDACTED***",
+      "APP_CREDENTIAL=***REDACTED***",
+      "TLS_PRIVATE=***REDACTED***",
+      "NODE_ENV=production",
+    ]);
+  });
+
   it("container.inspect redacts secret env before returning detail", async () => {
     const tools = createToolLayer(
       fakeProvider({
@@ -88,7 +125,7 @@ describe("Tool Layer", () => {
       image: "nginx:1.27",
       state: "running",
       config: {
-        env: ["NODE_ENV=production", `API_TOKEN=${REDACTED}`],
+        env: ["NODE_ENV=production", "API_TOKEN=***REDACTED***"],
         cmd: ["nginx"],
       },
     });
@@ -105,8 +142,8 @@ describe("Tool Layer", () => {
     expect(typeof result).toBe("string");
     const text = result as string;
     expect(text.startsWith("[... truncated ...]\n")).toBe(true);
-    expect(text).toContain(`token=${REDACTED}`);
-    expect(text).toContain(`hex=${REDACTED}`);
+    expect(text).toContain("token=***REDACTED***");
+    expect(text).toContain("hex=***REDACTED***");
     expect(text).not.toContain("sk-live-abc123");
     expect(text.split("\n")).toHaveLength(201);
   });
