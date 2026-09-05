@@ -19,6 +19,7 @@ export function createThebeAgent(options: {
   auditPath?: string;
   now?: () => Date;
   callerId?: string;
+  getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }) {
   const now = options.now ?? (() => new Date());
   const callerId = options.callerId ?? "default";
@@ -40,6 +41,7 @@ export function createThebeAgent(options: {
       tools,
     },
     streamFn: options.streamFn,
+    getApiKey: options.getApiKey,
   });
 
   async function auditUnknownToolResults(messages: AgentMessage[]): Promise<void> {
