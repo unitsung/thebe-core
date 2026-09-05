@@ -1,3 +1,7 @@
+export { createThebeAgent } from "./ask.ts";
+export { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
+export { createAuditLog, hashParameters } from "./audit/audit-log.ts";
+export { createPolicyEngine } from "./policy/policy-engine.ts";
 export {
   DEFAULT_LOG_TAIL,
   REDACTED,
@@ -14,3 +18,5 @@ export {
   type HostStatusSummary,
   type ProviderErrorCode,
 } from "./providers/index.ts";
+export { CONTAINER_TOOL_NAMES } from "./tools/container-tools.ts";
+export { createToolLayer } from "./tools/tool-layer.ts";
