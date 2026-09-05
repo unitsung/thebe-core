@@ -36,6 +36,11 @@ const STATES = new Set<ContainerState>([
 ]);
 
 export class ArcaneAdapter implements ContainerInfoProvider {
+  // Checked 2026-09-05 against instance v2.10.2 openapi.json:
+  // list uses pagination.totalItems and names[]; inspect state is {status,running};
+  // counts has no paused/exited (paused stays 0, exited uses stoppedContainers).
+  // Auth header is X-API-Key (X-Api-Key is equivalent).
+  // Unverified: WS logs path, frame format, default environmentId "0".
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly environmentId: string;

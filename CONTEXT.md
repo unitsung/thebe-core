@@ -1,33 +1,53 @@
 # Thebe Core
 
-Homelab 上常驻的 Agent。loop 由 Pi 提供，本仓库不自写 agent loop。v0.3 先验证四个只读容器工具。
+The homelab Agent. Pi owns the loop; this repo does not write one. v0 is four read-only container tools through Arcane.
 
 ## Language
 
 **Thebe Core**:
-本仓库，以及这个 Agent。包名与仓库名是 `thebe-core`。
-_Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, 把它降成不含 Agent 的面板代理
+This repository and the Agent it is. Package and repo name are `thebe-core`.
+_Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, a dashboard proxy with no Agent, a daemon
 
 **Pi**:
-Earendil Works 的 Agent（`@earendil-works/pi-coding-agent` / `@earendil-works/pi-agent-core`）。Thebe Core 在它上面构建。
-_Avoid_: 把 Pi 写成我们自己实现的 loop
+Earendil Works `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`. Thebe Core is a library on top of them.
+_Avoid_: `@earendil-works/pi-coding-agent`, the official `pi` CLI as the product entry, treating Pi as a loop we wrote
 
-**Tool Layer**:
-v0.3 对外能力面，且只有 `container.list` / `container.inspect` / `container.logs` / `container.status_summary`。不注册 Pi 内置的 read / bash / edit / write，也没有文件系统工具。
-_Avoid_: 在接口、配置或开关里再声明一份「允许什么」
-
-**ContainerInfoProvider**:
-容器只读观测的唯一能力声明。Tool Layer 和 PolicyEngine 只认这个接口。
-_Avoid_: 让工具代码 import 任何面板 SDK 或 HTTP 客户端
-
-**Arcane**:
-当前唯一的容器面板。Thebe Core 不直连 docker.sock。v0.3 只维护 ArcaneAdapter，不做多面板、不接 Dockge。
-
-**PolicyEngine**:
-对 Tool Layer 的方法白名单、预算计数和脱敏规则。白名单与四个方法名相同。`container.logs` 默认每日 1000 次，其余先不设上限。
-
-**AuditLog**:
-不可变、只追加的本地日志。v0.3 为明文 JSONL；加密是后一刀。记录时间戳、方法名、参数哈希、返回字节数、预算消耗、是否脱敏。
+**AgentAdapter**:
+Wrapper around Pi's `Agent`. Ask calls `prompt()` only; `toolExecution` is required `"sequential"` on the type. convertToLlm, transformContext, StreamGuard, and failure-sentinel detection sit behind it.
+_Avoid_: raw `agentLoop()`, omitting `toolExecution`, Ask constructing `Agent` itself
 
 **Ask**:
-一次提问：走 Pi，只用四个容器工具。不是 status / logs / abort / doctor 套件。
+One question, via AgentAdapter `prompt()`. The product's only entry.
+_Avoid_: a parallel Thebe CLI suite (status / logs / abort / doctor)
+
+**v0**:
+First product slice: four read-only container tools, Arcane only. No approval, scheduler, MCP, Beszel, or docker.sock.
+_Avoid_: treating the spec version "v0.3" as a build checklist, folding §6.2 / §12 into v0
+
+**Tool Layer**:
+The capability surface. v0 registers `container.list` / `container.inspect` / `container.logs` / `container.status_summary`. Redaction is internal to this module, not exported.
+_Avoid_: a second allow-list in config or flags, treating redaction as its own module
+
+**ContainerInfoProvider**:
+The only capability declaration for read-only container observation. Tool Layer and PolicyEngine speak only this interface.
+_Avoid_: tool code importing a panel SDK or HTTP client
+
+**Arcane**:
+The only container panel. Thebe Core does not talk to docker.sock. Only ArcaneAdapter; no Dockge, no multi-panel.
+_Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager
+
+**PolicyEngine**:
+Interception and budgets for the Tool Layer. `decide` is a pure function; `beforeToolCall` is fail-closed; after budget or violation latch, `shouldStopAfterTurn` stops the loop — not `tool_result.terminate`.
+_Avoid_: Gate, Harness, Session, stopping a Run with a terminate field
+
+**StreamGuard**:
+Per-Run application timeouts: TTFB + idle timers plus an abort watchdog. Wired by AgentAdapter; does not rely on fetch/undici.
+_Avoid_: treating upstream timeoutMs as the only backstop
+
+**RunStore**:
+Thebe-owned persistence: transcript snapshot, Run status, token ledger. The ledger is not its own module.
+_Avoid_: reusing Pi session files, a TokenLedger module
+
+**AuditLog**:
+Immutable, append-only, Thebe-Core-writable local JSONL. Redaction at two points (before the model and before disk). Routine cannot disable audit.
+_Avoid_: a model-writable audit tool, making audit opt-in

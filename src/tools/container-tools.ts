@@ -4,7 +4,7 @@ import { hashParameters } from "../audit/audit-log.ts";
 import type { createAuditLog } from "../audit/audit-log.ts";
 import type { createPolicyEngine } from "../policy/policy-engine.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
-import { REDACTED, TRUNCATION_MARKER } from "../redaction.ts";
+import { REDACTED, TRUNCATION_MARKER } from "./redaction.ts";
 import { createToolLayer } from "./tool-layer.ts";
 
 const emptyParams = Type.Object({});

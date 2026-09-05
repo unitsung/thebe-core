@@ -12,7 +12,22 @@ export type AuditRecord = {
 };
 
 export function hashParameters(args: unknown): string {
-  return createHash("sha256").update(JSON.stringify(args ?? {})).digest("hex");
+  return createHash("sha256").update(canonicalJson(args ?? {})).digest("hex");
+}
+
+/** Canonical JSON with sorted keys. Hash this after argument validation. */
+export function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`);
+  return `{${entries.join(",")}}`;
 }
 
 export function createAuditLog(path: string, now: () => Date) {

@@ -4,7 +4,7 @@ import type {
   ContainerSummary,
   HostStatusSummary,
 } from "../providers/index.ts";
-import { redactEnv, redactLogs } from "../redaction.ts";
+import { redactEnv, redactLogs } from "./redaction.ts";
 
 export function createToolLayer(provider: ContainerInfoProvider) {
   return {
