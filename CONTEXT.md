@@ -1,20 +1,16 @@
 # Thebe Core
 
-Host 上常驻的 Agent。loop 由 Pi 提供，本仓库不自写 agent loop。v0.3 先验证四个只读容器工具。
+Homelab 上常驻的 Agent。loop 由 Pi 提供，本仓库不自写 agent loop。v0.3 先验证四个只读容器工具。
 
 ## Language
 
 **Thebe Core**:
-本仓库，以及跑在 Host 上的那个 Agent。包名与仓库名是 `thebe-core`。
+本仓库，以及这个 Agent。包名与仓库名是 `thebe-core`。
 _Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, 把它降成不含 Agent 的面板代理
 
 **Pi**:
-Earendil Works 的 Agent 运行时。本仓库以库的方式依赖 `@earendil-works/pi-agent-core`，进程和入口是我们的。
-_Avoid_: 用 "pi" 指代 Host 或树莓派（spec 原文里的 "pi" 一律读成 Host）；把官方 `pi` CLI 当成本产品入口
-
-**Host**:
-Thebe Core 运行的那台常驻机器。v0.3 不监听端口。
-_Avoid_: pi, Raspberry Pi（除非确实在说那块硬件）
+Earendil Works 的 Agent（`@earendil-works/pi-coding-agent` / `@earendil-works/pi-agent-core`）。Thebe Core 在它上面构建。
+_Avoid_: 把 Pi 写成我们自己实现的 loop
 
 **Tool Layer**:
 v0.3 对外能力面，且只有 `container.list` / `container.inspect` / `container.logs` / `container.status_summary`。不注册 Pi 内置的 read / bash / edit / write，也没有文件系统工具。
@@ -34,4 +30,4 @@ _Avoid_: 让工具代码 import 任何面板 SDK 或 HTTP 客户端
 不可变、只追加的本地日志。v0.3 为明文 JSONL；加密是后一刀。记录时间戳、方法名、参数哈希、返回字节数、预算消耗、是否脱敏。
 
 **Ask**:
-v0.3 的 CLI 入口：一次提问，走 Pi loop 和四个容器工具。不是 status / logs / abort / doctor 套件。
+一次提问：走 Pi，只用四个容器工具。不是 status / logs / abort / doctor 套件。

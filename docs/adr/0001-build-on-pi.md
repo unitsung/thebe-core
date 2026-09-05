@@ -1,5 +1,5 @@
-# Build on Pi as a library
+# Build the agent on Pi
 
-Thebe Core is an agent, but we will not write the agent loop, session machinery, or model streaming ourselves. We depend on `@earendil-works/pi-agent-core` as a library. This repo owns the process, the `ask` entry, and Homelab tools.
+Thebe Core is an agent built on Earendil's Pi. We do not write the agent loop, session machinery, or model streaming. The user starts the agent the way Pi is started. This repo adds Homelab capability on top: v0.3 is four read-only container tools, Arcane, policy, and redaction.
 
-The official `pi` CLI is a coding TUI with bash/edit/write. Forking Pi would inherit their release cadence. Neither fits a Homelab agent whose v0.3 surface is four read-only container tools.
+Forking Pi would inherit their release cadence for no gain.
