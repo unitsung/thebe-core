@@ -15,10 +15,13 @@ identity.txt
 # Dependencies / build
 node_modules/
 .bun/
+.pnpm-store/
+pnpm-debug.log*
 dist/
 build/
 out/
 *.tsbuildinfo
+.vite/
 
 # Runtime / data
 /data/
