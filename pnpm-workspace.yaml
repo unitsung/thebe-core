@@ -1,0 +1,9 @@
+allowBuilds:
+  "@google/genai": false
+  esbuild: false
+  protobufjs: false
+minimumReleaseAgeExclude:
+  - "@earendil-works/chord@0.85.0"
+  - "@earendil-works/pi-agent-core@0.85.0"
+  - "@earendil-works/pi-ai@0.85.0"
+  - "@earendil-works/pi-telemetry@0.85.0"
