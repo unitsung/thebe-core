@@ -1,8 +1,10 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import {
   contentText,
+  createAssistantMessageEventStream,
   createModels,
   fauxAssistantMessage,
   fauxProvider,
@@ -10,6 +12,7 @@ import {
 } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { createThebeAgent } from "./ask.ts";
+import { createRunStore } from "../run-store/index.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 
 function emptyProvider(): ContainerInfoProvider {
@@ -33,18 +36,25 @@ function thebeWithFaux(
     auditPath?: string;
     now?: () => Date;
     callerId?: string;
+    runStoreDir?: string;
+    maxToolCalls?: number;
+    ttfbMs?: number;
+    idleMs?: number;
+    watchdogMs?: number;
+    streamFn?: StreamFn;
   } = {},
 ) {
   const faux = fauxProvider();
   const models = createModels();
   models.setProvider(faux.provider);
+  const { streamFn, ...rest } = extras;
   const thebe = createThebeAgent({
     model: faux.getModel(),
-    streamFn: models.streamSimple.bind(models),
+    streamFn: streamFn ?? models.streamSimple.bind(models),
     provider,
-    ...extras,
+    ...rest,
   });
-  return { faux, thebe };
+  return { faux, thebe, models };
 }
 
 describe("Ask", () => {
@@ -251,6 +261,183 @@ describe("Ask", () => {
     const dumped = JSON.stringify(lines);
     expect(dumped).not.toContain("s3cret");
     expect(dumped).not.toContain("API_TOKEN=");
+  });
+
+  it("canary secret is absent from audit and from later provider bodies (§15 #7)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-audit-"));
+    const auditPath = join(dir, "audit.jsonl");
+    const provider: ContainerInfoProvider = {
+      ...emptyProvider(),
+      inspectContainer: async () => ({
+        id: "abc123",
+        name: "nginx",
+        image: "nginx:1.27",
+        state: "running",
+        config: { env: ["API_TOKEN=canary-s3cret"] },
+      }),
+    };
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const bodies: string[] = [];
+    const inner = models.streamSimple.bind(models);
+    const thebe = createThebeAgent({
+      model: faux.getModel(),
+      streamFn: (model, context, options) => {
+        bodies.push(JSON.stringify(context));
+        return inner(model, context, options);
+      },
+      provider,
+      auditPath,
+      now: () => new Date("2026-09-05T12:00:00Z"),
+      callerId: "agent-1",
+    });
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("container.inspect", { id: "abc123" }),
+      ]),
+      fauxAssistantMessage("inspected"),
+    ]);
+    await thebe.ask("inspect nginx");
+    const audit = await readFile(auditPath, "utf8");
+    expect(audit).not.toContain("canary-s3cret");
+    expect(bodies.join("\n")).not.toContain("canary-s3cret");
+    expect(bodies.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("truncates huge logs, marks them, and audits the truncation (§15 #8)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-audit-"));
+    const auditPath = join(dir, "audit.jsonl");
+    const lines = Array.from({ length: 250 }, (_, i) => `L${i}`);
+    const provider: ContainerInfoProvider = {
+      ...emptyProvider(),
+      getContainerLogs: async () => lines.join("\n"),
+    };
+    const { faux, thebe } = thebeWithFaux(provider, {
+      auditPath,
+      now: () => new Date("2026-09-05T12:00:00Z"),
+      callerId: "agent-1",
+    });
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("container.logs", { id: "abc123" })]),
+      fauxAssistantMessage("logged"),
+    ]);
+    await thebe.ask("show logs");
+    const toolResult = thebe.messages().find((m) => m.role === "toolResult");
+    expect(toolResult?.role).toBe("toolResult");
+    if (toolResult?.role === "toolResult") {
+      expect(contentText(toolResult.content)).toContain("[... truncated ...]");
+    }
+    const rows = (await readFile(auditPath, "utf8"))
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { method?: string; redactionFired?: boolean });
+    const logsLine = rows.find((row) => row.method === "container.logs");
+    expect(logsLine?.redactionFired).toBe(true);
+  });
+
+  it("budget exhaust stops the loop via shouldStopAfterTurn with no terminate (§15 #5/#13)", async () => {
+    const { faux, thebe } = thebeWithFaux(emptyProvider(), { maxToolCalls: 1 });
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("container.list", {}),
+        fauxToolCall("container.list", {}),
+      ]),
+      fauxAssistantMessage("should not run"),
+    ]);
+    const reply = await thebe.ask("list twice");
+    expect(reply).not.toBe("should not run");
+    const toolResults = thebe.messages().filter((m) => m.role === "toolResult");
+    expect(toolResults.length).toBe(2);
+    expect(toolResults.some((m) => "terminate" in m)).toBe(false);
+    expect(faux.getPendingResponseCount()).toBe(1);
+    expect(JSON.stringify(toolResults)).not.toContain('"terminate"');
+  });
+
+  it("Ask hanging stream reaches terminal with a snapshot in ≤10s (§15 #1/#14)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-run-"));
+    const start = Date.now();
+    const { thebe } = thebeWithFaux(emptyProvider(), {
+      runStoreDir: dir,
+      now: () => new Date("2026-09-05T12:00:00Z"),
+      ttfbMs: 40,
+      idleMs: 1000,
+      watchdogMs: 40,
+      streamFn: async () => createAssistantMessageEventStream(),
+    });
+    await expect(thebe.ask("ping")).rejects.toThrow();
+    expect(Date.now() - start).toBeLessThan(10_000);
+    const files = await readdir(dir);
+    expect(files.length).toBeGreaterThanOrEqual(1);
+    const store = createRunStore(dir);
+    const ids = await store.list();
+    const snap = await store.load(ids[0] ?? "");
+    expect(["failed", "force-killed"]).toContain(snap.status);
+    expect(snap.messages.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("Ask streamFn throw does not hang and is not returned as a reply (§15 #2/#15)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-run-"));
+    const { thebe } = thebeWithFaux(emptyProvider(), {
+      runStoreDir: dir,
+      now: () => new Date("2026-09-05T12:00:00Z"),
+      streamFn: async () => {
+        throw new Error("boom");
+      },
+    });
+    await expect(thebe.ask("ping")).rejects.toThrow(/boom/);
+    const store = createRunStore(dir);
+    const ids = await store.list();
+    const snap = await store.load(ids[0] ?? "");
+    expect(snap.status).toBe("failed");
+    expect(snap.tokenTotals.totalTokens).toBe(0);
+    expect(snap.tokenTotals.estimatedTokens).toBe(0);
+  });
+
+  it("after abort, no further LLM calls in that run (§15 #11)", async () => {
+    let calls = 0;
+    const { thebe } = thebeWithFaux(emptyProvider(), {
+      ttfbMs: 40,
+      idleMs: 1000,
+      watchdogMs: 40,
+      streamFn: async () => {
+        calls += 1;
+        return createAssistantMessageEventStream();
+      },
+    });
+    await thebe.ask("ping").catch(() => {});
+    expect(calls).toBe(1);
+    await new Promise((r) => setTimeout(r, 80));
+    expect(calls).toBe(1);
+  });
+
+  it("after an aborted turn, the next Ask succeeds without the aborted assistant (§15 #4)", async () => {
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    let calls = 0;
+    const inner = models.streamSimple.bind(models);
+    const seen: string[] = [];
+    const thebe = createThebeAgent({
+      model: faux.getModel(),
+      streamFn: (model, context, options) => {
+        calls += 1;
+        if (calls === 1) {
+          return createAssistantMessageEventStream();
+        }
+        seen.push(JSON.stringify(context.messages));
+        return inner(model, context, options);
+      },
+      provider: emptyProvider(),
+      ttfbMs: 40,
+      idleMs: 1000,
+      watchdogMs: 40,
+    });
+    await expect(thebe.ask("one")).rejects.toThrow();
+    faux.setResponses([fauxAssistantMessage("pong")]);
+    await expect(thebe.ask("two")).resolves.toBe("pong");
+    expect(seen.join("\n")).not.toMatch(/"stopReason":"aborted"/);
+    expect(seen.join("\n")).not.toMatch(/"stopReason":"error"/);
   });
 });
 

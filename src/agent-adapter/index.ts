@@ -72,6 +72,7 @@ export function createAgentAdapter(options: {
       await agent.prompt(input);
     },
     abort(): void {
+      guard.noteAbort();
       agent.abort();
     },
     subscribe(
@@ -93,17 +94,26 @@ export function createAgentAdapter(options: {
       return guard.wasForceKilled();
     },
     lastReply(): AgentReply {
-      const last = agent.state.messages.at(-1);
-      if (!last || last.role !== "assistant") {
-        return { kind: "missing" };
-      }
-      if (isFailureSentinel(last)) {
+      for (let i = agent.state.messages.length - 1; i >= 0; i--) {
+        const message = agent.state.messages[i];
+        if (message?.role !== "assistant") {
+          continue;
+        }
+        if (isFailureSentinel(message)) {
+          const errorMessage =
+            "errorMessage" in message &&
+            typeof message.errorMessage === "string" &&
+            message.errorMessage.length > 0
+              ? message.errorMessage
+              : "Ask run failed";
+          return { kind: "sentinel", errorMessage };
+        }
         return {
-          kind: "sentinel",
-          errorMessage: last.errorMessage || "Ask run failed",
+          kind: "ok",
+          text: "content" in message ? contentText(message.content) : "",
         };
       }
-      return { kind: "ok", text: contentText(last.content) };
+      return { kind: "missing" };
     },
   };
 }

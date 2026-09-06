@@ -70,6 +70,50 @@ export function createThebeAgent(options: {
   const runStore = createRunStore(options.runStoreDir, now);
   let runSeq = 0;
   let currentRunId: string | undefined;
+  let messagesBeforeRun = 0;
+  let persistedForRun: string | undefined;
+  let recordedForRun = false;
+
+  async function persistCurrentRun(): Promise<void> {
+    if (!currentRunId) {
+      return;
+    }
+    if (!recordedForRun) {
+      runStore.recordMessages(adapter.messages().slice(messagesBeforeRun));
+      recordedForRun = true;
+    }
+    if (persistedForRun === currentRunId) {
+      return;
+    }
+    if (!options.runStoreDir) {
+      persistedForRun = currentRunId;
+      return;
+    }
+    const reply = adapter.lastReply();
+    try {
+      await runStore.save({
+        runId: currentRunId,
+        systemPrompt: adapter.systemPrompt(),
+        messages: adapter.messages().slice(),
+        tools: adapter.toolNames(),
+        status: adapter.wasForceKilled()
+          ? "force-killed"
+          : reply.kind !== "ok"
+            ? "failed"
+            : "done",
+      });
+      persistedForRun = currentRunId;
+    } catch {
+      // snapshot is best-effort; Ask still returns or throws from the reply
+    }
+  }
+
+  adapter.subscribe(async (event) => {
+    if (event.type !== "agent_end") {
+      return;
+    }
+    await persistCurrentRun();
+  });
 
   async function auditUnknownToolResults(
     messages: AgentMessage[],
@@ -115,28 +159,13 @@ export function createThebeAgent(options: {
       runStore.resetLedger();
       runSeq += 1;
       currentRunId = `run-${now().toISOString().replace(/[:.]/g, "-")}-${runSeq}`;
-      const before = adapter.messages().length;
+      persistedForRun = undefined;
+      recordedForRun = false;
+      messagesBeforeRun = adapter.messages().length;
       await adapter.prompt(input);
-      const added = adapter.messages().slice(before);
-      runStore.recordMessages(added);
+      await persistCurrentRun();
       await auditUnknownToolResults(adapter.messages());
       const reply = adapter.lastReply();
-      const failed = reply.kind !== "ok";
-      if (currentRunId && options.runStoreDir) {
-        await runStore
-          .save({
-            runId: currentRunId,
-            systemPrompt: adapter.systemPrompt(),
-            messages: adapter.messages().slice(),
-            tools: adapter.toolNames(),
-            status: adapter.wasForceKilled()
-              ? "force-killed"
-              : failed
-                ? "failed"
-                : "done",
-          })
-          .catch(() => {});
-      }
       if (reply.kind === "missing") {
         throw new Error("Ask did not produce an assistant reply");
       }

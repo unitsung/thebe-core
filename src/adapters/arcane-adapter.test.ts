@@ -183,38 +183,66 @@ describe("ArcaneAdapter", () => {
     });
   });
 
-  it("maps HTTP failures to ProviderError codes", async () => {
+  it("maps HTTP failures to ProviderError codes without leaking the panel body", async () => {
     const failing = (status: number) =>
       new ArcaneAdapter({
         baseUrl: "https://arcane.internal:3552",
         apiKey: "thebe-key",
         environmentId: "0",
-        fetch: async () => jsonResponse(status, { message: "nope" }),
+        fetch: async () =>
+          jsonResponse(status, {
+            message: "nope",
+            error: "raw-arcane-stack-trace",
+          }),
       });
 
-    await expect(failing(404).listContainers()).rejects.toMatchObject({
-      name: "ProviderError",
-      code: "NOT_FOUND",
-    } satisfies Partial<ProviderError>);
-    await expect(failing(401).listContainers()).rejects.toMatchObject({
-      code: "UNAUTHORIZED",
-    });
-    await expect(failing(429).listContainers()).rejects.toMatchObject({
-      code: "RATE_LIMITED",
-    });
+    const cases: Array<[number, ProviderError["code"]]> = [
+      [404, "NOT_FOUND"],
+      [401, "UNAUTHORIZED"],
+      [429, "RATE_LIMITED"],
+    ];
+    for (const [status, code] of cases) {
+      const err = await failing(status)
+        .listContainers()
+        .then(
+          () => {
+            throw new Error(`expected ${status} to reject`);
+          },
+          (error: unknown) => error,
+        );
+      expect(err).toMatchObject({
+        name: "ProviderError",
+        code,
+      } satisfies Partial<ProviderError>);
+      expect(err).toBeInstanceOf(ProviderError);
+      const pe = err as ProviderError;
+      expect(pe.message).not.toContain("nope");
+      expect(pe.message).not.toContain("raw-arcane-stack-trace");
+      expect(JSON.stringify(pe)).not.toContain("nope");
+      expect(JSON.stringify(pe)).not.toContain("raw-arcane-stack-trace");
+    }
   });
 
-  it("maps network failure to UNREACHABLE", async () => {
+  it("maps network failure to UNREACHABLE without leaking the cause message to tools", async () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
       environmentId: "0",
       fetch: async () => {
-        throw new TypeError("fetch failed");
+        throw new TypeError("ECONNREFUSED 10.0.0.5:3552 secret-host");
       },
     });
-    await expect(adapter.listContainers()).rejects.toMatchObject({
-      code: "UNREACHABLE",
-    });
+    const err = await adapter.listContainers().then(
+      () => {
+        throw new Error("expected unreachable to reject");
+      },
+      (error: unknown) => error,
+    );
+    expect(err).toMatchObject({ code: "UNREACHABLE" });
+    expect(err).toBeInstanceOf(ProviderError);
+    const pe = err as ProviderError;
+    expect(pe.message).toBe("Arcane is unreachable");
+    expect(pe.message).not.toContain("secret-host");
+    expect(JSON.stringify(pe)).not.toContain("secret-host");
   });
 });

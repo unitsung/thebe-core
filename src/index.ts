@@ -1,6 +1,10 @@
 export { createThebeAgent } from "./ask/index.ts";
 export { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
 export {
+  createThebeHttpHandler,
+  listenThebeHttp,
+} from "./http/index.ts";
+export {
   ProviderError,
   type ContainerDetail,
   type ContainerInfoProvider,
