@@ -42,7 +42,9 @@ export function thebeConvertToLlm(messages: AgentMessage[]): Message[] {
 
 /**
  * Strip trailing assistant messages whose stopReason is error/aborted.
- * Do not repair orphan tool_use blocks or drop user steering messages.
+ * Pi appends the new user prompt before calling this hook, so a trailing
+ * user suffix is skipped while stripping, then kept (steering stays).
+ * Do not repair orphan tool_use blocks.
  * Must not throw; on error return the original array.
  */
 export function thebeTransformContext(
@@ -50,6 +52,11 @@ export function thebeTransformContext(
 ): Promise<AgentMessage[]> {
   try {
     let end = messages.length;
+    let userSuffix = 0;
+    while (end > 0 && messages[end - 1]?.role === "user") {
+      end -= 1;
+      userSuffix += 1;
+    }
     while (end > 0) {
       const last = messages[end - 1];
       if (
@@ -61,10 +68,16 @@ export function thebeTransformContext(
       }
       break;
     }
-    if (end === messages.length) {
+    if (end + userSuffix === messages.length) {
       return Promise.resolve(messages);
     }
-    return Promise.resolve(messages.slice(0, end));
+    if (userSuffix === 0) {
+      return Promise.resolve(messages.slice(0, end));
+    }
+    return Promise.resolve([
+      ...messages.slice(0, end),
+      ...messages.slice(messages.length - userSuffix),
+    ]);
   } catch {
     return Promise.resolve(messages);
   }

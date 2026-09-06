@@ -7,12 +7,10 @@ export type ProviderErrorCode =
 
 export class ProviderError extends Error {
   readonly code: ProviderErrorCode;
-  readonly cause?: unknown;
 
   constructor(code: ProviderErrorCode, message: string, cause?: unknown) {
-    super(message);
+    super(message, cause !== undefined ? { cause } : undefined);
     this.name = "ProviderError";
     this.code = code;
-    this.cause = cause;
   }
 }

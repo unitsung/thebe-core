@@ -6,8 +6,27 @@ function hangingStream() {
   return createAssistantMessageEventStream();
 }
 
+async function drainUntilEnd(
+  stream: AsyncIterable<{ type?: string }>,
+  ms: number,
+): Promise<string[]> {
+  const got: string[] = [];
+  const pump = (async () => {
+    for await (const event of stream) {
+      got.push(event.type ?? "");
+    }
+  })();
+  await Promise.race([
+    pump,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("stream did not end")), ms),
+    ),
+  ]);
+  return got;
+}
+
 describe("StreamGuard (§5 dual timers)", () => {
-  it("aborts on TTFB timeout and records ttfb_timeout", async () => {
+  it("aborts on TTFB timeout, records ttfb_timeout, and ends the stream", async () => {
     const abort = vi.fn();
     const events: string[] = [];
     const guard = createStreamGuard({
@@ -19,16 +38,30 @@ describe("StreamGuard (§5 dual timers)", () => {
     });
     const wrapped = guard.wrapStreamFn(async () => hangingStream());
     const stream = await wrapped({} as never, {} as never);
-    const pump = (async () => {
-      for await (const _ of stream) {
-        // noop
-      }
-    })();
-    await new Promise((r) => setTimeout(r, 60));
+    const types = await drainUntilEnd(stream, 400);
     expect(abort).toHaveBeenCalledTimes(1);
     expect(events).toContain("ttfb_timeout");
+    expect(types).toContain("error");
     guard.dispose();
-    await Promise.race([pump, new Promise((r) => setTimeout(r, 50))]);
+  });
+
+  it("slow prefill longer than idle is TTFB, not idle", async () => {
+    const abort = vi.fn();
+    const events: string[] = [];
+    const guard = createStreamGuard({
+      ttfbMs: 80,
+      idleMs: 20,
+      watchdogMs: 1000,
+      abort,
+      onEvent: (k) => events.push(k),
+    });
+    const wrapped = guard.wrapStreamFn(async () => hangingStream());
+    const stream = await wrapped({} as never, {} as never);
+    await drainUntilEnd(stream, 400);
+    expect(events).toContain("ttfb_timeout");
+    expect(events).not.toContain("idle_timeout");
+    expect(abort).toHaveBeenCalledTimes(1);
+    guard.dispose();
   });
 
   it("cancels TTFB after first content; idle still fires", async () => {
@@ -44,19 +77,14 @@ describe("StreamGuard (§5 dual timers)", () => {
     const inner = createAssistantMessageEventStream();
     const wrapped = guard.wrapStreamFn(async () => inner);
     const stream = await wrapped({} as never, {} as never);
-    const seen: string[] = [];
-    const pump = (async () => {
-      for await (const e of stream) {
-        seen.push((e as { type: string }).type);
-      }
-    })();
     inner.push({ type: "start", partial: {} } as never);
-    await new Promise((r) => setTimeout(r, 60));
+    const seen = await drainUntilEnd(stream, 400);
     expect(events).not.toContain("ttfb_timeout");
     expect(events).toContain("idle_timeout");
     expect(abort).toHaveBeenCalledTimes(1);
+    expect(seen).toContain("start");
+    expect(seen).toContain("error");
     guard.dispose();
-    await Promise.race([pump, new Promise((r) => setTimeout(r, 50))]);
   });
 
   it("content events reset idle so a slow stream is not treated as idle", async () => {
@@ -90,18 +118,43 @@ describe("StreamGuard (§5 dual timers)", () => {
     await Promise.race([pump, new Promise((r) => setTimeout(r, 50))]);
   });
 
-  it("turns a throwing streamFn into an error event", async () => {
+  it("turns a throwing streamFn into an error event and does not hang", async () => {
     const guard = createStreamGuard({ ttfbMs: 1000, idleMs: 1000 });
     const wrapped = guard.wrapStreamFn(async () => {
       throw new Error("boom");
     });
     const stream = await wrapped({} as never, {} as never);
-    const got: string[] = [];
-    for await (const e of stream) {
-      got.push((e as { type: string }).type);
-      break;
-    }
+    const got = await drainUntilEnd(stream, 400);
     expect(got).toEqual(["error"]);
+    guard.dispose();
+  });
+
+  it("idle-timeouts a stream that emitted content then never closed (#7954)", async () => {
+    const abort = vi.fn();
+    const events: string[] = [];
+    const guard = createStreamGuard({
+      ttfbMs: 1000,
+      idleMs: 20,
+      watchdogMs: 1000,
+      abort,
+      onEvent: (k) => events.push(k),
+    });
+    const inner = createAssistantMessageEventStream();
+    const wrapped = guard.wrapStreamFn(async () => inner);
+    const stream = await wrapped({} as never, {} as never);
+    inner.push({
+      type: "start",
+      partial: {
+        role: "assistant",
+        content: [{ type: "text", text: "hi" }],
+        stopReason: "stop",
+      },
+    } as never);
+    const types = await drainUntilEnd(stream, 400);
+    expect(events).toContain("idle_timeout");
+    expect(events).not.toContain("ttfb_timeout");
+    expect(types).toContain("error");
+    expect(abort).toHaveBeenCalledTimes(1);
     guard.dispose();
   });
 

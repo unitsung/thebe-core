@@ -2,6 +2,7 @@ import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  createAssistantMessageEventStream,
   createModels,
   fauxAssistantMessage,
   fauxProvider,
@@ -77,7 +78,7 @@ describe("RunStore", () => {
     expect(store.tokenTotals().estimatedTokens).toBe(0);
   });
 
-  it("Ask abort/early-end still leaves a loadable snapshot", async () => {
+  it("Ask success leaves a loadable snapshot", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-run-"));
     const faux = fauxProvider();
     const models = createModels();
@@ -97,5 +98,35 @@ describe("RunStore", () => {
     const ids = await store.list();
     const snap = await store.load(ids[0] ?? "");
     expect(snap.status).toBe("done");
+    expect(snap.messages.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("Ask abort/error still snapshots via agent_end (§15 #14)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-run-"));
+    const faux = fauxProvider();
+    const models = createModels();
+    models.setProvider(faux.provider);
+    const thebe = createThebeAgent({
+      model: faux.getModel(),
+      streamFn: async () => createAssistantMessageEventStream(),
+      provider: emptyProvider(),
+      runStoreDir: dir,
+      now: () => new Date("2026-09-05T12:00:00Z"),
+      ttfbMs: 40,
+      idleMs: 1000,
+      watchdogMs: 40,
+    });
+    await expect(thebe.ask("ping")).rejects.toThrow();
+    const store = createRunStore(dir);
+    const ids = await store.list();
+    expect(ids.length).toBeGreaterThanOrEqual(1);
+    const snap = await store.load(ids[0] ?? "");
+    expect(["failed", "force-killed"]).toContain(snap.status);
+    expect(snap.tools).toEqual([
+      "container.list",
+      "container.inspect",
+      "container.logs",
+      "container.status_summary",
+    ]);
   });
 });

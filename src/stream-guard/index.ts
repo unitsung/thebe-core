@@ -1,5 +1,35 @@
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import {
+  createAssistantMessageEventStream,
+  type AssistantMessage,
+} from "@earendil-works/pi-ai";
+
+const EMPTY_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+function failureMessage(
+  model: { api: string; provider: string; id: string },
+  stopReason: "aborted" | "error",
+  errorMessage: string,
+): AssistantMessage {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text: "" }],
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: EMPTY_USAGE,
+    stopReason,
+    errorMessage,
+    timestamp: Date.now(),
+  };
+}
 
 export type StreamGuardTimeoutKind = "ttfb_timeout" | "idle_timeout";
 
@@ -60,60 +90,114 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
     forceKilled = false;
   }
 
+  function armWatchdog(): void {
+    if (watchdog !== undefined) {
+      return;
+    }
+    watchdog = setT(() => {
+      watchdog = undefined;
+      forceKilled = true;
+      onEvent?.("force-killed");
+    }, watchdogMs);
+    const t = watchdog as unknown as { unref?: () => void };
+    if (typeof t.unref === "function") {
+      t.unref();
+    }
+  }
+
   function fireAbort(kind: StreamGuardTimeoutKind): void {
     onEvent?.(kind);
     try {
       abortFn?.();
     } finally {
       // abort() is best-effort; force-killed if agent_end never arrives.
-      clearWatchdog();
-      watchdog = setT(() => {
-        watchdog = undefined;
-        forceKilled = true;
-        onEvent?.("force-killed");
-      }, watchdogMs);
-      const t = watchdog as unknown as { unref?: () => void };
-      if (typeof t.unref === "function") {
-        t.unref();
-      }
+      armWatchdog();
     }
+  }
+
+  function noteAbort(): void {
+    armWatchdog();
   }
 
   function wrapStreamFn(inner: StreamFn): StreamFn {
     return ((model, context, streamOptions) => {
       const outer = createAssistantMessageEventStream();
-      void (async () => {
-        let ttfb: ReturnType<typeof setTimeout> | undefined;
-        let idle: ReturnType<typeof setTimeout> | undefined;
-        let settled = false;
-        const clearAll = () => {
-          settled = true;
-          if (ttfb !== undefined) {
-            clearT(ttfb);
-            ttfb = undefined;
-          }
-          if (idle !== undefined) {
-            clearT(idle);
-            idle = undefined;
-          }
-        };
-        const resetIdle = () => {
-          if (settled) return;
-          if (idle !== undefined) clearT(idle);
-          idle = setT(() => {
-            clearAll();
-            fireAbort("idle_timeout");
-          }, idleMs);
-        };
-        ttfb = setT(() => {
-          clearAll();
-          fireAbort("ttfb_timeout");
-        }, ttfbMs);
+      let ttfb: ReturnType<typeof setTimeout> | undefined;
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      let settled = false;
 
+      const clearTimers = () => {
+        if (ttfb !== undefined) {
+          clearT(ttfb);
+          ttfb = undefined;
+        }
+        if (idle !== undefined) {
+          clearT(idle);
+          idle = undefined;
+        }
+      };
+
+      const completeOuter = (
+        stopReason: "aborted" | "error",
+        errorMessage: string,
+      ) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimers();
+        const msg = failureMessage(model, stopReason, errorMessage);
+        try {
+          outer.push({ type: "error", reason: stopReason, error: msg });
+        } catch {
+          // already complete
+        }
+        try {
+          outer.end(msg);
+        } catch {
+          // ignore
+        }
+      };
+
+      const resetIdle = () => {
+        if (settled) {
+          return;
+        }
+        if (idle !== undefined) {
+          clearT(idle);
+        }
+        idle = setT(() => {
+          completeOuter("aborted", "idle_timeout");
+          fireAbort("idle_timeout");
+        }, idleMs);
+      };
+
+      ttfb = setT(() => {
+        completeOuter("aborted", "ttfb_timeout");
+        fireAbort("ttfb_timeout");
+      }, ttfbMs);
+
+      const signal = streamOptions?.signal;
+      const onSignalAbort = () => {
+        noteAbort();
+        completeOuter("aborted", "aborted");
+      };
+      signal?.addEventListener("abort", onSignalAbort, { once: true });
+      if (signal?.aborted) {
+        onSignalAbort();
+      }
+
+      void (async () => {
         try {
           const innerStream = await inner(model, context, streamOptions);
+          if (settled) {
+            return;
+          }
           let firstContentSeen = false;
           for await (const event of innerStream) {
+            if (settled) {
+              break;
+            }
             const type = (event as { type?: string }).type;
             if (!firstContentSeen && type === "start") {
               firstContentSeen = true;
@@ -122,7 +206,11 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
                 ttfb = undefined;
               }
               resetIdle();
-            } else if (firstContentSeen && type !== undefined && CONTENT_DELTAS.has(type)) {
+            } else if (
+              firstContentSeen &&
+              type !== undefined &&
+              CONTENT_DELTAS.has(type)
+            ) {
               resetIdle();
             } else if (
               !firstContentSeen &&
@@ -142,34 +230,30 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
             }
             outer.push(event);
             if (type === "done" || type === "error") {
-              clearAll();
+              settled = true;
+              clearTimers();
               break;
             }
           }
         } catch (error) {
-          clearAll();
-          outer.push({
-            type: "error",
-            reason: "error",
-            error: {
-              role: "assistant",
-              content: [{ type: "text", text: "" }],
-              stopReason: "error",
-              errorMessage:
-                error instanceof Error ? error.message : String(error),
-              timestamp: Date.now(),
-            },
-          } as never);
+          completeOuter(
+            "error",
+            error instanceof Error ? error.message : String(error),
+          );
         } finally {
-          clearAll();
-          try {
-            const result = await outer.result().catch(() => undefined);
-            outer.end(result);
-          } catch {
+          signal?.removeEventListener("abort", onSignalAbort);
+          clearTimers();
+          if (!settled) {
+            settled = true;
             try {
-              outer.end(undefined);
+              const result = await outer.result().catch(() => undefined);
+              outer.end(result);
             } catch {
-              // ignore
+              try {
+                outer.end(undefined);
+              } catch {
+                // ignore
+              }
             }
           }
         }
@@ -182,6 +266,7 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
     setAbort,
     wrapStreamFn,
     notifyAgentEnd,
+    noteAbort,
     dispose,
     beginRun,
     wasForceKilled: () => forceKilled,
