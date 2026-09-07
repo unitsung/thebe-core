@@ -46,6 +46,9 @@ export type ThebePromptOptions = {
  */
 export type SessionRunStatus = "idle" | "running" | "awaiting_permission";
 
+/** Default ceiling for a model connectivity probe. */
+export const DEFAULT_MODEL_TEST_TIMEOUT_MS = 60_000;
+
 /** Error with an HTTP status hint for the thin Serve layer. */
 export function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
@@ -650,6 +653,67 @@ export function createThebeProduct(options: {
     },
     async listModels(query?: { all?: boolean; providerId?: string }) {
       return options.runtime.listModels(query);
+    },
+    /**
+     * Connectivity probe for onboarding: runs one minimal turn with the
+     * given model on an ephemeral runtime session. The session is never
+     * persisted to the ProductStore and never becomes `active`; unknown
+     * models 404 via setModel validation, hung runs abort and 504.
+     */
+    async testModel(
+      model: RuntimeModelRef,
+      query?: { timeoutMs?: number },
+    ): Promise<{
+      providerId: string;
+      modelId: string;
+      text: string;
+      latencyMs: number;
+    }> {
+      const timeoutMs = query?.timeoutMs ?? DEFAULT_MODEL_TEST_TIMEOUT_MS;
+      const session = await options.runtime.createSession({
+        customTools: [],
+        builtinTools: [],
+        systemPrompt: "You are a connectivity probe. Reply briefly.",
+      });
+      const started = Date.now();
+      try {
+        await session.setModel(model);
+        const reply = await Promise.race([
+          session.prompt("Reply with exactly: ok").then(() => undefined),
+          new Promise<never>((_resolve, reject) => {
+            const timer = setTimeout(() => {
+              reject(
+                httpError(504, "model test timed out; provider may be slow"),
+              );
+            }, timeoutMs);
+            if (typeof timer === "object" && "unref" in timer) {
+              (timer as { unref(): void }).unref?.();
+            }
+          }),
+        ]);
+        void reply;
+        const text = session.lastAssistantText();
+        await audit
+          ?.append({
+            method: "model.test",
+            parameterHash: hashParameters(model),
+            responseBytes: text.length,
+            budgetConsumed: 0,
+            redactionFired: false,
+          })
+          .catch(() => {});
+        return {
+          providerId: model.providerId,
+          modelId: model.modelId,
+          text,
+          latencyMs: Date.now() - started,
+        };
+      } catch (error) {
+        await session.abort().catch(() => {});
+        throw error;
+      } finally {
+        session.dispose();
+      }
     },
     async listAvailableModels(query?: { providerId?: string }) {
       return options.runtime.listAvailableModels(query);

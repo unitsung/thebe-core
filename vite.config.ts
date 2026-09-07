@@ -14,6 +14,7 @@ export default defineConfig({
         index: resolve(import.meta.dirname, "src/index.ts"),
         serve: resolve(import.meta.dirname, "src/serve.ts"),
         tui: resolve(import.meta.dirname, "src/tui.ts"),
+        cli: resolve(import.meta.dirname, "src/cli.ts"),
       },
       preserveEntrySignatures: "allow-extension",
       output: {
