@@ -1,47 +1,40 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
-import { applyThebeApiKey } from "./auth/credentials.ts";
-import { envLocalCandidates, loadEnvLocal } from "./env.ts";
-import { createThebeApp } from "./product/app.ts";
-import { createPiCodingAgentRuntime } from "./runtime/pi/pi-coding-agent-runtime.ts";
+import { bootstrapThebe } from "./bootstrap.ts";
+import { parseCliArgs } from "./cli/args.ts";
 import { startThebeTui } from "./tui/app.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-loadEnvLocal(here);
+const flags = parseCliArgs(process.argv.slice(2));
+const sessionId =
+  flags.kind === "tui" || flags.kind === "print"
+    ? flags.sessionId
+    : undefined;
+const continueLast = flags.kind === "tui" ? flags.continueLast : false;
+const title =
+  flags.kind === "tui" || flags.kind === "print" ? flags.title : undefined;
 
-const baseUrl = process.env.ARCANE_BASE_URL;
-const arcaneKey = process.env.ARCANE_API_KEY;
-const openCodeKey = process.env.OPENCODE_API_KEY;
-if (!baseUrl || !arcaneKey || !openCodeKey) {
-  console.error(
-    "Missing ARCANE_BASE_URL, ARCANE_API_KEY, or OPENCODE_API_KEY",
-  );
-  console.error(
-    "Put them in .env.local (package root or next to dist/tui.js). Looked in:",
-  );
-  for (const path of envLocalCandidates(here)) {
-    console.error(`  ${path}`);
-  }
-  process.exit(1);
+const { product } = await bootstrapThebe({ fromDir: here });
+
+let resolvedSessionId = sessionId;
+if (continueLast && !resolvedSessionId) {
+  const rows = await product.listSessions();
+  const sorted = [...rows].sort((a, b) => {
+    const aTime = a.lastActiveAt ?? a.updatedAt ?? a.createdAt ?? "";
+    const bTime = b.lastActiveAt ?? b.updatedAt ?? b.createdAt ?? "";
+    return bTime.localeCompare(aTime);
+  });
+  resolvedSessionId = sorted[0]?.thebeSessionId;
+}
+if (resolvedSessionId) {
+  await product.resume(resolvedSessionId);
+} else {
+  const meta = await product.createSession({ title });
+  resolvedSessionId = meta.thebeSessionId;
 }
 
-const runtime = await createPiCodingAgentRuntime({
-  cwd: process.cwd(),
-  sessionDir: process.env.THEBE_SESSION_DIR,
-  agentDir: process.env.THEBE_AGENT_DIR,
-  apiKey: { providerId: "opencode", key: openCodeKey },
-});
-await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
-
-const { send } = createThebeApp({
-  runtime,
-  provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
-});
-
 startThebeTui({
-  send: async (text) => {
-    const result = await send(text);
-    return result.text;
-  },
+  product,
+  sessionId: resolvedSessionId,
+  title,
 });

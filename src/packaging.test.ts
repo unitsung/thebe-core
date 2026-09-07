@@ -29,7 +29,7 @@ describe("Node packaging", () => {
 
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {
     const names = await readdir(join(root, "dist"));
-    expect(names).toEqual(expect.arrayContaining(["serve.js", "tui.js", "index.js", "chunks"]));
+    expect(names).toEqual(expect.arrayContaining(["serve.js", "tui.js", "cli.js", "index.js", "chunks"]));
     const chunks = await readdir(join(root, "dist", "chunks"));
     expect(chunks.some((name) => name.endsWith(".js"))).toBe(true);
     expect(chunks.some((name) => /-[a-z0-9]+\.js$/i.test(name))).toBe(true);
