@@ -7,6 +7,9 @@ export type ProductSessionMeta = {
   runtimeSessionId: string;
   title?: string;
   createdAt?: string;
+  /** Last metadata write (create, patch, remember, share). */
+  updatedAt?: string;
+  /** Last activity of any kind, including prompt runs. */
   lastActiveAt?: string;
   parentThebeSessionId?: string;
   selectedContext?: {

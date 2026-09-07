@@ -17,11 +17,13 @@ import {
   PI_BUILTIN_TOOLS,
   PI_RUNTIME_ID,
   asPromptInput,
+  isInlineTextFile,
 } from "../types.ts";
 import { createExplicitResourceLoader } from "./explicit-loader.ts";
 import { loadPiSdk, type PiSdk } from "./load-pi.ts";
 import { mapPiEvent, mapPiMessages } from "./map-events.ts";
 import { exportPiSession } from "./pi-export.ts";
+import { permissionRisk, summarizeArgs } from "../../tools/redaction.ts";
 
 type PiSession = {
   sessionId: string;
@@ -116,6 +118,8 @@ export async function createPiCodingAgentRuntime(
                 permissionId: request.permissionId,
                 toolName: request.toolName,
                 toolCallId: request.toolCallId,
+                argsSummary: request.argsSummary,
+                risk: request.risk,
               });
             }
             return create.permissionHandler!.request(request);
@@ -151,6 +155,8 @@ export async function createPiCodingAgentRuntime(
                   toolName: event.toolName,
                   toolCallId: event.toolCallId ?? permissionId,
                   args: event.input,
+                  argsSummary: summarizeArgs(event.input),
+                  risk: permissionRisk(event.toolName),
                 });
                 if (decision !== "allow") {
                   return { block: true, reason: "denied by user" };
@@ -232,16 +238,35 @@ export async function createPiCodingAgentRuntime(
             data: file.data,
           },
         }));
-      const otherFiles = (prompt.files ?? []).filter(
-        (file) => !file.mediaType.startsWith("image/"),
+      const textFiles = (prompt.files ?? []).filter((file) =>
+        isInlineTextFile(file.mediaType),
       );
+      const otherFiles = (prompt.files ?? []).filter(
+        (file) =>
+          !file.mediaType.startsWith("image/") &&
+          !isInlineTextFile(file.mediaType),
+      );
+      const inlined = textFiles
+        .map((file) => {
+          const name = file.filename ?? "attachment";
+          let text: string;
+          try {
+            text = Buffer.from(file.data, "base64").toString("utf8");
+          } catch {
+            text = "";
+          }
+          return `[file: ${name} (${file.mediaType})]\n${text}`;
+        })
+        .join("\n\n");
       const extra = otherFiles
         .map(
           (file) =>
             `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
         )
         .join("\n");
-      const text = extra ? `${prompt.text}\n${extra}` : prompt.text;
+      const text = [prompt.text, inlined, extra]
+        .filter((part) => part.length > 0)
+        .join("\n");
       await session.prompt(text, images.length > 0 ? { images } : undefined);
     }
 
@@ -279,10 +304,10 @@ export async function createPiCodingAgentRuntime(
       exportSession: () => exportPiSession(session as never),
       messages: () => mapPiMessages(session.messages),
       async setModel(model: RuntimeModelRef): Promise<void> {
-        const resolved = modelRuntime.getModel(model.providerID, model.modelID);
+        const resolved = modelRuntime.getModel(model.providerId, model.modelId);
         if (!resolved) {
           throw new Error(
-            `unknown model: ${model.providerID}/${model.modelID}`,
+            `unknown model: ${model.providerId}/${model.modelId}`,
           );
         }
         await session.setModel(resolved);
@@ -502,30 +527,74 @@ export async function createPiCodingAgentRuntime(
       const providers = modelRuntime.getProviders() as Array<{
         id: string;
         name?: string;
+        auth?: { apiKey?: unknown; oauth?: unknown };
       }>;
       const out: RuntimeProvider[] = [];
       for (const provider of providers) {
-        const status = await modelRuntime.checkAuth(provider.id);
+        const methods: Array<"apiKey" | "oauth"> = [];
+        if (provider.auth?.apiKey) {
+          methods.push("apiKey");
+        }
+        if (provider.auth?.oauth) {
+          methods.push("oauth");
+        }
+        let authStatus: RuntimeProvider["authStatus"];
+        try {
+          const status = await modelRuntime.checkAuth(provider.id);
+          authStatus = status ? "connected" : "missing";
+        } catch {
+          authStatus = "error";
+        }
         out.push({
           id: provider.id,
-          name: provider.name,
-          connected: Boolean(status),
+          displayName: provider.name,
+          authMethods: methods,
+          authStatus,
         });
       }
       return out;
     },
   };
 
-  function toRuntimeModel(model: {
+  type PiModelShape = {
     id: string;
     provider: string;
     name?: string;
-  }): RuntimeModel {
+    contextWindow?: number;
+    maxTokens?: number;
+    reasoning?: boolean;
+    thinkingLevelMap?: unknown;
+  };
+
+  function toRuntimeModel(
+    model: PiModelShape,
+    availableIds?: Set<string>,
+  ): RuntimeModel {
     return {
-      providerID: model.provider,
-      modelID: model.id,
-      name: model.name,
+      providerId: model.provider,
+      modelId: model.id,
+      displayName: model.name,
+      contextWindow: model.contextWindow,
+      maxOutputTokens: model.maxTokens,
+      supportsThinking:
+        model.reasoning === true || model.thinkingLevelMap != null || undefined,
+      available: availableIds ? availableIds.has(model.id) : undefined,
     };
+  }
+
+  function modelKey(model: PiModelShape): string {
+    return `${model.provider}/${model.id}`;
+  }
+
+  async function availableKeys(providerId?: string): Promise<Set<string>> {
+    try {
+      const available = (await modelRuntime.getAvailable(
+        providerId,
+      )) as PiModelShape[];
+      return new Set(available.map(modelKey));
+    } catch {
+      return new Set();
+    }
   }
 
   return {
@@ -566,25 +635,27 @@ export async function createPiCodingAgentRuntime(
         runtimeSessionId: row.id,
       }));
     },
-    async listModels(query?: { all?: boolean }) {
+    async listModels(query?: { all?: boolean; providerId?: string }) {
+      const models = (
+        query?.providerId
+          ? modelRuntime.getModels(query.providerId)
+          : modelRuntime.getModels()
+      ) as PiModelShape[];
       if (query?.all === false) {
-        const available = await modelRuntime.getAvailable();
-        return (available as Array<{ id: string; provider: string; name?: string }>).map(
-          toRuntimeModel,
-        );
+        const keys = await availableKeys(query?.providerId);
+        return models
+          .filter((model) => keys.has(modelKey(model)))
+          .map((model) => toRuntimeModel(model, keys));
       }
-      const models = modelRuntime.getModels() as Array<{
-        id: string;
-        provider: string;
-        name?: string;
-      }>;
-      return models.map(toRuntimeModel);
+      const keys = await availableKeys(query?.providerId);
+      return models.map((model) => toRuntimeModel(model, keys));
     },
-    async listAvailableModels() {
-      const available = await modelRuntime.getAvailable();
-      return (available as Array<{ id: string; provider: string; name?: string }>).map(
-        toRuntimeModel,
-      );
+    async listAvailableModels(query?: { providerId?: string }) {
+      const available = (await modelRuntime.getAvailable(
+        query?.providerId,
+      )) as PiModelShape[];
+      const keys = new Set(available.map(modelKey));
+      return available.map((model) => toRuntimeModel(model, keys));
     },
     async listProviders() {
       return auth.listProviders();
