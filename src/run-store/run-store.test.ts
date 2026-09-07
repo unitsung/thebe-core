@@ -84,6 +84,7 @@ describe("RunStore", () => {
     const models = createModels();
     models.setProvider(faux.provider);
     const thebe = createThebeAgent({
+      models,
       model: faux.getModel(),
       streamFn: models.streamSimple.bind(models),
       provider: emptyProvider(),
@@ -107,6 +108,7 @@ describe("RunStore", () => {
     const models = createModels();
     models.setProvider(faux.provider);
     const thebe = createThebeAgent({
+      models,
       model: faux.getModel(),
       streamFn: async () => createAssistantMessageEventStream(),
       provider: emptyProvider(),

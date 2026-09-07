@@ -54,10 +54,10 @@ if (!model) {
 }
 
 const thebe = createThebeAgent({
+  models,
   model,
   streamFn: models.streamSimple.bind(models),
   provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
-  getApiKey: () => openCodeKey,
 });
 
 const reply = await thebe.ask(

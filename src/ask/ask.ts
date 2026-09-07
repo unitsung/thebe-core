@@ -1,16 +1,22 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
-import type { Model } from "@earendil-works/pi-ai";
+import type { CompactionSettings } from "@earendil-works/pi-agent-core";
+import type { Model, Models } from "@earendil-works/pi-ai";
 import { createAgentAdapter } from "../agent-adapter/index.ts";
 import { createAuditLog, hashParameters } from "../audit/audit-log.ts";
 import { createPolicyEngine } from "../policy/policy-engine.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createRunStore } from "../run-store/index.ts";
 import {
+  exportRunHtml,
+  exportRunJsonl,
+} from "../session-export/index.ts";
+import {
   CONTAINER_TOOL_NAMES,
   createContainerTools,
 } from "../tools/container-tools.ts";
 
 export function createThebeAgent(options: {
+  models: Models;
   model: Model<string>;
   streamFn: StreamFn;
   provider: ContainerInfoProvider;
@@ -26,6 +32,7 @@ export function createThebeAgent(options: {
   ttfbMs?: number;
   idleMs?: number;
   watchdogMs?: number;
+  compaction?: CompactionSettings;
 }) {
   const now = options.now ?? (() => new Date());
   const callerId = options.callerId ?? "default";
@@ -45,6 +52,7 @@ export function createThebeAgent(options: {
   const allowed = new Set<string>(CONTAINER_TOOL_NAMES);
   const auditedUnknown = new Set<string>();
   const adapter = createAgentAdapter({
+    models: options.models,
     model: options.model,
     streamFn: options.streamFn,
     tools,
@@ -55,6 +63,7 @@ export function createThebeAgent(options: {
     ttfbMs: options.ttfbMs,
     idleMs: options.idleMs,
     watchdogMs: options.watchdogMs,
+    compaction: options.compaction,
     onStreamGuardEvent: (kind) => {
       void audit
         ?.append({
@@ -78,6 +87,7 @@ export function createThebeAgent(options: {
     if (!currentRunId) {
       return;
     }
+    await adapter.refresh();
     if (!recordedForRun) {
       runStore.recordMessages(adapter.messages().slice(messagesBeforeRun));
       recordedForRun = true;
@@ -153,6 +163,53 @@ export function createThebeAgent(options: {
     },
     messages(): AgentMessage[] {
       return adapter.messages();
+    },
+    lastRunId(): string | undefined {
+      return currentRunId;
+    },
+    tokenTotals() {
+      return runStore.tokenTotals();
+    },
+    isOverflow(contextWindow: number, reserveMargin = 0) {
+      return runStore.isOverflow(contextWindow, reserveMargin);
+    },
+    compactionReasons(): string[] {
+      return adapter.compactionReasons();
+    },
+    beforeToolResults(): Array<Record<string, unknown>> {
+      return adapter.beforeToolResults();
+    },
+    async forkBranch(name: string, at?: string | null) {
+      return adapter.forkBranch(name, at);
+    },
+    async appendOnBranch(name: string, message: AgentMessage): Promise<void> {
+      await adapter.appendOnBranch(name, message);
+    },
+    async branchMessages(name: string): Promise<AgentMessage[]> {
+      return adapter.branchMessages(name);
+    },
+    async exportLastRun(): Promise<{ jsonl: string; html: string }> {
+      await persistCurrentRun();
+      if (!options.runStoreDir || !currentRunId) {
+        const snapshot = {
+          runId: currentRunId ?? "in-memory",
+          timestamp: now().toISOString(),
+          systemPrompt: adapter.systemPrompt(),
+          messages: adapter.messages().slice(),
+          tools: adapter.toolNames(),
+          status: "done" as const,
+          tokenTotals: runStore.tokenTotals(),
+        };
+        return {
+          jsonl: exportRunJsonl(snapshot),
+          html: exportRunHtml(snapshot),
+        };
+      }
+      const snapshot = await runStore.load(currentRunId);
+      return {
+        jsonl: exportRunJsonl(snapshot),
+        html: exportRunHtml(snapshot),
+      };
     },
     async ask(input: string): Promise<string> {
       policy.beginRun();

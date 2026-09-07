@@ -49,6 +49,7 @@ function thebeWithFaux(
   models.setProvider(faux.provider);
   const { streamFn, ...rest } = extras;
   const thebe = createThebeAgent({
+    models,
     model: faux.getModel(),
     streamFn: streamFn ?? models.streamSimple.bind(models),
     provider,
@@ -282,6 +283,7 @@ describe("Ask", () => {
     const bodies: string[] = [];
     const inner = models.streamSimple.bind(models);
     const thebe = createThebeAgent({
+      models,
       model: faux.getModel(),
       streamFn: (model, context, options) => {
         bodies.push(JSON.stringify(context));
@@ -419,6 +421,7 @@ describe("Ask", () => {
     const inner = models.streamSimple.bind(models);
     const seen: string[] = [];
     const thebe = createThebeAgent({
+      models,
       model: faux.getModel(),
       streamFn: (model, context, options) => {
         calls += 1;

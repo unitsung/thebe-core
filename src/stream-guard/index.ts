@@ -40,7 +40,7 @@ export type StreamGuardOptions = {
   idleMs?: number;
   /** After abort(), mark force-killed if agent_end does not arrive. Default 10s. */
   watchdogMs?: number;
-  abort?: () => void;
+  abort?: () => void | Promise<void>;
   onEvent?: (kind: StreamGuardTimeoutKind | "force-killed") => void;
   setTimeoutFn?: typeof setTimeout;
   clearTimeoutFn?: typeof clearTimeout;
@@ -60,13 +60,13 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
   const watchdogMs = options.watchdogMs ?? 10_000;
   const setT = options.setTimeoutFn ?? setTimeout;
   const clearT = options.clearTimeoutFn ?? clearTimeout;
-  let abortFn: (() => void) | undefined = options.abort;
+  let abortFn: (() => void | Promise<void>) | undefined = options.abort;
   const onEvent = options.onEvent;
 
   let watchdog: ReturnType<typeof setTimeout> | undefined;
   let forceKilled = false;
 
-  function setAbort(fn: () => void): void {
+  function setAbort(fn: () => void | Promise<void>): void {
     abortFn = fn;
   }
 
@@ -105,10 +105,10 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
     }
   }
 
-  function fireAbort(kind: StreamGuardTimeoutKind): void {
+  async function fireAbort(kind: StreamGuardTimeoutKind): Promise<void> {
     onEvent?.(kind);
     try {
-      abortFn?.();
+      await abortFn?.();
     } finally {
       // abort() is best-effort; force-killed if agent_end never arrives.
       armWatchdog();
@@ -167,14 +167,16 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
           clearT(idle);
         }
         idle = setT(() => {
-          completeOuter("aborted", "idle_timeout");
-          fireAbort("idle_timeout");
+          void fireAbort("idle_timeout").finally(() => {
+            completeOuter("aborted", "idle_timeout");
+          });
         }, idleMs);
       };
 
       ttfb = setT(() => {
-        completeOuter("aborted", "ttfb_timeout");
-        fireAbort("ttfb_timeout");
+        void fireAbort("ttfb_timeout").finally(() => {
+          completeOuter("aborted", "ttfb_timeout");
+        });
       }, ttfbMs);
 
       const signal = streamOptions?.signal;
