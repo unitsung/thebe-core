@@ -17,27 +17,27 @@ First `AgentRuntime` implementation. Embeds `@earendil-works/pi-coding-agent` vi
 _Avoid_: depending on Pi types outside `src/runtime/pi`, wrapping the Pi CLI
 
 **RuntimeSession**:
-One runtime-backed conversation. Create, resume, list, fork, compact, and export are runtime facilities.
+One runtime-backed conversation. Create, resume, list, fork (including at a message), compact, export, steer, follow-up, model selection, and revert are runtime facilities.
 _Avoid_: Thebe-owned transcripts, branch stores, or local HTML/JSONL exporters
 
 **NormalizedEvent**:
-The only event shape clients see (`text_delta`, `tool_start`, `tool_end`, `session_end`, …).
+The only event shape clients see (`text_delta`, `tool_start`, `tool_end`, `session_end`, `interrupted`, `queue_update`, `permission_requested`, …).
 _Avoid_: Pi `AgentSessionEvent`, `assistantMessageEvent`, harness hook payloads
 
 **ProductStore**:
-Thebe persistence for product metadata only: `thebeSessionId`, `runtimeId`, `runtimeSessionId`, selected context, labels, share metadata.
+Thebe persistence for product metadata only: `thebeSessionId`, `runtimeId`, `runtimeSessionId`, title, timestamps, selected context, labels, share metadata, remembered permissions.
 _Avoid_: storing transcripts, branch topology, compaction records, or OAuth refresh tokens
 
-**Ask**:
-One question through the Thebe product service into a `RuntimeSession`. HTTP Serve and the TUI share `createThebeApp`.
-_Avoid_: a second agent loop, a parallel Thebe CLI suite
+**Prompt**:
+One user turn through the Thebe product service into a `RuntimeSession` (`ThebeProduct.prompt()`). Modes are `prompt`, `steer`, and `followUp`. `send()` is a compatibility alias.
+_Avoid_: naming this Ask, a second agent loop, a parallel Thebe CLI suite
 
 **TUI**:
-`@earendil-works/pi-tui` (`TuiMainScreen`, `Editor`, `Markdown`, `Text`). Start with `node dist/tui.js`. Ask is the agent; this package is the terminal.
+`@earendil-works/pi-tui` (`TuiMainScreen`, `Editor`, `Markdown`, `Text`). Start with `node dist/tui.js`. Prompt is the agent turn; this package is the terminal.
 _Avoid_: a homegrown renderer, a Thebe-written web chat
 
 **Serve**:
-Thin HTTP listener the iOS `ThebeCoreClient` already speaks: `/v1/health`, `/v1/events`, `/v1/devices`, `/v1/ask`, `/mcp`. Default port 8787. Auth is optional `X-Thebe-Token`.
+Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). iOS compatibility: `/v1/health`, `/v1/events`, `/v1/devices`, `/mcp`. Default port 8787. Auth is optional `X-Thebe-Token`.
 _Avoid_: a second agent loop, MCP servers as a product, pairing/APNs as v0 features
 
 **Tool Layer**:

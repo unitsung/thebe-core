@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 import { listenThebeHttp } from "./listen.ts";
 
@@ -7,20 +6,6 @@ describe("listenThebeHttp", () => {
   it("serves /v1/health on a bound port", async () => {
     const app = createThebeHttpHandler({
       version: "0.1.0",
-      provider: {
-        listContainers: async () => [],
-        inspectContainer: async () => {
-          throw new Error("unused");
-        },
-        getContainerLogs: async () => "",
-        getStatusSummary: async () => ({
-          totalContainers: 0,
-          runningContainers: 0,
-          pausedContainers: 0,
-          exitedContainers: 0,
-          lastUpdated: 0,
-        }),
-      } satisfies ContainerInfoProvider,
     });
     const { server, url } = await listenThebeHttp(app, {
       host: "127.0.0.1",

@@ -98,7 +98,7 @@ describe("mixed tools and redaction", () => {
       ]),
       fauxAssistantMessage("done"),
     ]);
-    const result = await product.ask("inspect");
+    const result = await product.send("inspect");
     const exported = await product.exportSession();
     const blob = [
       dump(result.events),
@@ -127,8 +127,8 @@ describe("mixed tools and redaction", () => {
       ]),
       fauxAssistantMessage("denied"),
     ]);
-    await product.ask("inspect");
-    await product.ask("start");
+    await product.send("inspect");
+    await product.send("start");
     const exported = await product.exportSession();
     const blob = [dump(product.messages()), dump(product.lastEvents()), exported.jsonl].join(
       "\n",
@@ -147,7 +147,7 @@ describe("mixed tools and redaction", () => {
       ]),
       fauxAssistantMessage("cancelled"),
     ]);
-    await cancelling.product.ask("logs");
+    await cancelling.product.send("logs");
     const cancelBlob = dump(cancelling.product.messages());
     expect(cancelBlob).not.toContain(CANARY);
   });

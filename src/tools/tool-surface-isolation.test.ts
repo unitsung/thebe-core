@@ -18,5 +18,8 @@ describe("Tool Layer isolation", () => {
     expect(joined).not.toMatch(/docker\.sock/);
     expect(joined).not.toMatch(/\bfetch\s*\(/);
     expect(joined).not.toMatch(/from ["']node:http["']/);
+    expect(joined).not.toContain("@earendil-works/pi-ai");
+    expect(joined).not.toContain("@earendil-works/pi-agent-core");
+    expect(joined).not.toContain("@earendil-works/pi-coding-agent");
   });
 });

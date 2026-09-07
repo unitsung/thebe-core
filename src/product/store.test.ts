@@ -28,6 +28,8 @@ describe("ProductStore", () => {
     expect(raw).not.toContain("refresh_token");
     expect(await store.list()).toHaveLength(1);
     expect(await readdir(dir)).toEqual(["thebe-1.json"]);
+    await store.delete("thebe-1");
+    expect(await store.list()).toHaveLength(0);
   });
 
   it("rejects Pi payload keys", () => {

@@ -1,10 +1,14 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type ProductSessionMeta = {
   thebeSessionId: string;
   runtimeId: string;
   runtimeSessionId: string;
+  title?: string;
+  createdAt?: string;
+  lastActiveAt?: string;
+  parentThebeSessionId?: string;
   selectedContext?: {
     host?: string;
     environment?: string;
@@ -12,6 +16,7 @@ export type ProductSessionMeta = {
   };
   labels?: Record<string, string>;
   shareMetadata?: Record<string, unknown>;
+  rememberedPermissions?: Record<string, "allow" | "deny">;
 };
 
 const FORBIDDEN_KEYS = [
@@ -74,5 +79,19 @@ export function createProductStore(dir?: string) {
     return rows;
   }
 
-  return { save, load, list };
+  async function remove(thebeSessionId: string): Promise<void> {
+    if (!dir) {
+      return;
+    }
+    try {
+      await unlink(join(dir, `${thebeSessionId}.json`));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  return { save, load, list, delete: remove };
 }

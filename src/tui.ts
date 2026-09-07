@@ -34,14 +34,14 @@ const runtime = await createPiCodingAgentRuntime({
 });
 await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
 
-const { ask } = createThebeApp({
+const { send } = createThebeApp({
   runtime,
   provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
 });
 
 startThebeTui({
-  ask: async (text) => {
-    const result = await ask(text);
+  send: async (text) => {
+    const result = await send(text);
     return result.text;
   },
 });

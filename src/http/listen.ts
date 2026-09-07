@@ -39,7 +39,24 @@ async function handleNode(
       headers[key] = value;
     });
     res.writeHead(response.status, headers);
-    res.end(Buffer.from(await response.arrayBuffer()));
+    if (!response.body) {
+      res.end();
+      return;
+    }
+    const reader = response.body.getReader();
+    req.on("close", () => {
+      void reader.cancel();
+    });
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        res.write(value);
+      }
+    }
+    res.end();
   } catch (error) {
     res.writeHead(500, { "content-type": "application/json" });
     res.end(

@@ -5,7 +5,7 @@ const LOGS_DAILY_LIMIT = 1000;
 const BUDGET_EXHAUSTED_REASON =
   "Budget exhausted. Do not call any more tools; write the final answer from what you already have.";
 
-/** Per-Run counters and latches. Reset by beginRun() before each Ask. */
+/** Per-Run counters and latches. Reset by beginRun() before each send. */
 export type PolicyRunState = {
   toolCalls: number;
   blocks: number;

@@ -1,4 +1,4 @@
-export { createThebeAgent } from "./ask/index.ts";
+export { createThebeAgent } from "./agent/index.ts";
 export { createThebeApp } from "./product/app.ts";
 export { createThebeProduct } from "./product/service.ts";
 export { createProductStore } from "./product/store.ts";
@@ -7,8 +7,10 @@ export { createPiCodingAgentRuntime } from "./runtime/pi/pi-coding-agent-runtime
 export {
   PI_BUILTIN_TOOLS,
   PI_RUNTIME_ID,
+  TOOLS_REQUIRING_APPROVAL,
   type AgentRuntime,
   type NormalizedEvent,
+  type PromptInput,
   type RuntimeSession,
 } from "./runtime/types.ts";
 export { applyThebeApiKey } from "./auth/credentials.ts";

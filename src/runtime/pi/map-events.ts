@@ -56,6 +56,19 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
       return { type: "compaction_start", reason: event.reason };
     case "compaction_end":
       return { type: "compaction_end", aborted: event.aborted };
+    case "queue_update": {
+      const queued = event as unknown as {
+        steering?: unknown;
+        followUp?: unknown;
+      };
+      const steering = Array.isArray(queued.steering)
+        ? queued.steering.length
+        : 0;
+      const followUp = Array.isArray(queued.followUp)
+        ? queued.followUp.length
+        : 0;
+      return { type: "queue_update", steering, followUp };
+    }
     default:
       return undefined;
   }
@@ -63,8 +76,10 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
 
 export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
   const out: RuntimeMessage[] = [];
+  let index = 0;
   for (const raw of messages) {
     const message = raw as {
+      id?: string;
       role?: string;
       content?: unknown;
       toolName?: string;
@@ -72,12 +87,15 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
       isError?: boolean;
       errorMessage?: string;
     };
+    const id = typeof message.id === "string" ? message.id : `pi-${index}`;
+    index += 1;
     if (message.role === "user") {
-      out.push({ role: "user", text: contentToText(message.content) });
+      out.push({ id, role: "user", text: contentToText(message.content) });
       continue;
     }
     if (message.role === "assistant") {
       out.push({
+        id,
         role: "assistant",
         text: contentToText(message.content) || message.errorMessage || "",
       });
@@ -85,6 +103,7 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
     }
     if (message.role === "toolResult" || message.role === "tool") {
       out.push({
+        id,
         role: "tool",
         text: contentToText(message.content),
         toolName: message.toolName,

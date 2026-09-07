@@ -1,4 +1,3 @@
-import { Type } from "@earendil-works/pi-ai";
 import { hashParameters } from "../audit/audit-log.ts";
 import type { createAuditLog } from "../audit/audit-log.ts";
 import type { createPolicyEngine } from "../policy/policy-engine.ts";
@@ -7,14 +6,25 @@ import type { CustomToolDefinition } from "../runtime/types.ts";
 import { REDACTED, TRUNCATION_MARKER } from "./redaction.ts";
 import { createToolLayer } from "./tool-layer.ts";
 
-const emptyParams = Type.Object({});
-const idParams = Type.Object({
-  id: Type.String({ description: "Container id" }),
-});
-const logsParams = Type.Object({
-  id: Type.String({ description: "Container id" }),
-  tail: Type.Optional(Type.Number({ description: "Max log lines" })),
-});
+const emptyParams = {
+  type: "object",
+  properties: {},
+};
+const idParams = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Container id" },
+  },
+  required: ["id"],
+};
+const logsParams = {
+  type: "object",
+  properties: {
+    id: { type: "string", description: "Container id" },
+    tail: { type: "number", description: "Max log lines" },
+  },
+  required: ["id"],
+};
 
 export const CONTAINER_TOOL_NAMES = [
   "container.list",
@@ -22,6 +32,16 @@ export const CONTAINER_TOOL_NAMES = [
   "container.logs",
   "container.status_summary",
 ] as const;
+
+export const CONTAINER_TOOL_DESCRIPTIONS: Record<
+  (typeof CONTAINER_TOOL_NAMES)[number],
+  string
+> = {
+  "container.list": "List container summaries in the configured environment",
+  "container.inspect": "Inspect one container (env already redacted)",
+  "container.logs": "Read recent container logs (redacted and truncated)",
+  "container.status_summary": "Host-level container counts",
+};
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 type Audit = ReturnType<typeof createAuditLog>;
@@ -70,28 +90,28 @@ export function createContainerTools(
     {
       name: "container.list",
       label: "List containers",
-      description: "List container summaries in the configured environment",
+      description: CONTAINER_TOOL_DESCRIPTIONS["container.list"],
       parameters: emptyParams,
       execute: run("container.list"),
     },
     {
       name: "container.inspect",
       label: "Inspect container",
-      description: "Inspect one container (env already redacted)",
+      description: CONTAINER_TOOL_DESCRIPTIONS["container.inspect"],
       parameters: idParams,
       execute: run("container.inspect"),
     },
     {
       name: "container.logs",
       label: "Container logs",
-      description: "Read recent container logs (redacted and truncated)",
+      description: CONTAINER_TOOL_DESCRIPTIONS["container.logs"],
       parameters: logsParams,
       execute: run("container.logs"),
     },
     {
       name: "container.status_summary",
       label: "Container status summary",
-      description: "Host-level container counts",
+      description: CONTAINER_TOOL_DESCRIPTIONS["container.status_summary"],
       parameters: emptyParams,
       execute: run("container.status_summary"),
     },

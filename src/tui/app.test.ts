@@ -48,10 +48,10 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     expect(joined).toContain("\x1b[");
   });
 
-  it("splices the Ask reply before the Editor, like chat-simple", async () => {
+  it("splices the reply before the Editor, like chat-simple", async () => {
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
     const { editor } = attachThebeChat(tui, {
-      ask: async () => "**25 running**",
+      send: async () => "**25 running**",
     });
     editor.onSubmit?.("hello");
     await new Promise((r) => setTimeout(r, 40));
@@ -72,7 +72,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
   it("clears messages with /clear and keeps the editor", () => {
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
     const { editor } = attachThebeChat(tui, {
-      ask: async () => "unused",
+      send: async () => "unused",
     });
     tui.children.splice(
       tui.children.length - 1,

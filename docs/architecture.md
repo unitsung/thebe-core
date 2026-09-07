@@ -12,11 +12,13 @@ Thebe is a homelab product on a replaceable coding-agent runtime. It is not an a
 
 ## Data
 
-ProductStore records only `thebeSessionId`, `runtimeId`, `runtimeSessionId`, selected context, labels, and share metadata. Transcript, branches, compaction, and OAuth refresh tokens stay in the runtime.
+ProductStore records only `thebeSessionId`, `runtimeId`, `runtimeSessionId`, title, timestamps, selected context, labels, share metadata, and remembered permissions. Transcript, branches, compaction, and OAuth refresh tokens stay in the runtime.
 
 ## Entry points
 
-`createThebeApp` is the shared factory. HTTP `/v1/ask`, `/mcp`, and the TUI all go through the same product service, custom-tool wrap, and session mapping.
+`createThebeApp` is the shared factory. HTTP `/v1/session`, `/v1/messages`, `/mcp`, and the TUI all go through the same product service, custom-tool wrap, and session mapping.
+
+Historical migration specs live in `docs/spec-history/` and are not the active spec.
 
 ## Skills and extensions
 

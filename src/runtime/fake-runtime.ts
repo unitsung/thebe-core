@@ -1,14 +1,21 @@
 import { randomUUID } from "node:crypto";
-import { PI_BUILTIN_TOOLS, PI_RUNTIME_ID } from "./types.ts";
-import type {
-  AgentRuntime,
-  CreateRuntimeSessionOptions,
-  CustomToolDefinition,
-  NormalizedEvent,
-  RuntimeAuth,
-  RuntimeExport,
-  RuntimeMessage,
-  RuntimeSession,
+import {
+  PI_BUILTIN_TOOLS,
+  PI_RUNTIME_ID,
+  asPromptInput,
+  type AgentRuntime,
+  type CreateRuntimeSessionOptions,
+  type CustomToolDefinition,
+  type NormalizedEvent,
+  type PromptInput,
+  type RuntimeAuth,
+  type RuntimeExport,
+  type RuntimeMessage,
+  type RuntimeModel,
+  type RuntimeModelRef,
+  type RuntimeProvider,
+  type RuntimeSession,
+  type ThinkingLevel,
 } from "./types.ts";
 
 export type FakeQueuedTurn =
@@ -27,6 +34,14 @@ type FakeSessionState = {
   tools: CustomToolDefinition[];
   builtinTools: string[];
   enabledResources: CreateRuntimeSessionOptions["enabledResources"];
+  model: RuntimeModelRef;
+  thinkingLevel: ThinkingLevel;
+  reverted: RuntimeMessage[] | undefined;
+  permissionHandler?: CreateRuntimeSessionOptions["permissionHandler"];
+  toolsRequiringApproval: string[];
+  // Shared across resumed handles of the same underlying session, like abort
+  // on a real runtime session: any handle's abort unblocks a hanging turn.
+  abortWaiters: Array<() => void>;
 };
 
 export function createFakeRuntime(options: { runtimeId?: string } = {}) {
@@ -34,6 +49,12 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
   const queue: FakeQueuedTurn[] = [];
   const apiKeys = new Map<string, string>();
   const oauthLogins: string[] = [];
+  const oauthPending = new Set<string>();
+  const inboundToolResults: Array<{
+    toolName: string;
+    text: string;
+    isError: boolean;
+  }> = [];
   let compactCalls = 0;
 
   function queueTurns(turns: FakeQueuedTurn[]): void {
@@ -51,7 +72,9 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
   function makeSession(state: FakeSessionState): RuntimeSession {
     const listeners = new Set<(event: NormalizedEvent) => void>();
     let aborted = false;
-    let abortWaiters: Array<() => void> = [];
+    let busy = false;
+    const steering: string[] = [];
+    const followUps: string[] = [];
 
     const emit = (event: NormalizedEvent) => {
       for (const listener of listeners) {
@@ -67,7 +90,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
             reject(new Error("aborted"));
             return;
           }
-          abortWaiters.push(() => {
+          state.abortWaiters.push(() => {
             reject(new Error("aborted"));
           });
         });
@@ -79,7 +102,11 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       }
       if (turn.kind === "text") {
         emit({ type: "text_delta", text: turn.text });
-        state.messages.push({ role: "assistant", text: turn.text });
+        state.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          text: turn.text,
+        });
         emit({ type: "turn_end" });
         emit({ type: "session_end", text: turn.text });
         return;
@@ -90,6 +117,41 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         }
         const toolCallId = call.id ?? randomUUID();
         emit({ type: "tool_start", toolName: call.name, toolCallId });
+        const needsApproval = state.toolsRequiringApproval.includes(call.name);
+        if (needsApproval && state.permissionHandler) {
+          const permissionId = randomUUID();
+          emit({
+            type: "permission_requested",
+            permissionId,
+            toolName: call.name,
+            toolCallId,
+          });
+          const decision = await state.permissionHandler.request({
+            permissionId,
+            toolName: call.name,
+            toolCallId,
+            args: call.args,
+          });
+          if (decision !== "allow") {
+            const text = "denied by user";
+            emit({
+              type: "tool_end",
+              toolName: call.name,
+              toolCallId,
+              isError: true,
+              text,
+            });
+            state.messages.push({
+              id: randomUUID(),
+              role: "tool",
+              text,
+              toolName: call.name,
+              toolCallId,
+              isError: true,
+            });
+            continue;
+          }
+        }
         const tool = state.tools.find((item) => item.name === call.name);
         let text = "";
         let isError = false;
@@ -110,6 +172,11 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
             text = error instanceof Error ? error.message : String(error);
           }
         }
+        inboundToolResults.push({
+          toolName: call.name,
+          text,
+          isError,
+        });
         emit({
           type: "tool_end",
           toolName: call.name,
@@ -118,6 +185,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
           text,
         });
         state.messages.push({
+          id: randomUUID(),
           role: "tool",
           text,
           toolName: call.name,
@@ -134,17 +202,59 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       emit({ type: "session_end", text: last });
     }
 
+    async function runPrompt(input: string | PromptInput): Promise<void> {
+      aborted = false;
+      busy = true;
+      state.reverted = undefined;
+      const prompt = asPromptInput(input);
+      const filesNote = (prompt.files ?? [])
+        .map(
+          (file) =>
+            `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
+        )
+        .join("\n");
+      const text = filesNote
+        ? `${prompt.text}\n${filesNote}`
+        : prompt.text;
+      state.messages.push({ id: randomUUID(), role: "user", text });
+      try {
+        await runQueued();
+      } finally {
+        busy = false;
+      }
+    }
+
     return {
       runtimeSessionId: state.id,
-      async prompt(text: string): Promise<void> {
-        aborted = false;
-        state.messages.push({ role: "user", text });
-        await runQueued();
+      prompt: runPrompt,
+      async steer(text: string): Promise<void> {
+        if (!busy) {
+          await runPrompt(text);
+          return;
+        }
+        steering.push(text);
+        emit({
+          type: "queue_update",
+          steering: steering.length,
+          followUp: followUps.length,
+        });
+      },
+      async followUp(text: string): Promise<void> {
+        if (!busy) {
+          await runPrompt(text);
+          return;
+        }
+        followUps.push(text);
+        emit({
+          type: "queue_update",
+          steering: steering.length,
+          followUp: followUps.length,
+        });
       },
       async abort(): Promise<void> {
         aborted = true;
-        const waiters = abortWaiters;
-        abortWaiters = [];
+        emit({ type: "interrupted" });
+        const waiters = state.abortWaiters.splice(0);
         for (const waiter of waiters) {
           waiter();
         }
@@ -166,7 +276,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         emit({ type: "compaction_start", reason: "manual" });
         state.compacted = true;
         state.messages = [
-          { role: "assistant", text: "[compacted]" },
+          { id: randomUUID(), role: "assistant", text: "[compacted]" },
           ...state.messages.slice(-2),
         ];
         emit({ type: "compaction_end", aborted: false });
@@ -189,11 +299,45 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       messages(): RuntimeMessage[] {
         return state.messages.slice();
       },
+      async setModel(model: RuntimeModelRef): Promise<void> {
+        state.model = model;
+      },
+      async setThinkingLevel(level: ThinkingLevel): Promise<void> {
+        state.thinkingLevel = level;
+      },
+      async revert(): Promise<void> {
+        if (state.reverted) {
+          return;
+        }
+        const lastUser = [...state.messages]
+          .reverse()
+          .find((message) => message.role === "user");
+        if (!lastUser) {
+          throw new Error("nothing to revert");
+        }
+        const index = state.messages.findIndex(
+          (message) => message.id === lastUser.id,
+        );
+        state.reverted = state.messages.slice(index);
+        state.messages = state.messages.slice(0, index);
+      },
+      async unrevert(): Promise<void> {
+        if (!state.reverted) {
+          throw new Error("nothing to unrevert");
+        }
+        state.messages = [...state.messages, ...state.reverted];
+        state.reverted = undefined;
+      },
       dispose(): void {
         listeners.clear();
       },
     };
   }
+
+  const FAKE_MODELS: RuntimeModel[] = [
+    { providerID: "fake", modelID: "fake-1", name: "Fake One" },
+    { providerID: "fake", modelID: "fake-2", name: "Fake Two" },
+  ];
 
   const auth: RuntimeAuth = {
     async setApiKey(providerId: string, apiKey: string): Promise<void> {
@@ -203,13 +347,60 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       oauthLogins.push(providerId);
       return { kind: "oauth", providerId };
     },
+    async authorizeOAuth(providerId) {
+      if (apiKeys.has(providerId) || oauthLogins.includes(providerId)) {
+        return { providerId, connected: true as const };
+      }
+      oauthPending.add(providerId);
+      return {
+        providerId,
+        pending: true as const,
+        url: `https://oauth.example/${providerId}/authorize`,
+        instructions:
+          "Complete login in your browser, then POST the redirect URL or code to the callback route.",
+      };
+    },
+    async submitOAuthCallback(providerId, input) {
+      if (!oauthPending.has(providerId)) {
+        throw new Error(`unknown OAuth authorization: ${providerId}`);
+      }
+      if (!input.trim()) {
+        throw new Error("OAuth callback input required");
+      }
+      oauthPending.delete(providerId);
+      if (!oauthLogins.includes(providerId)) {
+        oauthLogins.push(providerId);
+      }
+    },
     async logout(providerId: string): Promise<void> {
       apiKeys.delete(providerId);
     },
     async check(providerId: string) {
       return { ok: apiKeys.has(providerId) || oauthLogins.includes(providerId) };
     },
+    async listProviders(): Promise<RuntimeProvider[]> {
+      return [
+        {
+          id: "fake",
+          name: "Fake",
+          connected: apiKeys.has("fake") || oauthLogins.includes("fake"),
+        },
+      ];
+    },
   };
+
+  function applyCreate(
+    state: FakeSessionState,
+    create: CreateRuntimeSessionOptions,
+  ): void {
+    state.tools = create.customTools;
+    state.builtinTools = [...(create.builtinTools ?? state.builtinTools)];
+    state.enabledResources = create.enabledResources;
+    state.permissionHandler = create.permissionHandler;
+    state.toolsRequiringApproval = [
+      ...(create.toolsRequiringApproval ?? state.toolsRequiringApproval),
+    ];
+  }
 
   const runtime: AgentRuntime = {
     runtimeId: options.runtimeId ?? PI_RUNTIME_ID,
@@ -222,16 +413,19 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS)],
         enabledResources: create.enabledResources,
+        model: FAKE_MODELS[0]!,
+        thinkingLevel: "off",
+        reverted: undefined,
+        permissionHandler: create.permissionHandler,
+        toolsRequiringApproval: [...(create.toolsRequiringApproval ?? [])],
+        abortWaiters: [],
       };
       sessions.set(id, state);
       return makeSession(state);
     },
     async resumeSession(runtimeSessionId, create) {
       const existing = getState(runtimeSessionId);
-      existing.tools = create.customTools;
-      existing.builtinTools = [
-        ...(create.builtinTools ?? existing.builtinTools),
-      ];
+      applyCreate(existing, create);
       return makeSession(existing);
     },
     async listSessions() {
@@ -239,21 +433,48 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         runtimeSessionId,
       }));
     },
-    async forkSession(runtimeSessionId, create) {
+    async forkSession(runtimeSessionId, create, fork) {
       const parent = getState(runtimeSessionId);
       const parentMessages = parent.messages.map((message) => ({ ...message }));
+      let copied = parent.messages.map((message) => ({ ...message }));
+      if (fork?.atEntryId) {
+        const index = copied.findIndex(
+          (message) => message.id === fork.atEntryId,
+        );
+        if (index < 0) {
+          throw new Error(`unknown message: ${fork.atEntryId}`);
+        }
+        copied = copied.slice(0, index + 1);
+      }
       const id = randomUUID();
       const state: FakeSessionState = {
         id,
-        messages: parent.messages.map((message) => ({ ...message })),
+        messages: copied,
         compacted: parent.compacted,
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? parent.builtinTools)],
         enabledResources: create.enabledResources,
+        model: { ...parent.model },
+        thinkingLevel: parent.thinkingLevel,
+        reverted: undefined,
+        permissionHandler: create.permissionHandler,
+        toolsRequiringApproval: [
+          ...(create.toolsRequiringApproval ?? parent.toolsRequiringApproval),
+        ],
+        abortWaiters: [],
       };
       sessions.set(id, state);
       parent.messages = parentMessages;
       return makeSession(state);
+    },
+    async listModels() {
+      return FAKE_MODELS.slice();
+    },
+    async listAvailableModels() {
+      return FAKE_MODELS.slice();
+    },
+    async listProviders() {
+      return auth.listProviders();
     },
     auth() {
       return auth;
@@ -266,6 +487,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
     apiKeys,
     oauthLogins,
     compactCalls: () => compactCalls,
+    inboundToolResults: () => inboundToolResults.slice(),
     snapshot(id: string) {
       return getState(id);
     },

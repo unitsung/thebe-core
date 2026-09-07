@@ -21,6 +21,8 @@ describe("Node packaging", () => {
       await readFile(join(root, "package.json"), "utf8"),
     ) as { dependencies?: Record<string, string> };
     expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe("0.85.0");
+    expect(pkg.dependencies?.["@earendil-works/pi-agent-core"]).toBeUndefined();
+    expect(pkg.dependencies?.["@earendil-works/pi-ai"]).toBeUndefined();
     const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
     expect(lock).toContain("@earendil-works/pi-coding-agent@0.85.0");
   });
