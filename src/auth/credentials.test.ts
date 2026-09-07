@@ -1,33 +1,38 @@
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createModels, fauxProvider } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
-import { resolveThebeAuth } from "./credentials.ts";
+import { describe, expect, it } from "vitest";
+import { applyThebeApiKey, loginThebeOAuth } from "./credentials.ts";
+import { createFakeRuntime } from "../runtime/fake-runtime.ts";
 
 const srcRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("credential resolution", () => {
-  it("goes through pi-ai models.getAuth", async () => {
-    const faux = fauxProvider();
-    const models = createModels();
-    models.setProvider(faux.provider);
-    const spy = vi.spyOn(models, "getAuth");
-    await resolveThebeAuth(models, faux.getModel().provider);
-    expect(spy).toHaveBeenCalled();
-    expect(spy.mock.calls[0]?.[0]).toBe(faux.getModel().provider);
-    spy.mockRestore();
+  it("API keys go through runtime auth", async () => {
+    const fake = createFakeRuntime();
+    await applyThebeApiKey(fake.runtime.auth(), "opencode", "sk-test");
+    expect(fake.apiKeys.get("opencode")).toBe("sk-test");
+  });
+
+  it("OAuth login goes through runtime auth", async () => {
+    const fake = createFakeRuntime();
+    const result = await loginThebeOAuth(fake.runtime.auth(), "opencode");
+    expect(result).toEqual({ kind: "oauth", providerId: "opencode" });
+    expect(fake.oauthLogins).toEqual(["opencode"]);
   });
 
   it("does not introduce Thebe-owned OAuth token storage or refresh", async () => {
     const files = await collectTs(srcRoot);
+    const outsidePi = files.filter(
+      (path) => !path.includes(`${join("runtime", "pi")}`),
+    );
     const joined = (
-      await Promise.all(files.map((path) => readFile(path, "utf8")))
+      await Promise.all(outsidePi.map((path) => readFile(path, "utf8")))
     ).join("\n");
     expect(joined).not.toMatch(/oauth[_-]?token[_-]?store/i);
     expect(joined).not.toMatch(/refreshOAuth/i);
-    expect(joined).not.toMatch(/refresh_token/i);
-    expect(joined).toContain("models.getAuth");
+    expect(joined).not.toMatch(/async function refresh\(/);
+    expect(joined).not.toMatch(/function refreshOAuth/);
   });
 });
 

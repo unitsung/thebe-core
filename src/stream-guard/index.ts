@@ -1,36 +1,3 @@
-import type { StreamFn } from "@earendil-works/pi-agent-core";
-import {
-  createAssistantMessageEventStream,
-  type AssistantMessage,
-} from "@earendil-works/pi-ai";
-
-const EMPTY_USAGE = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
-function failureMessage(
-  model: { api: string; provider: string; id: string },
-  stopReason: "aborted" | "error",
-  errorMessage: string,
-): AssistantMessage {
-  return {
-    role: "assistant",
-    content: [{ type: "text", text: "" }],
-    api: model.api,
-    provider: model.provider,
-    model: model.id,
-    usage: EMPTY_USAGE,
-    stopReason,
-    errorMessage,
-    timestamp: Date.now(),
-  };
-}
-
 export type StreamGuardTimeoutKind = "ttfb_timeout" | "idle_timeout";
 
 export type StreamGuardOptions = {
@@ -46,13 +13,9 @@ export type StreamGuardOptions = {
   clearTimeoutFn?: typeof clearTimeout;
 };
 
-const CONTENT_DELTAS = new Set(["text_delta", "thinking_delta", "toolcall_delta"]);
-
 /**
- * Per-Run application timeouts. Does not use fetch/undici/runtime timeout options.
- * TTFB starts when streamFn is invoked and cancels on the first `start` event
- * (SSE keepalives are not protocol events). Idle resets on content deltas.
- * Pi 0.85 emits `toolcall_delta`; the spec's `tool_call_delta` is the old name.
+ * Per-Run application timeouts over normalized runtime events.
+ * Does not use fetch/undici or runtime timeout options.
  */
 export function createStreamGuard(options: StreamGuardOptions = {}) {
   const ttfbMs = options.ttfbMs ?? 300_000;
@@ -64,7 +27,11 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
   const onEvent = options.onEvent;
 
   let watchdog: ReturnType<typeof setTimeout> | undefined;
+  let ttfb: ReturnType<typeof setTimeout> | undefined;
+  let idle: ReturnType<typeof setTimeout> | undefined;
   let forceKilled = false;
+  let firstContentSeen = false;
+  let settled = false;
 
   function setAbort(fn: () => void | Promise<void>): void {
     abortFn = fn;
@@ -77,17 +44,35 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
     }
   }
 
+  function clearTimers(): void {
+    if (ttfb !== undefined) {
+      clearT(ttfb);
+      ttfb = undefined;
+    }
+    if (idle !== undefined) {
+      clearT(idle);
+      idle = undefined;
+    }
+  }
+
   function notifyAgentEnd(): void {
+    settled = true;
+    clearTimers();
     clearWatchdog();
   }
 
   function dispose(): void {
+    settled = true;
+    clearTimers();
     clearWatchdog();
   }
 
   function beginRun(): void {
+    clearTimers();
     clearWatchdog();
     forceKilled = false;
+    firstContentSeen = false;
+    settled = false;
   }
 
   function armWatchdog(): void {
@@ -106,11 +91,13 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
   }
 
   async function fireAbort(kind: StreamGuardTimeoutKind): Promise<void> {
+    if (settled) {
+      return;
+    }
     onEvent?.(kind);
     try {
       await abortFn?.();
     } finally {
-      // abort() is best-effort; force-killed if agent_end never arrives.
       armWatchdog();
     }
   }
@@ -119,156 +106,52 @@ export function createStreamGuard(options: StreamGuardOptions = {}) {
     armWatchdog();
   }
 
-  function wrapStreamFn(inner: StreamFn): StreamFn {
-    return ((model, context, streamOptions) => {
-      const outer = createAssistantMessageEventStream();
-      let ttfb: ReturnType<typeof setTimeout> | undefined;
-      let idle: ReturnType<typeof setTimeout> | undefined;
-      let settled = false;
+  function resetIdle(): void {
+    if (settled) {
+      return;
+    }
+    if (idle !== undefined) {
+      clearT(idle);
+    }
+    idle = setT(() => {
+      void fireAbort("idle_timeout");
+    }, idleMs);
+  }
 
-      const clearTimers = () => {
-        if (ttfb !== undefined) {
-          clearT(ttfb);
-          ttfb = undefined;
-        }
-        if (idle !== undefined) {
-          clearT(idle);
-          idle = undefined;
-        }
-      };
+  function armTtfb(): void {
+    if (settled) {
+      return;
+    }
+    if (ttfb !== undefined) {
+      clearT(ttfb);
+    }
+    ttfb = setT(() => {
+      void fireAbort("ttfb_timeout");
+    }, ttfbMs);
+  }
 
-      const completeOuter = (
-        stopReason: "aborted" | "error",
-        errorMessage: string,
-      ) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        clearTimers();
-        const msg = failureMessage(model, stopReason, errorMessage);
-        try {
-          outer.push({ type: "error", reason: stopReason, error: msg });
-        } catch {
-          // already complete
-        }
-        try {
-          outer.end(msg);
-        } catch {
-          // ignore
-        }
-      };
-
-      const resetIdle = () => {
-        if (settled) {
-          return;
-        }
-        if (idle !== undefined) {
-          clearT(idle);
-        }
-        idle = setT(() => {
-          void fireAbort("idle_timeout").finally(() => {
-            completeOuter("aborted", "idle_timeout");
-          });
-        }, idleMs);
-      };
-
-      ttfb = setT(() => {
-        void fireAbort("ttfb_timeout").finally(() => {
-          completeOuter("aborted", "ttfb_timeout");
-        });
-      }, ttfbMs);
-
-      const signal = streamOptions?.signal;
-      const onSignalAbort = () => {
-        noteAbort();
-        completeOuter("aborted", "aborted");
-      };
-      signal?.addEventListener("abort", onSignalAbort, { once: true });
-      if (signal?.aborted) {
-        onSignalAbort();
+  function noteContent(): void {
+    if (settled) {
+      return;
+    }
+    if (!firstContentSeen) {
+      firstContentSeen = true;
+      if (ttfb !== undefined) {
+        clearT(ttfb);
+        ttfb = undefined;
       }
-
-      void (async () => {
-        try {
-          const innerStream = await inner(model, context, streamOptions);
-          if (settled) {
-            return;
-          }
-          let firstContentSeen = false;
-          for await (const event of innerStream) {
-            if (settled) {
-              break;
-            }
-            const type = (event as { type?: string }).type;
-            if (!firstContentSeen && type === "start") {
-              firstContentSeen = true;
-              if (ttfb !== undefined) {
-                clearT(ttfb);
-                ttfb = undefined;
-              }
-              resetIdle();
-            } else if (
-              firstContentSeen &&
-              type !== undefined &&
-              CONTENT_DELTAS.has(type)
-            ) {
-              resetIdle();
-            } else if (
-              !firstContentSeen &&
-              type !== undefined &&
-              (CONTENT_DELTAS.has(type) ||
-                type === "text_start" ||
-                type === "thinking_start" ||
-                type === "toolcall_start" ||
-                type === "tool_call_delta")
-            ) {
-              firstContentSeen = true;
-              if (ttfb !== undefined) {
-                clearT(ttfb);
-                ttfb = undefined;
-              }
-              resetIdle();
-            }
-            outer.push(event);
-            if (type === "done" || type === "error") {
-              settled = true;
-              clearTimers();
-              break;
-            }
-          }
-        } catch (error) {
-          completeOuter(
-            "error",
-            error instanceof Error ? error.message : String(error),
-          );
-        } finally {
-          signal?.removeEventListener("abort", onSignalAbort);
-          clearTimers();
-          if (!settled) {
-            settled = true;
-            try {
-              const result = await outer.result().catch(() => undefined);
-              outer.end(result);
-            } catch {
-              try {
-                outer.end(undefined);
-              } catch {
-                // ignore
-              }
-            }
-          }
-        }
-      })();
-      return outer;
-    }) as StreamFn;
+      resetIdle();
+      return;
+    }
+    resetIdle();
   }
 
   return {
     setAbort,
-    wrapStreamFn,
     notifyAgentEnd,
     noteAbort,
+    noteContent,
+    armTtfb,
     dispose,
     beginRun,
     wasForceKilled: () => forceKilled,

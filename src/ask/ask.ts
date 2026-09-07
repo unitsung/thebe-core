@@ -1,260 +1,59 @@
-import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
-import type { CompactionSettings } from "@earendil-works/pi-agent-core";
-import type { Model, Models } from "@earendil-works/pi-ai";
-import { createAgentAdapter } from "../agent-adapter/index.ts";
-import { createAuditLog, hashParameters } from "../audit/audit-log.ts";
-import { createPolicyEngine } from "../policy/policy-engine.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
-import { createRunStore } from "../run-store/index.ts";
-import {
-  exportRunHtml,
-  exportRunJsonl,
-} from "../session-export/index.ts";
-import {
-  CONTAINER_TOOL_NAMES,
-  createContainerTools,
-} from "../tools/container-tools.ts";
+import { createThebeProduct, type ThebeProduct } from "../product/service.ts";
+import type { AgentRuntime, EnabledResource } from "../runtime/types.ts";
 
 export function createThebeAgent(options: {
-  models: Models;
-  model: Model<string>;
-  streamFn: StreamFn;
+  runtime: AgentRuntime;
   provider: ContainerInfoProvider;
   auditPath?: string;
-  runStoreDir?: string;
+  productStoreDir?: string;
   now?: () => Date;
   callerId?: string;
-  getApiKey?: (
-    provider: string,
-  ) => Promise<string | undefined> | string | undefined;
   maxToolCalls?: number;
   maxBlocks?: number;
   ttfbMs?: number;
   idleMs?: number;
   watchdogMs?: number;
-  compaction?: CompactionSettings;
+  systemPrompt?: string;
+  builtinTools?: readonly string[];
+  enabledResources?: EnabledResource[];
 }) {
-  const now = options.now ?? (() => new Date());
-  const callerId = options.callerId ?? "default";
-  const policy = createPolicyEngine({
-    now,
-    maxToolCalls: options.maxToolCalls,
-    maxBlocks: options.maxBlocks,
-  });
-  const audit = options.auditPath
-    ? createAuditLog(options.auditPath, now)
-    : undefined;
-  const tools = createContainerTools(options.provider, {
-    policy,
-    audit,
-    callerId,
-  });
-  const allowed = new Set<string>(CONTAINER_TOOL_NAMES);
-  const auditedUnknown = new Set<string>();
-  const adapter = createAgentAdapter({
-    models: options.models,
-    model: options.model,
-    streamFn: options.streamFn,
-    tools,
-    toolExecution: "sequential",
-    getApiKey: options.getApiKey,
-    beforeToolCall: (ctx) => policy.beforeToolCall(ctx),
-    shouldStopAfterTurn: () => policy.shouldStopAfterTurn(),
-    ttfbMs: options.ttfbMs,
-    idleMs: options.idleMs,
-    watchdogMs: options.watchdogMs,
-    compaction: options.compaction,
-    onStreamGuardEvent: (kind) => {
-      void audit
-        ?.append({
-          method: `streamguard.${kind}`,
-          parameterHash: hashParameters({}),
-          responseBytes: 0,
-          budgetConsumed: 0,
-          redactionFired: false,
-        })
-        .catch(() => {});
-    },
-  });
-  const runStore = createRunStore(options.runStoreDir, now);
-  let runSeq = 0;
-  let currentRunId: string | undefined;
-  let messagesBeforeRun = 0;
-  let persistedForRun: string | undefined;
-  let recordedForRun = false;
-
-  async function persistCurrentRun(): Promise<void> {
-    if (!currentRunId) {
-      return;
-    }
-    await adapter.refresh();
-    if (!recordedForRun) {
-      runStore.recordMessages(adapter.messages().slice(messagesBeforeRun));
-      recordedForRun = true;
-    }
-    if (persistedForRun === currentRunId) {
-      return;
-    }
-    if (!options.runStoreDir) {
-      persistedForRun = currentRunId;
-      return;
-    }
-    const reply = adapter.lastReply();
-    try {
-      await runStore.save({
-        runId: currentRunId,
-        systemPrompt: adapter.systemPrompt(),
-        messages: adapter.messages().slice(),
-        tools: adapter.toolNames(),
-        status: adapter.wasForceKilled()
-          ? "force-killed"
-          : reply.kind !== "ok"
-            ? "failed"
-            : "done",
-      });
-      persistedForRun = currentRunId;
-    } catch {
-      // snapshot is best-effort; Ask still returns or throws from the reply
-    }
-  }
-
-  adapter.subscribe(async (event) => {
-    if (event.type !== "agent_end") {
-      return;
-    }
-    await persistCurrentRun();
-  });
-
-  async function auditUnknownToolResults(
-    messages: AgentMessage[],
-  ): Promise<void> {
-    if (!audit) {
-      return;
-    }
-    for (const message of messages) {
-      if (message.role !== "toolResult" || !message.isError) {
-        continue;
-      }
-      if (allowed.has(message.toolName)) {
-        continue;
-      }
-      if (auditedUnknown.has(message.toolCallId)) {
-        continue;
-      }
-      auditedUnknown.add(message.toolCallId);
-      await audit.append({
-        method: message.toolName,
-        parameterHash: hashParameters(
-          argumentsForToolCall(messages, message.toolCallId),
-        ),
-        responseBytes: 0,
-        budgetConsumed: 0,
-        redactionFired: false,
-      });
-    }
-  }
-
+  const product = createThebeProduct(options);
   return {
+    product,
     toolNames(): string[] {
-      return adapter.toolNames();
+      return product.toolNames();
     },
-    toolExecution(): "sequential" {
-      return adapter.toolExecution;
+    messages() {
+      return product.messages();
     },
-    messages(): AgentMessage[] {
-      return adapter.messages();
+    lastThebeSessionId(): string | undefined {
+      return product.lastThebeSessionId();
     },
-    lastRunId(): string | undefined {
-      return currentRunId;
-    },
-    tokenTotals() {
-      return runStore.tokenTotals();
-    },
-    isOverflow(contextWindow: number, reserveMargin = 0) {
-      return runStore.isOverflow(contextWindow, reserveMargin);
-    },
-    compactionReasons(): string[] {
-      return adapter.compactionReasons();
-    },
-    beforeToolResults(): Array<Record<string, unknown>> {
-      return adapter.beforeToolResults();
-    },
-    async forkBranch(name: string, at?: string | null) {
-      return adapter.forkBranch(name, at);
-    },
-    async appendOnBranch(name: string, message: AgentMessage): Promise<void> {
-      await adapter.appendOnBranch(name, message);
-    },
-    async branchMessages(name: string): Promise<AgentMessage[]> {
-      return adapter.branchMessages(name);
-    },
-    async exportLastRun(): Promise<{ jsonl: string; html: string }> {
-      await persistCurrentRun();
-      if (!options.runStoreDir || !currentRunId) {
-        const snapshot = {
-          runId: currentRunId ?? "in-memory",
-          timestamp: now().toISOString(),
-          systemPrompt: adapter.systemPrompt(),
-          messages: adapter.messages().slice(),
-          tools: adapter.toolNames(),
-          status: "done" as const,
-          tokenTotals: runStore.tokenTotals(),
-        };
-        return {
-          jsonl: exportRunJsonl(snapshot),
-          html: exportRunHtml(snapshot),
-        };
-      }
-      const snapshot = await runStore.load(currentRunId);
-      return {
-        jsonl: exportRunJsonl(snapshot),
-        html: exportRunHtml(snapshot),
-      };
+    lastEvents() {
+      return product.lastEvents();
     },
     async ask(input: string): Promise<string> {
-      policy.beginRun();
-      runStore.resetLedger();
-      runSeq += 1;
-      currentRunId = `run-${now().toISOString().replace(/[:.]/g, "-")}-${runSeq}`;
-      persistedForRun = undefined;
-      recordedForRun = false;
-      messagesBeforeRun = adapter.messages().length;
-      await adapter.prompt(input);
-      await persistCurrentRun();
-      await auditUnknownToolResults(adapter.messages());
-      const reply = adapter.lastReply();
-      if (reply.kind === "missing") {
-        throw new Error("Ask did not produce an assistant reply");
-      }
-      if (reply.kind === "sentinel") {
-        throw new Error(reply.errorMessage);
-      }
-      return reply.text;
+      const result = await product.ask(input);
+      return result.text;
+    },
+    async exportLastSession() {
+      return product.exportSession();
+    },
+    async fork() {
+      return product.fork();
+    },
+    async compact() {
+      return product.compact();
+    },
+    async enableResource(resource: EnabledResource) {
+      return product.enableResource(resource);
+    },
+    auth() {
+      return product.auth();
     },
   };
 }
 
-function argumentsForToolCall(
-  messages: AgentMessage[],
-  toolCallId: string,
-): unknown {
-  for (const message of messages) {
-    if (message.role !== "assistant" || !Array.isArray(message.content)) {
-      continue;
-    }
-    for (const block of message.content) {
-      if (
-        typeof block === "object" &&
-        block !== null &&
-        "type" in block &&
-        block.type === "toolCall" &&
-        "id" in block &&
-        block.id === toolCallId &&
-        "arguments" in block
-      ) {
-        return block.arguments;
-      }
-    }
-  }
-  return {};
-}
+export type ThebeAgent = ReturnType<typeof createThebeAgent>;
+export type { ThebeProduct };

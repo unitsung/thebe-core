@@ -16,6 +16,15 @@ describe("Node packaging", () => {
     expect(config).not.toContain("rollupOptions");
   });
 
+  it("pins @earendil-works/pi-coding-agent in package.json and the lockfile", async () => {
+    const pkg = JSON.parse(
+      await readFile(join(root, "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe("0.85.0");
+    const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
+    expect(lock).toContain("@earendil-works/pi-coding-agent@0.85.0");
+  });
+
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {
     const names = await readdir(join(root, "dist"));
     expect(names).toEqual(expect.arrayContaining(["serve.js", "tui.js", "index.js", "chunks"]));

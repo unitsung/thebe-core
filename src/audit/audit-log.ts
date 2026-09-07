@@ -9,6 +9,9 @@ export type AuditRecord = {
   responseBytes: number;
   budgetConsumed: number;
   redactionFired: boolean;
+  identity?: string;
+  version?: string;
+  source?: string;
 };
 
 export function hashParameters(args: unknown): string {

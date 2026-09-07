@@ -1,12 +1,20 @@
-import type { Model, Models } from "@earendil-works/pi-ai";
+import type { RuntimeAuth } from "../runtime/types.ts";
 
 /**
- * Thin provider pick for HTTP/TUI. Resolution, refresh, and storage stay in
- * pi-ai `Models.getAuth` — Thebe does not keep OAuth tokens.
+ * API-key and OAuth lifecycle stay on the runtime (Pi ModelRuntime).
+ * Thebe does not store or refresh OAuth tokens.
  */
-export async function resolveThebeAuth(
-  models: Models,
-  provider: string | Model<string>,
-) {
-  return models.getAuth(provider as never);
+export async function applyThebeApiKey(
+  auth: RuntimeAuth,
+  providerId: string,
+  apiKey: string,
+): Promise<void> {
+  await auth.setApiKey(providerId, apiKey);
+}
+
+export async function loginThebeOAuth(
+  auth: RuntimeAuth,
+  providerId: string,
+): Promise<{ kind: "oauth"; providerId: string }> {
+  return auth.loginOAuth(providerId, { type: "oauth" });
 }
