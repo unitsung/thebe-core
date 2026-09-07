@@ -13,8 +13,8 @@ Earendil Works `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, and `@e
 _Avoid_: treating Pi as a loop we wrote
 
 **AgentAdapter**:
-Wrapper around Pi's `Agent`. Ask calls `prompt()` only; `toolExecution` is required `"sequential"` on the type. convertToLlm, transformContext, StreamGuard, and failure-sentinel detection sit behind it.
-_Avoid_: raw `agentLoop()`, omitting `toolExecution`, Ask constructing `Agent` itself
+Wrapper around Pi's `AgentHarness`. Ask calls `prompt()` only; `toolExecution` is required `"sequential"` on the type. convertToLlm, transformContext, StreamGuard, and failure-sentinel detection sit behind it. One active lane per Run.
+_Avoid_: raw `agentLoop()`, omitting `toolExecution`, Ask constructing `Agent` itself, depending on pi-coding-agent
 
 **Ask**:
 One question, via AgentAdapter `prompt()`. HTTP Serve and the TUI are adapters over the same tools, not a second loop.

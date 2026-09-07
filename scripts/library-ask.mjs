@@ -24,6 +24,7 @@ models.setProvider(faux.provider);
 faux.setResponses([fauxAssistantMessage("pong")]);
 
 const thebe = createThebeAgent({
+  models,
   model: faux.getModel(),
   streamFn: models.streamSimple.bind(models),
   provider,

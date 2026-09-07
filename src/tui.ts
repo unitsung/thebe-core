@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { createModels } from "@earendil-works/pi-ai";
 import { opencodeProvider } from "@earendil-works/pi-ai/providers/opencode";
 import { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
+import { resolveThebeAuth } from "./auth/credentials.ts";
 import { createThebeAgent } from "./ask/index.ts";
 import { envLocalCandidates, loadEnvLocal } from "./env.ts";
 import { startThebeTui } from "./tui/app.ts";
@@ -33,11 +34,16 @@ if (!model) {
   throw new Error("muse-spark-1.3-contributor-free not in OpenCode catalog");
 }
 
+const auth = await resolveThebeAuth(models, model);
+if (!auth) {
+  throw new Error("No credentials for the configured model provider");
+}
+
 const thebe = createThebeAgent({
+  models,
   model,
   streamFn: models.streamSimple.bind(models),
   provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
-  getApiKey: () => openCodeKey,
 });
 
 startThebeTui({ ask: (text) => thebe.ask(text) });
