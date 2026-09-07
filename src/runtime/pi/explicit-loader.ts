@@ -19,6 +19,8 @@ export function createExplicitResourceLoader(options: {
   systemPrompt: string;
   enabledResources?: EnabledResource[];
   sdk: PiSdk;
+  extensions?: unknown[];
+  extensionRuntime?: unknown;
 }): ResourceLoader {
   const skills = (options.enabledResources ?? [])
     .filter((resource) => resource.kind === "skill")
@@ -38,9 +40,10 @@ export function createExplicitResourceLoader(options: {
 
   return {
     getExtensions: () => ({
-      extensions: [],
+      extensions: options.extensions ?? [],
       errors: [],
-      runtime: options.sdk.createExtensionRuntime(),
+      runtime:
+        options.extensionRuntime ?? options.sdk.createExtensionRuntime(),
     }),
     getSkills: () => ({ skills, diagnostics: [] }),
     getPrompts: () => ({ prompts: [], diagnostics: [] }),

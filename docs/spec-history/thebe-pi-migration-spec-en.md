@@ -1,6 +1,6 @@
 # Thebe Migration to Pi Coding Agent Runtime — Reference Spec (English)
 
-> Obsolete as an active spec. Ownership and decisions now live in `architecture.md`, `adr/0001-pi-coding-agent-runtime.md`, and `migration-note.md`.
+> Obsolete as an active spec. Ownership and decisions now live in `../architecture.md`, `../adr/0001-pi-coding-agent-runtime.md`, and `../migration-note.md`.
 
 > Compiled from `thebe-pi-coding-agent-migration-goal.md` as a long-term reference baseline to prevent scope drift.
 

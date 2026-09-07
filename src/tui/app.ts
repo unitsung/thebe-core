@@ -1,6 +1,6 @@
 /**
  * Chat shell from pi-tui `test/chat-simple.ts` (v0.85.0).
- * Thebe only replaces the fake timeout with Ask.
+ * Thebe only replaces the fake timeout with send.
  */
 import {
   CombinedAutocompleteProvider,
@@ -15,11 +15,11 @@ import {
 } from "@earendil-works/pi-tui";
 import { chalk, defaultEditorTheme, defaultMarkdownTheme } from "./theme.ts";
 
-export type ThebeTuiAsk = (text: string) => Promise<string>;
+export type ThebeTuiSend = (text: string) => Promise<string>;
 
 export function attachThebeChat(
   tui: TUI,
-  options: { ask: ThebeTuiAsk },
+  options: { send: ThebeTuiSend },
 ): { editor: Editor } {
   tui.addChild(
     new Text(
@@ -81,7 +81,7 @@ export function attachThebeChat(
     tui.requestRender();
 
     void options
-      .ask(trimmed)
+      .send(trimmed)
       .then((reply) => {
         tui.removeChild(loader);
         loader.stop();
@@ -110,7 +110,7 @@ export function attachThebeChat(
   return { editor };
 }
 
-export function startThebeTui(options: { ask: ThebeTuiAsk }): TUI {
+export function startThebeTui(options: { send: ThebeTuiSend }): TUI {
   const tui: TUI = new TuiMainScreen(new ProcessTerminal());
   attachThebeChat(tui, options);
   tui.addInputListener((data) => {

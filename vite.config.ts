@@ -32,7 +32,7 @@ export default defineConfig({
             { name: "tui-app", test: /[/\\]src[/\\]tui[/\\]/, priority: 25 },
             {
               name: "core",
-              test: /[/\\]src[/\\](ask|product|runtime|tools|policy|providers|stream-guard|audit|auth)[/\\]/,
+              test: /[/\\]src[/\\](agent|product|runtime|tools|policy|providers|stream-guard|audit|auth)[/\\]/,
               priority: 20,
             },
           ],

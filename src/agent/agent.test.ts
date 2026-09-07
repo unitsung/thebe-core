@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createThebeAgent } from "./ask.ts";
+import { createThebeAgent } from "./agent.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createFakeRuntime } from "../runtime/fake-runtime.ts";
 
@@ -21,7 +21,7 @@ function emptyProvider(): ContainerInfoProvider {
   };
 }
 
-describe("Ask", () => {
+describe("Thebe agent", () => {
   it("returns the runtime reply through the product layer", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "pong" }]);
@@ -29,7 +29,7 @@ describe("Ask", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.ask("ping")).resolves.toBe("pong");
+    await expect(thebe.send("ping")).resolves.toBe("pong");
   });
 
   it("registers Pi built-ins plus the four container tools", () => {
@@ -50,7 +50,7 @@ describe("Ask", () => {
     );
   });
 
-  it("Ask inspect redacts secret env in the tool result", async () => {
+  it("inspect redacts secret env in the tool result", async () => {
     const provider: ContainerInfoProvider = {
       ...emptyProvider(),
       inspectContainer: async () => ({
@@ -70,11 +70,50 @@ describe("Ask", () => {
       { kind: "text", text: "inspected" },
     ]);
     const thebe = createThebeAgent({ runtime: fake.runtime, provider });
-    await expect(thebe.ask("inspect nginx")).resolves.toBe("inspected");
+    await expect(thebe.send("inspect nginx")).resolves.toBe("inspected");
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.text).toContain("API_TOKEN=***REDACTED***");
     expect(toolResult?.text).toContain("NODE_ENV=production");
     expect(toolResult?.text).not.toContain("s3cret");
+  });
+
+  it("canary secret never enters audit or runtime-captured tool results", async () => {
+    const CANARY = "canary-s3cret";
+    const dir = await mkdtemp(join(tmpdir(), "thebe-canary-"));
+    const auditPath = join(dir, "audit.jsonl");
+    const provider: ContainerInfoProvider = {
+      ...emptyProvider(),
+      inspectContainer: async () => ({
+        id: "abc123",
+        name: "nginx",
+        image: "nginx:1.27",
+        state: "running",
+        config: { env: [`API_TOKEN=${CANARY}`] },
+      }),
+    };
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+      },
+      { kind: "text", text: "inspected" },
+    ]);
+    const thebe = createThebeAgent({
+      runtime: fake.runtime,
+      provider,
+      auditPath,
+    });
+    await thebe.send("inspect nginx");
+    const audit = await readFile(auditPath, "utf8");
+    const exported = await thebe.exportLastSession();
+    const inbound = JSON.stringify(fake.inboundToolResults());
+    expect(inbound).not.toContain(CANARY);
+    expect(inbound).toContain("***REDACTED***");
+    expect(audit).not.toContain(CANARY);
+    expect(exported.jsonl).not.toContain(CANARY);
+    expect(exported.html).not.toContain(CANARY);
+    expect(JSON.stringify(thebe.messages())).not.toContain(CANARY);
   });
 
   it("refuses container.start when the model tries to call it", async () => {
@@ -90,7 +129,7 @@ describe("Ask", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.ask("start nginx")).resolves.toBe("stopped");
+    await expect(thebe.send("start nginx")).resolves.toBe("stopped");
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.isError).toBe(true);
     expect(toolResult?.toolName).toBe("container.start");
@@ -124,7 +163,7 @@ describe("Ask", () => {
       now: () => new Date("2026-09-05T12:00:00Z"),
       callerId: "agent-1",
     });
-    await thebe.ask("inspect nginx");
+    await thebe.send("inspect nginx");
     const lines = (await readFile(auditPath, "utf8"))
       .trim()
       .split("\n")
@@ -155,14 +194,14 @@ describe("Ask", () => {
       provider: emptyProvider(),
       maxToolCalls: 1,
     });
-    const reply = await thebe.ask("list twice");
+    const reply = await thebe.send("list twice");
     expect(reply).not.toBe("should not run");
     const toolResults = thebe.messages().filter((m) => m.role === "tool");
     expect(toolResults.length).toBe(2);
     expect(JSON.stringify(toolResults)).not.toContain('"terminate"');
   });
 
-  it("Ask hanging stream reaches terminal via StreamGuard", async () => {
+  it("hanging stream reaches terminal via StreamGuard", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);
     const thebe = createThebeAgent({
@@ -173,7 +212,7 @@ describe("Ask", () => {
       watchdogMs: 40,
     });
     const start = Date.now();
-    await expect(thebe.ask("ping")).rejects.toThrow();
+    await expect(thebe.send("ping")).rejects.toThrow();
     expect(Date.now() - start).toBeLessThan(10_000);
   });
 });

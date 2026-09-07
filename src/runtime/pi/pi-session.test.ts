@@ -62,7 +62,7 @@ describe("PiCodingAgentRuntime sessions", () => {
       provider: emptyProvider(),
       productStoreDir: join(dir, "meta"),
     });
-    await expect(product.ask("hi")).resolves.toMatchObject({
+    await expect(product.send("hi")).resolves.toMatchObject({
       text: "hello-from-parent",
     });
     const meta = (await product.listSessions())[0]!;
@@ -76,7 +76,7 @@ describe("PiCodingAgentRuntime sessions", () => {
       productStoreDir: join(dir, "meta"),
     });
     await resumed.resume(meta.thebeSessionId);
-    const again = await resumed.ask("again", meta.thebeSessionId);
+    const again = await resumed.send("again", meta.thebeSessionId);
     expect(again.text).toBe("resumed");
     const listed = await second.runtime.listSessions();
     expect(listed.some((row) => row.runtimeSessionId === meta.runtimeSessionId)).toBe(
@@ -96,11 +96,11 @@ describe("PiCodingAgentRuntime sessions", () => {
       provider: emptyProvider(),
       productStoreDir: join(dir, "meta"),
     });
-    await product.ask("one");
+    await product.send("one");
     const parentMessages = product.messages().map((m) => m.text);
     const parentId = product.lastThebeSessionId()!;
     await product.fork(parentId);
-    await product.ask("two");
+    await product.send("two");
     const parentMeta = (await product.listSessions()).find(
       (row) => row.thebeSessionId === parentId,
     )!;
@@ -124,9 +124,9 @@ describe("PiCodingAgentRuntime sessions", () => {
       runtime,
       provider: emptyProvider(),
     });
-    await product.ask("one");
+    await product.send("one");
     await product.compact();
-    const continued = await product.ask("two");
+    const continued = await product.send("two");
     expect(continued.text.length).toBeGreaterThan(0);
     expect(product.messages().length).toBeGreaterThan(0);
   });
@@ -139,7 +139,7 @@ describe("PiCodingAgentRuntime sessions", () => {
       runtime,
       provider: emptyProvider(),
     });
-    await product.ask("say exported-turn");
+    await product.send("say exported-turn");
     const cwd = process.cwd();
     const before = new Set(await readdir(cwd));
     const exported = await product.exportSession();
@@ -181,6 +181,43 @@ describe("PiCodingAgentRuntime sessions", () => {
     expect(src).not.toContain("refresh_token");
   });
 
+  it("authorizeOAuth surfaces the provider auth URL without blocking", async () => {
+    const { runtime, modelRuntime } = await piWithFaux();
+    const loginSpy = vi
+      .spyOn(modelRuntime, "login")
+      .mockImplementation(async (...args: unknown[]) => {
+        const interaction = args[2] as {
+          notify: (event: {
+            type: string;
+            url?: string;
+            instructions?: string;
+          }) => void;
+        };
+        interaction.notify({
+          type: "auth_url",
+          url: "https://example.com/oauth/authorize",
+          instructions: "open me",
+        });
+        return {
+          type: "oauth",
+          access: "a",
+          refresh: "r",
+          expires: Date.now() + 60_000,
+        };
+      });
+    const result = await runtime
+      .auth()
+      .authorizeOAuth("unauthorized-provider");
+    expect(result).toMatchObject({
+      pending: true,
+      url: "https://example.com/oauth/authorize",
+    });
+    expect(loginSpy).toHaveBeenCalled();
+    await expect(
+      runtime.auth().submitOAuthCallback("unauthorized-provider", "code"),
+    ).rejects.toThrow("unknown OAuth authorization");
+  });
+
   it("product metadata files omit transcript payloads", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-pi-meta-"));
     const { faux, runtime } = await piWithFaux(dir);
@@ -190,7 +227,7 @@ describe("PiCodingAgentRuntime sessions", () => {
       provider: emptyProvider(),
       productStoreDir: join(dir, "meta"),
     });
-    await product.ask("hi");
+    await product.send("hi");
     const names = await readdir(join(dir, "meta"));
     const raw = await readFile(join(dir, "meta", names[0]!), "utf8");
     expect(raw).not.toContain("secret-turn");

@@ -60,7 +60,7 @@ const thebe = createThebeAgent({
   provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
 });
 
-const reply = await thebe.ask(
+const reply = await thebe.send(
   "How many containers are running? Call container.status_summary, then answer with the running count.",
 );
 const toolNames = thebe

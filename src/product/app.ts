@@ -3,9 +3,12 @@ import type { AgentRuntime } from "../runtime/types.ts";
 import { createThebeHttpHandler } from "../http/handler.ts";
 import { createThebeProduct, type ThebeProduct } from "./service.ts";
 
-export type ThebeAppAsk = (
+export type ThebeAppPrompt = (
   text: string,
 ) => Promise<{ text: string; tools: string[] }>;
+
+/** @deprecated Use ThebeAppPrompt */
+export type ThebeAppSend = ThebeAppPrompt;
 
 export function createThebeApp(options: {
   runtime: AgentRuntime;
@@ -18,20 +21,19 @@ export function createThebeApp(options: {
   callerId?: string;
 }): {
   product: ThebeProduct;
-  ask: ThebeAppAsk;
+  prompt: ThebeAppPrompt;
+  send: ThebeAppSend;
   handler: ReturnType<typeof createThebeHttpHandler>;
 } {
   const product = createThebeProduct(options);
-  const ask: ThebeAppAsk = async (text) => {
-    const result = await product.ask(text);
+  const prompt: ThebeAppPrompt = async (text) => {
+    const result = await product.prompt(text);
     return { text: result.text, tools: result.tools };
   };
   const handler = createThebeHttpHandler({
     version: options.version ?? "0.1.0",
-    provider: options.provider,
     token: options.token,
     product,
-    ask,
   });
-  return { product, ask, handler };
+  return { product, prompt, send: prompt, handler };
 }

@@ -1,6 +1,6 @@
 # Thebe 迁移至 Pi Coding Agent Runtime — 参考规格文档（中文版）
 
-> 已不再作为现行规格。所有权边界与决策见 `architecture.md`、`adr/0001-pi-coding-agent-runtime.md` 与 `migration-note.md`。
+> 已不再作为现行规格。所有权边界与决策见 `../architecture.md`、`../adr/0001-pi-coding-agent-runtime.md` 与 `../migration-note.md`。
 
 > 本文档基于 `thebe-pi-coding-agent-migration-goal.md` 整理，作为后续开发的长期参考基准，防止范围漂移。
 

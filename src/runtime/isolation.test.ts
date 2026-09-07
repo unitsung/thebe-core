@@ -8,6 +8,8 @@ const piWrapper = join(srcRoot, "runtime", "pi");
 
 const FORBIDDEN = [
   "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-agent-core",
+  "@earendil-works/pi-ai",
   "AgentHarness",
   "createAgentAdapter",
   "thebeConvertToLlm",
@@ -17,7 +19,7 @@ const FORBIDDEN = [
 ];
 
 describe("runtime isolation", () => {
-  it("keeps Pi coding-agent and old harness types inside the Pi wrapper", async () => {
+  it("keeps Pi packages and old harness types inside the Pi wrapper", async () => {
     const files = await collectProductionTs(srcRoot);
     const outside = files.filter((path) => !path.startsWith(piWrapper));
     const leaks: string[] = [];
@@ -30,6 +32,13 @@ describe("runtime isolation", () => {
       }
     }
     expect(leaks).toEqual([]);
+  });
+
+  it("does not keep retired run-store or session-export modules", async () => {
+    const names = await readdir(srcRoot);
+    expect(names).not.toContain("run-store");
+    expect(names).not.toContain("session-export");
+    expect(names).not.toContain("agent-adapter");
   });
 
   it("does not spawn the Pi CLI", async () => {

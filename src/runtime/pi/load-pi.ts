@@ -35,11 +35,15 @@ export async function loadPiSdk() {
   const modelRuntime = await import(piDistUrl("core/model-runtime.js"));
   const extensions = await import(piDistUrl("core/extensions/index.js"));
   const source = await import(piDistUrl("core/source-info.js"));
+  const eventBus = await import(piDistUrl("core/event-bus.js"));
   return {
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,
     defineTool: extensions.defineTool as typeof extensions.defineTool,
     createExtensionRuntime:
       extensions.createExtensionRuntime as typeof extensions.createExtensionRuntime,
+    loadExtensionFromFactory:
+      extensions.loadExtensionFromFactory as typeof extensions.loadExtensionFromFactory,
+    createEventBus: eventBus.createEventBus as typeof eventBus.createEventBus,
     SessionManager: session.SessionManager as typeof session.SessionManager,
     SettingsManager: settings.SettingsManager as typeof settings.SettingsManager,
     ModelRuntime: modelRuntime.ModelRuntime as typeof modelRuntime.ModelRuntime,

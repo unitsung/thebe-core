@@ -21,7 +21,7 @@ const thebe = createThebeAgent({
   provider,
 });
 
-const reply = await thebe.ask("ping");
+const reply = await thebe.send("ping");
 if (reply !== "pong") {
   throw new Error(`expected pong, got ${JSON.stringify(reply)}`);
 }

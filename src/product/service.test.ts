@@ -1,7 +1,7 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createFakeRuntime } from "../runtime/fake-runtime.ts";
 import { createThebeApp } from "./app.ts";
@@ -32,7 +32,7 @@ describe("Thebe product service (fake runtime)", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    const result = await product.ask("ping");
+    const result = await product.send("ping");
     expect(result.text).toBe("pong");
     expect(result.events.map((event) => event.type)).toEqual([
       "text_delta",
@@ -85,7 +85,7 @@ describe("Thebe product service (fake runtime)", () => {
       runtime: fake.runtime,
       provider,
     });
-    const result = await product.ask("inspect");
+    const result = await product.send("inspect");
     expect(result.text).toBe("inspected");
     const dumped = JSON.stringify({
       events: result.events,
@@ -95,7 +95,7 @@ describe("Thebe product service (fake runtime)", () => {
     expect(dumped).toContain("***REDACTED***");
   });
 
-  it("HTTP and TUI share the same ask function from createThebeApp", async () => {
+  it("HTTP session prompt and TUI share the product from createThebeApp", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "shared" }]);
     const app = createThebeApp({
@@ -103,19 +103,27 @@ describe("Thebe product service (fake runtime)", () => {
       provider: emptyProvider(),
       version: "0.1.0",
     });
+    const created = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+    );
+    const session = (await created.json()) as { thebeSessionId: string };
     const http = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "hello" }),
-      }),
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/prompt`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        },
+      ),
     );
     expect(http.status).toBe(200);
-    await expect(http.json()).resolves.toEqual({
+    await expect(http.json()).resolves.toMatchObject({
       text: "shared",
       tools: [],
+      thebeSessionId: session.thebeSessionId,
     });
-    expect(app.ask).toBeTypeOf("function");
+    expect(app.send).toBeTypeOf("function");
   });
 
   it("ProductStore files contain mapping keys only", async () => {
@@ -127,7 +135,7 @@ describe("Thebe product service (fake runtime)", () => {
       provider: emptyProvider(),
       productStoreDir: dir,
     });
-    await product.ask("hi");
+    await product.send("hi");
     const listed = await product.listSessions();
     expect(listed).toHaveLength(1);
     const raw = await readFile(
@@ -135,9 +143,12 @@ describe("Thebe product service (fake runtime)", () => {
       "utf8",
     );
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    expect(Object.keys(parsed).sort()).toEqual(
-      ["runtimeId", "runtimeSessionId", "thebeSessionId"].sort(),
-    );
+    expect(parsed.thebeSessionId).toBe(listed[0]!.thebeSessionId);
+    expect(parsed.runtimeId).toBeDefined();
+    expect(parsed.runtimeSessionId).toBeDefined();
+    expect(parsed.createdAt).toBeDefined();
+    expect(parsed.lastActiveAt).toBeDefined();
+    expect(parsed.title).toBe("hi");
     expect(raw).not.toContain("pong");
     expect(raw).not.toContain("transcript");
   });
@@ -149,7 +160,7 @@ describe("Thebe product service (fake runtime)", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await product.ask("one");
+    await product.send("one");
     const parentId = product.lastThebeSessionId()!;
     const before = product.messages().map((message) => message.text);
     await product.fork(parentId);
@@ -170,9 +181,9 @@ describe("Thebe product service (fake runtime)", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await product.ask("one");
+    await product.send("one");
     await product.compact();
-    const continued = await product.ask("two");
+    const continued = await product.send("two");
     expect(continued.text).toBe("second");
     expect(fake.compactCalls()).toBe(1);
   });
@@ -238,5 +249,118 @@ describe("Thebe product service (fake runtime)", () => {
       result?: { content?: Array<{ text?: string }> };
     };
     expect(body.result?.content?.[0]?.text).toContain("runningContainers");
+  });
+
+  it("prompt accepts files and records them on the user message", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "saw-file" }]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const result = await product.prompt({
+      text: "look",
+      files: [
+        { mediaType: "image/png", data: "aaaa", filename: "shot.png" },
+      ],
+    });
+    expect(result.text).toBe("saw-file");
+    expect(product.messages()[0]?.text).toContain("shot.png");
+    expect(product.messages()[0]?.text).toContain("image/png");
+  });
+
+  it("forks from a specific message id", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "first" },
+      { kind: "text", text: "second" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    await product.prompt("one");
+    const firstAssistant = product.messages()[1]!;
+    await product.prompt("two");
+    const parentId = product.lastThebeSessionId()!;
+    const child = await product.fork(parentId, firstAssistant.id);
+    expect(child.parentThebeSessionId).toBe(parentId);
+    expect(product.messages().map((message) => message.text)).toEqual([
+      "one",
+      "first",
+    ]);
+    const kids = await product.children(parentId);
+    expect(kids.map((row) => row.thebeSessionId)).toEqual([child.thebeSessionId]);
+  });
+
+  it("reverts and unreverts the last user turn", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "pong" }]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    await product.prompt("ping");
+    await product.revert();
+    expect(product.messages()).toEqual([]);
+    await product.unrevert();
+    expect(product.messages().map((message) => message.text)).toEqual([
+      "ping",
+      "pong",
+    ]);
+  });
+
+  it("holds bash until permission is resolved", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const pending = product.prompt("run bash");
+    await vi.waitFor(() => {
+      expect(product.pendingPermissionIds().length).toBe(1);
+    });
+    const permissionId = product.pendingPermissionIds()[0]!;
+    const sessionId = product.lastThebeSessionId()!;
+    expect(product.lastEvents().some((event) => event.type === "permission_requested")).toBe(
+      true,
+    );
+    await product.resolvePermission(sessionId, permissionId, {
+      response: "deny",
+    });
+    const result = await pending;
+    expect(result.text).toBe("after");
+    const tool = product.messages().find((message) => message.role === "tool");
+    expect(tool?.isError).toBe(true);
+    expect(tool?.text).toContain("denied");
+  });
+
+  it("remember:true persists the approval decision on the session meta", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const pending = product.prompt("run bash");
+    await vi.waitFor(() => {
+      expect(product.pendingPermissionIds().length).toBe(1);
+    });
+    const permissionId = product.pendingPermissionIds()[0]!;
+    const sessionId = product.lastThebeSessionId()!;
+    await product.resolvePermission(sessionId, permissionId, {
+      response: "allow",
+      remember: true,
+    });
+    await pending;
+    const meta = await product.getSession(sessionId);
+    expect(meta.rememberedPermissions).toMatchObject({ bash: "allow" });
   });
 });

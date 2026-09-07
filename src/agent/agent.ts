@@ -33,8 +33,12 @@ export function createThebeAgent(options: {
     lastEvents() {
       return product.lastEvents();
     },
-    async ask(input: string): Promise<string> {
-      const result = await product.ask(input);
+    async prompt(input: string): Promise<string> {
+      const result = await product.prompt(input);
+      return result.text;
+    },
+    async send(input: string): Promise<string> {
+      const result = await product.prompt(input);
       return result.text;
     },
     async exportLastSession() {
