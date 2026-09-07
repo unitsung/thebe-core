@@ -16,7 +16,9 @@ import {
   type RuntimeProvider,
   type RuntimeSession,
   type ThinkingLevel,
+  isInlineTextFile,
 } from "./types.ts";
+import { permissionRisk, summarizeArgs } from "../tools/redaction.ts";
 
 export type FakeQueuedTurn =
   | { kind: "text"; text: string }
@@ -125,12 +127,16 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
             permissionId,
             toolName: call.name,
             toolCallId,
+            argsSummary: summarizeArgs(call.args),
+            risk: permissionRisk(call.name),
           });
           const decision = await state.permissionHandler.request({
             permissionId,
             toolName: call.name,
             toolCallId,
             args: call.args,
+            argsSummary: summarizeArgs(call.args),
+            risk: permissionRisk(call.name),
           });
           if (decision !== "allow") {
             const text = "denied by user";
@@ -207,15 +213,30 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       busy = true;
       state.reverted = undefined;
       const prompt = asPromptInput(input);
+      const inlined = (prompt.files ?? [])
+        .filter((file) => isInlineTextFile(file.mediaType))
+        .map((file) => {
+          const name = file.filename ?? "attachment";
+          let text: string;
+          try {
+            text = Buffer.from(file.data, "base64").toString("utf8");
+          } catch {
+            text = "";
+          }
+          return `[file: ${name} (${file.mediaType})]\n${text}`;
+        })
+        .join("\n\n");
       const filesNote = (prompt.files ?? [])
+        .filter((file) => !isInlineTextFile(file.mediaType))
         .map(
           (file) =>
             `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
         )
         .join("\n");
-      const text = filesNote
-        ? `${prompt.text}\n${filesNote}`
-        : prompt.text;
+      const extra = [inlined, filesNote]
+        .filter((part) => part.length > 0)
+        .join("\n");
+      const text = extra ? `${prompt.text}\n${extra}` : prompt.text;
       state.messages.push({ id: randomUUID(), role: "user", text });
       try {
         await runQueued();
@@ -300,6 +321,16 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         return state.messages.slice();
       },
       async setModel(model: RuntimeModelRef): Promise<void> {
+        const known = FAKE_MODELS.some(
+          (row) =>
+            row.providerId === model.providerId &&
+            row.modelId === model.modelId,
+        );
+        if (!known) {
+          throw new Error(
+            `unknown model: ${model.providerId}/${model.modelId}`,
+          );
+        }
         state.model = model;
       },
       async setThinkingLevel(level: ThinkingLevel): Promise<void> {
@@ -335,8 +366,20 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
   }
 
   const FAKE_MODELS: RuntimeModel[] = [
-    { providerID: "fake", modelID: "fake-1", name: "Fake One" },
-    { providerID: "fake", modelID: "fake-2", name: "Fake Two" },
+    {
+      providerId: "fake",
+      modelId: "fake-1",
+      displayName: "Fake One",
+      supportsThinking: true,
+      available: true,
+    },
+    {
+      providerId: "fake",
+      modelId: "fake-2",
+      displayName: "Fake Two",
+      supportsThinking: false,
+      available: true,
+    },
   ];
 
   const auth: RuntimeAuth = {
@@ -374,16 +417,24 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
     },
     async logout(providerId: string): Promise<void> {
       apiKeys.delete(providerId);
+      const index = oauthLogins.indexOf(providerId);
+      if (index >= 0) {
+        oauthLogins.splice(index, 1);
+      }
+      oauthPending.delete(providerId);
     },
     async check(providerId: string) {
       return { ok: apiKeys.has(providerId) || oauthLogins.includes(providerId) };
     },
     async listProviders(): Promise<RuntimeProvider[]> {
+      const connected =
+        apiKeys.has("fake") || oauthLogins.includes("fake");
       return [
         {
           id: "fake",
-          name: "Fake",
-          connected: apiKeys.has("fake") || oauthLogins.includes("fake"),
+          displayName: "Fake",
+          authMethods: ["apiKey", "oauth"],
+          authStatus: connected ? "connected" : "missing",
         },
       ];
     },
@@ -467,11 +518,17 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       parent.messages = parentMessages;
       return makeSession(state);
     },
-    async listModels() {
-      return FAKE_MODELS.slice();
+    async listModels(query?: { providerId?: string }) {
+      return FAKE_MODELS.filter(
+        (model) => !query?.providerId || model.providerId === query.providerId,
+      );
     },
-    async listAvailableModels() {
-      return FAKE_MODELS.slice();
+    async listAvailableModels(query?: { providerId?: string }) {
+      return FAKE_MODELS.filter(
+        (model) =>
+          model.available !== false &&
+          (!query?.providerId || model.providerId === query.providerId),
+      );
     },
     async listProviders() {
       return auth.listProviders();

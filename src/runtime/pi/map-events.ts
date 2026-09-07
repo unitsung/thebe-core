@@ -90,7 +90,12 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
     const id = typeof message.id === "string" ? message.id : `pi-${index}`;
     index += 1;
     if (message.role === "user") {
-      out.push({ id, role: "user", text: contentToText(message.content) });
+      out.push({
+        id,
+        role: "user",
+        text: contentToText(message.content),
+        attachments: contentAttachments(message.content),
+      });
       continue;
     }
     if (message.role === "assistant") {
@@ -98,6 +103,7 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
         id,
         role: "assistant",
         text: contentToText(message.content) || message.errorMessage || "",
+        attachments: contentAttachments(message.content),
       });
       continue;
     }
@@ -113,6 +119,42 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
     }
   }
   return out;
+}
+
+function contentAttachments(
+  content: unknown,
+): Array<{ mediaType?: string }> | undefined {
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  const found: Array<{ mediaType?: string }> = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const row = block as {
+      type?: unknown;
+      mediaType?: unknown;
+      image_url?: unknown;
+      source?: unknown;
+    };
+    const mediaType =
+      typeof row.mediaType === "string"
+        ? row.mediaType
+        : typeof row.source === "object" && row.source !== null
+          ? (row.source as { mediaType?: unknown }).mediaType
+          : undefined;
+    if (
+      (typeof row.type === "string" && row.type.toLowerCase().includes("image")) ||
+      row.image_url !== undefined ||
+      (typeof mediaType === "string" && mediaType.startsWith("image/"))
+    ) {
+      found.push(
+        typeof mediaType === "string" ? { mediaType } : {},
+      );
+    }
+  }
+  return found.length > 0 ? found : undefined;
 }
 
 function toolText(value: unknown): string {

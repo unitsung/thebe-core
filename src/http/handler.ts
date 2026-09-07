@@ -3,6 +3,13 @@ import type {
   NormalizedEvent,
   PromptFile,
   PromptMode,
+  ThinkingLevel,
+} from "../runtime/types.ts";
+import {
+  estimatedDecodedBytes,
+  isSupportedPromptFile,
+  MAX_PROMPT_FILES,
+  MAX_PROMPT_FILE_BYTES,
 } from "../runtime/types.ts";
 import {
   CONTAINER_TOOL_DESCRIPTIONS,
@@ -104,9 +111,10 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       }
       if (request.method === "GET" && path === "/v1/model") {
         const all = url.searchParams.get("all") === "true";
+        const providerId = url.searchParams.get("provider") ?? undefined;
         const models = all
-          ? await product.listModels({ all: true })
-          : await product.listAvailableModels();
+          ? await product.listModels({ all: true, providerId })
+          : await product.listAvailableModels({ providerId });
         return json({ models });
       }
       if (
@@ -121,6 +129,15 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
           return json({ ok: false, error: "apiKey required" }, 400);
         }
         await product.auth().setApiKey(parts[2], apiKey);
+        return json({ ok: true });
+      }
+      if (
+        request.method === "DELETE" &&
+        parts[0] === "v1" &&
+        parts[1] === "auth" &&
+        parts[2]
+      ) {
+        await product.auth().logout(parts[2]);
         return json({ ok: true });
       }
       return json({ ok: false }, 404);
@@ -144,7 +161,33 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return json({ sessions: await product.listSessions() });
     }
     if (method === "POST" && parts.length === 2) {
-      return json(await product.createSession(), 201);
+      const body = await readJson(request);
+      const model = asObject(body.model);
+      const providerId =
+        typeof model.providerId === "string" ? model.providerId : "";
+      const modelId = typeof model.modelId === "string" ? model.modelId : "";
+      if (body.model !== undefined && (!providerId || !modelId)) {
+        return json(
+          { error: "model.providerId and model.modelId required" },
+          400,
+        );
+      }
+      return json(
+        await product.createSession({
+          title: typeof body.title === "string" ? body.title : undefined,
+          labels: asStringMap(body.labels),
+          selectedContext: body.selectedContext
+            ? (asObject(body.selectedContext) as {
+                host?: string;
+                environment?: string;
+                service?: string;
+              })
+            : undefined,
+          model:
+            providerId && modelId ? { providerId, modelId } : undefined,
+        }),
+        201,
+      );
     }
     if (method === "GET" && id === "status" && parts.length === 3) {
       return json({ sessions: await product.sessionStatus() });
@@ -184,7 +227,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     if (method === "POST" && action === "prompt") {
       const parsed = await readPromptBody(request);
       if (!parsed.ok) {
-        return json({ error: parsed.error }, 400);
+        return promptBodyError(parsed);
       }
       const result = await product.prompt(
         { text: parsed.text, files: parsed.files },
@@ -197,7 +240,26 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       });
     }
     if (method === "GET" && action === "message" && !extra) {
-      return json({ messages: await product.loadMessages(id) });
+      const messages = await product.loadMessages(id);
+      const limitResult = parseLimit(url.searchParams.get("limit"));
+      if (!limitResult.ok) {
+        return json({ error: limitResult.error }, 400);
+      }
+      const after = url.searchParams.get("after");
+      let start = 0;
+      if (after !== null) {
+        const found = messages.findIndex((message) => message.id === after);
+        if (found < 0) {
+          return json({ error: "unknown message cursor" }, 400);
+        }
+        start = found + 1;
+      }
+      const sliced = messages.slice(start, start + limitResult.limit);
+      return json({
+        messages: sliced,
+        total: messages.length,
+        hasMore: start + sliced.length < messages.length,
+      });
     }
     if (method === "GET" && action === "message" && extra) {
       const message = await product.message(id, extra);
@@ -207,10 +269,16 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return json(message);
     }
     if (method === "GET" && action === "log") {
-      if (url.searchParams.get("follow") === "true") {
-        return sessionLogStream(product, id, request);
+      const afterResult = parseLogCursor(request, url);
+      if (!afterResult.ok) {
+        return json({ error: afterResult.error }, 400);
       }
-      return json({ events: product.events(id) });
+      if (url.searchParams.get("follow") === "true") {
+        return sessionLogStream(product, id, request, afterResult.after);
+      }
+      const events = product.events(id);
+      const sliced = events.slice(afterResult.after);
+      return json({ events: sliced, next: events.length });
     }
     if (method === "POST" && action === "interrupt") {
       await product.interrupt(id);
@@ -253,20 +321,57 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     if (method === "POST" && action === "model") {
       const body = await readJson(request);
       const model = asObject(body.model);
-      const providerID =
-        typeof model.providerID === "string" ? model.providerID : "";
-      const modelID = typeof model.modelID === "string" ? model.modelID : "";
-      if (!providerID || !modelID) {
-        return json({ error: "model.providerID and model.modelID required" }, 400);
+      const providerId =
+        typeof model.providerId === "string" ? model.providerId : "";
+      const modelId = typeof model.modelId === "string" ? model.modelId : "";
+      if (!providerId || !modelId) {
+        return json({ error: "model.providerId and model.modelId required" }, 400);
       }
-      await product.setModel(id, { providerID, modelID });
+      await product.setModel(id, { providerId, modelId });
+      return json({ ok: true });
+    }
+    if (method === "POST" && action === "thinking") {
+      const body = await readJson(request);
+      const level = parseThinkingLevel(body.level);
+      if (!level) {
+        return json(
+          {
+            error:
+              "invalid thinking level; want off, minimal, low, medium, high, xhigh, or max",
+          },
+          400,
+        );
+      }
+      await product.setThinkingLevel(id, level);
       return json({ ok: true });
     }
     if (method === "GET" && action === "export") {
-      return json(await product.exportSession(id));
+      const format = url.searchParams.get("format");
+      const exported = await product.exportSession(id);
+      if (format === "jsonl") {
+        return new Response(exported.jsonl, {
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }
+      if (format === "html") {
+        return new Response(exported.html, {
+          headers: { "content-type": "text/html" },
+        });
+      }
+      if (format !== null) {
+        return json({ error: "invalid format; want jsonl or html" }, 400);
+      }
+      return json(exported);
     }
     if (method === "GET" && action === "diff") {
-      return json({ diff: "" }, 501);
+      return json(
+        {
+          ok: false,
+          code: "feature_not_implemented",
+          error: "session diff is not implemented",
+        },
+        501,
+      );
     }
     if (action === "share") {
       if (method === "POST") {
@@ -410,9 +515,63 @@ function parseMode(value: unknown): PromptMode | undefined {
   return undefined;
 }
 
+const THINKING_LEVELS: ThinkingLevel[] = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
+
+function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
+  return typeof value === "string" &&
+    (THINKING_LEVELS as string[]).includes(value)
+    ? (value as ThinkingLevel)
+    : undefined;
+}
+
+const MAX_MESSAGE_LIMIT = 500;
+const DEFAULT_MESSAGE_LIMIT = 200;
+
+function parseLimit(
+  value: string | null,
+): { ok: true; limit: number } | { ok: false; error: string } {
+  if (value === null) {
+    return { ok: true, limit: DEFAULT_MESSAGE_LIMIT };
+  }
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return { ok: false, error: "limit must be a positive integer" };
+  }
+  return { ok: true, limit: Math.min(parsed, MAX_MESSAGE_LIMIT) };
+}
+
+/**
+ * Log cursor is a log-index offset. Accepts `?after=` or the standard
+ * `Last-Event-ID` header (SSE streams carry `id:` per event). Reconnect
+ * strategy: resume the SSE with the last seen id, or refresh messages.
+ */
+function parseLogCursor(
+  request: Request,
+  url: URL,
+): { ok: true; after: number } | { ok: false; error: string } {
+  const raw =
+    url.searchParams.get("after") ?? request.headers.get("last-event-id");
+  if (raw === null || raw === "") {
+    return { ok: true, after: 0 };
+  }
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return { ok: false, error: "after must be a non-negative integer" };
+  }
+  return { ok: true, after: parsed };
+}
+
 type ParsedPromptBody =
   | { ok: true; text: string; mode: PromptMode; files: PromptFile[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; status?: number };
 
 /** Shared prompt body validation for the session prompt route. */
 async function readPromptBody(request: Request): Promise<ParsedPromptBody> {
@@ -425,11 +584,59 @@ async function readPromptBody(request: Request): Promise<ParsedPromptBody> {
       error: "invalid mode; want prompt, steer, or followUp",
     };
   }
-  const files = parseFiles(body.files);
-  if (!text.trim() && files.length === 0) {
+  const filesResult = parsePromptFiles(body.files);
+  if (!filesResult.ok) {
+    return filesResult;
+  }
+  if (!text.trim() && filesResult.files.length === 0) {
     return { ok: false, error: "text or files required" };
   }
-  return { ok: true, text, mode, files };
+  return { ok: true, text, mode, files: filesResult.files };
+}
+
+function parsePromptFiles(value: unknown): ParsedPromptBody {
+  if (value === undefined) {
+    return { ok: true, text: "", mode: "prompt", files: [] };
+  }
+  if (!Array.isArray(value)) {
+    return { ok: false, error: "files must be an array" };
+  }
+  if (value.length > MAX_PROMPT_FILES) {
+    return {
+      ok: false,
+      error: `too many files; maximum is ${MAX_PROMPT_FILES}`,
+    };
+  }
+  const files: PromptFile[] = [];
+  for (const item of value) {
+    const row = asObject(item);
+    const mediaType =
+      typeof row.mediaType === "string" ? row.mediaType : "";
+    const data = typeof row.data === "string" ? row.data : "";
+    if (!mediaType || !data) {
+      return { ok: false, error: "each file needs mediaType and data" };
+    }
+    if (!isSupportedPromptFile(mediaType)) {
+      return { ok: false, error: `unsupported media type: ${mediaType}` };
+    }
+    if (estimatedDecodedBytes(data) > MAX_PROMPT_FILE_BYTES) {
+      return {
+        ok: false,
+        status: 413,
+        error: `file too large; maximum is ${MAX_PROMPT_FILE_BYTES} bytes decoded`,
+      };
+    }
+    files.push({
+      mediaType,
+      data,
+      filename: typeof row.filename === "string" ? row.filename : undefined,
+    });
+  }
+  return { ok: true, text: "", mode: "prompt", files };
+}
+
+function promptBodyError(result: { error: string; status?: number }): Response {
+  return json({ error: result.error }, result.status ?? 400);
 }
 
 function oauthCallbackInput(body: Record<string, unknown>): string | undefined {
@@ -445,25 +652,6 @@ function oauthCallbackInput(body: Record<string, unknown>): string | undefined {
   }
   const state = typeof body.state === "string" ? body.state.trim() : "";
   return state ? `${code}#${state}` : code;
-}
-
-function parseFiles(value: unknown): PromptFile[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const files: PromptFile[] = [];
-  for (const item of value) {
-    const row = asObject(item);
-    if (typeof row.mediaType !== "string" || typeof row.data !== "string") {
-      continue;
-    }
-    files.push({
-      mediaType: row.mediaType,
-      data: row.data,
-      filename: typeof row.filename === "string" ? row.filename : undefined,
-    });
-  }
-  return files;
 }
 
 function productError(error: unknown): Response {
@@ -491,18 +679,19 @@ function sessionLogStream(
   product: ThebeProduct,
   thebeSessionId: string,
   request: Request,
+  after: number,
 ): Response {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     start(controller) {
+      let nextId = after;
       const send = (event: NormalizedEvent) => {
-        controller.enqueue(
-          encoder.encode(
-            `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`,
-          ),
-        );
+        const line =
+          `id: ${nextId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+        nextId += 1;
+        controller.enqueue(encoder.encode(line));
       };
-      for (const event of product.events(thebeSessionId)) {
+      for (const event of product.events(thebeSessionId).slice(after)) {
         send(event);
       }
       const unsub = product.subscribeLog(thebeSessionId, send);

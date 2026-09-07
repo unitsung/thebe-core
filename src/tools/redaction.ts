@@ -39,6 +39,29 @@ export function redactToolOutput(text: string): string {
   return redactSecrets(envStyle);
 }
 
+/** Static risk hint for the approval UI: arbitrary commands are high. */
+export function permissionRisk(toolName: string): "high" | "standard" {
+  return toolName === "bash" ? "high" : "standard";
+}
+
+/** Redacted, truncated rendering of a tool input for approval display. */
+export function summarizeArgs(args: unknown, maxChars = 500): string {
+  let text: string;
+  if (typeof args === "string") {
+    text = args;
+  } else {
+    try {
+      text = JSON.stringify(args) ?? "";
+    } catch {
+      text = "";
+    }
+  }
+  const redacted = redactToolOutput(text);
+  return redacted.length > maxChars
+    ? `${redacted.slice(0, maxChars)}${TRUNCATION_MARKER}`
+    : redacted;
+}
+
 function redactSecrets(text: string): string {
   let redacted = text;
   for (const pattern of LOG_SECRET_PATTERNS) {

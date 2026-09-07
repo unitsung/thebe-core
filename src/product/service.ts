@@ -40,6 +40,12 @@ export type ThebePromptOptions = {
   mode?: PromptMode;
 };
 
+/**
+ * Coarse run state for UI rendering. `interrupted` is a transient event, not
+ * a state: after an abort the session returns to `idle`.
+ */
+export type SessionRunStatus = "idle" | "running" | "awaiting_permission";
+
 /** Error with an HTTP status hint for the thin Serve layer. */
 export function httpError(status: number, message: string): Error {
   return Object.assign(new Error(message), { status });
@@ -52,6 +58,7 @@ type SessionLog = {
 
 type PendingPermission = {
   request: PermissionRequest;
+  thebeSessionId?: string;
   resolve: (decision: "allow" | "deny") => void;
 };
 
@@ -93,6 +100,7 @@ export function createThebeProduct(options: {
   const logs = new Map<string, SessionLog>();
   const pendingPermissions = new Map<string, PendingPermission>();
   const streaming = new Set<string>();
+  const abortRequested = new Set<string>();
   let requestStop: () => void | Promise<void> = () => {};
 
   function sessionLog(thebeSessionId: string): SessionLog {
@@ -117,19 +125,36 @@ export function createThebeProduct(options: {
     }
   }
 
-  function permissionHandler() {
+  function permissionHandler(explicitSessionId?: string) {
     return {
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
-        const remembered =
-          active?.meta.rememberedPermissions?.[request.toolName];
+        const thebeSessionId =
+          explicitSessionId ?? active?.meta.thebeSessionId;
+        const remembered = thebeSessionId
+          ? (await lookupRemembered(thebeSessionId))?.[request.toolName]
+          : active?.meta.rememberedPermissions?.[request.toolName];
         if (remembered) {
           return remembered;
         }
         return await new Promise<"allow" | "deny">((resolve) => {
-          pendingPermissions.set(request.permissionId, { request, resolve });
+          pendingPermissions.set(request.permissionId, {
+            request,
+            thebeSessionId,
+            resolve,
+          });
         });
       },
     };
+  }
+
+  async function lookupRemembered(
+    thebeSessionId: string,
+  ): Promise<Record<string, "allow" | "deny"> | undefined> {
+    try {
+      return (await lookup(thebeSessionId)).rememberedPermissions;
+    } catch {
+      return active?.meta.rememberedPermissions;
+    }
   }
 
   function baseTools() {
@@ -140,7 +165,7 @@ export function createThebeProduct(options: {
     });
   }
 
-  function sessionOptions() {
+  function sessionOptions(explicitSessionId?: string) {
     return {
       customTools: wrapCustomTools(baseTools(), {
         policy,
@@ -150,7 +175,7 @@ export function createThebeProduct(options: {
       builtinTools,
       systemPrompt,
       enabledResources: enabledResources.slice(),
-      permissionHandler: permissionHandler(),
+      permissionHandler: permissionHandler(explicitSessionId),
       toolsRequiringApproval: TOOLS_REQUIRING_APPROVAL,
     };
   }
@@ -160,6 +185,16 @@ export function createThebeProduct(options: {
     return {
       ...meta,
       createdAt: meta.createdAt ?? ts,
+      lastActiveAt: ts,
+    };
+  }
+
+  function touchMeta(meta: ProductSessionMeta): ProductSessionMeta {
+    const ts = now().toISOString();
+    return {
+      ...meta,
+      createdAt: meta.createdAt ?? ts,
+      updatedAt: ts,
       lastActiveAt: ts,
     };
   }
@@ -186,7 +221,7 @@ export function createThebeProduct(options: {
       const meta = await lookup(thebeSessionId);
       const session = await options.runtime.resumeSession(
         meta.runtimeSessionId,
-        sessionOptions(),
+        sessionOptions(meta.thebeSessionId),
       );
       requestStop = () => session.abort();
       active = { meta, session };
@@ -290,6 +325,8 @@ export function createThebeProduct(options: {
     guard.beginRun();
     guard.armTtfb();
     try {
+      // Queued steer/followUp inputs are text-only: the Pi SDK accepts a
+      // plain string there, so attached files apply to idle `prompt` runs.
       if (mode === "steer") {
         await opened.session.steer(body.text);
       } else if (mode === "followUp") {
@@ -309,6 +346,18 @@ export function createThebeProduct(options: {
         events: lastEvents.slice(),
         thebeSessionId,
       };
+    } catch (error) {
+      // Normalize run failures onto the session log. User-initiated aborts
+      // already emitted `interrupted` via the session abort path, so they
+      // must not also surface as errors.
+      if (abortRequested.delete(thebeSessionId)) {
+        throw error;
+      }
+      appendEvent(thebeSessionId, {
+        type: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     } finally {
       streaming.delete(thebeSessionId);
       unsub();
@@ -322,6 +371,30 @@ export function createThebeProduct(options: {
       return fromStore;
     }
     return [...memory.values()];
+  }
+
+  function hasPendingFor(thebeSessionId: string): boolean {
+    for (const pending of pendingPermissions.values()) {
+      if (pending.thebeSessionId === thebeSessionId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function withRunState(
+    meta: ProductSessionMeta,
+  ): ProductSessionMeta & { status: SessionRunStatus; streaming: boolean } {
+    const isStreaming = streaming.has(meta.thebeSessionId);
+    return {
+      ...meta,
+      streaming: isStreaming,
+      status: !isStreaming
+        ? "idle"
+        : hasPendingFor(meta.thebeSessionId)
+          ? "awaiting_permission"
+          : "running",
+    };
   }
 
   return {
@@ -378,19 +451,33 @@ export function createThebeProduct(options: {
     isStreaming(thebeSessionId: string): boolean {
       return streaming.has(thebeSessionId);
     },
-    async createSession(): Promise<ProductSessionMeta> {
+    async createSession(init?: {
+      title?: string;
+      labels?: Record<string, string>;
+      selectedContext?: ProductSessionMeta["selectedContext"];
+      model?: RuntimeModelRef;
+    }): Promise<ProductSessionMeta> {
       const session = await options.runtime.createSession(sessionOptions());
-      const meta = stamp({
+      const meta = touchMeta({
         thebeSessionId: randomUUID(),
         runtimeId: options.runtime.runtimeId,
         runtimeSessionId: session.runtimeSessionId,
+        title: init?.title,
+        labels: init?.labels,
+        selectedContext: init?.selectedContext,
       });
       await persist(meta);
       active = { meta, session };
+      if (init?.model) {
+        await session.setModel(init.model);
+      }
       return meta;
     },
-    async listSessions(): Promise<ProductSessionMeta[]> {
-      return listMetas();
+    async listSessions(): Promise<
+      Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
+    > {
+      const rows = await listMetas();
+      return rows.map((row) => withRunState(row));
     },
     async getSession(thebeSessionId: string): Promise<ProductSessionMeta> {
       return lookup(thebeSessionId);
@@ -405,7 +492,7 @@ export function createThebeProduct(options: {
       >,
     ): Promise<ProductSessionMeta> {
       const current = await lookup(thebeSessionId);
-      const meta = stamp({
+      const meta = touchMeta({
         ...current,
         title: patch.title ?? current.title,
         labels: patch.labels ?? current.labels,
@@ -418,6 +505,12 @@ export function createThebeProduct(options: {
       }
       return meta;
     },
+    /**
+     * Removes the Thebe session mapping/metadata only (unlink, not erase).
+     * The Pi-native session, its transcript/branches and exports stay in the
+     * runtime; resuming the same runtimeSessionId still works. There is no
+     * undelete: the mapping must be recreated by resuming/forking.
+     */
     async deleteSession(thebeSessionId: string): Promise<void> {
       if (active?.meta.thebeSessionId === thebeSessionId) {
         active.session.dispose();
@@ -428,13 +521,10 @@ export function createThebeProduct(options: {
       await store.delete(thebeSessionId);
     },
     async sessionStatus(): Promise<
-      Array<ProductSessionMeta & { streaming: boolean }>
+      Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
     > {
       const rows = await listMetas();
-      return rows.map((row) => ({
-        ...row,
-        streaming: streaming.has(row.thebeSessionId),
-      }));
+      return rows.map((row) => withRunState(row));
     },
     async resume(thebeSessionId: string): Promise<ProductSessionMeta> {
       const opened = await openSession(thebeSessionId);
@@ -479,8 +569,21 @@ export function createThebeProduct(options: {
     },
     async interrupt(thebeSessionId?: string): Promise<void> {
       const opened = await openSession(thebeSessionId);
+      const id = opened.meta.thebeSessionId;
+      abortRequested.add(id);
       await opened.session.abort();
+      // The runtime emits `interrupted` on the aborted handle only; a resume
+      // handle has no listeners, so ensure the session log sees exactly one.
+      const tail = sessionLog(id).events.at(-1);
+      if (!tail || tail.type !== "interrupted") {
+        appendEvent(id, { type: "interrupted" });
+      }
     },
+    /**
+     * History-only revert to the last user turn. External side effects
+     * (bash runs, file writes, container changes) are NOT rolled back;
+     * clients must not present this as undoing what the agent did.
+     */
     async revert(thebeSessionId?: string): Promise<void> {
       const opened = await openSession(thebeSessionId);
       await opened.session.revert();
@@ -489,6 +592,13 @@ export function createThebeProduct(options: {
       const opened = await openSession(thebeSessionId);
       await opened.session.unrevert();
     },
+    /**
+     * Resolves one pending approval. `remember` persists the decision for
+     * this tool on this session only (no TTL, no cross-session sharing);
+     * pending entries are in-memory, so a restart turns them into
+     * `unknown permission` 404s and the client should re-prompt. Resolving
+     * twice is a deterministic 404, not silent success.
+     */
     async resolvePermission(
       thebeSessionId: string,
       permissionId: string,
@@ -505,7 +615,7 @@ export function createThebeProduct(options: {
           ...meta.rememberedPermissions,
           [pending.request.toolName]: decision.response,
         };
-        await persist(stamp(meta));
+        await persist(touchMeta(meta));
         if (active?.meta.thebeSessionId === thebeSessionId) {
           active.meta = meta;
         }
@@ -519,6 +629,9 @@ export function createThebeProduct(options: {
       thebeSessionId: string,
       model: RuntimeModelRef,
     ): Promise<void> {
+      if (streaming.has(thebeSessionId)) {
+        throw httpError(409, "session is streaming; switch model when idle");
+      }
       const opened = await openSession(thebeSessionId);
       await opened.session.setModel(model);
     },
@@ -526,14 +639,20 @@ export function createThebeProduct(options: {
       thebeSessionId: string,
       level: ThinkingLevel,
     ): Promise<void> {
+      if (streaming.has(thebeSessionId)) {
+        throw httpError(
+          409,
+          "session is streaming; switch thinking level when idle",
+        );
+      }
       const opened = await openSession(thebeSessionId);
       await opened.session.setThinkingLevel(level);
     },
-    async listModels(query?: { all?: boolean }) {
+    async listModels(query?: { all?: boolean; providerId?: string }) {
       return options.runtime.listModels(query);
     },
-    async listAvailableModels() {
-      return options.runtime.listAvailableModels();
+    async listAvailableModels(query?: { providerId?: string }) {
+      return options.runtime.listAvailableModels(query);
     },
     async listProviders(query?: { all?: boolean }) {
       return options.runtime.listProviders(query);

@@ -24,6 +24,10 @@ export type NormalizedEvent =
       permissionId: string;
       toolName: string;
       toolCallId: string;
+      /** Redacted, truncated rendering of the tool input for the approval UI. */
+      argsSummary?: string;
+      /** Static risk hint: arbitrary-command tools are high, others standard. */
+      risk?: "high" | "standard";
     };
 
 export type RuntimeMessage = {
@@ -33,6 +37,7 @@ export type RuntimeMessage = {
   toolName?: string;
   toolCallId?: string;
   isError?: boolean;
+  attachments?: Array<{ mediaType?: string }>;
 };
 
 export type PromptFile = {
@@ -40,6 +45,34 @@ export type PromptFile = {
   data: string;
   filename?: string;
 };
+
+/** Controlled attachment subset: images go to the model, text inlines. */
+export const PROMPT_IMAGE_MEDIA_TYPES = [
+  "image/png",
+  "image/jpeg",
+  "image/gif",
+  "image/webp",
+];
+
+export function isInlineTextFile(mediaType: string): boolean {
+  return (
+    mediaType.startsWith("text/") || mediaType === "application/json"
+  );
+}
+
+export function isSupportedPromptFile(mediaType: string): boolean {
+  return (
+    PROMPT_IMAGE_MEDIA_TYPES.includes(mediaType) ||
+    isInlineTextFile(mediaType)
+  );
+}
+
+export const MAX_PROMPT_FILES = 8;
+export const MAX_PROMPT_FILE_BYTES = 2_000_000;
+
+export function estimatedDecodedBytes(base64: string): number {
+  return Math.floor(base64.length * 3 / 4);
+}
 
 export type PromptInput = {
   text: string;
@@ -58,18 +91,23 @@ export type ThinkingLevel =
   | "max";
 
 export type RuntimeModelRef = {
-  providerID: string;
-  modelID: string;
+  providerId: string;
+  modelId: string;
 };
 
 export type RuntimeModel = RuntimeModelRef & {
-  name?: string;
+  displayName?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  supportsThinking?: boolean;
+  available?: boolean;
 };
 
 export type RuntimeProvider = {
   id: string;
-  name?: string;
-  connected?: boolean;
+  displayName?: string;
+  authMethods?: Array<"apiKey" | "oauth">;
+  authStatus?: "connected" | "missing" | "error";
 };
 
 export type PermissionDecision = {
@@ -82,6 +120,8 @@ export type PermissionRequest = {
   toolName: string;
   toolCallId: string;
   args?: unknown;
+  argsSummary?: string;
+  risk?: "high" | "standard";
 };
 
 export type PermissionHandler = {
@@ -231,8 +271,13 @@ export interface AgentRuntime {
     options: CreateRuntimeSessionOptions,
     fork?: ForkSessionOptions,
   ): Promise<RuntimeSession>;
-  listModels(options?: { all?: boolean }): Promise<RuntimeModel[]>;
-  listAvailableModels(): Promise<RuntimeModel[]>;
+  listModels(options?: {
+    all?: boolean;
+    providerId?: string;
+  }): Promise<RuntimeModel[]>;
+  listAvailableModels(options?: {
+    providerId?: string;
+  }): Promise<RuntimeModel[]>;
   listProviders(options?: { all?: boolean }): Promise<RuntimeProvider[]>;
   auth(): RuntimeAuth;
 }
