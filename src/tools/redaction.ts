@@ -28,7 +28,19 @@ function redactEnvLine(line: string): string {
 
 export function redactLogs(text: string, tail = DEFAULT_LOG_TAIL): string {
   const truncated = truncateLogLines(text, tail);
-  let redacted = truncated;
+  return redactSecrets(truncated);
+}
+
+export function redactToolOutput(text: string): string {
+  const envStyle = text.replace(
+    /(SECRET|TOKEN|KEY|PASSWORD|PASS|CREDENTIAL|PRIVATE)("?\s*[:=]\s*"?)([^"\s,}]+)/gi,
+    `$1$2${REDACTED}`,
+  );
+  return redactSecrets(envStyle);
+}
+
+function redactSecrets(text: string): string {
+  let redacted = text;
   for (const pattern of LOG_SECRET_PATTERNS) {
     redacted = redacted.replace(pattern, REDACTED);
   }

@@ -1,0 +1,146 @@
+import type { NormalizedEvent, RuntimeMessage } from "../types.ts";
+
+type AgentSessionEvent = {
+  type: string;
+  assistantMessageEvent?: { type?: string; delta?: string };
+  toolName?: string;
+  toolCallId?: string;
+  isError?: boolean;
+  result?: unknown;
+  reason?: string;
+  aborted?: boolean;
+};
+
+export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefined {
+  switch (event.type) {
+    case "message_update": {
+      const inner = event.assistantMessageEvent as {
+        type?: string;
+        delta?: string;
+      };
+      if (inner.type === "text_delta" && inner.delta) {
+        return { type: "text_delta", text: inner.delta };
+      }
+      if (inner.type === "thinking_delta" && inner.delta) {
+        return { type: "thinking_delta", text: inner.delta };
+      }
+      return undefined;
+    }
+    case "tool_execution_start":
+      return {
+        type: "tool_start",
+        toolName: event.toolName ?? "",
+        toolCallId: event.toolCallId ?? "",
+      };
+    case "tool_execution_update":
+      return {
+        type: "tool_update",
+        toolName: event.toolName ?? "",
+        toolCallId: event.toolCallId ?? "",
+        text: toolText(event),
+      };
+    case "tool_execution_end":
+      return {
+        type: "tool_end",
+        toolName: event.toolName ?? "",
+        toolCallId: event.toolCallId ?? "",
+        isError: Boolean(event.isError),
+        text: toolText(event.result),
+      };
+    case "turn_end":
+      return { type: "turn_end" };
+    case "agent_end":
+    case "agent_settled":
+      return { type: "session_end", text: "" };
+    case "compaction_start":
+      return { type: "compaction_start", reason: event.reason };
+    case "compaction_end":
+      return { type: "compaction_end", aborted: event.aborted };
+    default:
+      return undefined;
+  }
+}
+
+export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
+  const out: RuntimeMessage[] = [];
+  for (const raw of messages) {
+    const message = raw as {
+      role?: string;
+      content?: unknown;
+      toolName?: string;
+      toolCallId?: string;
+      isError?: boolean;
+      errorMessage?: string;
+    };
+    if (message.role === "user") {
+      out.push({ role: "user", text: contentToText(message.content) });
+      continue;
+    }
+    if (message.role === "assistant") {
+      out.push({
+        role: "assistant",
+        text: contentToText(message.content) || message.errorMessage || "",
+      });
+      continue;
+    }
+    if (message.role === "toolResult" || message.role === "tool") {
+      out.push({
+        role: "tool",
+        text: contentToText(message.content),
+        toolName: message.toolName,
+        toolCallId: message.toolCallId,
+        isError: message.isError,
+      });
+    }
+  }
+  return out;
+}
+
+function toolText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value && typeof value === "object") {
+    const record = value as {
+      content?: unknown;
+      result?: unknown;
+      text?: unknown;
+    };
+    if (typeof record.text === "string") {
+      return record.text;
+    }
+    if (record.content !== undefined) {
+      return contentToText(record.content);
+    }
+    if (record.result !== undefined) {
+      return toolText(record.result);
+    }
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return "";
+    }
+  }
+  return value == null ? "" : String(value);
+}
+
+function contentToText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return content == null ? "" : toolText(content);
+  }
+  return content
+    .map((block) => {
+      if (typeof block === "string") {
+        return block;
+      }
+      if (block && typeof block === "object" && "text" in block) {
+        const text = (block as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      }
+      return "";
+    })
+    .join("");
+}

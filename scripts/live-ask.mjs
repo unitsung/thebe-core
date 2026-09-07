@@ -1,9 +1,12 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createModels } from "@earendil-works/pi-ai";
-import { opencodeProvider } from "@earendil-works/pi-ai/providers/opencode";
-import { ArcaneAdapter, createThebeAgent } from "../dist/index.js";
+import {
+  ArcaneAdapter,
+  applyThebeApiKey,
+  createPiCodingAgentRuntime,
+  createThebeAgent,
+} from "../dist/index.js";
 
 function loadEnvLocal() {
   const path = join(dirname(fileURLToPath(import.meta.url)), "..", ".env.local");
@@ -46,17 +49,14 @@ if (!baseUrl || !arcaneKey || !openCodeKey) {
   process.exit(0);
 }
 
-const models = createModels();
-models.setProvider(opencodeProvider());
-const model = models.getModel("opencode", "muse-spark-1.3-contributor-free");
-if (!model) {
-  throw new Error("muse-spark-1.3-contributor-free not in OpenCode catalog");
-}
+const runtime = await createPiCodingAgentRuntime({
+  cwd: process.cwd(),
+  apiKey: { providerId: "opencode", key: openCodeKey },
+});
+await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
 
 const thebe = createThebeAgent({
-  models,
-  model,
-  streamFn: models.streamSimple.bind(models),
+  runtime,
   provider: new ArcaneAdapter({ baseUrl, apiKey: arcaneKey }),
 });
 
@@ -65,7 +65,7 @@ const reply = await thebe.ask(
 );
 const toolNames = thebe
   .messages()
-  .filter((m) => m.role === "toolResult")
+  .filter((m) => m.role === "tool")
   .map((m) => m.toolName);
 console.log("LIVE_ASK_TOOLS", toolNames.join(",") || "(none)");
 console.log("LIVE_ASK_REPLY", reply.replace(/\s+/g, " ").slice(0, 500));

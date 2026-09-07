@@ -1,3 +1,4 @@
+import type { ThebeProduct } from "../product/service.ts";
 import { createPolicyEngine } from "../policy/policy-engine.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import {
@@ -14,6 +15,7 @@ export type ThebeHttpHandlerOptions = {
   provider: ContainerInfoProvider;
   token?: string;
   ask?: ThebeAskFn;
+  product?: ThebeProduct;
   now?: () => Date;
   callerId?: string;
 };
@@ -60,7 +62,13 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
   }
 
   async function handleAsk(request: Request): Promise<Response> {
-    if (!options.ask) {
+    const ask = options.ask ?? (options.product
+      ? async (text: string) => {
+          const result = await options.product!.ask(text);
+          return { text: result.text, tools: result.tools };
+        }
+      : undefined);
+    if (!ask) {
       return json({ text: "", tools: [] }, 503);
     }
     const body = await readJson(request);
@@ -69,7 +77,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return json({ text: "", tools: [] }, 400);
     }
     try {
-      const reply = await options.ask(text);
+      const reply = await ask(text);
       return json({ text: reply.text, tools: reply.tools });
     } catch (error) {
       return json(
@@ -155,11 +163,14 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return JSON.stringify({ summary: "No recent Core events." });
     }
     const mapped = ALIASES[name] ?? name;
+    if (options.product) {
+      return options.product.invokeTool(mapped, asObject(args) ?? {});
+    }
     const tool = tools.find((item) => item.name === mapped);
     if (!tool) {
       throw new Error(`unknown tool: ${name}`);
     }
-    const result = await tool.execute("http", (asObject(args) ?? {}) as never);
+    const result = await tool.execute("http", asObject(args) ?? {});
     return result.content
       .filter((block) => block.type === "text")
       .map((block) => block.text)

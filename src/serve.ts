@@ -1,13 +1,12 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createModels } from "@earendil-works/pi-ai";
-import { opencodeProvider } from "@earendil-works/pi-ai/providers/opencode";
 import { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
-import { resolveThebeAuth } from "./auth/credentials.ts";
-import { createThebeAgent } from "./ask/index.ts";
+import { applyThebeApiKey } from "./auth/credentials.ts";
 import { envLocalCandidates, loadEnvLocal } from "./env.ts";
-import { createThebeHttpHandler, listenThebeHttp } from "./http/index.ts";
+import { listenThebeHttp } from "./http/index.ts";
+import { createThebeApp } from "./product/app.ts";
+import { createPiCodingAgentRuntime } from "./runtime/pi/pi-coding-agent-runtime.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 loadEnvLocal(here);
@@ -29,41 +28,24 @@ if (!baseUrl || !arcaneKey || !openCodeKey) {
   process.exit(1);
 }
 
-const models = createModels();
-models.setProvider(opencodeProvider());
-const model = models.getModel("opencode", "muse-spark-1.3-contributor-free");
-if (!model) {
-  throw new Error("muse-spark-1.3-contributor-free not in OpenCode catalog");
-}
-
-const auth = await resolveThebeAuth(models, model);
-if (!auth) {
-  throw new Error("No credentials for the configured model provider");
-}
-
 const provider = new ArcaneAdapter({ baseUrl, apiKey: arcaneKey });
-const thebe = createThebeAgent({
-  models,
-  model,
-  streamFn: models.streamSimple.bind(models),
+const runtime = await createPiCodingAgentRuntime({
+  cwd: process.cwd(),
+  sessionDir: process.env.THEBE_SESSION_DIR,
+  agentDir: process.env.THEBE_AGENT_DIR,
+  apiKey: { providerId: "opencode", key: openCodeKey },
+});
+await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
+
+const { handler: app } = createThebeApp({
+  runtime,
   provider,
+  version,
+  token: process.env.THEBE_TOKEN,
 });
 
 const port = Number(process.env.THEBE_PORT ?? "8787");
 const host = process.env.THEBE_HOST ?? "0.0.0.0";
-const app = createThebeHttpHandler({
-  version,
-  provider,
-  token: process.env.THEBE_TOKEN,
-  ask: async (text) => {
-    const reply = await thebe.ask(text);
-    const tools = thebe
-      .messages()
-      .filter((message) => message.role === "toolResult")
-      .map((message) => message.toolName);
-    return { text: reply, tools };
-  },
-});
 
 const { url } = await listenThebeHttp(app, { host, port });
 console.log(`THEBE_LISTEN ${url}`);

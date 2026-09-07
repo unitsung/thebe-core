@@ -1,9 +1,4 @@
-import {
-  createModels,
-  fauxAssistantMessage,
-  fauxProvider,
-} from "@earendil-works/pi-ai";
-import { createThebeAgent } from "../dist/index.js";
+import { createFakeRuntime, createThebeAgent } from "../dist/index.js";
 
 const provider = {
   listContainers: async () => [],
@@ -18,15 +13,11 @@ const provider = {
   },
 };
 
-const faux = fauxProvider();
-const models = createModels();
-models.setProvider(faux.provider);
-faux.setResponses([fauxAssistantMessage("pong")]);
+const fake = createFakeRuntime();
+fake.queueTurns([{ kind: "text", text: "pong" }]);
 
 const thebe = createThebeAgent({
-  models,
-  model: faux.getModel(),
-  streamFn: models.streamSimple.bind(models),
+  runtime: fake.runtime,
   provider,
 });
 
