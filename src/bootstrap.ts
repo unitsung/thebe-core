@@ -23,18 +23,23 @@ export type ThebeBootstrap = {
   version: string;
 };
 
+export type BootstrapOptions = {
+  fromDir?: string;
+  requireArcane?: boolean;
+  model?: { providerId: string; modelId: string };
+};
+
 /**
  * Shared factory for serve / CLI / TUI. Loads `.env.local`, embeds Pi via
  * AgentRuntime, and returns a product service — never spawns the Pi CLI.
  */
-export async function bootstrapThebe(options?: {
-  fromDir?: string;
-  requireArcane?: boolean;
-}): Promise<ThebeBootstrap> {
+export async function bootstrapThebe(
+  options?: BootstrapOptions,
+): Promise<ThebeBootstrap> {
   const fromDir = options?.fromDir ?? dirname(fileURLToPath(import.meta.url));
   loadEnvLocal(fromDir);
 
-  const requireArcane = options?.requireArcane ?? true;
+  const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
   const arcaneKey = process.env.ARCANE_API_KEY;
   const openCodeKey = process.env.OPENCODE_API_KEY;
@@ -46,11 +51,17 @@ export async function bootstrapThebe(options?: {
     failEnv("Missing ARCANE_BASE_URL or ARCANE_API_KEY", fromDir);
   }
 
+  const defaultModel = options?.model ?? {
+    providerId: "opencode",
+    modelId: "muse-spark-1.3-free",
+  };
+
   const runtime = await createPiCodingAgentRuntime({
     cwd: process.cwd(),
     sessionDir: process.env.THEBE_SESSION_DIR,
     agentDir: process.env.THEBE_AGENT_DIR,
     apiKey: { providerId: "opencode", key: openCodeKey! },
+    model: defaultModel,
   });
   await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey!);
 
@@ -60,13 +71,18 @@ export async function bootstrapThebe(options?: {
       : stubProvider();
 
   const version = readPackageVersion(fromDir);
+  const productStoreDir =
+    process.env.THEBE_PRODUCT_STORE_DIR ??
+    join(process.env.HOME ?? ".", ".thebe", "sessions");
+
   const app = createThebeApp({
     runtime,
     provider,
     version,
     token: process.env.THEBE_TOKEN,
-    productStoreDir: process.env.THEBE_PRODUCT_STORE_DIR,
+    productStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
+    model: defaultModel,
   });
 
   return {

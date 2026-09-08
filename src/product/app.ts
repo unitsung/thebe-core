@@ -19,6 +19,7 @@ export function createThebeApp(options: {
   productStoreDir?: string;
   now?: () => Date;
   callerId?: string;
+  model?: import("../runtime/types.ts").RuntimeModelRef;
 }): {
   product: ThebeProduct;
   prompt: ThebeAppPrompt;

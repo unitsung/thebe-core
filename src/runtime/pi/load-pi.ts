@@ -36,8 +36,10 @@ export async function loadPiSdk() {
   const extensions = await import(piDistUrl("core/extensions/index.js"));
   const source = await import(piDistUrl("core/source-info.js"));
   const eventBus = await import(piDistUrl("core/event-bus.js"));
+  const bash = await import(piDistUrl("core/tools/bash.js"));
   return {
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,
+    createBashTool: bash.createBashTool as typeof bash.createBashTool,
     defineTool: extensions.defineTool as typeof extensions.defineTool,
     createExtensionRuntime:
       extensions.createExtensionRuntime as typeof extensions.createExtensionRuntime,

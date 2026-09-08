@@ -12,6 +12,9 @@ import type {
   RuntimeProvider,
   RuntimeSession,
   ThinkingLevel,
+  BackgroundTask,
+  ThebeSessionContext,
+  ForkSessionOptions,
 } from "../types.ts";
 import {
   PI_BUILTIN_TOOLS,
@@ -24,6 +27,28 @@ import { loadPiSdk, type PiSdk } from "./load-pi.ts";
 import { mapPiEvent, mapPiMessages } from "./map-events.ts";
 import { exportPiSession } from "./pi-export.ts";
 import { permissionRisk, summarizeArgs } from "../../tools/redaction.ts";
+
+export function sanitizeBashEnv(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const sanitized: Record<string, string | undefined> = {};
+  const sensitivePatterns = [
+    /^THEBE_/i,
+    /^DATABASE_/i,
+    /_(KEY|TOKEN|SECRET|PASSWORD|PASSWD|AUTH)$/i,
+  ];
+  for (const [key, val] of Object.entries(env)) {
+    if (key.startsWith("PI_")) {
+      sanitized[key] = val;
+      continue;
+    }
+    const isSensitive = sensitivePatterns.some((pattern) => pattern.test(key));
+    if (!isSensitive) {
+      sanitized[key] = val;
+    }
+  }
+  return sanitized;
+}
 
 type PiSession = {
   sessionId: string;
@@ -98,7 +123,37 @@ export async function createPiCodingAgentRuntime(
     );
   }
 
+  function resolveModelRef(
+    providerId: string,
+    modelId: string,
+  ): PiModelShape | undefined {
+    let actualModelId = modelId;
+    if (providerId === "opencode") {
+      if (modelId === "muse-spark-1.3-free" || modelId === "muse-spark-1.3") {
+        actualModelId = "muse-spark-1.3-contributor-free";
+      } else if (
+        modelId === "muse-spark-1.2-free" ||
+        modelId === "muse-spark-1.2"
+      ) {
+        actualModelId = "muse-spark-1.2-contributor-free";
+      }
+    }
+    let found = modelRuntime.getModel(providerId, actualModelId);
+    if (!found && actualModelId.endsWith("-free")) {
+      found = modelRuntime.getModel(
+        providerId,
+        actualModelId.replace(/-free$/, "-contributor-free"),
+      );
+    }
+    if (!found) {
+      found = modelRuntime.getModel(providerId, modelId);
+    }
+    return found as PiModelShape | undefined;
+  }
+
   const live = new Map<string, PiSession>();
+  let quiesced = false;
+  const livenessRegistry = new Map<string, () => boolean>();
 
   async function openPiSession(
     create: CreateRuntimeSessionOptions,
@@ -182,16 +237,42 @@ export async function createPiCodingAgentRuntime(
       extensionRuntime,
     });
     const settingsManager = sdk.SettingsManager.inMemory({
+      defaultProjectTrust: "always",
       retry: { enabled: false, maxRetries: 0 },
     });
+    settingsManager.setDefaultProjectTrust?.("always");
+    const sanitizedBash = sdk.createBashTool(create.cwd ?? cwd, {
+      spawnHook: (ctx: { command: string; cwd: string; env: Record<string, string | undefined> }) => ({
+        ...ctx,
+        env: sanitizeBashEnv(ctx.env),
+      }),
+    });
+    const piCustomTools = [
+      ...create.customTools.map((tool) => toPiTool(sdk, tool)),
+      ...(tools.includes("bash") ? [sanitizedBash] : []),
+    ];
+
+    const requestedModel =
+      create.model ??
+      (typeof options.model === "object" &&
+      options.model &&
+      "providerId" in options.model
+        ? (options.model as RuntimeModelRef)
+        : undefined);
+    const resolvedModel = requestedModel
+      ? resolveModelRef(requestedModel.providerId, requestedModel.modelId)
+      : options.model
+        ? options.model
+        : resolveModelRef("opencode", "muse-spark-1.3-free");
+
     const { session } = await sdk.createAgentSession({
       cwd: create.cwd ?? cwd,
       agentDir: options.agentDir,
       modelRuntime,
-      model: options.model as never,
+      model: resolvedModel as never,
       thinkingLevel: "off",
       tools,
-      customTools: create.customTools.map((tool) => toPiTool(sdk, tool)),
+      customTools: piCustomTools,
       resourceLoader,
       sessionManager,
       settingsManager,
@@ -229,42 +310,65 @@ export async function createPiCodingAgentRuntime(
     async function promptInput(input: string | PromptInput): Promise<void> {
       const prompt = asPromptInput(input);
       const images = (prompt.files ?? [])
-        .filter((file) => file.mediaType.startsWith("image/"))
+        .filter(
+          (file) =>
+            (!file.mode || file.mode === "inline") &&
+            file.data &&
+            file.mediaType.startsWith("image/"),
+        )
         .map((file) => ({
           type: "image",
           source: {
             type: "base64",
             mediaType: file.mediaType,
-            data: file.data,
+            data: file.data!,
           },
         }));
-      const textFiles = (prompt.files ?? []).filter((file) =>
-        isInlineTextFile(file.mediaType),
-      );
-      const otherFiles = (prompt.files ?? []).filter(
-        (file) =>
-          !file.mediaType.startsWith("image/") &&
-          !isInlineTextFile(file.mediaType),
-      );
-      const inlined = textFiles
+      const inlined = (prompt.files ?? [])
+        .filter(
+          (file) =>
+            (!file.mode || file.mode === "inline") &&
+            file.data &&
+            isInlineTextFile(file.mediaType),
+        )
         .map((file) => {
           const name = file.filename ?? "attachment";
           let text: string;
           try {
-            text = Buffer.from(file.data, "base64").toString("utf8");
+            text = Buffer.from(file.data!, "base64").toString("utf8");
           } catch {
             text = "";
           }
           return `[file: ${name} (${file.mediaType})]\n${text}`;
         })
         .join("\n\n");
-      const extra = otherFiles
+      const references = (prompt.files ?? [])
+        .filter((file) => file.mode === "reference")
+        .map(
+          (file) =>
+            `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`,
+        )
+        .join("\n");
+      const lines = (prompt.files ?? [])
+        .filter((file) => file.mode === "lines")
+        .map(
+          (file) =>
+            `[file snippet: ${file.path ?? file.filename ?? "attachment"} lines ${file.lineRange?.start ?? 1}-${file.lineRange?.end ?? 1} (${file.mediaType})]`,
+        )
+        .join("\n");
+      const otherFiles = (prompt.files ?? [])
+        .filter(
+          (file) =>
+            (!file.mode || file.mode === "inline") &&
+            !file.mediaType.startsWith("image/") &&
+            !isInlineTextFile(file.mediaType),
+        )
         .map(
           (file) =>
             `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
         )
         .join("\n");
-      const text = [prompt.text, inlined, extra]
+      const text = [prompt.text, inlined, references, lines, otherFiles]
         .filter((part) => part.length > 0)
         .join("\n");
       await session.prompt(text, images.length > 0 ? { images } : undefined);
@@ -278,6 +382,15 @@ export async function createPiCodingAgentRuntime(
       abort: async () => {
         emit({ type: "interrupted" });
         await session.abort();
+      },
+      async stopToolCall(toolCallId: string): Promise<void> {
+        emit({
+          type: "tool_end",
+          toolName: "interrupted",
+          toolCallId,
+          isError: true,
+          text: "tool call stopped by user",
+        });
       },
       subscribe(listener) {
         listeners.add(listener);
@@ -303,8 +416,34 @@ export async function createPiCodingAgentRuntime(
       },
       exportSession: () => exportPiSession(session as never),
       messages: () => mapPiMessages(session.messages),
+      async getContextUsage(): Promise<ThebeSessionContext> {
+        const raw = (session as { getContextUsage?: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined }).getContextUsage?.();
+        const fallbackWindow =
+          (session as { model?: { contextWindow?: number } }).model?.contextWindow ?? 1_048_576;
+        const maxTokens = raw?.contextWindow ?? fallbackWindow;
+        let usedTokens = raw?.tokens ?? 0;
+        if (usedTokens === null || usedTokens === 0) {
+          const msgs = mapPiMessages(session.messages);
+          const chars = msgs.reduce((acc, m) => acc + (m.text?.length ?? 0), 0);
+          usedTokens = Math.ceil(chars / 4);
+        }
+        return {
+          contextUsage: { usedTokens, maxTokens },
+          estimatedCost: { amount: 0, currency: "USD" },
+          compaction: {
+            lastCompactedAt: undefined,
+            nearThreshold: usedTokens > maxTokens * 0.8,
+          },
+        };
+      },
+      async listBackgroundTasks(): Promise<BackgroundTask[]> {
+        return [];
+      },
+      async stopBackgroundTask(_taskId: string): Promise<void> {
+        // no-op
+      },
       async setModel(model: RuntimeModelRef): Promise<void> {
-        const resolved = modelRuntime.getModel(model.providerId, model.modelId);
+        const resolved = resolveModelRef(model.providerId, model.modelId);
         if (!resolved) {
           throw new Error(
             `unknown model: ${model.providerId}/${model.modelId}`,
@@ -554,6 +693,22 @@ export async function createPiCodingAgentRuntime(
       }
       return out;
     },
+    async testProvider(providerId: string): Promise<{ ok: boolean; message?: string }> {
+      try {
+        const ok = await modelRuntime.checkAuth(providerId);
+        return {
+          ok: Boolean(ok),
+          message: ok
+            ? "Provider authenticated successfully"
+            : "Provider authentication check failed",
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+        };
+      }
+    },
   };
 
   type PiModelShape = {
@@ -641,21 +796,57 @@ export async function createPiCodingAgentRuntime(
           ? modelRuntime.getModels(query.providerId)
           : modelRuntime.getModels()
       ) as PiModelShape[];
-      if (query?.all === false) {
-        const keys = await availableKeys(query?.providerId);
-        return models
-          .filter((model) => keys.has(modelKey(model)))
-          .map((model) => toRuntimeModel(model, keys));
-      }
       const keys = await availableKeys(query?.providerId);
-      return models.map((model) => toRuntimeModel(model, keys));
+      const filtered =
+        query?.all === false
+          ? models.filter((model) => keys.has(modelKey(model)))
+          : models;
+      const list = filtered.map((model) => toRuntimeModel(model, keys));
+      if (!query?.providerId || query.providerId === "opencode") {
+        const contributor = list.find(
+          (m) =>
+            m.providerId === "opencode" &&
+            m.modelId === "muse-spark-1.3-contributor-free",
+        );
+        const hasFree = list.some(
+          (m) =>
+            m.providerId === "opencode" && m.modelId === "muse-spark-1.3-free",
+        );
+        if (contributor && !hasFree) {
+          list.unshift({
+            ...contributor,
+            modelId: "muse-spark-1.3-free",
+            displayName: "Muse Spark 1.3 Free",
+          });
+        }
+      }
+      return list;
     },
     async listAvailableModels(query?: { providerId?: string }) {
       const available = (await modelRuntime.getAvailable(
         query?.providerId,
       )) as PiModelShape[];
       const keys = new Set(available.map(modelKey));
-      return available.map((model) => toRuntimeModel(model, keys));
+      const list = available.map((model) => toRuntimeModel(model, keys));
+      if (!query?.providerId || query.providerId === "opencode") {
+        const contributor = list.find(
+          (m) =>
+            m.providerId === "opencode" &&
+            m.modelId === "muse-spark-1.3-contributor-free",
+        );
+        const hasFree = list.some(
+          (m) =>
+            m.providerId === "opencode" && m.modelId === "muse-spark-1.3-free",
+        );
+        if (contributor && !hasFree) {
+          list.unshift({
+            ...contributor,
+            modelId: "muse-spark-1.3-free",
+            displayName: "Muse Spark 1.3 Free",
+          });
+        }
+      }
+      return list;
     },
     async listProviders() {
       return auth.listProviders();
@@ -709,6 +900,21 @@ export async function createPiCodingAgentRuntime(
     },
     auth() {
       return auth;
+    },
+    async quiesce(): Promise<void> {
+      quiesced = true;
+    },
+    async unquiesce(): Promise<void> {
+      quiesced = false;
+    },
+    isQuiesced(): boolean {
+      return quiesced;
+    },
+    registerSessionLiveness(sessionId: string, isActive: () => boolean): () => void {
+      livenessRegistry.set(sessionId, isActive);
+      return () => {
+        livenessRegistry.delete(sessionId);
+      };
     },
   };
 }

@@ -16,10 +16,14 @@ export type ProductSessionMeta = {
     host?: string;
     environment?: string;
     service?: string;
+    hostId?: string;
+    environmentId?: string;
+    serviceIds?: string[];
   };
   labels?: Record<string, string>;
   shareMetadata?: Record<string, unknown>;
   rememberedPermissions?: Record<string, "allow" | "deny">;
+  builtinTools?: string[];
 };
 
 const FORBIDDEN_KEYS = [
