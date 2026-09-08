@@ -8,6 +8,7 @@ describe("parseCliArgs", () => {
       sessionId: undefined,
       continueLast: false,
       title: undefined,
+      tuiMode: undefined,
     });
   });
 
@@ -77,18 +78,52 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("supports muse-spark shorthand without provider", () => {
+    expect(
+      parseCliArgs(["-p", "hi", "--model", "muse-spark-1.3-free"]),
+    ).toMatchObject({
+      kind: "print",
+      model: { providerId: "opencode", modelId: "muse-spark-1.3-free" },
+    });
+    expect(parseCliArgs(["--model", "muse-spark-1.3-free"])).toMatchObject({
+      kind: "tui",
+      model: { providerId: "opencode", modelId: "muse-spark-1.3-free" },
+    });
+  });
+
   it("parses continue and resume", () => {
     expect(parseCliArgs(["-c"])).toEqual({
       kind: "tui",
       sessionId: undefined,
       continueLast: true,
       title: undefined,
+      tuiMode: undefined,
     });
     expect(parseCliArgs(["--session", "abc-123"])).toEqual({
       kind: "tui",
       sessionId: "abc-123",
       continueLast: false,
       title: undefined,
+      tuiMode: undefined,
+    });
+  });
+
+  it("parses --tui-mode and --fullscreen flags", () => {
+    expect(parseCliArgs(["--tui-mode", "fullscreen"])).toMatchObject({
+      kind: "tui",
+      tuiMode: "fullscreen",
+    });
+    expect(parseCliArgs(["--tui-mode", "regular"])).toMatchObject({
+      kind: "tui",
+      tuiMode: "regular",
+    });
+    expect(parseCliArgs(["--fullscreen"])).toMatchObject({
+      kind: "tui",
+      tuiMode: "fullscreen",
+    });
+    expect(parseCliArgs(["--tui-mode", "invalid-mode"])).toMatchObject({
+      kind: "error",
+      message: 'invalid --tui-mode: "invalid-mode"; want "regular" or "fullscreen"',
     });
   });
 });

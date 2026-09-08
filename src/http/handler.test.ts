@@ -157,15 +157,27 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(res.status).toBe(401);
   });
 
-  it("POST /v1/messages is gone; sessions own the prompt flow", async () => {
-    const res = await handler().handle(
+  it("POST /v1/messages is a compatibility adapter delegating to prompt", async () => {
+    const { createFakeRuntime } = await import("../runtime/fake-runtime.ts");
+    const { createThebeApp } = await import("../product/app.ts");
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "messages response" }]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      version: "0.1.0",
+    });
+    const res = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: "hello" }),
       }),
     );
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(200);
+    const data = (await res.json()) as { ok: boolean; text: string };
+    expect(data.ok).toBe(true);
+    expect(data.text).toBe("messages response");
   });
 
   it("accepts the matching X-Thebe-Token", async () => {

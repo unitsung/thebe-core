@@ -16,6 +16,8 @@ import {
   type RuntimeProvider,
   type RuntimeSession,
   type ThinkingLevel,
+  type BackgroundTask,
+  type ThebeSessionContext,
   isInlineTextFile,
 } from "./types.ts";
 import { permissionRisk, summarizeArgs } from "../tools/redaction.ts";
@@ -58,6 +60,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
     isError: boolean;
   }> = [];
   let compactCalls = 0;
+  let quiesced = false;
 
   function queueTurns(turns: FakeQueuedTurn[]): void {
     queue.push(...turns);
@@ -214,26 +217,49 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       state.reverted = undefined;
       const prompt = asPromptInput(input);
       const inlined = (prompt.files ?? [])
-        .filter((file) => isInlineTextFile(file.mediaType))
+        .filter(
+          (file) =>
+            (!file.mode || file.mode === "inline") &&
+            file.data &&
+            isInlineTextFile(file.mediaType),
+        )
         .map((file) => {
           const name = file.filename ?? "attachment";
           let text: string;
           try {
-            text = Buffer.from(file.data, "base64").toString("utf8");
+            text = Buffer.from(file.data ?? "", "base64").toString("utf8");
           } catch {
             text = "";
           }
           return `[file: ${name} (${file.mediaType})]\n${text}`;
         })
         .join("\n\n");
-      const filesNote = (prompt.files ?? [])
-        .filter((file) => !isInlineTextFile(file.mediaType))
+      const references = (prompt.files ?? [])
+        .filter((file) => file.mode === "reference")
+        .map(
+          (file) =>
+            `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`,
+        )
+        .join("\n");
+      const lines = (prompt.files ?? [])
+        .filter((file) => file.mode === "lines")
+        .map(
+          (file) =>
+            `[file snippet: ${file.path ?? file.filename ?? "attachment"} lines ${file.lineRange?.start ?? 1}-${file.lineRange?.end ?? 1} (${file.mediaType})]`,
+        )
+        .join("\n");
+      const otherFiles = (prompt.files ?? [])
+        .filter(
+          (file) =>
+            (!file.mode || file.mode === "inline") &&
+            !isInlineTextFile(file.mediaType),
+        )
         .map(
           (file) =>
             `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
         )
         .join("\n");
-      const extra = [inlined, filesNote]
+      const extra = [inlined, references, lines, otherFiles]
         .filter((part) => part.length > 0)
         .join("\n");
       const text = extra ? `${prompt.text}\n${extra}` : prompt.text;
@@ -336,6 +362,38 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       async setThinkingLevel(level: ThinkingLevel): Promise<void> {
         state.thinkingLevel = level;
       },
+      async stopToolCall(toolCallId: string): Promise<void> {
+        emit({
+          type: "tool_end",
+          toolName: "interrupted",
+          toolCallId,
+          isError: true,
+          text: "tool call stopped by user",
+        });
+      },
+      async getContextUsage(): Promise<ThebeSessionContext> {
+        const totalChars = state.messages.reduce(
+          (sum, m) => sum + (m.text?.length ?? 0),
+          0,
+        );
+        const tokens = Math.ceil(totalChars / 4);
+        return {
+          contextUsage: { usedTokens: tokens, maxTokens: 128_000 },
+          estimatedCost: { amount: 0.001, currency: "USD" },
+          compaction: {
+            lastCompactedAt: state.compacted
+              ? new Date().toISOString()
+              : undefined,
+            nearThreshold: tokens > 100_000,
+          },
+        };
+      },
+      async listBackgroundTasks(): Promise<BackgroundTask[]> {
+        return [];
+      },
+      async stopBackgroundTask(_taskId: string): Promise<void> {
+        // no-op
+      },
       async revert(): Promise<void> {
         if (state.reverted) {
           return;
@@ -378,6 +436,13 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       modelId: "fake-2",
       displayName: "Fake Two",
       supportsThinking: false,
+      available: true,
+    },
+    {
+      providerId: "opencode",
+      modelId: "muse-spark-1.3-free",
+      displayName: "Muse Spark 1.3 Free",
+      supportsThinking: true,
       available: true,
     },
   ];
@@ -438,6 +503,10 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         },
       ];
     },
+    async testProvider(providerId: string): Promise<{ ok: boolean; message?: string }> {
+      const ok = apiKeys.has(providerId) || oauthLogins.includes(providerId);
+      return { ok, message: ok ? "Connected" : "Provider credentials not found" };
+    },
   };
 
   function applyCreate(
@@ -464,7 +533,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS)],
         enabledResources: create.enabledResources,
-        model: FAKE_MODELS[0]!,
+        model: create.model ?? FAKE_MODELS[0]!,
         thinkingLevel: "off",
         reverted: undefined,
         permissionHandler: create.permissionHandler,
@@ -535,6 +604,15 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
     },
     auth() {
       return auth;
+    },
+    async quiesce(): Promise<void> {
+      quiesced = true;
+    },
+    async unquiesce(): Promise<void> {
+      quiesced = false;
+    },
+    isQuiesced(): boolean {
+      return quiesced;
     },
   };
 

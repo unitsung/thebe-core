@@ -35,9 +35,57 @@ export const defaultMarkdownTheme: MarkdownTheme = {
   underline: (text: string) => chalk.underline(text),
 };
 
+export const lightSelectListTheme: SelectListTheme = {
+  selectedPrefix: (text: string) => chalk.blue(text),
+  selectedText: (text: string) => chalk.bold.black(text),
+  description: (text: string) => chalk.dim(text),
+  scrollInfo: (text: string) => chalk.dim(text),
+  noMatch: (text: string) => chalk.dim(text),
+};
+
+export const lightMarkdownTheme: MarkdownTheme = {
+  heading: (text: string) => chalk.bold.blue(text),
+  link: (text: string) => chalk.blue(text),
+  linkUrl: (text: string) => chalk.dim(text),
+  code: (text: string) => chalk.magenta(text),
+  codeBlock: (text: string) => chalk.black(text),
+  codeBlockBorder: (text: string) => chalk.dim(text),
+  quote: (text: string) => chalk.italic(text),
+  quoteBorder: (text: string) => chalk.dim(text),
+  hr: (text: string) => chalk.dim(text),
+  listBullet: (text: string) => chalk.blue(text),
+  bold: (text: string) => chalk.bold(text),
+  italic: (text: string) => chalk.italic(text),
+  strikethrough: (text: string) => chalk.strikethrough(text),
+  underline: (text: string) => chalk.underline(text),
+};
+
 export const defaultEditorTheme: EditorTheme = {
   borderColor: (text: string) => chalk.dim(text),
   selectList: defaultSelectListTheme,
 };
 
+export const lightEditorTheme: EditorTheme = {
+  borderColor: (text: string) => chalk.dim(text),
+  selectList: lightSelectListTheme,
+};
+
+export type ThemeName = "dark" | "light";
+
+export function getTuiTheme(name: ThemeName = "dark") {
+  if (name === "light") {
+    return {
+      selectList: lightSelectListTheme,
+      markdown: lightMarkdownTheme,
+      editor: lightEditorTheme,
+    };
+  }
+  return {
+    selectList: defaultSelectListTheme,
+    markdown: defaultMarkdownTheme,
+    editor: defaultEditorTheme,
+  };
+}
+
 export { chalk };
+

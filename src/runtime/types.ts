@@ -28,6 +28,12 @@ export type NormalizedEvent =
       argsSummary?: string;
       /** Static risk hint: arbitrary-command tools are high, others standard. */
       risk?: "high" | "standard";
+    }
+  | {
+      type: "tool_watchdog_timeout";
+      toolCallId: string;
+      toolName: string;
+      elapsedMs: number;
     };
 
 export type RuntimeMessage = {
@@ -40,10 +46,15 @@ export type RuntimeMessage = {
   attachments?: Array<{ mediaType?: string }>;
 };
 
+export type PromptFileMode = "inline" | "reference" | "lines";
+
 export type PromptFile = {
+  mode?: PromptFileMode;
   mediaType: string;
-  data: string;
+  data?: string;
+  path?: string;
   filename?: string;
+  lineRange?: { start: number; end: number };
 };
 
 /** Controlled attachment subset: images go to the model, text inlines. */
@@ -69,6 +80,8 @@ export function isSupportedPromptFile(mediaType: string): boolean {
 
 export const MAX_PROMPT_FILES = 8;
 export const MAX_PROMPT_FILE_BYTES = 2_000_000;
+/** Default threshold (12 KB) beyond which inline attachments degrade to references if path is present */
+export const MAX_INLINE_FILE_BYTES = 12_288;
 
 export function estimatedDecodedBytes(base64: string): number {
   return Math.floor(base64.length * 3 / 4);
@@ -182,10 +195,29 @@ export type CreateRuntimeSessionOptions = {
   cwd?: string;
   permissionHandler?: PermissionHandler;
   toolsRequiringApproval?: readonly string[];
+  model?: RuntimeModelRef;
 };
+
+export type ForkSessionMode = "new_session" | "branch_in_place";
 
 export type ForkSessionOptions = {
   atEntryId?: string;
+  mode?: ForkSessionMode;
+};
+
+export type ThebeSessionContext = {
+  contextUsage: { usedTokens: number; maxTokens: number };
+  estimatedCost?: { amount: number; currency: string };
+  compaction: { lastCompactedAt?: string; nearThreshold: boolean };
+};
+
+export type BackgroundTask = {
+  id: string;
+  name?: string;
+  pid?: number;
+  port?: number;
+  status: "running" | "stopped" | "failed";
+  startedAt?: string;
 };
 
 export type RuntimeSessionSummary = {
@@ -237,6 +269,7 @@ export type RuntimeAuth = {
   logout(providerId: string): Promise<void>;
   check(providerId: string): Promise<{ ok: boolean }>;
   listProviders(): Promise<RuntimeProvider[]>;
+  testProvider(providerId: string): Promise<{ ok: boolean; message?: string }>;
 };
 
 export interface RuntimeSession {
@@ -245,6 +278,7 @@ export interface RuntimeSession {
   steer(text: string): Promise<void>;
   followUp(text: string): Promise<void>;
   abort(): Promise<void>;
+  stopToolCall(toolCallId: string): Promise<void>;
   subscribe(listener: (event: NormalizedEvent) => void): () => void;
   lastAssistantText(): string;
   toolNames(): string[];
@@ -253,6 +287,9 @@ export interface RuntimeSession {
   messages(): RuntimeMessage[];
   setModel(model: RuntimeModelRef): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): Promise<void>;
+  getContextUsage(): Promise<ThebeSessionContext>;
+  listBackgroundTasks(): Promise<BackgroundTask[]>;
+  stopBackgroundTask(taskId: string): Promise<void>;
   revert(): Promise<void>;
   unrevert(): Promise<void>;
   dispose(): void;
@@ -280,4 +317,11 @@ export interface AgentRuntime {
   }): Promise<RuntimeModel[]>;
   listProviders(options?: { all?: boolean }): Promise<RuntimeProvider[]>;
   auth(): RuntimeAuth;
+  quiesce(): Promise<void>;
+  unquiesce(): Promise<void>;
+  isQuiesced(): boolean;
+  registerSessionLiveness?(
+    sessionId: string,
+    isActive: () => boolean,
+  ): () => void;
 }

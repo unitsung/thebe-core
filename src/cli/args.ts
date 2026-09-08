@@ -5,7 +5,14 @@
 
 export type CliCommand =
   | { kind: "help" }
-  | { kind: "tui"; sessionId?: string; continueLast?: boolean; title?: string }
+  | {
+      kind: "tui";
+      sessionId?: string;
+      continueLast?: boolean;
+      title?: string;
+      model?: { providerId: string; modelId: string };
+      tuiMode?: "regular" | "fullscreen";
+    }
   | {
       kind: "print";
       text: string;
@@ -102,6 +109,22 @@ export function parseCliArgs(argv: string[]): CliCommand {
       ? modeFlag
       : undefined;
 
+  const tuiModeFlag = flagString(flags, "tui-mode");
+  if (tuiModeFlag && tuiModeFlag !== "regular" && tuiModeFlag !== "fullscreen") {
+    return {
+      kind: "error",
+      message: `invalid --tui-mode: "${tuiModeFlag}"; want "regular" or "fullscreen"`,
+    };
+  }
+  const tuiMode: "regular" | "fullscreen" | undefined =
+    tuiModeFlag === "regular" || tuiModeFlag === "fullscreen"
+      ? tuiModeFlag
+      : flags.has("fullscreen")
+        ? "fullscreen"
+        : flags.has("regular")
+          ? "regular"
+          : undefined;
+
   if (flags.has("list-models")) {
     const search =
       typeof flags.get("list-models") === "string"
@@ -120,7 +143,13 @@ export function parseCliArgs(argv: string[]): CliCommand {
     return { kind: "help" };
   }
   if (head === "tui") {
-    return { kind: "tui", sessionId, continueLast, title };
+    if (model === "invalid") {
+      return {
+        kind: "error",
+        message: "invalid --model; want provider/modelId",
+      };
+    }
+    return { kind: "tui", sessionId, continueLast, title, model, tuiMode };
   }
   if (head === "session") {
     return parseSessionSubcommand(positionals.slice(1), flags, model);
@@ -166,7 +195,7 @@ export function parseCliArgs(argv: string[]): CliCommand {
     };
   }
 
-  return { kind: "tui", sessionId, continueLast, title };
+  return { kind: "tui", sessionId, continueLast, title, model, tuiMode };
 }
 
 function parseSessionSubcommand(
@@ -290,6 +319,15 @@ function parseModel(
   }
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1) {
+    if (
+      value === "muse-spark-1.3-free" ||
+      value === "muse-spark-1.3-contributor-free"
+    ) {
+      return {
+        providerId: "opencode",
+        modelId: value,
+      };
+    }
     return "invalid";
   }
   return {
@@ -321,7 +359,8 @@ function takesValue(key: string): boolean {
     key === "at" ||
     key === "mode" ||
     key === "list-models" ||
-    key === "fork"
+    key === "fork" ||
+    key === "tui-mode"
   );
 }
 
@@ -363,6 +402,8 @@ Options:
   --model <provider/id>    Set model before prompt
   --thinking <level>       off|minimal|low|medium|high|xhigh|max
   --mode prompt|steer|followUp
+  --tui-mode <mode>        regular|fullscreen (default: regular or ~/.thebe/config.json)
+  --fullscreen             Launch TUI directly in fullscreen alt-screen mode
   -n, --name <title>       Session title
   --format jsonl|html|both Export format (default both)
   -o, --out <path>         Export output path/prefix

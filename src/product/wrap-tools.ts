@@ -2,7 +2,7 @@ import { hashParameters } from "../audit/audit-log.ts";
 import type { createAuditLog } from "../audit/audit-log.ts";
 import type { createPolicyEngine } from "../policy/policy-engine.ts";
 import { REDACTED, redactToolOutput } from "../tools/redaction.ts";
-import type { CustomToolDefinition, CustomToolResult } from "../runtime/types.ts";
+import type { CustomToolDefinition, CustomToolResult, NormalizedEvent } from "../runtime/types.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 type Audit = ReturnType<typeof createAuditLog>;
@@ -12,6 +12,8 @@ export function wrapCustomTools(
   options: {
     policy: Policy;
     audit?: Audit;
+    toolWatchdogMs?: number;
+    onEvent?: (event: NormalizedEvent) => void;
     onStop?: () => void | Promise<void>;
   },
 ): CustomToolDefinition[] {
@@ -43,10 +45,37 @@ export function wrapCustomTools(
           details: {},
         });
       }
+      let timer: NodeJS.Timeout | undefined;
+      let timedOut = false;
+      const watchdogMs = options.toolWatchdogMs;
+      const executePromise = tool.execute(toolCallId, params, signal);
       try {
-        const result = await tool.execute(toolCallId, params, signal);
-        const redacted = redactResult(result);
-        const text = redacted.content.map((block) => block.text).join("\n");
+        let result: CustomToolResult;
+        if (watchdogMs && watchdogMs > 0) {
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              timedOut = true;
+              options.onEvent?.({
+                type: "tool_watchdog_timeout",
+                toolCallId,
+                toolName: tool.name,
+                elapsedMs: watchdogMs,
+              });
+              reject(
+                new Error(`tool call exceeded watchdog timeout (${watchdogMs}ms)`),
+              );
+            }, watchdogMs);
+          });
+          try {
+            result = await Promise.race([executePromise, timeoutPromise]);
+          } finally {
+            if (timer) clearTimeout(timer);
+          }
+        } else {
+          result = await executePromise;
+        }
+        const wrapped = wrapResult(tool.name, result);
+        const text = wrapped.content.map((block) => block.text).join("\n");
         await options.audit?.append({
           method: tool.name,
           parameterHash: hashParameters(params),
@@ -54,7 +83,7 @@ export function wrapCustomTools(
           budgetConsumed: 0,
           redactionFired: text.includes(REDACTED),
         });
-        return redacted;
+        return wrapped;
       } catch (error) {
         const message = redactToolOutput(
           error instanceof Error ? error.message : String(error),
@@ -66,11 +95,11 @@ export function wrapCustomTools(
           budgetConsumed: 0,
           redactionFired: message.includes(REDACTED),
         });
-        if (signal?.aborted) {
-          return redactResult({
+        if (signal?.aborted || timedOut) {
+          return wrapResult(tool.name, {
             isError: true,
             content: [{ type: "text", text: message }],
-            details: {},
+            details: timedOut ? { watchdogTimeout: true } : {},
           });
         }
         throw new Error(message);
@@ -86,6 +115,17 @@ function redactResult(result: CustomToolResult): CustomToolResult {
     content: result.content.map((block) => ({
       type: "text" as const,
       text: redactToolOutput(block.text),
+    })),
+  };
+}
+
+function wrapResult(toolName: string, result: CustomToolResult): CustomToolResult {
+  return {
+    isError: result.isError,
+    details: result.details ?? {},
+    content: result.content.map((block) => ({
+      type: "text" as const,
+      text: `<tool_output tool="${toolName}">\n${redactToolOutput(block.text)}\n</tool_output>`,
     })),
   };
 }
