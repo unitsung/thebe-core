@@ -8,10 +8,12 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   CombinedAutocompleteProvider,
   Editor,
+  Input,
   Loader,
   Markdown,
   ProcessTerminal,
   SelectList,
+  SettingsList,
   Text,
   TuiAltScreen,
   TuiMainScreen,
@@ -19,6 +21,8 @@ import {
   truncateToWidth,
   visibleWidth,
   type SelectItem,
+  type SettingItem,
+  type SettingsListTheme,
   type SlashCommand,
   type TUI,
   type TuiMode,
@@ -26,14 +30,13 @@ import {
 import type { ThebeProduct } from "../product/service.ts";
 import type {
   NormalizedEvent,
+  RuntimeProvider,
   ThinkingLevel,
 } from "../runtime/types.ts";
 import {
   chalk,
-  defaultEditorTheme,
-  defaultMarkdownTheme,
   defaultSelectListTheme,
-  lightMarkdownTheme,
+  getTuiTheme,
   type ThemeName,
 } from "./theme.ts";
 import {
@@ -41,7 +44,7 @@ import {
   attachSearchableProviderPicker,
 } from "./model-picker.ts";
 import { attachSearchableSessionPicker } from "./session-picker.ts";
-import { loadThebeConfig, saveThebeConfig } from "./config.ts";
+import { saveThebeConfig } from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
 
@@ -54,38 +57,83 @@ export type ThebeTuiOptions = {
   /** Simple reply adapter used by unit tests / demos. */
   send?: ThebeTuiSend;
   tuiMode?: TuiMode;
+  theme?: ThemeName;
+  /** Invoked after `/tui` persists a mode so the host can swap the live screen. */
+  onTuiModeChange?: (mode: TuiMode) => void | Promise<void>;
 };
 
-export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "model", description: "Search or switch model interactively or /model <query>", argumentHint: "[query]" },
-  { name: "provider", description: "Browse and switch providers or filter models", argumentHint: "[provider]" },
-  { name: "thinking", description: "Set thinking level (interactive if no arg)", argumentHint: "[level]" },
-  { name: "settings", description: "Open interactive settings menu" },
-  { name: "usage", description: "Display token and context window usage" },
-  { name: "tui", description: "Switch TUI display mode: regular|fullscreen", argumentHint: "[regular|fullscreen]" },
-  { name: "session", description: "Show current session info and token usage" },
-  { name: "sessions", description: "Browse and search sessions (interactive picker)", argumentHint: "[query]" },
-  { name: "resume", description: "Resume a session (interactive search if no id)", argumentHint: "[id|query]" },
-  { name: "new", description: "Start a new session", argumentHint: "[title]" },
-  { name: "name", description: "Set session title", argumentHint: "<title>" },
-  { name: "fork", description: "Fork session (interactive options if no arg)", argumentHint: "[messageId]" },
-  { name: "tree", description: "Display session branch tree" },
-  { name: "compact", description: "Compact context" },
-  { name: "export", description: "Export session to HTML and JSONL", argumentHint: "[path]" },
-  { name: "theme", description: "Switch UI theme: dark|light (interactive if no arg)", argumentHint: "[dark|light]" },
-  { name: "copy", description: "Copy last assistant response to clipboard" },
-  { name: "hotkeys", description: "Show keyboard shortcuts and keybindings" },
-  { name: "followup", description: "Queue a follow-up turn", argumentHint: "<text>" },
-  { name: "interrupt", description: "Abort the current run" },
-  { name: "revert", description: "Revert last user turn (history only)" },
-  { name: "unrevert", description: "Undo the last revert" },
-  { name: "messages", description: "Show recent session messages", argumentHint: "[limit|all]" },
-  { name: "allow", description: "Allow pending tool permission", argumentHint: "[id]" },
-  { name: "deny", description: "Deny pending tool permission", argumentHint: "[id]" },
-  { name: "clear", description: "Clear the visible transcript" },
-  { name: "quit", description: "Quit Thebe" },
-  { name: "help", description: "Show slash commands and help" },
+export type SlashCategory = "Session" | "Agent" | "Provider" | "System";
+
+export type ThebeSlashCommand = SlashCommand & {
+  category: SlashCategory;
+  aliases?: string[];
+};
+
+/** Same grouping OpenCode uses in the command palette: Session / Agent / Provider / System. */
+export const SLASH_COMMANDS: ThebeSlashCommand[] = [
+  // Session
+  { name: "sessions", category: "Session", aliases: ["resume", "continue"], description: "Browse and switch sessions", argumentHint: "[query]" },
+  { name: "new", category: "Session", description: "Start a new session", argumentHint: "[title]" },
+  { name: "name", category: "Session", aliases: ["rename"], description: "Set session title", argumentHint: "<title>" },
+  { name: "fork", category: "Session", description: "Fork session", argumentHint: "[messageId]" },
+  { name: "tree", category: "Session", description: "Session branch tree" },
+  { name: "compact", category: "Session", aliases: ["summarize"], description: "Compact context" },
+  { name: "export", category: "Session", description: "Export session to HTML and JSONL", argumentHint: "[path]" },
+  { name: "copy", category: "Session", description: "Copy last assistant message to clipboard" },
+  { name: "followup", category: "Session", description: "Queue a follow-up turn", argumentHint: "<text>" },
+  { name: "revert", category: "Session", aliases: ["undo"], description: "Revert last user turn" },
+  { name: "unrevert", category: "Session", aliases: ["redo"], description: "Undo the last revert" },
+  { name: "clear", category: "Session", description: "Clear the visible transcript" },
+  { name: "interrupt", category: "Session", description: "Abort the current run" },
+  { name: "allow", category: "Session", description: "Allow pending tool permission", argumentHint: "[id]" },
+  { name: "deny", category: "Session", description: "Deny pending tool permission", argumentHint: "[id]" },
+  { name: "session", category: "Session", aliases: ["status"], description: "Show session info and usage" },
+  // Agent
+  { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Switch model", argumentHint: "[provider/model]" },
+  { name: "thinking", category: "Agent", description: "Set thinking level", argumentHint: "[level]" },
+  // Provider
+  { name: "login", category: "Provider", aliases: ["connect"], description: "Connect provider (API key or OAuth)", argumentHint: "[provider]" },
+  { name: "logout", category: "Provider", description: "Remove provider credentials", argumentHint: "[provider]" },
+  { name: "provider", category: "Provider", description: "Browse a provider and pick one of its models", argumentHint: "[provider]" },
+  // System
+  { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
+  { name: "settings", category: "System", description: "Theme, thinking, TUI mode" },
+  { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
+  { name: "usage", category: "System", description: "Token and context usage" },
+  { name: "hotkeys", category: "System", description: "Keyboard shortcuts" },
+  { name: "help", category: "System", description: "Show commands by category" },
+  { name: "quit", category: "System", aliases: ["exit", "q"], description: "Quit Thebe" },
 ];
+
+const SLASH_ALIAS_TO_NAME = new Map<string, string>();
+for (const command of SLASH_COMMANDS) {
+  for (const alias of command.aliases ?? []) {
+    SLASH_ALIAS_TO_NAME.set(alias, command.name);
+  }
+}
+
+export function resolveSlashName(name: string): string {
+  return SLASH_ALIAS_TO_NAME.get(name) ?? name;
+}
+
+function slashCommandsForAutocomplete(): SlashCommand[] {
+  const out: SlashCommand[] = [];
+  for (const command of SLASH_COMMANDS) {
+    out.push({
+      name: command.name,
+      description: command.description,
+      argumentHint: command.argumentHint,
+    });
+    for (const alias of command.aliases ?? []) {
+      out.push({
+        name: alias,
+        description: command.description,
+        argumentHint: command.argumentHint,
+      });
+    }
+  }
+  return out;
+}
 
 const THINKING_LEVELS = new Set<ThinkingLevel>([
   "off",
@@ -190,22 +238,69 @@ export function formatSessionTree(
   return lines;
 }
 
-export async function copyToClipboard(text: string): Promise<boolean> {
-  return new Promise((resolveResult) => {
-    try {
-      const isMac = process.platform === "darwin";
-      const proc = spawn(
-        isMac ? "pbcopy" : "xclip",
-        isMac ? [] : ["-selection", "clipboard"],
-      );
-      proc.stdin.write(text);
-      proc.stdin.end();
-      proc.on("close", (code) => resolveResult(code === 0));
-      proc.on("error", () => resolveResult(false));
-    } catch {
-      resolveResult(false);
+function writeOsc52(text: string, write: (data: string) => void): boolean {
+  try {
+    const payload = Buffer.from(text, "utf8").toString("base64");
+    write(`\x1b]52;c;${payload}\x07`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function openBrowser(target: string): void {
+  if (!process.stdout.isTTY) return;
+  const [cmd, args] =
+    process.platform === "darwin"
+      ? (["open", [target]] as const)
+      : process.platform === "win32"
+        ? (["rundll32", ["url.dll,FileProtocolHandler", target]] as const)
+        : (["xdg-open", [target]] as const);
+  spawn(cmd, [...args], { stdio: "ignore", detached: true })
+    .on("error", () => {})
+    .unref();
+}
+
+/** Same fallbacks Pi uses: native tool, then OSC 52 (especially over SSH). */
+export async function copyToClipboard(
+  text: string,
+  write?: (data: string) => void,
+): Promise<boolean> {
+  const options = {
+    input: text,
+    timeout: 5000,
+    stdio: ["pipe", "ignore", "ignore"] as ["pipe", "ignore", "ignore"],
+  };
+  let copied = false;
+  try {
+    if (process.platform === "darwin") {
+      execSync("pbcopy", options);
+      copied = true;
+    } else if (process.platform === "win32") {
+      execSync("clip", options);
+      copied = true;
+    } else {
+      try {
+        execSync("xclip -selection clipboard", options);
+        copied = true;
+      } catch {
+        execSync("xsel --clipboard --input", options);
+        copied = true;
+      }
     }
-  });
+  } catch {
+    copied = false;
+  }
+  const remote = Boolean(
+    process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.MOSH_CONNECTION,
+  );
+  if (!copied || remote) {
+    const oscWrite = write ?? ((data: string) => {
+      process.stdout.write(data);
+    });
+    copied = writeOsc52(text, oscWrite) || copied;
+  }
+  return copied;
 }
 
 export function attachThebeChat(
@@ -220,9 +315,9 @@ export function attachThebeChat(
   const product = options.product;
   let sessionId = options.sessionId;
   let sessionTitle = options.title;
-  let currentModel = options.model ?? "opencode/muse-spark-1.3-free";
+  let currentModel = options.model ?? "";
   let currentThinking: ThinkingLevel = "off";
-  let currentTheme: ThemeName = "dark";
+  let currentTheme: ThemeName = options.theme ?? "dark";
   let contextTokensUsed = 0;
   let contextWindowTotal = 1_048_576;
   let cumulativeInputTokens = 0;
@@ -246,9 +341,9 @@ export function attachThebeChat(
   const footerText = new Text("");
   tui.addChild(footerText);
 
-  const editor = new Editor(tui, defaultEditorTheme);
+  const editor = new Editor(tui, getTuiTheme(currentTheme).editor);
   editor.setAutocompleteProvider(
-    new CombinedAutocompleteProvider(SLASH_COMMANDS, process.cwd()),
+    new CombinedAutocompleteProvider(slashCommandsForAutocomplete(), process.cwd()),
   );
   tui.addChild(editor);
   tui.setFocus(editor);
@@ -304,10 +399,9 @@ export function attachThebeChat(
     const statsLeft = statsParts.join(" ");
 
     // Right side: (provider) modelId • thinkingLevel
-    const [providerId, ...modelParts] = currentModel.includes("/")
-      ? currentModel.split("/")
-      : ["opencode", currentModel];
-    const modelId = modelParts.join("/") || currentModel;
+    const parsedModel = parseModelRef(currentModel);
+    const providerId = parsedModel.providerId;
+    const modelId = parsedModel.modelId || currentModel || "no model";
 
     let rightSideWithoutProvider = modelId;
     if (currentThinking === "off") {
@@ -354,10 +448,32 @@ export function attachThebeChat(
   }
 
   function notice(text: string): void {
+    const width = tui.terminal?.columns ?? process.stdout.columns ?? 80;
+    const fitted = text
+      .split("\n")
+      .map((line) => truncateToWidth(line, width, ""))
+      .join("\n");
     const index = children.indexOf(footerText);
     const insertAt = index >= 0 ? index : children.length - 1;
-    children.splice(insertAt, 0, new Text(chalk.dim(text)));
+    children.splice(insertAt, 0, new Text(chalk.dim(fitted)));
     tui.requestRender();
+  }
+
+  async function applyModel(
+    id: string,
+    selected: { providerId: string; modelId: string; displayName?: string },
+  ): Promise<void> {
+    const newKey = `${selected.providerId}/${selected.modelId}`;
+    await product!.setModel(id, {
+      providerId: selected.providerId,
+      modelId: selected.modelId,
+    });
+    currentModel = newKey;
+    void refreshContextUsage();
+    updateFooter();
+    notice(
+      `switched model to ${currentModel} (${selected.displayName ?? selected.modelId})`,
+    );
   }
 
   function insertBeforeFooter(component: { render(width: number): string[] }): void {
@@ -378,11 +494,92 @@ export function attachThebeChat(
   }
 
   function getActiveMarkdownTheme() {
-    return currentTheme === "light" ? lightMarkdownTheme : defaultMarkdownTheme;
+    return getTuiTheme(currentTheme).markdown;
+  }
+
+  function makeMarkdown(text: string): Markdown {
+    const md = new Markdown(text, 1, 1, getActiveMarkdownTheme());
+    stashMarkdownSource(md, text);
+    return md;
+  }
+
+  async function applyTheme(name: ThemeName, persist = true): Promise<void> {
+    currentTheme = name;
+    const pack = getTuiTheme(name);
+    editor.borderColor = pack.editor.borderColor;
+    for (const child of children) {
+      child.invalidate?.();
+    }
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      if (!(child instanceof Markdown)) continue;
+      const source = readMarkdownSource(child);
+      const replacement = makeMarkdown(source);
+      children[i] = replacement;
+      if (replyMarkdown === child) {
+        replyMarkdown = replacement;
+      }
+    }
+    if (persist) {
+      await saveThebeConfig({ theme: name });
+    }
+    tui.requestRender();
+  }
+
+  async function afterProviderLoggedIn(
+    providerId: string,
+    actionLabel: string,
+  ): Promise<void> {
+    if (!product || !sessionId) {
+      notice(actionLabel);
+      return;
+    }
+    const scoped = await product.listAvailableModels({ providerId });
+    if (scoped.length === 0) {
+      notice(
+        `${actionLabel}. no models available for ${providerId}; use /model after models appear`,
+      );
+      return;
+    }
+    await applyModel(sessionId, scoped[0]!);
+    notice(
+      `${actionLabel}. selected ${scoped[0]!.providerId}/${scoped[0]!.modelId}`,
+    );
+  }
+
+  async function resolvePermissionInteractively(
+    permissionId: string,
+    toolName: string,
+  ): Promise<void> {
+    if (!product) return;
+    const selected = await attachSelectList(
+      tui,
+      [
+        { label: `Allow ${toolName}`, value: "allow" },
+        { label: `Deny ${toolName}`, value: "deny" },
+      ],
+      editor,
+    );
+    const id = sessionId ?? product.lastThebeSessionId();
+    if (!selected || !id) {
+      if (!selected) {
+        notice(`permission ${permissionId} not resolved — /allow or /deny`);
+      }
+      return;
+    }
+    await product.resolvePermission(id, permissionId, {
+      response: selected.value as "allow" | "deny",
+    });
+    if (pendingPermissionId === permissionId) {
+      pendingPermissionId = undefined;
+    }
+    notice(
+      `permission ${permissionId} ${selected.value === "allow" ? "allowed" : "denied"}`,
+    );
   }
 
   function beginStream(label = "Thinking..."): void {
-    replyMarkdown = new Markdown("", 1, 1, getActiveMarkdownTheme());
+    replyMarkdown = makeMarkdown("");
     insertBeforeFooter(replyMarkdown);
     loader = new Loader(
       tui,
@@ -412,10 +609,9 @@ export function attachThebeChat(
       const next = `${readMarkdownSource(replyMarkdown)}${event.text}`;
       const index = children.indexOf(replyMarkdown);
       if (index >= 0) {
-        const replacement = new Markdown(next, 1, 1, getActiveMarkdownTheme());
+        const replacement = makeMarkdown(next);
         children[index] = replacement;
         replyMarkdown = replacement;
-        stashMarkdownSource(replacement, next);
         tui.requestRender();
       }
     } else if (event.type === "tool_start") {
@@ -432,8 +628,9 @@ export function attachThebeChat(
       pendingPermissionId = event.permissionId;
       updateFooter();
       notice(
-        `permission requested: ${event.toolName} (${event.risk ?? "standard"}) ${event.argsSummary ?? ""} — use /allow or /deny`,
+        `permission requested: ${event.toolName} (${event.risk ?? "standard"}) ${event.argsSummary ?? ""}`,
       );
+      void resolvePermissionInteractively(event.permissionId, event.toolName);
     } else if (event.type === "interrupted") {
       notice("session interrupted");
     } else if (event.type === "error") {
@@ -466,14 +663,14 @@ export function attachThebeChat(
       }
       isResponding = true;
       editor.disableSubmit = true;
-      insertBeforeFooter(new Markdown(text, 1, 1, getActiveMarkdownTheme()));
+      insertBeforeFooter(makeMarkdown(text));
       beginStream();
       try {
         const reply = await options.send(text);
         if (replyMarkdown) {
           const index = children.indexOf(replyMarkdown);
           if (index >= 0) {
-            children[index] = new Markdown(reply, 1, 1, getActiveMarkdownTheme());
+            children[index] = makeMarkdown(reply);
           }
         }
       } finally {
@@ -494,9 +691,8 @@ export function attachThebeChat(
         return;
       }
       isResponding = true;
-      insertBeforeFooter(new Markdown(text, 1, 1, getActiveMarkdownTheme()));
+      insertBeforeFooter(makeMarkdown(text));
       beginStream();
-      stashMarkdownSource(replyMarkdown!, "");
       streamUnsub = product.subscribeLog(id, onEvent);
       try {
         const result = await product.prompt(text, {
@@ -506,12 +702,7 @@ export function attachThebeChat(
         if (replyMarkdown && !readMarkdownSource(replyMarkdown)) {
           const index = children.indexOf(replyMarkdown);
           if (index >= 0) {
-            children[index] = new Markdown(
-              result.text,
-              1,
-              1,
-              getActiveMarkdownTheme(),
-            );
+            children[index] = makeMarkdown(result.text);
           }
         }
       } catch (error) {
@@ -536,43 +727,46 @@ export function attachThebeChat(
     }
     const body = raw.slice(1).trim();
     const space = body.indexOf(" ");
-    const name = (space < 0 ? body : body.slice(0, space)).toLowerCase();
+    const rawName = (space < 0 ? body : body.slice(0, space)).toLowerCase();
+    const name = resolveSlashName(rawName);
     const arg = space < 0 ? "" : body.slice(space + 1).trim();
 
     if (name === "help") {
-      notice(
-        [
-          "Thebe Commands:",
-          ...SLASH_COMMANDS.map(
-            (c) => `  /${c.name.padEnd(12)} ${c.argumentHint ?? ""} — ${c.description ?? ""}`,
-          ),
-        ].join("\n"),
-      );
+      const categories: SlashCategory[] = [
+        "Session",
+        "Agent",
+        "Provider",
+        "System",
+      ];
+      const lines = ["Thebe Commands:"];
+      for (const category of categories) {
+        const group = SLASH_COMMANDS.filter((c) => c.category === category);
+        if (group.length === 0) continue;
+        lines.push("", category);
+        for (const c of group) {
+          const alias =
+            c.aliases && c.aliases.length > 0
+              ? ` (${c.aliases.map((a) => `/${a}`).join(", ")})`
+              : "";
+          lines.push(
+            `  /${c.name.padEnd(12)} ${c.argumentHint ?? ""} — ${c.description ?? ""}${alias}`,
+          );
+        }
+      }
+      notice(lines.join("\n"));
       return true;
     }
     if (name === "hotkeys") {
       notice(
         [
-          "Keyboard Shortcuts:",
-          "  Enter          Submit prompt (or steer active turn when busy)",
-          "  Alt+Enter      Queue follow-up turn mid-flight",
-          "  Option+Enter   Queue follow-up turn (macOS alternative)",
-          "  Esc            Interrupt current agent turn or tool execution",
-          "  Ctrl+P         Quick open interactive model picker",
-          "  Ctrl+C         Quit Thebe cleanly",
-          "",
-          "Quick Commands:",
-          "  /model         Search and select model interactively or /model <query>",
-          "  /provider      Browse providers and filter models or /provider <id>",
-          "  /thinking      Set thinking level interactively",
-          "  /sessions      Browse and search sessions interactively or /sessions <query>",
-          "  /usage         Display token and context window usage stats",
-          "  /tui           Switch TUI display mode (regular terminal vs fullscreen)",
-          "  /settings      Interactive settings menu",
-          "  /tree          Visual session branch tree",
-          "  /fork          Fork session into a new branch",
-          "  /copy          Copy last response to clipboard",
-          "  /session       Display session info and token usage",
+          "Keyboard shortcuts:",
+          "  Enter        send (steer when busy)",
+          "  Alt+Enter    queue follow-up",
+          "  Esc          interrupt",
+          "  Ctrl+P       switch model",
+          "  Shift+Tab    cycle thinking",
+          "  Ctrl+C       quit",
+          "  /help        commands by category (Session, Agent, Provider, System)",
         ].join("\n"),
       );
       return true;
@@ -600,13 +794,12 @@ export function attachThebeChat(
     try {
       switch (name) {
         case "new": {
-          const defaultModelRef = {
-            providerId: currentModel.includes("/") ? currentModel.split("/")[0]! : "opencode",
-            modelId: currentModel.includes("/") ? currentModel.split("/").slice(1).join("/") : currentModel,
-          };
+          const parsed = parseModelRef(currentModel);
           const meta = await product.createSession({
             title: arg || options.title,
-            model: defaultModelRef,
+            model: parsed.providerId
+              ? { providerId: parsed.providerId, modelId: parsed.modelId }
+              : undefined,
           });
           sessionId = meta.thebeSessionId;
           sessionTitle = meta.title;
@@ -617,7 +810,7 @@ export function attachThebeChat(
         }
         case "resume":
         case "sessions": {
-          if (name === "resume" && arg && !arg.includes(" ")) {
+          if (rawName === "resume" && arg && !arg.includes(" ")) {
             const meta = await product.resume(arg);
             sessionId = meta.thebeSessionId;
             sessionTitle = meta.title;
@@ -655,31 +848,97 @@ export function attachThebeChat(
             estimatedCost = ctx.estimatedCost;
           } catch {}
           const msgs = await product.loadMessages(id);
+
+          // Calculate turns and counts
+          let userTurns = 0;
+          let assistantTurns = 0;
+          let toolCalls = 0;
+          let messageInputTokens = 0;
+          let messageOutputTokens = 0;
+          let messageCacheReadTokens = 0;
+          let messageCacheWriteTokens = 0;
+
+          for (const m of msgs) {
+            if (m.role === "user") {
+              userTurns += 1;
+            } else if (m.role === "assistant") {
+              assistantTurns += 1;
+            } else if (m.role === "tool" || m.toolName) {
+              toolCalls += 1;
+            }
+            // If runtime message contains nested usage stats
+            const rawUsage = (m as { usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } }).usage;
+            if (rawUsage) {
+              messageInputTokens += rawUsage.input ?? 0;
+              messageOutputTokens += rawUsage.output ?? 0;
+              messageCacheReadTokens += rawUsage.cacheRead ?? 0;
+              messageCacheWriteTokens += rawUsage.cacheWrite ?? 0;
+            }
+          }
+
+          const totalTurns = userTurns + assistantTurns;
+          const effectiveInputTokens = Math.max(cumulativeInputTokens, messageInputTokens);
+          const effectiveOutputTokens = Math.max(cumulativeOutputTokens, messageOutputTokens);
+          const effectiveCacheRead = messageCacheReadTokens;
+          const effectiveCacheWrite = messageCacheWriteTokens;
+          const totalTokens = effectiveInputTokens + effectiveOutputTokens + effectiveCacheRead + effectiveCacheWrite;
+
+          // Cache hit rate: cacheRead / (input + cacheRead)
+          const totalInputWithCache = effectiveInputTokens + effectiveCacheRead;
+          const cacheHitRate = totalInputWithCache > 0 ? (effectiveCacheRead / totalInputWithCache) * 100 : 0;
+
           const pct = u.maxTokens > 0 ? (u.usedTokens / u.maxTokens) * 100 : 0;
           const barWidth = 24;
           const filled = Math.min(barWidth, Math.max(0, Math.round((pct / 100) * barWidth)));
           const empty = barWidth - filled;
           const meter = `[${chalk.cyan("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct.toFixed(1)}%`;
+
           const lines = [
-            chalk.cyan("─── Token & Context Usage ──────────────────────────────────────"),
-            `Session:      ${meta.thebeSessionId} (${meta.title ?? "untitled"})`,
-            `Model:        ${currentModel} · Thinking: ${currentThinking}`,
-            `Context Bar:  ${meter}`,
-            `Context:      ${formatTokens(u.usedTokens)} / ${formatTokens(u.maxTokens)} tokens (${u.usedTokens.toLocaleString()} / ${u.maxTokens.toLocaleString()})`,
-            `Cumulative:   In: ${formatTokens(cumulativeInputTokens)} · Out: ${formatTokens(cumulativeOutputTokens)}`,
-            `Compaction:   Near Threshold: ${compaction.nearThreshold ? chalk.yellow("YES (approaching auto-compact)") : chalk.green("No")}${compaction.lastCompactedAt ? ` · Last: ${compaction.lastCompactedAt.slice(0, 19).replace("T", " ")}` : ""}`,
-            estimatedCost ? `Cost:         $${estimatedCost.amount.toFixed(4)} ${estimatedCost.currency}` : undefined,
-            `Messages:     ${msgs.length} messages in current transcript`,
+            chalk.cyan("─── Token & Usage Details ──────────────────────────────────────"),
+            `Session:       ${meta.thebeSessionId} (${meta.title ?? "untitled"})`,
+            `Model:         ${currentModel} · Thinking: ${currentThinking}`,
+            `Context Bar:   ${meter}`,
+            `Context Window:${formatTokens(u.usedTokens)} / ${formatTokens(u.maxTokens)} tokens (${u.usedTokens.toLocaleString()} / ${u.maxTokens.toLocaleString()})`,
+            "",
+            chalk.bold("Activity & Turns:"),
+            `  • Total Turns:       ${totalTurns} (User: ${userTurns} · Assistant: ${assistantTurns})`,
+            `  • Tool Executions:   ${toolCalls}`,
+            `  • Total Messages:    ${msgs.length} in transcript`,
+            "",
+            chalk.bold("Tokens & Cache:"),
+            `  • Total Tokens:      ${formatTokens(totalTokens)} (${totalTokens.toLocaleString()})`,
+            `  • Input Tokens:      ${formatTokens(effectiveInputTokens)} (${effectiveInputTokens.toLocaleString()})`,
+            `  • Output Tokens:     ${formatTokens(effectiveOutputTokens)} (${effectiveOutputTokens.toLocaleString()})`,
+            `  • Cached Tokens:     Read: ${formatTokens(effectiveCacheRead)} (${effectiveCacheRead.toLocaleString()}) · Write: ${formatTokens(effectiveCacheWrite)} (${effectiveCacheWrite.toLocaleString()})`,
+            `  • Cache Hit Rate:    ${chalk.cyan(cacheHitRate.toFixed(1) + "%")} (${effectiveCacheRead.toLocaleString()} of ${totalInputWithCache.toLocaleString()} prompt tokens)`,
+            "",
+            chalk.bold("Status:"),
+            `  • Auto-Compaction:   Near Threshold: ${compaction.nearThreshold ? chalk.yellow("YES (approaching limit)") : chalk.green("No")}${compaction.lastCompactedAt ? ` · Last: ${compaction.lastCompactedAt.slice(0, 19).replace("T", " ")}` : ""}`,
+            estimatedCost ? `  • Estimated Cost:    $${estimatedCost.amount.toFixed(4)} ${estimatedCost.currency}` : undefined,
             chalk.cyan("────────────────────────────────────────────────────────────────"),
           ].filter(Boolean) as string[];
           notice(lines.join("\n"));
           break;
         }
         case "tui": {
+          const applyMode = async (chosen: TuiMode): Promise<void> => {
+            await saveThebeConfig({ tuiMode: chosen });
+            if (tui.mode === chosen) {
+              notice(`TUI mode already "${chosen}"`);
+              return;
+            }
+            if (options.onTuiModeChange) {
+              notice(`switching TUI mode to "${chosen}"`);
+              await options.onTuiModeChange(chosen);
+              return;
+            }
+            notice(
+              `TUI mode set to "${chosen}" (saved; host did not apply a live switch)`,
+            );
+          };
           if (arg) {
             if (arg === "fullscreen" || arg === "regular") {
-              await saveThebeConfig({ tuiMode: arg });
-              notice(`TUI mode set to "${arg}" (saved to ~/.thebe/config.json; active in new launch or restart)`);
+              await applyMode(arg);
             } else {
               notice("usage: /tui regular|fullscreen");
             }
@@ -698,11 +957,7 @@ export function attachThebeChat(
           ];
           const selected = await attachSelectList(tui, items, editor);
           if (selected) {
-            const chosen = selected.value as "regular" | "fullscreen";
-            await saveThebeConfig({ tuiMode: chosen });
-            notice(
-              `TUI mode configured to "${chosen}" (saved to ~/.thebe/config.json; active in next launch or restart)`,
-            );
+            await applyMode(selected.value as TuiMode);
           }
           break;
         }
@@ -815,105 +1070,107 @@ export function attachThebeChat(
         }
         case "model": {
           const id = ensureSession();
+          if (arg) {
+            const trimmed = arg.trim();
+            const slash = trimmed.indexOf("/");
+            if (slash > 0) {
+              const providerToken = trimmed.slice(0, slash);
+              const modelToken = trimmed.slice(slash + 1);
+              const providers = await product.listProviders();
+              const provider = resolveListedProvider(providers, providerToken);
+              if (!provider) {
+                notice(`unknown provider: ${providerToken}`);
+                break;
+              }
+              const scoped = await product.listAvailableModels({
+                providerId: provider.id,
+              });
+              const exact = scoped.find(
+                (m) => m.modelId.toLowerCase() === modelToken.toLowerCase(),
+              );
+              if (exact) {
+                await applyModel(id, exact);
+                break;
+              }
+              notice(`unknown model: ${provider.id}/${modelToken}`);
+              break;
+            }
+
+            const available = await product.listAvailableModels();
+            const exact = available.find(
+              (m) =>
+                m.modelId.toLowerCase() === trimmed.toLowerCase() ||
+                `${m.providerId}/${m.modelId}`.toLowerCase() ===
+                  trimmed.toLowerCase(),
+            );
+            if (exact) {
+              await applyModel(id, exact);
+              break;
+            }
+          }
+
           const available = await product.listAvailableModels();
           if (available.length === 0) {
             notice("no available models found");
             break;
           }
-          if (arg) {
-            const trimmed = arg.trim();
-            const slash = trimmed.indexOf("/");
-            const providerId = slash > 0 ? trimmed.slice(0, slash) : "opencode";
-            const modelId = slash > 0 ? trimmed.slice(slash + 1) : trimmed;
-
-            // Direct exact match check
-            const exact = available.find(
-              (m) =>
-                `${m.providerId}/${m.modelId}`.toLowerCase() === trimmed.toLowerCase() ||
-                (m.providerId.toLowerCase() === providerId.toLowerCase() &&
-                  m.modelId.toLowerCase() === modelId.toLowerCase()) ||
-                m.modelId.toLowerCase() === trimmed.toLowerCase(),
-            );
-            if (exact) {
-              const newKey = `${exact.providerId}/${exact.modelId}`;
-              await product.setModel(id, {
-                providerId: exact.providerId,
-                modelId: exact.modelId,
-              });
-              currentModel = newKey;
-              void refreshContextUsage();
-              updateFooter();
-              notice(`switched model to ${currentModel} (${exact.displayName ?? exact.modelId})`);
-              break;
-            }
-          }
-
           const selected = await attachSearchableModelPicker(tui, {
             product,
             currentModel,
-            initialQuery: arg,
+            initialQuery: arg || undefined,
             focusBack: editor,
           });
           if (selected) {
-            const newKey = `${selected.providerId}/${selected.modelId}`;
-            await product.setModel(id, {
-              providerId: selected.providerId,
-              modelId: selected.modelId,
-            });
-            currentModel = newKey;
-            void refreshContextUsage();
-            updateFooter();
-            notice(`switched model to ${currentModel} (${selected.displayName ?? selected.modelId})`);
+            await applyModel(id, selected);
           }
           break;
         }
         case "provider": {
           const id = ensureSession();
+          const providers = await product.listProviders();
+          let chosenProvider: RuntimeProvider | undefined;
           if (arg) {
-            const trimmed = arg.trim();
-            const selected = await attachSearchableModelPicker(tui, {
-              product,
-              currentModel,
-              providerFilter: trimmed,
-              focusBack: editor,
-            });
-            if (selected) {
-              const newKey = `${selected.providerId}/${selected.modelId}`;
-              await product.setModel(id, {
-                providerId: selected.providerId,
-                modelId: selected.modelId,
-              });
-              currentModel = newKey;
-              void refreshContextUsage();
-              updateFooter();
-              notice(`switched model to ${currentModel} (${selected.displayName ?? selected.modelId})`);
+            chosenProvider = resolveListedProvider(providers, arg);
+            if (!chosenProvider) {
+              notice(`unknown provider: ${arg.trim()}`);
+              break;
             }
+          } else {
+            chosenProvider =
+              (await attachSearchableProviderPicker(tui, {
+                product,
+                currentModel,
+                focusBack: editor,
+              })) ?? undefined;
+            if (!chosenProvider) {
+              break;
+            }
+          }
+
+          const scoped = await product.listAvailableModels({
+            providerId: chosenProvider.id,
+          });
+          if (scoped.length === 0) {
+            notice(
+              `no models available for provider ${chosenProvider.id}; login may be required`,
+            );
             break;
           }
 
-          const selectedProvider = await attachSearchableProviderPicker(tui, {
+          const selectedModel = await attachSearchableModelPicker(tui, {
             product,
             currentModel,
+            providerFilter: chosenProvider.id,
             focusBack: editor,
           });
-          if (selectedProvider) {
-            const selectedModel = await attachSearchableModelPicker(tui, {
-              product,
-              currentModel,
-              providerFilter: selectedProvider.id,
-              focusBack: editor,
-            });
-            if (selectedModel) {
-              const newKey = `${selectedModel.providerId}/${selectedModel.modelId}`;
-              await product.setModel(id, {
-                providerId: selectedModel.providerId,
-                modelId: selectedModel.modelId,
-              });
-              currentModel = newKey;
-              void refreshContextUsage();
-              updateFooter();
-              notice(`switched model to ${currentModel} (${selectedModel.displayName ?? selectedModel.modelId})`);
+          if (selectedModel) {
+            if (!sameProviderId(selectedModel.providerId, chosenProvider.id)) {
+              notice(
+                `model ${selectedModel.providerId}/${selectedModel.modelId} is not a ${chosenProvider.id} model`,
+              );
+              break;
             }
+            await applyModel(id, selectedModel);
           }
           break;
         }
@@ -950,59 +1207,86 @@ export function attachThebeChat(
           break;
         }
         case "settings": {
-          const items: SelectItem[] = [
-            { label: "1. Select Model (/model)", value: "model" },
-            { label: "2. Select Provider (/provider)", value: "provider" },
-            { label: "3. Set Thinking Level (/thinking)", value: "thinking" },
-            { label: `4. TUI Display Mode [${tui.mode}] (/tui)`, value: "tui" },
-            { label: "5. View Token & Context Usage (/usage)", value: "usage" },
-            { label: `6. Switch Theme [${currentTheme}] (/theme)`, value: "theme" },
-            { label: "7. Browse & Search Sessions (/sessions)", value: "sessions" },
-            { label: "8. Compact Context (/compact)", value: "compact" },
-            { label: "9. View Session Info (/session)", value: "session" },
-            { label: "10. Keyboard Shortcuts (/hotkeys)", value: "hotkeys" },
-          ];
-          const selected = await attachSelectList(tui, items, editor);
-          if (selected) {
-            await handleSlash(`/${selected.value}`);
-          }
+          await attachSettingsMenu(tui, editor, {
+            theme: currentTheme,
+            thinking: currentThinking,
+            tuiMode: tui.mode,
+            onTheme: (value) => applyTheme(value as ThemeName),
+            onThinking: async (value) => {
+              if (!product) return;
+              const id = ensureSession();
+              await product.setThinkingLevel(id, value as ThinkingLevel);
+              currentThinking = value as ThinkingLevel;
+              updateFooter();
+            },
+            onTuiMode: async (value) => {
+              await saveThebeConfig({ tuiMode: value as TuiMode });
+              if (tui.mode !== value && options.onTuiModeChange) {
+                await options.onTuiModeChange(value as TuiMode);
+              }
+            },
+          });
           break;
         }
         case "theme": {
           if (arg) {
             if (arg === "dark" || arg === "light") {
-              currentTheme = arg;
+              await applyTheme(arg);
               notice(`theme set to ${arg}`);
             } else {
               notice("usage: /theme dark|light");
             }
             break;
           }
+          const previous = currentTheme;
           const items: SelectItem[] = [
             { label: `${currentTheme === "dark" ? "★ " : "  "}Dark theme`, value: "dark" },
             { label: `${currentTheme === "light" ? "★ " : "  "}Light theme`, value: "light" },
           ];
-          const selected = await attachSelectList(tui, items, editor);
+          const selected = await attachSelectList(
+            tui,
+            items,
+            editor,
+            (item) => {
+              void applyTheme(item.value as ThemeName, false);
+            },
+          );
           if (selected) {
-            currentTheme = selected.value as ThemeName;
-            notice(`theme set to ${currentTheme}`);
+            const chosen = selected.value as ThemeName;
+            await applyTheme(chosen);
+            notice(`theme set to ${chosen}`);
+          } else {
+            await applyTheme(previous, false);
           }
           break;
         }
         case "copy": {
-          const id = ensureSession();
-          const msgs = await product.loadMessages(id);
-          const assistantMsgs = msgs.filter((m) => m.role === "assistant");
-          const last = assistantMsgs.at(-1);
-          if (!last || !last.text) {
+          let text = "";
+          if (product) {
+            const id = ensureSession();
+            const msgs = await product.loadMessages(id);
+            text =
+              msgs.filter((m) => m.role === "assistant").at(-1)?.text ?? "";
+          } else {
+            const markdowns = children.filter(
+              (child) => child instanceof Markdown,
+            );
+            text = readMarkdownSource(markdowns.at(-1) as Markdown) ?? "";
+          }
+          if (!text) {
             notice("no assistant response found to copy");
             break;
           }
-          const ok = await copyToClipboard(last.text);
+          const write = tui.terminal
+            ? (data: string) => tui.terminal!.write(data)
+            : undefined;
+          const ok = await copyToClipboard(text, write);
           if (ok) {
-            notice(`copied last response (${last.text.length} chars) to clipboard`);
+            notice(`copied last response (${text.length} chars) to clipboard`);
           } else {
-            notice(`clipboard command unavailable; response snippet: ${last.text.slice(0, 120)}...`);
+            notice(
+              `clipboard command unavailable; response snippet: ${text.slice(0, 120)}...`,
+            );
           }
           break;
         }
@@ -1096,7 +1380,124 @@ export function attachThebeChat(
           if (pendingPermissionId === permissionId) {
             pendingPermissionId = undefined;
           }
-          notice(`permission ${permissionId} ${name}ed`);
+          notice(
+            `permission ${permissionId} ${name === "allow" ? "allowed" : "denied"}`,
+          );
+          break;
+        }
+        case "login": {
+          const providers = await product.listProviders();
+          let target = arg.trim();
+          if (!target) {
+            if (providers.length === 0) {
+              notice("no providers available to log in");
+              break;
+            }
+            const items: SelectItem[] = providers.map((p) => ({
+              label: `${p.displayName ?? p.id} [${p.id}] · ${p.authStatus === "connected" ? chalk.green("connected ●") : chalk.yellow("missing key ○")}`,
+              value: p.id,
+            }));
+            const selected = await attachSelectList(tui, items, editor);
+            if (!selected) break;
+            target = selected.value;
+          }
+          const providerObj = resolveListedProvider(providers, target);
+          if (!providerObj) {
+            notice(`unknown provider: ${target}`);
+            break;
+          }
+          const targetProvider = providerObj.id;
+          const display = providerObj.displayName ?? targetProvider;
+          const methods = providerObj.authMethods ?? ["apiKey"];
+          const supportsOAuth = methods.includes("oauth");
+          const supportsApiKey = methods.includes("apiKey") || methods.length === 0;
+
+          let method: "oauth" | "apikey" = supportsOAuth ? "oauth" : "apikey";
+          if (supportsOAuth && supportsApiKey) {
+            const chosen = await attachSelectList(
+              tui,
+              [
+                { label: `1. OAuth Login with ${display}`, value: "oauth" },
+                { label: `2. Set API Key for ${display}`, value: "apikey" },
+              ],
+              editor,
+            );
+            if (!chosen) break;
+            method = chosen.value === "apikey" ? "apikey" : "oauth";
+          }
+
+          if (method === "oauth") {
+            const ok = await runOAuthLogin(
+              tui,
+              product,
+              targetProvider,
+              editor,
+              notice,
+            );
+            if (ok) {
+              await afterProviderLoggedIn(
+                targetProvider,
+                `logged in provider ${targetProvider} via OAuth`,
+              );
+            }
+            break;
+          }
+
+          const apiKey = await attachPromptInput(tui, {
+            prompt: chalk.cyan(`API key for ${targetProvider}: `),
+            placeholder: "paste API key and press Enter",
+            focusBack: editor,
+          });
+          if (apiKey === null) {
+            notice(`login cancelled for ${targetProvider}`);
+            break;
+          }
+          if (!apiKey.trim()) {
+            notice(`API key required for ${targetProvider}`);
+            break;
+          }
+          try {
+            await product.auth().setApiKey(targetProvider, apiKey.trim());
+            await afterProviderLoggedIn(
+              targetProvider,
+              `saved API key for ${targetProvider}`,
+            );
+          } catch (e) {
+            notice(
+              `login error for ${targetProvider}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
+          break;
+        }
+        case "logout": {
+          const providers = await product.listProviders();
+          let target = arg.trim();
+          if (!target) {
+            if (providers.length === 0) {
+              notice("no providers available to log out");
+              break;
+            }
+            const items: SelectItem[] = providers.map((p) => ({
+              label: `${p.displayName ?? p.id} [${p.id}] · ${p.authStatus === "connected" ? chalk.green("connected ●") : chalk.yellow("missing key ○")}`,
+              value: p.id,
+            }));
+            const selected = await attachSelectList(tui, items, editor);
+            if (!selected) break;
+            target = selected.value;
+          }
+          const providerObj = resolveListedProvider(providers, target);
+          if (!providerObj) {
+            notice(`unknown provider: ${target}`);
+            break;
+          }
+          try {
+            await product.auth().logout(providerObj.id);
+            notice(`logged out provider ${providerObj.id}`);
+          } catch (e) {
+            notice(
+              `logout error for ${providerObj.id}: ${e instanceof Error ? e.message : String(e)}`,
+            );
+          }
           break;
         }
         default:
@@ -1124,24 +1525,40 @@ export function attachThebeChat(
       return;
     }
     void (async () => {
-      if (await handleSlash(trimmed)) {
-        return;
-      }
       try {
+        if (await handleSlash(trimmed)) {
+          return;
+        }
         await runPrompt(trimmed, "prompt");
       } catch (error) {
         notice(error instanceof Error ? error.message : String(error));
         isResponding = false;
         editor.disableSubmit = false;
         endStream();
+      } finally {
+        tui.setFocus(editor);
+        tui.requestRender();
       }
     })();
   };
 
+  const thinkingCycle: ThinkingLevel[] = [
+    "off",
+    "low",
+    "medium",
+    "high",
+  ];
   const originalHandleInput = editor.handleInput.bind(editor);
   editor.handleInput = (data: string) => {
     if (matchesKey(data, "ctrl+p")) {
       void handleSlash("/model");
+      return;
+    }
+    if (matchesKey(data, "shift+tab")) {
+      const idx = thinkingCycle.indexOf(currentThinking);
+      const next =
+        thinkingCycle[(idx < 0 ? 0 : idx + 1) % thinkingCycle.length]!;
+      void handleSlash(`/thinking ${next}`);
       return;
     }
     if (isResponding && matchesKey(data, "alt+enter")) {
@@ -1173,39 +1590,271 @@ export function attachThebeChat(
 }
 
 export function startThebeTui(options: ThebeTuiOptions): TUI {
-  const mode: TuiMode = options.tuiMode ?? "regular";
+  let mode: TuiMode = options.tuiMode ?? "regular";
   const terminal = new ProcessTerminal();
-  const tui: TUI =
-    mode === "fullscreen"
+  let tui: TUI | undefined;
+
+  const launch = (): TUI => {
+    tui = mode === "fullscreen"
       ? new TuiAltScreen(terminal, true)
       : new TuiMainScreen(terminal);
-  const chat = attachThebeChat(tui, options);
-  tui.addInputListener((data) => {
-    if (matchesKey(data, "ctrl+c")) {
-      tui.stop();
-      process.exit(0);
-    }
-    if (matchesKey(data, "escape")) {
-      if (chat.isResponding() && options.product) {
-        const id = options.sessionId ?? options.product.lastThebeSessionId();
-        if (id) {
-          void options.product.interrupt(id).catch(() => {});
+    const chat = attachThebeChat(tui, {
+      ...options,
+      tuiMode: mode,
+      onTuiModeChange: async (next) => {
+        if (next === mode) return;
+        mode = next;
+        options.tuiMode = next;
+        tui?.stop();
+        const nextTui = launch();
+        nextTui.start();
+      },
+    });
+    tui.addInputListener((data) => {
+      if (matchesKey(data, "ctrl+c")) {
+        tui?.stop();
+        process.exit(0);
+      }
+      if (matchesKey(data, "escape")) {
+        if (chat.isResponding() && options.product) {
+          const id = options.sessionId ?? options.product.lastThebeSessionId();
+          if (id) {
+            void options.product.interrupt(id).catch(() => {});
+          }
+          return { consume: true };
         }
-        return { consume: true };
+        return undefined;
       }
       return undefined;
+    });
+    return tui;
+  };
+
+  const started = launch();
+  started.start();
+  return started;
+}
+
+export function parseModelRef(ref: string): {
+  providerId: string;
+  modelId: string;
+} {
+  const trimmed = ref.trim();
+  const slash = trimmed.indexOf("/");
+  if (slash > 0) {
+    return {
+      providerId: trimmed.slice(0, slash),
+      modelId: trimmed.slice(slash + 1),
+    };
+  }
+  return { providerId: "", modelId: trimmed };
+}
+
+async function runOAuthLogin(
+  tui: TUI,
+  product: ThebeProduct,
+  providerId: string,
+  focusBack: unknown,
+  notice: (text: string) => void,
+): Promise<boolean> {
+  try {
+    notice(`initiating OAuth login for ${providerId}...`);
+    const auth = product.auth();
+    const res = await auth.authorizeOAuth(providerId);
+    if (res.connected) {
+      return true;
     }
-    return undefined;
+    if (res.url) {
+      openBrowser(res.url);
+    }
+    if (res.deviceCode?.verificationUri) {
+      openBrowser(res.deviceCode.verificationUri);
+    }
+    const hint = [
+      res.url ? `authorize in your browser: ${res.url}` : undefined,
+      res.deviceCode
+        ? `device login: visit ${res.deviceCode.verificationUri} and enter ${res.deviceCode.userCode}`
+        : undefined,
+      res.instructions,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (hint) {
+      notice(hint);
+    }
+    const callback = await attachPromptInput(tui, {
+      prompt: chalk.cyan(`OAuth callback for ${providerId}: `),
+      placeholder: "paste redirect URL or code",
+      focusBack,
+    });
+    if (callback === null || !callback.trim()) {
+      const already = await auth.check(providerId);
+      if (already.ok) {
+        return true;
+      }
+      notice(
+        callback === null
+          ? `OAuth login for ${providerId} cancelled`
+          : `OAuth callback required for ${providerId}`,
+      );
+      return false;
+    }
+    try {
+      await auth.submitOAuthCallback(providerId, callback.trim());
+    } catch (error) {
+      const already = await auth.check(providerId);
+      if (!already.ok) {
+        throw error;
+      }
+    }
+    const status = await auth.check(providerId);
+    if (!status.ok) {
+      notice(`OAuth login for ${providerId} did not connect`);
+      return false;
+    }
+    return true;
+  } catch (e) {
+    notice(
+      `OAuth login error for ${providerId}: ${e instanceof Error ? e.message : String(e)}`,
+    );
+    return false;
+  }
+}
+
+export function resolveListedProvider(
+  providers: RuntimeProvider[],
+  token: string,
+): RuntimeProvider | undefined {
+  const lower = token.trim().toLowerCase();
+  if (!lower) return undefined;
+  return providers.find(
+    (p) =>
+      p.id.toLowerCase() === lower ||
+      (p.displayName ?? "").toLowerCase() === lower,
+  );
+}
+
+function sameProviderId(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+export function attachPromptInput(
+  tui: TUI,
+  options: {
+    prompt: string;
+    placeholder?: string;
+    focusBack?: unknown;
+  },
+): Promise<string | null> {
+  return new Promise((resolvePromise) => {
+    const input = new Input({
+      prompt: options.prompt,
+      placeholder: options.placeholder ?? "",
+      placeholderStyle: (text) => chalk.dim(text),
+    });
+    let resolved = false;
+    const finish = (value: string | null) => {
+      if (resolved) return;
+      resolved = true;
+      tui.removeChild(input);
+      if (options.focusBack) {
+        tui.setFocus(options.focusBack as never);
+      }
+      tui.requestRender();
+      resolvePromise(value);
+    };
+    input.onSubmit = (value) => finish(value);
+    input.onEscape = () => finish(null);
+    const origHandleInput = input.handleInput.bind(input);
+    input.handleInput = (keyData) => {
+      origHandleInput(keyData);
+      tui.requestRender();
+    };
+    tui.addChild(input);
+    tui.setFocus(input);
+    tui.requestRender();
   });
-  tui.start();
-  return tui;
 }
 
 /** SelectList helper for future pickers (models / sessions). */
+const defaultSettingsListTheme: SettingsListTheme = {
+  label: (text, selected) => (selected ? chalk.bold.cyan(text) : text),
+  value: (text, selected) => (selected ? chalk.cyan(text) : chalk.dim(text)),
+  description: (text) => chalk.dim(text),
+  cursor: "→ ",
+  hint: (text) => chalk.dim(text),
+};
+
+function attachSettingsMenu(
+  tui: TUI,
+  focusBack: unknown,
+  options: {
+    theme: ThemeName;
+    thinking: ThinkingLevel;
+    tuiMode: TuiMode;
+    onTheme: (value: string) => void | Promise<void>;
+    onThinking: (value: string) => void | Promise<void>;
+    onTuiMode: (value: string) => void | Promise<void>;
+  },
+): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const items: SettingItem[] = [
+      {
+        id: "theme",
+        label: "Theme",
+        description: "TUI color theme (applied immediately)",
+        currentValue: options.theme,
+        values: ["dark", "light"],
+      },
+      {
+        id: "thinking",
+        label: "Thinking",
+        description: "Reasoning level for the current session",
+        currentValue: options.thinking,
+        values: Array.from(THINKING_LEVELS),
+      },
+      {
+        id: "tui",
+        label: "TUI mode",
+        description: "regular scrolling terminal or fullscreen viewport",
+        currentValue: options.tuiMode,
+        values: ["regular", "fullscreen"],
+      },
+    ];
+    const list = new SettingsList(
+      items,
+      Math.min(items.length + 2, 10),
+      defaultSettingsListTheme,
+      (id, newValue) => {
+        list.updateValue(id, newValue);
+        tui.requestRender();
+        if (id === "theme") void options.onTheme(newValue);
+        if (id === "thinking") void options.onThinking(newValue);
+        if (id === "tui") void options.onTuiMode(newValue);
+      },
+      () => {
+        tui.removeChild(list);
+        if (focusBack) tui.setFocus(focusBack as never);
+        tui.requestRender();
+        resolvePromise();
+      },
+    );
+    const origHandleInput = list.handleInput.bind(list);
+    list.handleInput = (keyData) => {
+      origHandleInput(keyData);
+      tui.requestRender();
+    };
+    tui.addChild(list);
+    tui.setFocus(list);
+    tui.requestRender();
+  });
+}
+
 export function attachSelectList(
   tui: TUI,
   items: SelectItem[],
   focusBack?: { focus?: () => void } | unknown,
+  onSelectionChange?: (item: SelectItem) => void,
 ): Promise<SelectItem | null> {
   return new Promise((resolvePromise) => {
     const list = new SelectList(
@@ -1218,6 +1867,9 @@ export function attachSelectList(
       origHandleInput(keyData);
       tui.requestRender();
     };
+    if (onSelectionChange) {
+      list.onSelectionChange = onSelectionChange;
+    }
     list.onSelect = (item) => {
       tui.removeChild(list);
       if (focusBack) tui.setFocus(focusBack as never);

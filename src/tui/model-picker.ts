@@ -3,13 +3,30 @@ import {
   fuzzyFilter,
   Input,
   matchesKey,
+  truncateToWidth,
   type Component,
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { ThebeProduct } from "../product/service.ts";
 import type { RuntimeModel, RuntimeProvider } from "../runtime/types.ts";
-import { formatTokens } from "./app.ts";
+
+function isConfirmKey(data: string): boolean {
+  return (
+    matchesKey(data, "enter") ||
+    matchesKey(data, "return") ||
+    data === "\r" ||
+    data === "\n"
+  );
+}
+
+function sameProvider(a: string, b: string): boolean {
+  return a.toLowerCase() === b.toLowerCase();
+}
+
+function fitLines(lines: string[], width: number): string[] {
+  return lines.map((line) => truncateToWidth(line, width, ""));
+}
 
 export interface SearchableModelPickerOptions {
   models: RuntimeModel[];
@@ -54,7 +71,7 @@ export class SearchableModelPicker implements Component, Focusable {
   constructor(options: SearchableModelPickerOptions) {
     this.allModels = [...options.models];
     this.currentModel = options.currentModel;
-    this.defaultModel = options.defaultModel ?? "opencode/muse-spark-1.3-free";
+    this.defaultModel = options.defaultModel ?? "";
     this.pageSize = options.pageSize ?? 8;
     this.onSelectCallback = options.onSelect;
     this.onCancelCallback = options.onCancel;
@@ -64,10 +81,16 @@ export class SearchableModelPicker implements Component, Focusable {
     const uniqueProviders = Array.from(
       new Set(this.allModels.map((m) => m.providerId)),
     ).sort();
-    this.providers = ["all", ...uniqueProviders];
+    this.providers =
+      uniqueProviders.length <= 1
+        ? uniqueProviders.length === 1
+          ? uniqueProviders
+          : ["all"]
+        : ["all", ...uniqueProviders];
 
     if (options.initialProvider) {
-      const idx = this.providers.indexOf(options.initialProvider.toLowerCase());
+      const wanted = options.initialProvider.toLowerCase();
+      const idx = this.providers.findIndex((id) => id.toLowerCase() === wanted);
       if (idx >= 0) {
         this.providerIndex = idx;
       }
@@ -75,7 +98,7 @@ export class SearchableModelPicker implements Component, Focusable {
 
     this.searchInput = new Input({
       prompt: chalk.cyan("Search: "),
-      placeholder: "Type to filter (e.g. spark, claude, gpt)...",
+      placeholder: "filter models",
       placeholderStyle: (t) => chalk.dim(t),
     });
 
@@ -116,7 +139,9 @@ export class SearchableModelPicker implements Component, Focusable {
     const providerScoped =
       activeProvider === "all"
         ? this.allModels
-        : this.allModels.filter((m) => m.providerId === activeProvider);
+        : this.allModels.filter((m) =>
+            sameProvider(m.providerId, activeProvider),
+          );
 
     const query = this.searchInput.getValue().trim();
     if (!query) {
@@ -197,7 +222,7 @@ export class SearchableModelPicker implements Component, Focusable {
       return;
     }
 
-    if (matchesKey(data, "return")) {
+    if (isConfirmKey(data)) {
       const selected = this.filteredModels[this.selectedIndex];
       if (selected) {
         this.onSelectCallback(selected);
@@ -226,30 +251,19 @@ export class SearchableModelPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    const maxLen = Math.min(Math.max(width, 40), 76);
-    const divider = chalk.dim("  " + "─".repeat(maxLen - 2));
-
-    // 1. Header: title & provider filter
     const activeProvider = this.getActiveProvider();
-    const filterText =
+    const scope =
       activeProvider === "all"
-        ? chalk.dim("all providers")
-        : chalk.cyan(`[${activeProvider}]`);
-    lines.push(
-      `  ${chalk.bold("Model Selector")}  ${chalk.dim("Provider:")} ${filterText}  ${chalk.dim("(Tab to cycle)")}`,
-    );
+        ? chalk.dim("all")
+        : chalk.cyan(activeProvider);
+    lines.push(`  ${chalk.bold("Model")}  ${chalk.dim("provider:")} ${scope}`);
 
-    // 2. Search input
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
-    lines.push(divider);
 
-    // 3. Item list
     const total = this.filteredModels.length;
     if (total === 0) {
-      lines.push(
-        chalk.yellow("    No matching models found. Press Tab to cycle provider."),
-      );
+      lines.push(chalk.yellow("    No matching models"));
     } else {
       const startIndex = Math.max(
         0,
@@ -265,64 +279,27 @@ export class SearchableModelPicker implements Component, Focusable {
         const isSelected = i === this.selectedIndex;
         const key = `${item.providerId}/${item.modelId}`;
         const isCurrent = key === this.currentModel;
-        const isDefault = key === this.defaultModel;
-
-        const cursor = isSelected ? chalk.bold.cyan("→ ") : "  ";
-        const currentMarker = isCurrent ? chalk.bold.green("✓ ") : "  ";
+        const isDefault = Boolean(this.defaultModel) && key === this.defaultModel;
+        const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
         const modelIdText = isSelected
-          ? chalk.bold.cyan(item.modelId)
-          : chalk.white(item.modelId);
+          ? chalk.cyan(item.modelId)
+          : item.modelId;
         const providerBadge = chalk.dim(`[${item.providerId}]`);
-        const defaultBadge = isDefault ? chalk.yellow(" · default") : "";
-        const ctxBadge = item.contextWindow
-          ? chalk.dim(` ${formatTokens(item.contextWindow)} ctx`)
-          : "";
-        const reasoningBadge = item.supportsThinking
-          ? chalk.magenta(" [reasoning]")
-          : "";
-
+        const defaultBadge = isDefault ? chalk.dim(" · default") : "";
         lines.push(
-          `  ${cursor}${currentMarker}${modelIdText} ${providerBadge}${ctxBadge}${defaultBadge}${reasoningBadge}`,
+          `  ${cursor}${currentMarker}${modelIdText} ${providerBadge}${defaultBadge}`,
         );
       }
 
       if (total > this.pageSize) {
         lines.push(
-          chalk.dim(`    (${this.selectedIndex + 1}/${total} models)`),
+          chalk.dim(`    (${this.selectedIndex + 1}/${total})`),
         );
       }
     }
 
-    // 4. Selected details summary
-    lines.push(divider);
-    const currentSelected = this.filteredModels[this.selectedIndex];
-    if (currentSelected) {
-      const isCur = `${currentSelected.providerId}/${currentSelected.modelId}` === this.currentModel;
-      const isDef = `${currentSelected.providerId}/${currentSelected.modelId}` === this.defaultModel;
-      const statusBadge = isCur
-        ? chalk.green(" (Currently Active ✓)")
-        : isDef
-          ? chalk.yellow(" (System Default)")
-          : "";
-      const ctxStr = currentSelected.contextWindow
-        ? ` · ${formatTokens(currentSelected.contextWindow)} ctx`
-        : "";
-      const thinkStr = currentSelected.supportsThinking
-        ? " · reasoning"
-        : "";
-
-      lines.push(
-        `  ${chalk.dim("Selected Model Details:")} ${chalk.cyan(`${currentSelected.providerId}/${currentSelected.modelId}`)}${ctxStr}${thinkStr}${statusBadge}`,
-      );
-    }
-
-    // 5. Hotkey legend
-    lines.push(
-      chalk.dim("  Enter select  •  Tab cycle provider  •  ↑↓ navigate  •  Esc cancel"),
-    );
-    lines.push(divider);
-
-    return lines;
+    return fitLines(lines, width);
   }
 }
 
@@ -427,7 +404,7 @@ export class SearchableProviderPicker implements Component, Focusable {
       return;
     }
 
-    if (matchesKey(data, "return")) {
+    if (isConfirmKey(data)) {
       const selected = this.filteredProviders[this.selectedIndex];
       if (selected) {
         this.onSelectCallback(selected);
@@ -455,23 +432,13 @@ export class SearchableProviderPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    const maxLen = Math.min(Math.max(width, 40), 76);
-    const divider = chalk.dim("  " + "─".repeat(maxLen - 2));
-
-    // 1. Header
-    lines.push(
-      `  ${chalk.bold("Provider Selector")}  ${chalk.dim("• Select a provider to browse models")}`,
-    );
-
-    // 2. Search input
+    lines.push(`  ${chalk.bold("Provider")}`);
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
-    lines.push(divider);
 
-    // 3. Provider list
     const total = this.filteredProviders.length;
     if (total === 0) {
-      lines.push(chalk.yellow("    No matching providers found."));
+      lines.push(chalk.yellow("    No matching providers"));
     } else {
       const startIndex = Math.max(
         0,
@@ -485,57 +452,23 @@ export class SearchableProviderPicker implements Component, Focusable {
       for (let i = startIndex; i < endIndex; i++) {
         const item = this.filteredProviders[i]!;
         const isSelected = i === this.selectedIndex;
-        const isCurrent = item.id === this.currentProvider;
-        const count = this.modelCounts.get(item.id) ?? 0;
-
-        const cursor = isSelected ? chalk.bold.cyan("→ ") : "  ";
-        let statusBullet = chalk.yellow("○ ");
-        let statusText = chalk.yellow("missing key");
-        if (item.authStatus === "connected") {
-          statusBullet = chalk.green("● ");
-          statusText = chalk.green("connected");
-        } else if (item.authStatus === "error") {
-          statusBullet = chalk.red("× ");
-          statusText = chalk.red("error");
-        }
-
+        const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const status =
+          item.authStatus === "connected"
+            ? chalk.green("connected")
+            : item.authStatus === "error"
+              ? chalk.red("error")
+              : chalk.dim("missing");
         const nameText = isSelected
-          ? chalk.bold.cyan(item.displayName ?? item.id)
-          : chalk.white(item.displayName ?? item.id);
-        const idBadge = chalk.dim(`[${item.id}]`);
-        const modelBadge = chalk.dim(`(${count} models)`);
-        const activeBadge = isCurrent ? chalk.cyan(" · active") : "";
-
+          ? chalk.cyan(item.displayName ?? item.id)
+          : (item.displayName ?? item.id);
         lines.push(
-          `  ${cursor}${statusBullet}${nameText} ${idBadge} · ${statusText} ${modelBadge}${activeBadge}`,
+          `  ${cursor}${nameText} ${chalk.dim(`[${item.id}]`)} ${status}`,
         );
       }
     }
 
-    // 4. Details
-    lines.push(divider);
-    const current = this.filteredProviders[this.selectedIndex];
-    if (current) {
-      const count = this.modelCounts.get(current.id) ?? 0;
-      const statusDesc =
-        current.authStatus === "connected"
-          ? chalk.green("connected ●")
-          : current.authStatus === "error"
-            ? chalk.red("error ×")
-            : chalk.yellow("missing key ○");
-
-      lines.push(
-        `  ${chalk.dim("Provider Details:")} ${chalk.bold(current.displayName ?? current.id)} [${current.id}] · ${statusDesc} · (${count} models)`,
-      );
-    }
-
-    // 5. Hotkey legend
-    lines.push(
-      chalk.dim("  Enter select & browse models  •  ↑↓ navigate  •  Esc cancel"),
-    );
-    lines.push(divider);
-
-    return lines;
+    return fitLines(lines, width);
   }
 }
 
@@ -553,7 +486,17 @@ export async function attachSearchableModelPicker(
     focusBack?: unknown;
   },
 ): Promise<RuntimeModel | null> {
-  const models = await options.product.listAvailableModels();
+  let providerId = options.providerFilter?.trim();
+  if (providerId) {
+    const providers = await options.product.listProviders();
+    const match = providers.find((p) => sameProvider(p.id, providerId!));
+    if (match) {
+      providerId = match.id;
+    }
+  }
+  const models = await options.product.listAvailableModels(
+    providerId ? { providerId } : undefined,
+  );
   if (models.length === 0) {
     return null;
   }
@@ -574,9 +517,9 @@ export async function attachSearchableModelPicker(
     const picker = new SearchableModelPicker({
       models,
       currentModel: options.currentModel,
-      defaultModel: "opencode/muse-spark-1.3-free",
+      defaultModel: options.currentModel,
       initialQuery: options.initialQuery,
-      initialProvider: options.providerFilter,
+      initialProvider: providerId,
       onSelect: (model) => finish(model),
       onCancel: () => finish(null),
       onRequestRender: () => tui.requestRender(),

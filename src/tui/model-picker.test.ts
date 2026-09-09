@@ -119,16 +119,13 @@ describe("SearchableModelPicker", () => {
     });
 
     const lines = picker.render(80).join("\n");
-    expect(lines).toContain("Model Selector");
+    expect(lines).toContain("Model");
     expect(lines).toContain("Search:");
-    expect(lines).toContain("Provider:");
     expect(lines).toContain("muse-spark-1.3-free");
     expect(lines).toContain("[opencode]");
-    expect(lines).toContain("[reasoning]");
-    expect(lines).toContain("1.0M ctx");
-    expect(lines).toContain("Selected Model Details");
-    expect(lines).toContain("Enter");
-    expect(lines).toContain("Tab");
+    expect(lines).not.toContain("[reasoning]");
+    expect(lines).not.toContain("ctx");
+    expect(lines).not.toContain("Selected Model Details");
   });
 
   it("filters models in real time as characters are typed", () => {
@@ -203,20 +200,16 @@ describe("SearchableModelPicker", () => {
       onCancel: vi.fn(),
     });
 
-    // Initially selectedIndex is 0. Arrow down moves to index 1.
-    picker.handleInput("\x1b[B"); // down
-    // Arrow down moves to index 2
-    picker.handleInput("\x1b[B"); // down
-    // Arrow down wraps to 0
-    picker.handleInput("\x1b[B"); // down
-
-    // Arrow up wraps to last item (index 2)
+    // Wrap from the first row to the last with Up, then confirm that row.
     picker.handleInput("\x1b[A"); // up
     picker.handleInput("\r"); // enter
 
-    expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ modelId: "openai" in mockModels[2]! ? "gpt-4o" : mockModels[2]!.modelId }),
+    const sorted = [...mockModels].sort(
+      (a, b) =>
+        a.providerId.localeCompare(b.providerId) ||
+        a.modelId.localeCompare(b.modelId),
     );
+    expect(onSelect).toHaveBeenCalledWith(sorted.at(-1));
   });
 
   it("handles cancellation via Escape key", () => {
@@ -229,6 +222,33 @@ describe("SearchableModelPicker", () => {
 
     picker.handleInput("\x1b"); // escape
     expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it("cycling the provider tab to DeepSeek hides opencode rows", () => {
+    const picker = new SearchableModelPicker({
+      models: [
+        mockModels[0]!,
+        {
+          providerId: "deepseek",
+          modelId: "deepseek-chat",
+          displayName: "DeepSeek Chat",
+          available: true,
+        },
+      ],
+      onSelect: vi.fn(),
+      onCancel: vi.fn(),
+    });
+
+    let lines = picker.render(80).join("\n");
+    expect(lines).toContain("muse-spark-1.3-free");
+    expect(lines).toContain("deepseek-chat");
+
+    picker.handleInput("\t");
+    lines = picker.render(80).join("\n");
+    expect(lines).toContain("deepseek-chat");
+    expect(lines).toContain("[deepseek]");
+    expect(lines).not.toContain("muse-spark-1.3-free");
+    expect(lines).not.toContain("[opencode]");
   });
 
   it("accepts pre-filled initial query and initial provider", () => {
@@ -262,14 +282,14 @@ describe("SearchableProviderPicker", () => {
     });
 
     const lines = picker.render(80).join("\n");
-    expect(lines).toContain("Provider Selector");
+    expect(lines).toContain("Provider");
     expect(lines).toContain("OpenCode AI");
-    expect(lines).toContain("(2 models)");
+    expect(lines).toContain("[opencode]");
     expect(lines).toContain("connected");
     expect(lines).toContain("Anthropic");
     expect(lines).toContain("OpenAI");
-    expect(lines).toContain("missing key");
-    expect(lines).toContain("Provider Details");
+    expect(lines).not.toContain("Provider Details");
+    expect(lines).not.toContain("(2 models)");
   });
 
   it("filters providers and selects on enter", () => {
@@ -349,6 +369,9 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
     const picker = tui.children.find(
       (c) => c instanceof SearchableProviderPicker,
     ) as SearchableProviderPicker;
+    for (const char of "fake") {
+      picker.handleInput(char);
+    }
     picker.handleInput("\r");
 
     const result = await promise;
@@ -357,5 +380,35 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
     expect(
       tui.children.some((c) => c instanceof SearchableProviderPicker),
     ).toBe(false);
+  });
+
+  it("scopes attached model picker to DeepSeek and excludes opencode rows", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: stubContainerProvider,
+    });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+
+    const promise = attachSearchableModelPicker(tui, {
+      product,
+      providerFilter: "DeepSeek",
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    const picker = tui.children.find(
+      (c) => c instanceof SearchableModelPicker,
+    ) as SearchableModelPicker;
+    expect(picker).toBeDefined();
+    const lines = picker.render(80).join("\n");
+    expect(lines).toContain("deepseek-chat");
+    expect(lines).not.toContain("muse-spark-1.3-free");
+    expect(lines).not.toContain("[opencode]");
+    expect(lines).not.toContain("[fake]");
+
+    picker.handleInput("\r");
+    const result = await promise;
+    expect(result?.providerId).toBe("deepseek");
+    expect(result?.modelId).toMatch(/^deepseek-/);
   });
 });

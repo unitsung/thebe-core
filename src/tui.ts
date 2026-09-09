@@ -68,4 +68,5 @@ startThebeTui({
   model: modelRef,
   version,
   tuiMode,
+  theme: userConfig.theme,
 });

@@ -654,6 +654,7 @@ export async function createPiCodingAgentRuntime(
         throw new Error("OAuth callback input required");
       }
       entry.resolvePrompt(input);
+      await entry.completion;
     },
     async logout(providerId) {
       await modelRuntime.logout(providerId);
