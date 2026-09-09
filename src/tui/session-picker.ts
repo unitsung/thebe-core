@@ -308,10 +308,7 @@ export async function attachSearchableSessionPicker(
       if (settled) return;
       settled = true;
       tui.removeChild(picker);
-      if (
-        options.focusBack &&
-        typeof (options.focusBack as { focus?: () => void }).focus === "function"
-      ) {
+      if (options.focusBack) {
         tui.setFocus(options.focusBack as never);
       }
       tui.requestRender();

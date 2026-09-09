@@ -218,6 +218,37 @@ describe("PiCodingAgentRuntime sessions", () => {
     ).rejects.toThrow("unknown OAuth authorization");
   });
 
+  it("submitOAuthCallback feeds the prompt and waits for login to finish", async () => {
+    const { runtime, modelRuntime } = await piWithFaux();
+    let received = "";
+    vi.spyOn(modelRuntime, "login").mockImplementation(
+      async (...args: unknown[]) => {
+        const interaction = args[2] as {
+          prompt: () => Promise<string>;
+          notify: (event: { type: string; url?: string }) => void;
+        };
+        interaction.notify({
+          type: "auth_url",
+          url: "https://example.com/oauth/google",
+        });
+        received = await interaction.prompt();
+        return {
+          type: "oauth",
+          access: "a",
+          refresh: "r",
+          expires: Date.now() + 60_000,
+        };
+      },
+    );
+    const pending = await runtime.auth().authorizeOAuth("google");
+    expect(pending).toMatchObject({
+      pending: true,
+      url: "https://example.com/oauth/google",
+    });
+    await runtime.auth().submitOAuthCallback("google", "pasted-from-tui");
+    expect(received).toBe("pasted-from-tui");
+  });
+
   it("product metadata files omit transcript payloads", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-pi-meta-"));
     const { faux, runtime } = await piWithFaux(dir);

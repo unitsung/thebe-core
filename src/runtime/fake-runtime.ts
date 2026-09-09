@@ -48,7 +48,96 @@ type FakeSessionState = {
   abortWaiters: Array<() => void>;
 };
 
-export function createFakeRuntime(options: { runtimeId?: string } = {}) {
+export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [
+  {
+    providerId: "fake",
+    modelId: "fake-1",
+    displayName: "Fake One",
+    supportsThinking: true,
+    available: true,
+  },
+  {
+    providerId: "fake",
+    modelId: "fake-2",
+    displayName: "Fake Two",
+    supportsThinking: false,
+    available: true,
+  },
+  {
+    providerId: "opencode",
+    modelId: "muse-spark-1.3-free",
+    displayName: "Muse Spark 1.3 Free",
+    supportsThinking: true,
+    available: true,
+  },
+  {
+    providerId: "deepseek",
+    modelId: "deepseek-chat",
+    displayName: "DeepSeek Chat",
+    supportsThinking: false,
+    available: true,
+  },
+  {
+    providerId: "deepseek",
+    modelId: "deepseek-reasoner",
+    displayName: "DeepSeek Reasoner",
+    supportsThinking: true,
+    available: true,
+  },
+  {
+    providerId: "google",
+    modelId: "gemini-2.0-flash",
+    displayName: "Gemini 2.0 Flash",
+    supportsThinking: false,
+    available: true,
+  },
+  {
+    providerId: "anthropic",
+    modelId: "claude-3-5-sonnet",
+    displayName: "Claude 3.5 Sonnet",
+    supportsThinking: true,
+    available: true,
+  },
+];
+
+const FAKE_RUNTIME_PROVIDERS: Array<
+  Omit<RuntimeProvider, "authStatus">
+> = [
+  {
+    id: "fake",
+    displayName: "Fake",
+    authMethods: ["apiKey", "oauth"],
+  },
+  {
+    id: "opencode",
+    displayName: "OpenCode",
+    authMethods: ["apiKey"],
+  },
+  {
+    id: "deepseek",
+    displayName: "DeepSeek",
+    authMethods: ["apiKey"],
+  },
+  {
+    id: "google",
+    displayName: "Google",
+    authMethods: ["oauth"],
+  },
+  {
+    id: "anthropic",
+    displayName: "Anthropic",
+    authMethods: ["apiKey"],
+  },
+  {
+    id: "emptyco",
+    displayName: "Empty Co",
+    authMethods: ["oauth"],
+  },
+];
+
+export function createFakeRuntime(
+  options: { runtimeId?: string; models?: RuntimeModel[] } = {},
+) {
   const sessions = new Map<string, FakeSessionState>();
   const queue: FakeQueuedTurn[] = [];
   const apiKeys = new Map<string, string>();
@@ -347,7 +436,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         return state.messages.slice();
       },
       async setModel(model: RuntimeModelRef): Promise<void> {
-        const known = FAKE_MODELS.some(
+        const known = models.some(
           (row) =>
             row.providerId === model.providerId &&
             row.modelId === model.modelId,
@@ -423,29 +512,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
     };
   }
 
-  const FAKE_MODELS: RuntimeModel[] = [
-    {
-      providerId: "fake",
-      modelId: "fake-1",
-      displayName: "Fake One",
-      supportsThinking: true,
-      available: true,
-    },
-    {
-      providerId: "fake",
-      modelId: "fake-2",
-      displayName: "Fake Two",
-      supportsThinking: false,
-      available: true,
-    },
-    {
-      providerId: "opencode",
-      modelId: "muse-spark-1.3-free",
-      displayName: "Muse Spark 1.3 Free",
-      supportsThinking: true,
-      available: true,
-    },
-  ];
+  const models = options.models ?? FAKE_RUNTIME_MODELS;
 
   const auth: RuntimeAuth = {
     async setApiKey(providerId: string, apiKey: string): Promise<void> {
@@ -465,7 +532,11 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         pending: true as const,
         url: `https://oauth.example/${providerId}/authorize`,
         instructions:
-          "Complete login in your browser, then POST the redirect URL or code to the callback route.",
+          "Complete login in your browser, then paste the redirect URL or code.",
+        deviceCode: {
+          userCode: `${providerId.toUpperCase()}-DEV`,
+          verificationUri: `https://oauth.example/${providerId}/device`,
+        },
       };
     },
     async submitOAuthCallback(providerId, input) {
@@ -492,16 +563,13 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       return { ok: apiKeys.has(providerId) || oauthLogins.includes(providerId) };
     },
     async listProviders(): Promise<RuntimeProvider[]> {
-      const connected =
-        apiKeys.has("fake") || oauthLogins.includes("fake");
-      return [
-        {
-          id: "fake",
-          displayName: "Fake",
-          authMethods: ["apiKey", "oauth"],
-          authStatus: connected ? "connected" : "missing",
-        },
-      ];
+      return FAKE_RUNTIME_PROVIDERS.map((provider) => ({
+        ...provider,
+        authStatus:
+          apiKeys.has(provider.id) || oauthLogins.includes(provider.id)
+            ? ("connected" as const)
+            : ("missing" as const),
+      }));
     },
     async testProvider(providerId: string): Promise<{ ok: boolean; message?: string }> {
       const ok = apiKeys.has(providerId) || oauthLogins.includes(providerId);
@@ -533,7 +601,7 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS)],
         enabledResources: create.enabledResources,
-        model: create.model ?? FAKE_MODELS[0]!,
+        model: create.model ?? models[0]!,
         thinkingLevel: "off",
         reverted: undefined,
         permissionHandler: create.permissionHandler,
@@ -588,15 +656,18 @@ export function createFakeRuntime(options: { runtimeId?: string } = {}) {
       return makeSession(state);
     },
     async listModels(query?: { providerId?: string }) {
-      return FAKE_MODELS.filter(
-        (model) => !query?.providerId || model.providerId === query.providerId,
+      return models.filter(
+        (model) =>
+          !query?.providerId ||
+          model.providerId.toLowerCase() === query.providerId.toLowerCase(),
       );
     },
     async listAvailableModels(query?: { providerId?: string }) {
-      return FAKE_MODELS.filter(
+      return models.filter(
         (model) =>
           model.available !== false &&
-          (!query?.providerId || model.providerId === query.providerId),
+          (!query?.providerId ||
+            model.providerId.toLowerCase() === query.providerId.toLowerCase()),
       );
     },
     async listProviders() {
