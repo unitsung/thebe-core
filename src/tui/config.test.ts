@@ -144,8 +144,14 @@ describe("isReasoningModel and saveCustomProvider reasoning support", () => {
 
       const r1 = p.models.find((m: any) => m.id === "deepseek-r1:14b");
       const chat = p.models.find((m: any) => m.id === "deepseek-chat");
-      expect(r1.reasoning).toBe(true);
-      expect(r1.thinkingLevelMap).toEqual({ low: "low", medium: "medium", high: "high" });
+      expect(r1.thinkingLevelMap).toEqual({
+        minimal: "minimal",
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+        max: "max",
+      });
       expect(chat.reasoning).toBe(false);
     } finally {
       await rm(tmpAgent, { recursive: true, force: true }).catch(() => {});

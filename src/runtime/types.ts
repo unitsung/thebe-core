@@ -205,10 +205,30 @@ export type ForkSessionOptions = {
   mode?: ForkSessionMode;
 };
 
+export type ThebeSessionStats = {
+  sessionFile?: string;
+  sessionId?: string;
+  userMessages: number;
+  assistantMessages: number;
+  toolCalls: number;
+  toolResults: number;
+  totalMessages: number;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
+  cost: number;
+};
+
 export type ThebeSessionContext = {
   contextUsage: { usedTokens: number; maxTokens: number };
   estimatedCost?: { amount: number; currency: string };
   compaction: { lastCompactedAt?: string; nearThreshold: boolean };
+  sessionStats?: ThebeSessionStats;
+  sessionName?: string;
 };
 
 export type BackgroundTask = {

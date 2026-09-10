@@ -466,6 +466,16 @@ export function createFakeRuntime(
           0,
         );
         const tokens = Math.ceil(totalChars / 4);
+        let userMessages = 0;
+        let assistantMessages = 0;
+        let toolCalls = 0;
+        let toolResults = 0;
+        for (const m of state.messages) {
+          if (m.role === "user") userMessages++;
+          else if (m.role === "assistant") assistantMessages++;
+          else if (m.role === "toolResult" || m.role === "tool") toolResults++;
+          if (m.toolName) toolCalls++;
+        }
         return {
           contextUsage: { usedTokens: tokens, maxTokens: 128_000 },
           estimatedCost: { amount: 0.001, currency: "USD" },
@@ -475,6 +485,24 @@ export function createFakeRuntime(
               : undefined,
             nearThreshold: tokens > 100_000,
           },
+          sessionStats: {
+            sessionFile: "In-memory",
+            sessionId: state.id,
+            userMessages,
+            assistantMessages,
+            toolCalls,
+            toolResults,
+            totalMessages: state.messages.length,
+            tokens: {
+              input: tokens,
+              output: Math.ceil(tokens * 0.3),
+              cacheRead: 0,
+              cacheWrite: 0,
+              total: Math.ceil(tokens * 1.3),
+            },
+            cost: 0.001,
+          },
+          sessionName: state.title,
         };
       },
       async listBackgroundTasks(): Promise<BackgroundTask[]> {

@@ -541,9 +541,19 @@ describe("Thebe TUI product slash commands", () => {
       product,
       sessionId: meta.thebeSessionId,
     });
+    // First Shift+Tab: off -> minimal
     editor.handleInput("\x1b[Z");
     await new Promise((r) => setTimeout(r, 30));
-    const allText = tui.children
+    let allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("thinking level set to minimal");
+
+    // Second Shift+Tab: minimal -> low
+    editor.handleInput("\x1b[Z");
+    await new Promise((r) => setTimeout(r, 30));
+    allText = tui.children
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");

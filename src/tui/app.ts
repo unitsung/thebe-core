@@ -32,6 +32,7 @@ import type {
   NormalizedEvent,
   RuntimeProvider,
   ThinkingLevel,
+  ThebeSessionContext,
 } from "../runtime/types.ts";
 import {
   chalk,
@@ -50,6 +51,7 @@ import {
   saveCustomProvider,
   fetchRemoteModels,
   isReasoningModel,
+  DEFAULT_THINKING_LEVEL_MAP,
 } from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
@@ -772,7 +774,7 @@ export function attachThebeChat(
               maxTokens: 4096,
               reasoning,
               thinkingLevelMap: reasoning
-                ? { low: "low", medium: "medium", high: "high" }
+                ? { ...DEFAULT_THINKING_LEVEL_MAP }
                 : undefined,
             };
           })
@@ -782,7 +784,7 @@ export function attachThebeChat(
     if (existingSelected) {
       existingSelected.reasoning = enableReasoning;
       existingSelected.thinkingLevelMap = enableReasoning
-        ? { low: "low", medium: "medium", high: "high" }
+        ? { ...DEFAULT_THINKING_LEVEL_MAP }
         : undefined;
     } else {
       modelsToSave.unshift({
@@ -792,7 +794,7 @@ export function attachThebeChat(
         maxTokens: 4096,
         reasoning: enableReasoning,
         thinkingLevelMap: enableReasoning
-          ? { low: "low", medium: "medium", high: "high" }
+          ? { ...DEFAULT_THINKING_LEVEL_MAP }
           : undefined,
       });
     }
@@ -1147,20 +1149,28 @@ export function attachThebeChat(
           const id = ensureSession();
           const meta = await product.getSession(id);
           let u = { usedTokens: contextTokensUsed, maxTokens: contextWindowTotal };
-          let compaction: { nearThreshold: boolean; lastCompactedAt?: string } = { nearThreshold: false, lastCompactedAt: undefined };
+          let compaction: { nearThreshold: boolean; lastCompactedAt?: string } = {
+            nearThreshold: false,
+            lastCompactedAt: undefined,
+          };
           let estimatedCost: { amount: number; currency: string } | undefined;
+          let ctxStats: ThebeSessionContext["sessionStats"];
+          let sessionName: string | undefined = meta.title;
           try {
             const ctx = await product.getContextUsage(id);
             u = ctx.contextUsage;
             compaction = ctx.compaction;
             estimatedCost = ctx.estimatedCost;
+            ctxStats = ctx.sessionStats;
+            if (ctx.sessionName) sessionName = ctx.sessionName;
           } catch {}
           const msgs = await product.loadMessages(id);
 
-          // Calculate turns and counts
+          // Calculate turns and message counts
           let userTurns = 0;
           let assistantTurns = 0;
           let toolCalls = 0;
+          let toolResults = 0;
           let messageInputTokens = 0;
           let messageOutputTokens = 0;
           let messageCacheReadTokens = 0;
@@ -1171,8 +1181,16 @@ export function attachThebeChat(
               userTurns += 1;
             } else if (m.role === "assistant") {
               assistantTurns += 1;
-            } else if (m.role === "tool" || m.toolName) {
+              if (Array.isArray((m as { content?: unknown[] }).content)) {
+                for (const c of (m as { content?: Array<{ type?: string }> }).content ?? []) {
+                  if (c?.type === "toolCall") toolCalls += 1;
+                }
+              }
+            } else if (m.role === "tool" || (m as { toolName?: string }).toolName) {
               toolCalls += 1;
+            }
+            if (m.role === "toolResult" || m.role === "tool") {
+              toolResults += 1;
             }
             // If runtime message contains nested usage stats
             const rawUsage = (m as { usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } }).usage;
@@ -1184,48 +1202,99 @@ export function attachThebeChat(
             }
           }
 
-          const totalTurns = userTurns + assistantTurns;
-          const effectiveInputTokens = Math.max(cumulativeInputTokens, messageInputTokens);
-          const effectiveOutputTokens = Math.max(cumulativeOutputTokens, messageOutputTokens);
-          const effectiveCacheRead = messageCacheReadTokens;
-          const effectiveCacheWrite = messageCacheWriteTokens;
-          const totalTokens = effectiveInputTokens + effectiveOutputTokens + effectiveCacheRead + effectiveCacheWrite;
+          const userMessagesCount = ctxStats ? ctxStats.userMessages : userTurns;
+          const assistantMessagesCount = ctxStats ? ctxStats.assistantMessages : assistantTurns;
+          const toolCallsCount = ctxStats ? ctxStats.toolCalls : toolCalls;
+          const toolResultsCount = ctxStats ? ctxStats.toolResults : toolResults;
+          const totalMessagesCount = ctxStats ? ctxStats.totalMessages : msgs.length;
+          const totalTurns = userMessagesCount + assistantMessagesCount;
 
-          // Cache hit rate: cacheRead / (input + cacheRead)
-          const totalInputWithCache = effectiveInputTokens + effectiveCacheRead;
-          const cacheHitRate = totalInputWithCache > 0 ? (effectiveCacheRead / totalInputWithCache) * 100 : 0;
+          const effectiveInputTokens = ctxStats
+            ? ctxStats.tokens.input
+            : Math.max(cumulativeInputTokens, messageInputTokens);
+          const effectiveOutputTokens = ctxStats
+            ? ctxStats.tokens.output
+            : Math.max(cumulativeOutputTokens, messageOutputTokens);
+          const effectiveCacheRead = ctxStats
+            ? ctxStats.tokens.cacheRead
+            : messageCacheReadTokens;
+          const effectiveCacheWrite = ctxStats
+            ? ctxStats.tokens.cacheWrite
+            : messageCacheWriteTokens;
+          const promptTokens =
+            effectiveInputTokens + effectiveCacheRead + effectiveCacheWrite;
+          const totalTokens = ctxStats
+            ? ctxStats.tokens.total
+            : promptTokens + effectiveOutputTokens;
+
+          // Cache hit rate: cacheRead / promptTokens
+          const cacheHitRate =
+            promptTokens > 0 ? (effectiveCacheRead / promptTokens) * 100 : 0;
 
           const pct = u.maxTokens > 0 ? (u.usedTokens / u.maxTokens) * 100 : 0;
           const barWidth = 24;
-          const filled = Math.min(barWidth, Math.max(0, Math.round((pct / 100) * barWidth)));
+          const filled = Math.min(
+            barWidth,
+            Math.max(0, Math.round((pct / 100) * barWidth)),
+          );
           const empty = barWidth - filled;
           const meter = `[${chalk.cyan("█".repeat(filled))}${chalk.dim("░".repeat(empty))}] ${pct.toFixed(1)}%`;
 
+          const sessionFile = ctxStats?.sessionFile ?? "In-memory";
+          const costAmount = ctxStats?.cost ?? (estimatedCost?.amount ?? 0);
+
           const lines = [
             chalk.cyan("─── Token & Usage Details ──────────────────────────────────────"),
-            `Session:       ${meta.thebeSessionId} (${meta.title ?? "untitled"})`,
-            `Model:         ${currentModel} · Thinking: ${currentThinking}`,
-            `Context Bar:   ${meter}`,
-            `Context Window:${formatTokens(u.usedTokens)} / ${formatTokens(u.maxTokens)} tokens (${u.usedTokens.toLocaleString()} / ${u.maxTokens.toLocaleString()})`,
+            chalk.bold("Session Info:"),
+            sessionName ? `  Name:            ${sessionName}` : undefined,
+            `  File:            ${sessionFile}`,
+            `  ID:              ${meta.thebeSessionId}`,
+            `  Model:           ${currentModel} · Thinking: ${currentThinking}`,
             "",
-            chalk.bold("Activity & Turns:"),
-            `  • Total Turns:       ${totalTurns} (User: ${userTurns} · Assistant: ${assistantTurns})`,
-            `  • Tool Executions:   ${toolCalls}`,
-            `  • Total Messages:    ${msgs.length} in transcript`,
+            chalk.bold("Messages:"),
+            `  Total:           ${totalMessagesCount}`,
+            `  User:            ${userMessagesCount}`,
+            `  Assistant:       ${assistantMessagesCount}`,
+            `  Tools:           ${toolCallsCount} calls, ${toolResultsCount} results`,
+            `  Total Turns:     ${totalTurns} (User: ${userMessagesCount} · Assistant: ${assistantMessagesCount})`,
             "",
-            chalk.bold("Tokens & Cache:"),
-            `  • Total Tokens:      ${formatTokens(totalTokens)} (${totalTokens.toLocaleString()})`,
-            `  • Input Tokens:      ${formatTokens(effectiveInputTokens)} (${effectiveInputTokens.toLocaleString()})`,
-            `  • Output Tokens:     ${formatTokens(effectiveOutputTokens)} (${effectiveOutputTokens.toLocaleString()})`,
-            `  • Cached Tokens:     Read: ${formatTokens(effectiveCacheRead)} (${effectiveCacheRead.toLocaleString()}) · Write: ${formatTokens(effectiveCacheWrite)} (${effectiveCacheWrite.toLocaleString()})`,
-            `  • Cache Hit Rate:    ${chalk.cyan(cacheHitRate.toFixed(1) + "%")} (${effectiveCacheRead.toLocaleString()} of ${totalInputWithCache.toLocaleString()} prompt tokens)`,
+            chalk.bold("Tokens:"),
+            `  Input:           ${formatTokens(promptTokens)} (${promptTokens.toLocaleString()})`,
+          ];
+          if (
+            promptTokens > 0 &&
+            (effectiveCacheRead > 0 || effectiveCacheWrite > 0)
+          ) {
+            const hitRate = chalk.cyan(`(${cacheHitRate.toFixed(1)}%)`);
+            lines.push(
+              `    Cached:        ${formatTokens(effectiveCacheRead)} (${effectiveCacheRead.toLocaleString()}) ${hitRate}`,
+            );
+            const written =
+              effectiveCacheWrite > 0
+                ? chalk.dim(
+                    ` (${effectiveCacheWrite.toLocaleString()} written to cache)`,
+                  )
+                : "";
+            lines.push(
+              `    Uncached:      ${formatTokens(effectiveInputTokens + effectiveCacheWrite)} (${(effectiveInputTokens + effectiveCacheWrite).toLocaleString()})${written}`,
+            );
+          }
+          lines.push(
+            `  Output:          ${formatTokens(effectiveOutputTokens)} (${effectiveOutputTokens.toLocaleString()})`,
+            `  Total Tokens:    ${formatTokens(totalTokens)} (${totalTokens.toLocaleString()})`,
+            `  Cached Tokens:   Read: ${formatTokens(effectiveCacheRead)} (${effectiveCacheRead.toLocaleString()}) · Write: ${formatTokens(effectiveCacheWrite)} (${effectiveCacheWrite.toLocaleString()})`,
+            `  Cache Hit Rate:  ${chalk.cyan(cacheHitRate.toFixed(1) + "%")} (${effectiveCacheRead.toLocaleString()} of ${promptTokens.toLocaleString()} prompt tokens)`,
             "",
-            chalk.bold("Status:"),
-            `  • Auto-Compaction:   Near Threshold: ${compaction.nearThreshold ? chalk.yellow("YES (approaching limit)") : chalk.green("No")}${compaction.lastCompactedAt ? ` · Last: ${compaction.lastCompactedAt.slice(0, 19).replace("T", " ")}` : ""}`,
-            estimatedCost ? `  • Estimated Cost:    $${estimatedCost.amount.toFixed(4)} ${estimatedCost.currency}` : undefined,
+            chalk.bold("Context Window:"),
+            `  Context Bar:     ${meter}`,
+            `  Usage:           ${formatTokens(u.usedTokens)} / ${formatTokens(u.maxTokens)} tokens (${u.usedTokens.toLocaleString()} / ${u.maxTokens.toLocaleString()})`,
+            "",
+            chalk.bold("Cost & Compaction:"),
+            `  Total Cost:      $${costAmount.toFixed(3)}${estimatedCost && !ctxStats ? ` ${estimatedCost.currency}` : ""}`,
+            `  Auto-Compaction: Near Threshold: ${compaction.nearThreshold ? chalk.yellow("YES (approaching limit)") : chalk.green("No")}${compaction.lastCompactedAt ? ` · Last: ${compaction.lastCompactedAt.slice(0, 19).replace("T", " ")}` : ""}`,
             chalk.cyan("────────────────────────────────────────────────────────────────"),
-          ].filter(Boolean) as string[];
-          notice(lines.join("\n"));
+          );
+          notice(lines.filter(Boolean).join("\n"));
           break;
         }
         case "tui": {
@@ -1877,9 +1946,12 @@ export function attachThebeChat(
 
   const thinkingCycle: ThinkingLevel[] = [
     "off",
+    "minimal",
     "low",
     "medium",
     "high",
+    "xhigh",
+    "max",
   ];
   const originalHandleInput = editor.handleInput.bind(editor);
   editor.handleInput = (data: string) => {
