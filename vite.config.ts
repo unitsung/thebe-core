@@ -12,9 +12,9 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         index: resolve(import.meta.dirname, "src/index.ts"),
-        serve: resolve(import.meta.dirname, "src/serve.ts"),
-        tui: resolve(import.meta.dirname, "src/tui.ts"),
-        cli: resolve(import.meta.dirname, "src/cli.ts"),
+        serve: resolve(import.meta.dirname, "src/http/serve.ts"),
+        tui: resolve(import.meta.dirname, "src/tui/main.ts"),
+        cli: resolve(import.meta.dirname, "src/cli/main.ts"),
       },
       preserveEntrySignatures: "allow-extension",
       output: {
@@ -23,7 +23,7 @@ export default defineConfig({
         chunkFileNames: "chunks/[name]-[hash].js",
         codeSplitting: {
           groups: [
-            { name: "env", test: /[/\\]src[/\\]env\.ts$/, priority: 40 },
+            { name: "env", test: /[/\\]src[/\\]config[/\\]env\.ts$/, priority: 40 },
             { name: "http", test: /[/\\]src[/\\]http[/\\]/, priority: 30 },
             {
               name: "arcane",
@@ -33,7 +33,7 @@ export default defineConfig({
             { name: "tui-app", test: /[/\\]src[/\\]tui[/\\]/, priority: 25 },
             {
               name: "core",
-              test: /[/\\]src[/\\](agent|product|runtime|tools|policy|providers|stream-guard|audit|auth)[/\\]/,
+              test: /[/\\]src[/\\](agent|product|runtime|tools|policy|providers|stream-guard|audit|auth|config)[/\\]/,
               priority: 20,
             },
           ],

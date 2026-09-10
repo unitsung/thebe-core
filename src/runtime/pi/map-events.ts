@@ -9,6 +9,7 @@ type AgentSessionEvent = {
   result?: unknown;
   reason?: string;
   aborted?: boolean;
+  errorMessage?: string;
 };
 
 export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefined {
@@ -54,8 +55,19 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
       return { type: "session_end", text: "" };
     case "compaction_start":
       return { type: "compaction_start", reason: event.reason };
-    case "compaction_end":
-      return { type: "compaction_end", aborted: event.aborted };
+    case "compaction_end": {
+      const result = event.result as
+        | { tokensBefore?: number; estimatedTokensAfter?: number }
+        | undefined;
+      return {
+        type: "compaction_end",
+        aborted: event.aborted,
+        reason: event.reason,
+        tokensBefore: result?.tokensBefore,
+        estimatedTokensAfter: result?.estimatedTokensAfter,
+        errorMessage: event.errorMessage,
+      };
+    }
     case "queue_update": {
       const queued = event as unknown as {
         steering?: unknown;

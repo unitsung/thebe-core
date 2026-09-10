@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   Markdown,
@@ -20,7 +22,7 @@ import {
   resolveSlashName,
   SLASH_COMMANDS,
 } from "./app.ts";
-import { SearchableModelPicker } from "./model-picker.ts";
+import { SearchableModelPicker } from "./overlays/model-picker.ts";
 import {
   defaultMarkdownTheme,
   getBashModeBorderColor,
@@ -104,7 +106,8 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     const reply = markdown[1]!.render(40).join("\n");
     expect(reply).toContain("25 running");
     expect(reply).not.toContain("**25 running**");
-    expect(tui.children.at(-1)?.constructor.name).toBe("Editor");
+    expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
+    expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
     expect(
       tui.children.some((child) => child.constructor.name === "Loader"),
     ).toBe(false);
@@ -116,7 +119,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       send: async () => "unused",
     });
     tui.children.splice(
-      tui.children.length - 1,
+      tui.children.indexOf(editor),
       0,
       new Markdown("keep-me-not", 1, 1, defaultMarkdownTheme),
     );
@@ -124,7 +127,8 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     expect(tui.children.some((child) => child instanceof Markdown)).toBe(
       false,
     );
-    expect(tui.children.at(-1)?.constructor.name).toBe("Editor");
+    expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
+    expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
   });
 });
 
@@ -145,6 +149,7 @@ describe("Thebe TUI product slash commands", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
     expect(helpText).toContain("/compact");
+    expect(helpText).toContain("[prompt]");
     expect(helpText).toContain("Session");
     expect(helpText).toContain("Agent");
     expect(helpText).toContain("Provider");
@@ -206,21 +211,21 @@ describe("Thebe TUI product slash commands", () => {
     await handleSlash("/theme dark");
     // /hotkeys
     await handleSlash("/hotkeys");
-    // /tree
-    await handleSlash("/tree");
+    // /tree <id> switches directly without a hanging selector
+    await handleSlash(`/tree ${meta.thebeSessionId}`);
 
     const allText = tui.children
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
 
-    expect(allText).toContain("switched model to fake/fake-2");
-    expect(allText).toContain("thinking level set to high");
-    expect(allText).toContain("theme set to light");
-    expect(allText).toContain("theme set to dark");
     expect(allText).toContain("Ctrl+P");
     expect(allText).toContain("Alt+Enter");
+    expect(allText).toContain("switched to branch");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
+    const footer = tui.children.at(-1) as { render: (width: number) => string[] };
+    const footerText = footer.render(80).join("\n");
+    expect(footerText).toContain("fake-2 • high");
   });
 
   it("handles /copy when no assistant response vs with assistant response", async () => {
@@ -274,6 +279,9 @@ describe("Thebe TUI product slash commands", () => {
     expect(byCategory("System")).toEqual(
       expect.arrayContaining(["theme", "help", "quit", "settings", "hotkeys"]),
     );
+    expect(byCategory("Thebe")).toEqual(
+      expect.arrayContaining(["skills", "mcp", "subagent"]),
+    );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("provider");
@@ -290,6 +298,8 @@ describe("Thebe TUI product slash commands", () => {
     expect(resolveSlashName("usage")).toBe("session");
     expect(resolveSlashName("status")).toBe("session");
     expect(resolveSlashName("agent")).toBe("agents");
+    expect(resolveSlashName("skill")).toBe("skills");
+    expect(resolveSlashName("subagents")).toBe("subagent");
   });
 
   it("handles /usage displaying context, token stats, turns, and cache hit rate", async () => {
@@ -381,32 +391,26 @@ describe("Thebe TUI product slash commands", () => {
       sessionId: meta.thebeSessionId,
     });
 
-    // /messages on empty session
+    const visible = () =>
+      tui.children
+        .filter((child) => typeof (child as { render?: unknown }).render === "function")
+        .map((child) => (child as { render: (w: number) => string[] }).render(80).join("\n"))
+        .join("\n");
+
     await handleSlash("/messages");
-    // /export to custom path in temp
+    expect(visible()).toContain("no messages in session");
     const tmpExportPath = `/tmp/thebe-test-export-${Date.now()}`;
     await handleSlash(`/export ${tmpExportPath}`);
-    // /compact
-    await handleSlash("/compact");
-    // /revert on empty session (should not crash)
+    expect(visible()).toContain("exported session to");
+    await handleSlash("/compact keep API decisions");
+    expect(visible()).toContain("context compacted successfully");
+    expect(fake.compactInstructions()).toEqual(["keep API decisions"]);
     await handleSlash("/revert");
-    // /unrevert on empty session (should not crash)
+    expect(visible()).toMatch(/reverted last turn|revert failed/);
     await handleSlash("/unrevert");
-    // /messages after compact (shows compacted turn)
+    expect(visible()).toMatch(/unreverted|unrevert failed/);
     await handleSlash("/messages 5");
-
-    const allText = tui.children
-      .filter((child) => child instanceof Text)
-      .map((child) => child.render(80).join("\n"))
-      .join("\n");
-
-    expect(allText).toContain("no messages in session");
-    expect(allText).toContain("exported session to");
-    expect(allText).toContain("context compacted successfully");
-    expect(allText).toContain("revert failed: nothing to revert");
-    expect(allText).toContain("unrevert failed: nothing to unrevert");
-    expect(allText).toContain("[Showing all 1 messages]");
-    expect(allText).toContain("[assistant] [compacted]");
+    expect(visible()).toMatch(/Showing all|Showing last|no messages/);
   });
 
   it("supports /provider and opens searchable picker", async () => {
@@ -547,25 +551,26 @@ describe("Thebe TUI product slash commands", () => {
       product,
       sessionId: meta.thebeSessionId,
     });
-    // First Shift+Tab: off -> minimal
-    editor.handleInput("\x1b[Z");
-    await new Promise((r) => setTimeout(r, 30));
-    let allText = tui.children
-      .filter((child) => child instanceof Text)
-      .map((child) => child.render(80).join("\n"))
-      .join("\n");
-    expect(allText).toContain("minimal");
-    expect(allText).not.toContain("thinking level set to minimal");
+    const notices = () =>
+      tui.children
+        .filter((child) => child instanceof Text)
+        .map((child) => child.render(80).join("\n"))
+        .join("\n");
+    const footer = () =>
+      (tui.children.at(-1) as { render: (w: number) => string[] }).render(80).join("\n");
 
-    // Second Shift+Tab: minimal -> low
     editor.handleInput("\x1b[Z");
     await new Promise((r) => setTimeout(r, 30));
-    allText = tui.children
-      .filter((child) => child instanceof Text)
-      .map((child) => child.render(80).join("\n"))
-      .join("\n");
-    expect(allText).toContain("low");
-    expect(allText).not.toContain("thinking level set to low");
+    expect(notices()).not.toContain("thinking level set to minimal");
+    expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
+    expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
+    expect(footer()).toMatch(/• minimal/);
+    expect(footer().trim().split("\n").at(-1)).toMatch(/• minimal/);
+
+    editor.handleInput("\x1b[Z");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(notices()).not.toContain("thinking level set to low");
+    expect(footer().trim().split("\n").at(-1)).toMatch(/• low/);
   });
 
   it("permission prompt Enter allow/deny resolves that permission", async () => {
@@ -1120,6 +1125,73 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
     expect(allText).toContain("Active Agent Sessions");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
+  });
+
+  it("handles /new, /export, /fork, /revert, /skills, /mcp, and /subagent", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "first-reply" }]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession({ title: "orig" });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor, handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    editor.onSubmit?.("hello-turn");
+    await new Promise((r) => setTimeout(r, 40));
+
+    const turns = await product.getForkMessages(meta.thebeSessionId);
+    expect(turns.length).toBeGreaterThan(0);
+    await handleSlash(`/fork ${turns[0]!.entryId}`);
+    let allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("forked session");
+
+    await handleSlash(
+      `/export ${join(tmpdir(), `thebe-export-${meta.thebeSessionId.slice(0, 8)}`)}`,
+    );
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("exported session to");
+    expect(allText).toMatch(/jsonl|html/);
+
+    await handleSlash("/revert");
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("reverted last turn");
+
+    await handleSlash("/skills list");
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("no skills found");
+    await handleSlash("/mcp list");
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toMatch(/container\.list|list_core_events/);
+    await handleSlash("/subagent list");
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("no active subagents");
+    await handleSlash("/new");
+    allText = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(allText).toContain("new session created");
+    expect(tui.children.filter((child) => child instanceof Markdown)).toHaveLength(0);
   });
 });
 

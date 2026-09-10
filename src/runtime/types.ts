@@ -16,7 +16,14 @@ export type NormalizedEvent =
   | { type: "session_end"; text: string }
   | { type: "error"; message: string }
   | { type: "compaction_start"; reason?: string }
-  | { type: "compaction_end"; aborted?: boolean }
+  | {
+      type: "compaction_end";
+      aborted?: boolean;
+      reason?: string;
+      tokensBefore?: number;
+      estimatedTokensAfter?: number;
+      errorMessage?: string;
+    }
   | { type: "interrupted" }
   | { type: "queue_update"; steering: number; followUp: number }
   | {
@@ -196,6 +203,8 @@ export type CreateRuntimeSessionOptions = {
   permissionHandler?: PermissionHandler;
   toolsRequiringApproval?: readonly string[];
   model?: RuntimeModelRef;
+  /** Official Pi auto-compaction. Default true when omitted. */
+  autoCompact?: boolean;
 };
 
 export type ForkSessionMode = "new_session" | "branch_in_place";
@@ -226,7 +235,11 @@ export type ThebeSessionStats = {
 export type ThebeSessionContext = {
   contextUsage: { usedTokens: number; maxTokens: number };
   estimatedCost?: { amount: number; currency: string };
-  compaction: { lastCompactedAt?: string; nearThreshold: boolean };
+  compaction: {
+    lastCompactedAt?: string;
+    nearThreshold: boolean;
+    enabled?: boolean;
+  };
   sessionStats?: ThebeSessionStats;
   sessionName?: string;
 };
@@ -302,7 +315,9 @@ export interface RuntimeSession {
   subscribe(listener: (event: NormalizedEvent) => void): () => void;
   lastAssistantText(): string;
   toolNames(): string[];
-  compact(): Promise<void>;
+  compact(customInstructions?: string): Promise<void>;
+  setAutoCompactionEnabled?(enabled: boolean): void;
+  autoCompactionEnabled?(): boolean;
   exportSession(): Promise<RuntimeExport>;
   messages(): RuntimeMessage[];
   setModel(model: RuntimeModelRef): Promise<void>;
@@ -317,6 +332,7 @@ export interface RuntimeSession {
     onChunk?: (chunk: string) => void,
     options?: { excludeFromContext?: boolean },
   ): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
+  getForkMessages?(): Array<{ entryId: string; text: string }>;
   dispose(): void;
 }
 

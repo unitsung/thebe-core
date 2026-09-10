@@ -23,7 +23,7 @@ function mockProvider(): ContainerInfoProvider {
   };
 }
 
-describe("thebe_api_summary_final alignment tests", () => {
+describe("thebe spec alignment tests", () => {
   describe("P0: Security Baseline", () => {
     it("sanitizes bash process environment from sensitive host variables", () => {
       const hostEnv = {

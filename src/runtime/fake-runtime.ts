@@ -35,6 +35,9 @@ type FakeSessionState = {
   id: string;
   messages: RuntimeMessage[];
   compacted: boolean;
+  compactedAt?: string;
+  lastCompactInstructions?: string;
+  autoCompact: boolean;
   tools: CustomToolDefinition[];
   builtinTools: string[];
   enabledResources: CreateRuntimeSessionOptions["enabledResources"];
@@ -149,6 +152,7 @@ export function createFakeRuntime(
     isError: boolean;
   }> = [];
   let compactCalls = 0;
+  const compactInstructions: Array<string | undefined> = [];
   let quiesced = false;
 
   function queueTurns(turns: FakeQueuedTurn[]): void {
@@ -407,15 +411,30 @@ export function createFakeRuntime(
       toolNames(): string[] {
         return [...state.builtinTools, ...state.tools.map((tool) => tool.name)];
       },
-      async compact(): Promise<void> {
+      async compact(customInstructions?: string): Promise<void> {
         compactCalls += 1;
+        compactInstructions.push(customInstructions);
+        state.lastCompactInstructions = customInstructions;
         emit({ type: "compaction_start", reason: "manual" });
         state.compacted = true;
+        state.compactedAt = new Date().toISOString();
         state.messages = [
           { id: randomUUID(), role: "assistant", text: "[compacted]" },
           ...state.messages.slice(-2),
         ];
-        emit({ type: "compaction_end", aborted: false });
+        emit({
+          type: "compaction_end",
+          aborted: false,
+          reason: "manual",
+          tokensBefore: 8_000,
+          estimatedTokensAfter: 2_000,
+        });
+      },
+      setAutoCompactionEnabled(enabled: boolean): void {
+        state.autoCompact = enabled;
+      },
+      autoCompactionEnabled(): boolean {
+        return state.autoCompact;
       },
       async exportSession(): Promise<RuntimeExport> {
         const jsonl = state.messages
@@ -434,6 +453,11 @@ export function createFakeRuntime(
       },
       messages(): RuntimeMessage[] {
         return state.messages.slice();
+      },
+      getForkMessages(): Array<{ entryId: string; text: string }> {
+        return state.messages
+          .filter((m) => m.role === "user" && m.text)
+          .map((m) => ({ entryId: m.id, text: m.text ?? "" }));
       },
       async setModel(model: RuntimeModelRef): Promise<void> {
         const known = models.some(
@@ -473,17 +497,17 @@ export function createFakeRuntime(
         for (const m of state.messages) {
           if (m.role === "user") userMessages++;
           else if (m.role === "assistant") assistantMessages++;
-          else if (m.role === "toolResult" || m.role === "tool") toolResults++;
+          else if (m.role === "tool" || (m as { role?: string }).role === "toolResult") toolResults++;
           if (m.toolName) toolCalls++;
         }
         return {
           contextUsage: { usedTokens: tokens, maxTokens: 128_000 },
           estimatedCost: { amount: 0.001, currency: "USD" },
           compaction: {
-            lastCompactedAt: state.compacted
-              ? new Date().toISOString()
-              : undefined,
-            nearThreshold: tokens > 100_000,
+            lastCompactedAt: state.compactedAt,
+            nearThreshold:
+              state.autoCompact && tokens > 128_000 - 16_384,
+            enabled: state.autoCompact,
           },
           sessionStats: {
             sessionFile: "In-memory",
@@ -502,7 +526,7 @@ export function createFakeRuntime(
             },
             cost: 0.001,
           },
-          sessionName: state.title,
+          sessionName: (state as { title?: string }).title,
         };
       },
       async listBackgroundTasks(): Promise<BackgroundTask[]> {
@@ -624,6 +648,9 @@ export function createFakeRuntime(
     state.toolsRequiringApproval = [
       ...(create.toolsRequiringApproval ?? state.toolsRequiringApproval),
     ];
+    if (typeof create.autoCompact === "boolean") {
+      state.autoCompact = create.autoCompact;
+    }
   }
 
   const runtime: AgentRuntime = {
@@ -634,6 +661,7 @@ export function createFakeRuntime(
         id,
         messages: [],
         compacted: false,
+        autoCompact: create.autoCompact ?? true,
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS)],
         enabledResources: create.enabledResources,
@@ -675,6 +703,8 @@ export function createFakeRuntime(
         id,
         messages: copied,
         compacted: parent.compacted,
+        compactedAt: parent.compactedAt,
+        autoCompact: create.autoCompact ?? parent.autoCompact,
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? parent.builtinTools)],
         enabledResources: create.enabledResources,
@@ -729,6 +759,7 @@ export function createFakeRuntime(
     apiKeys,
     oauthLogins,
     compactCalls: () => compactCalls,
+    compactInstructions: () => compactInstructions.slice(),
     inboundToolResults: () => inboundToolResults.slice(),
     snapshot(id: string) {
       return getState(id);

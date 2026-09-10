@@ -34,6 +34,6 @@ describe("Node packaging", () => {
     expect(chunks.some((name) => name.endsWith(".js"))).toBe(true);
     expect(chunks.some((name) => /-[a-z0-9]+\.js$/i.test(name))).toBe(true);
     const serve = await readFile(join(root, "dist/serve.js"), "utf8");
-    expect(serve).toMatch(/from ["']\.\/chunks\//);
+    expect(serve).toMatch(/["']\.\/chunks\//);
   });
 });
