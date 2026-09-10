@@ -119,7 +119,7 @@ describe("SearchableModelPicker", () => {
     });
 
     const lines = picker.render(80).join("\n");
-    expect(lines).toContain("Model");
+    expect(lines).not.toContain("Model provider:");
     expect(lines).toContain("Search:");
     expect(lines).toContain("muse-spark-1.3-free");
     expect(lines).toContain("[opencode]");

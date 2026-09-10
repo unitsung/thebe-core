@@ -23,6 +23,7 @@ import {
 import { SearchableModelPicker } from "./model-picker.ts";
 import {
   defaultMarkdownTheme,
+  getBashModeBorderColor,
   getTuiTheme,
   lightMarkdownTheme,
 } from "./theme.ts";
@@ -257,6 +258,7 @@ describe("Thebe TUI product slash commands", () => {
       expect.arrayContaining([
         "resume",
         "new",
+        "session",
         "compact",
         "copy",
         "fork",
@@ -264,17 +266,19 @@ describe("Thebe TUI product slash commands", () => {
       ]),
     );
     expect(byCategory("Agent")).toEqual(
-      expect.arrayContaining(["model", "thinking"]),
+      expect.arrayContaining(["model", "thinking", "agents"]),
     );
     expect(byCategory("Provider")).toEqual(
       expect.arrayContaining(["login", "logout"]),
     );
     expect(byCategory("System")).toEqual(
-      expect.arrayContaining(["theme", "help", "quit", "settings", "usage"]),
+      expect.arrayContaining(["theme", "help", "quit", "settings", "hotkeys"]),
     );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("provider");
+    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("custom");
+    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("usage");
     expect(resolveSlashName("models")).toBe("model");
     expect(resolveSlashName("connect")).toBe("login");
     expect(resolveSlashName("themes")).toBe("theme");
@@ -282,8 +286,10 @@ describe("Thebe TUI product slash commands", () => {
     expect(resolveSlashName("exit")).toBe("quit");
     expect(resolveSlashName("sessions")).toBe("resume");
     expect(resolveSlashName("continue")).toBe("resume");
-    expect(resolveSlashName("session")).toBe("usage");
-    expect(resolveSlashName("status")).toBe("usage");
+    expect(resolveSlashName("session")).toBe("session");
+    expect(resolveSlashName("usage")).toBe("session");
+    expect(resolveSlashName("status")).toBe("session");
+    expect(resolveSlashName("agent")).toBe("agents");
   });
 
   it("handles /usage displaying context, token stats, turns, and cache hit rate", async () => {
@@ -451,11 +457,11 @@ describe("Thebe TUI product slash commands", () => {
     await handleSlash("/hotkeys");
 
     const allText = tui.children
-      .filter((child) => child instanceof Text)
+      .filter((child) => child instanceof Text || child instanceof Markdown)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
 
-    expect(allText).toContain("Keyboard shortcuts");
+    expect(allText).toContain("Keyboard Shortcuts");
     expect(allText).toContain("Alt+Enter");
     expect(allText).toContain("Ctrl+P");
     expect(allText).toContain("Shift+Tab");
@@ -548,7 +554,8 @@ describe("Thebe TUI product slash commands", () => {
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(allText).toContain("thinking level set to minimal");
+    expect(allText).toContain("minimal");
+    expect(allText).not.toContain("thinking level set to minimal");
 
     // Second Shift+Tab: minimal -> low
     editor.handleInput("\x1b[Z");
@@ -557,7 +564,8 @@ describe("Thebe TUI product slash commands", () => {
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(allText).toContain("thinking level set to low");
+    expect(allText).toContain("low");
+    expect(allText).not.toContain("thinking level set to low");
   });
 
   it("permission prompt Enter allow/deny resolves that permission", async () => {
@@ -658,6 +666,16 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       | undefined;
     expect(child).toBeDefined();
     return child!;
+  }
+
+  function findNamedOrNull(
+    tui: TUI,
+    name: string,
+  ): { handleInput: (data: string) => void; render: (width: number) => string[] } | null {
+    const child = tui.children.find((c) => c.constructor.name === name) as
+      | { handleInput: (data: string) => void; render: (width: number) => string[] }
+      | undefined;
+    return child ?? null;
   }
 
   function typeAndConfirm(
@@ -1035,5 +1053,74 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
+
+  it("dynamically updates editor border color when typing ! for bash mode", () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor } = attachThebeChat(tui, { product });
+
+    const initialBorder = editor.borderColor;
+    // Enter bash mode
+    editor.onChange?.("!echo hello");
+    expect(editor.borderColor).not.toBe(initialBorder);
+    expect(editor.borderColor).toBe(getBashModeBorderColor("dark"));
+
+    // Exit bash mode
+    editor.onChange?.("echo hello");
+    expect(editor.borderColor).toBe(initialBorder);
+  });
+
+  it("handles /settings opening 10 standard Pi settings items", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, { product });
+
+    const settingsPromise = handleSlash("/settings");
+    await flush();
+
+    const settingsList = findNamed(tui, "SettingsList") as any;
+    expect(settingsList).toBeDefined();
+    const itemIds = settingsList.items.map((i: any) => i.id);
+    expect(itemIds).toEqual([
+      "theme",
+      "thinking",
+      "tui",
+      "autoCompact",
+      "steeringMode",
+      "followUpMode",
+      "hideThinking",
+      "quietStartup",
+      "fullscreenExitOutput",
+      "fullscreenScrollbar",
+    ]);
+
+    // Close settings list
+    settingsList.handleInput("\x1b"); // Escape
+    await settingsPromise;
+    expect(findNamedOrNull(tui, "SettingsList")).toBeNull();
+  });
+
+  it("handles /agents listing active agents and sessions", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession({ title: "agent-session-1" });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    await handleSlash("/agents");
+    const allText = tui.children
+      .filter((child) => child instanceof Text || child instanceof Markdown)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+
+    expect(allText).toContain("Active Agent Sessions");
+    expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
+  });
 });
+
 

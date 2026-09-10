@@ -312,6 +312,11 @@ export interface RuntimeSession {
   stopBackgroundTask(taskId: string): Promise<void>;
   revert(): Promise<void>;
   unrevert(): Promise<void>;
+  executeBash?(
+    command: string,
+    onChunk?: (chunk: string) => void,
+    options?: { excludeFromContext?: boolean },
+  ): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
   dispose(): void;
 }
 

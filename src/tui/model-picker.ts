@@ -251,13 +251,6 @@ export class SearchableModelPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    const activeProvider = this.getActiveProvider();
-    const scope =
-      activeProvider === "all"
-        ? chalk.dim("all")
-        : chalk.cyan(activeProvider);
-    lines.push(`  ${chalk.bold("Model")}  ${chalk.dim("provider:")} ${scope}`);
-
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 
@@ -349,7 +342,7 @@ export class SearchableProviderPicker implements Component, Focusable {
     this.onRequestRender = options.onRequestRender;
 
     this.searchInput = new Input({
-      prompt: chalk.cyan("Search: "),
+      prompt: chalk.cyan("Provider: "),
       placeholder: "filter providers",
       placeholderStyle: (t) => chalk.dim(t),
     });
@@ -436,7 +429,6 @@ export class SearchableProviderPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    lines.push(`  ${chalk.bold("Provider")}  ${chalk.dim("select provider")}`);
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 

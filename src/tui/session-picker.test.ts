@@ -39,7 +39,7 @@ describe("SearchableSessionPicker", () => {
     });
 
     const lines = picker.render(80).join("\n");
-    expect(lines).toContain("Switch Session");
+    expect(lines).toContain("Session:");
     expect(lines).toContain("Docker container inspection");
     expect(lines).toContain("Muse spark benchmark");
     expect(lines).toContain("Branch test run");

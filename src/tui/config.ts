@@ -5,6 +5,14 @@ import type { TuiMode } from "@earendil-works/pi-tui";
 export type ThebeUserConfig = {
   tuiMode?: TuiMode;
   theme?: "dark" | "light";
+  defaultThinkingLevel?: string;
+  autoCompact?: boolean;
+  steeringMode?: "one-at-a-time" | "all";
+  followUpMode?: "one-at-a-time" | "all";
+  hideThinking?: boolean;
+  quietStartup?: boolean;
+  fullscreenExitOutput?: "transcript" | "resume-hint";
+  fullscreenScrollbar?: "auto" | "always" | "hidden";
   providers?: Record<string, { baseUrl?: string }>;
 };
 

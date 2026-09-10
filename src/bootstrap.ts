@@ -71,9 +71,13 @@ export async function bootstrapThebe(
     process.env.THEBE_AGENT_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "agent");
 
+  const sessionDir =
+    process.env.THEBE_SESSION_DIR ??
+    join(process.env.HOME ?? ".", ".thebe", "sessions");
+
   const runtime = await createPiCodingAgentRuntime({
     cwd: process.cwd(),
-    sessionDir: process.env.THEBE_SESSION_DIR,
+    sessionDir,
     agentDir,
     apiKey: primaryApiKey,
     model: defaultModel,
