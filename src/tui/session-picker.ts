@@ -61,7 +61,7 @@ export class SearchableSessionPicker implements Component, Focusable {
     this.onRequestRender = options.onRequestRender;
 
     this.searchInput = new Input({
-      prompt: chalk.cyan("Search: "),
+      prompt: chalk.cyan("Session: "),
       placeholder: "filter sessions",
       placeholderStyle: (t) => chalk.dim(t),
     });
@@ -168,8 +168,6 @@ export class SearchableSessionPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    lines.push(`  ${chalk.bold("Switch Session")}  ${chalk.dim("select session")}`);
-
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 

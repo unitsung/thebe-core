@@ -534,6 +534,14 @@ export function createFakeRuntime(
         state.messages = [...state.messages, ...state.reverted];
         state.reverted = undefined;
       },
+      async executeBash(
+        command: string,
+        onChunk?: (chunk: string) => void,
+      ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
+        const output = `fake output for ${command}\n`;
+        onChunk?.(output);
+        return { exitCode: 0, cancelled: false, output };
+      },
       dispose(): void {
         listeners.clear();
       },

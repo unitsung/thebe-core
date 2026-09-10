@@ -875,6 +875,18 @@ export function createThebeProduct(options: {
         await opened.session.stopBackgroundTask(task.id);
       }
     },
+    async executeBash(
+      thebeSessionId: string,
+      command: string,
+      onChunk?: (chunk: string) => void,
+      options?: { excludeFromContext?: boolean },
+    ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
+      const opened = await openSession(thebeSessionId);
+      if (opened.session.executeBash) {
+        return opened.session.executeBash(command, onChunk, options);
+      }
+      return { exitCode: 0, cancelled: false, output: "" };
+    },
     async quiesce(): Promise<void> {
       await options.runtime.quiesce();
     },

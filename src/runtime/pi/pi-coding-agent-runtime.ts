@@ -525,6 +525,23 @@ export async function createPiCodingAgentRuntime(
         await session.navigateTree(revertedLeaf);
         revertedLeaf = undefined;
       },
+      async executeBash(
+        command: string,
+        onChunk?: (chunk: string) => void,
+        options?: { excludeFromContext?: boolean },
+      ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
+        const raw = session as unknown as {
+          executeBash?: (
+            command: string,
+            onChunk?: (chunk: string) => void,
+            options?: { excludeFromContext?: boolean },
+          ) => Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
+        };
+        if (typeof raw.executeBash === "function") {
+          return raw.executeBash(command, onChunk, options);
+        }
+        return { exitCode: 0, cancelled: false, output: "" };
+      },
       dispose: () => {
         session.dispose();
         listeners.clear();
@@ -1024,3 +1041,10 @@ function lastAssistantText(session: PiSession): string {
   }
   return "";
 }
+
+export {
+  BashExecutionComponent,
+  createLocalBashOperations,
+  initTheme,
+} from "@earendil-works/pi-coding-agent";
+

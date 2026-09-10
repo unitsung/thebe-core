@@ -2,9 +2,14 @@
  * Thebe terminal UI on @earendil-works/pi-tui.
  * Session workflows go through ThebeProduct (same path as HTTP/CLI).
  */
-import { execSync, spawn } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  BashExecutionComponent,
+  createLocalBashOperations,
+  initTheme,
+} from "../runtime/pi/pi-coding-agent-runtime.ts";
 import {
   CombinedAutocompleteProvider,
   Editor,
@@ -38,6 +43,9 @@ import {
   chalk,
   defaultSelectListTheme,
   getTuiTheme,
+  getThinkingBorderColor,
+  getBashModeBorderColor,
+  getRunningBorderColor,
   type ThemeName,
 } from "./theme.ts";
 import {
@@ -46,6 +54,7 @@ import {
 } from "./model-picker.ts";
 import { attachSearchableSessionPicker } from "./session-picker.ts";
 import {
+  loadThebeConfig,
   saveThebeConfig,
   saveProviderEndpoint,
   saveCustomProvider,
@@ -82,6 +91,7 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   // Session
   { name: "resume", category: "Session", aliases: ["sessions", "continue"], description: "Resume a different session", argumentHint: "[query]" },
   { name: "new", category: "Session", description: "Start a new session", argumentHint: "[title]" },
+  { name: "session", category: "Session", aliases: ["usage", "status"], description: "Show session info and token usage statistics" },
   { name: "tree", category: "Session", description: "Navigate session tree (switch branches)" },
   { name: "fork", category: "Session", description: "Create a new fork from a previous user message", argumentHint: "[messageId]" },
   { name: "name", category: "Session", aliases: ["rename"], description: "Set session display name", argumentHint: "<title>" },
@@ -93,12 +103,11 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   // Agent / Model / Thinking
   { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Select model (opens selector UI)", argumentHint: "[provider/model]" },
   { name: "thinking", category: "Agent", description: "Set thinking level", argumentHint: "[level]" },
+  { name: "agents", category: "Agent", aliases: ["agent"], description: "List all active agents and their status" },
   // Provider / Auth
   { name: "login", category: "Provider", aliases: ["connect"], description: "Configure provider authentication", argumentHint: "[provider]" },
-  { name: "custom", category: "Provider", aliases: ["endpoint", "proxy"], description: "Configure custom endpoint (OpenAI / Anthropic compatible)", argumentHint: "[provider]" },
   { name: "logout", category: "Provider", description: "Remove provider authentication", argumentHint: "[provider]" },
   // System
-  { name: "usage", category: "System", aliases: ["session", "status"], description: "Show token usage, context window, and session stats" },
   { name: "settings", category: "System", description: "Open settings menu" },
   { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
   { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
@@ -122,9 +131,12 @@ const EXTRA_SLASH_ALIASES = new Map<string, string>([
   ["deny", "deny"],
   ["provider", "provider"],
   ["sessions", "resume"],
-  ["session", "usage"],
+  ["usage", "session"],
+  ["status", "session"],
+  ["agent", "agents"],
   ["followup", "followup"],
   ["unrevert", "unrevert"],
+  ["custom", "custom"],
   ["endpoint", "custom"],
   ["proxy", "custom"],
 ]);
@@ -324,6 +336,9 @@ export function attachThebeChat(
   let currentModel = options.model ?? "";
   let currentThinking: ThinkingLevel = "off";
   let currentTheme: ThemeName = options.theme ?? "dark";
+  try {
+    initTheme(currentTheme, false);
+  } catch {}
   let contextTokensUsed = 0;
   let contextWindowTotal = 1_048_576;
   let cumulativeInputTokens = 0;
@@ -355,12 +370,85 @@ export function attachThebeChat(
   tui.setFocus(editor);
 
   let isResponding = false;
+  let isBashMode = false;
+  let isExecutingBash = false;
+  let currentBashAbortController: AbortController | undefined;
   let streamUnsub: (() => void) | undefined;
   let replyMarkdown: Markdown | undefined;
   let loader: Loader | undefined;
   let pendingPermissionId: string | undefined;
 
   const children = tui.children;
+
+  function updateEditorBorderColor(): void {
+    if (isBashMode) {
+      editor.borderColor = getBashModeBorderColor(currentTheme);
+    } else if (isResponding || isExecutingBash) {
+      editor.borderColor = getRunningBorderColor(currentTheme);
+    } else {
+      editor.borderColor = getThinkingBorderColor(currentThinking, currentTheme);
+    }
+    editor.invalidate();
+    tui.requestRender();
+  }
+
+  editor.onChange = (text: string) => {
+    const wasBashMode = isBashMode;
+    isBashMode = text.trimStart().startsWith("!");
+    if (wasBashMode !== isBashMode) {
+      updateEditorBorderColor();
+    }
+  };
+  updateEditorBorderColor();
+
+  async function runBash(command: string, excludeFromContext: boolean): Promise<void> {
+    const bashComp = new BashExecutionComponent(command, tui, excludeFromContext);
+    insertBeforeFooter(bashComp);
+    tui.requestRender();
+
+    isExecutingBash = true;
+    updateEditorBorderColor();
+
+    const abortController = new AbortController();
+    currentBashAbortController = abortController;
+
+    try {
+      if (product && sessionId) {
+        const res = await product.executeBash(
+          sessionId,
+          command,
+          (chunk: string) => {
+            bashComp.appendOutput(chunk);
+            tui.requestRender();
+          },
+          { excludeFromContext },
+        );
+        bashComp.setComplete(res.exitCode, res.cancelled);
+      } else {
+        const ops = createLocalBashOperations();
+        const res = await ops.exec(command, process.cwd(), {
+          onData: (data: Buffer) => {
+            bashComp.appendOutput(data.toString("utf8"));
+            tui.requestRender();
+          },
+          signal: abortController.signal,
+        });
+        bashComp.setComplete(res.exitCode, false);
+      }
+    } catch (err: unknown) {
+      if (abortController.signal.aborted) {
+        bashComp.setComplete(undefined, true);
+      } else {
+        bashComp.setComplete(1, false);
+        notice(`Bash command failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } finally {
+      currentBashAbortController = undefined;
+      isExecutingBash = false;
+      updateEditorBorderColor();
+      tui.requestRender();
+    }
+  }
 
   function updateFooter(): void {
     const width = tui.terminal?.columns ?? process.stdout.columns ?? 80;
@@ -515,9 +603,12 @@ export function attachThebeChat(
 
   async function applyTheme(name: ThemeName, persist = true): Promise<void> {
     currentTheme = name;
+    try {
+      initTheme(name, false);
+    } catch {}
     const pack = getTuiTheme(name);
-    editor.borderColor = pack.editor.borderColor;
     (editor as unknown as { theme: unknown }).theme = pack.editor;
+    updateEditorBorderColor();
     for (const child of children) {
       child.invalidate?.();
     }
@@ -557,6 +648,10 @@ export function attachThebeChat(
           insertBeforeFooter(makeMarkdown(m.text));
         } else if (m.role === "assistant" && m.text) {
           insertBeforeFooter(makeMarkdown(m.text));
+        } else if (m.role === "tool" && m.text) {
+          const status = m.isError ? chalk.red("error") : chalk.green("ok");
+          const label = chalk.dim(`[tool: ${m.toolName ?? "unknown"} · ${status}]\n`);
+          insertBeforeFooter(new Text(`${label}${m.text}`));
         }
       }
       tui.requestRender();
@@ -959,6 +1054,7 @@ export function attachThebeChat(
         throw new Error("TUI requires product or send");
       }
       isResponding = true;
+      updateEditorBorderColor();
       editor.disableSubmit = true;
       insertBeforeFooter(makeMarkdown(text));
       beginStream();
@@ -975,6 +1071,7 @@ export function attachThebeChat(
         isResponding = false;
         editor.disableSubmit = false;
         updateFooter();
+        updateEditorBorderColor();
         tui.requestRender();
       }
       return;
@@ -988,6 +1085,7 @@ export function attachThebeChat(
         return;
       }
       isResponding = true;
+      updateEditorBorderColor();
       insertBeforeFooter(makeMarkdown(text));
       beginStream();
       streamUnsub = product.subscribeLog(id, onEvent);
@@ -1009,6 +1107,7 @@ export function attachThebeChat(
         isResponding = false;
         void refreshContextUsage();
         updateFooter();
+        updateEditorBorderColor();
         tui.requestRender();
       }
       return;
@@ -1054,18 +1153,45 @@ export function attachThebeChat(
       return true;
     }
     if (name === "hotkeys") {
-      notice(
-        [
-          "Keyboard shortcuts:",
-          "  Enter        send (steer when busy)",
-          "  Alt+Enter    queue follow-up",
-          "  Esc          interrupt",
-          "  Ctrl+P       switch model",
-          "  Shift+Tab    cycle thinking",
-          "  Ctrl+C       quit",
-          "  /help        commands by category (Session, Agent, Provider, System)",
-        ].join("\n"),
-      );
+      const hotkeysMarkdown = [
+        "### Keyboard Shortcuts",
+        "",
+        "**Navigation**",
+        "| Key | Action |",
+        "|-----|--------|",
+        "| `Up` / `Down` / `Left` / `Right` | Move cursor / browse history |",
+        "| `Alt+Left` / `Alt+Right` | Move by word |",
+        "| `Home` / `Ctrl+A` | Start of line |",
+        "| `End` / `Ctrl+E` | End of line |",
+        "| `PageUp` / `PageDown` | Scroll by page |",
+        "",
+        "**Editing**",
+        "| Key | Action |",
+        "|-----|--------|",
+        "| `Enter` | Send message (steer when busy) |",
+        "| `Shift+Enter` | New line |",
+        "| `Alt+Backspace` | Delete word backwards |",
+        "| `Alt+Delete` | Delete word forwards |",
+        "| `Ctrl+U` | Delete to start of line |",
+        "| `Ctrl+K` | Delete to end of line |",
+        "| `Ctrl+Y` | Paste recently deleted text |",
+        "| `Ctrl+Z` | Undo |",
+        "",
+        "**Actions & Control**",
+        "| Key | Action |",
+        "|-----|--------|",
+        "| `Tab` | Path completion / accept autocomplete |",
+        "| `Esc` | Cancel autocomplete / abort streaming / cancel bash |",
+        "| `Ctrl+C` | Exit |",
+        "| `Shift+Tab` | Cycle thinking level (off → min → low → med → high → xhigh → max) |",
+        "| `Ctrl+P` | Open model selector |",
+        "| `Alt+Enter` | Queue follow-up message |",
+        "| `/` | Slash commands autocomplete (use `/help` for list) |",
+        "| `!` | Run bash command (included in context) |",
+        "| `!!` | Run bash command (excluded from context) |",
+      ].join("\n");
+      insertBeforeFooter(makeMarkdown(hotkeysMarkdown));
+      tui.requestRender();
       return true;
     }
     if (name === "clear") {
@@ -1528,6 +1654,26 @@ export function attachThebeChat(
           }
           break;
         }
+        case "agents":
+        case "agent": {
+          const statuses = await product.sessionStatus();
+          if (statuses.length === 0) {
+            notice("no active agent sessions");
+            break;
+          }
+          const rows = statuses.map((s, idx) => {
+            const isCurrent = s.thebeSessionId === sessionId;
+            const currentMarker = isCurrent ? "★ " : "  ";
+            const title = s.title || "untitled";
+            const modelStr = s.model ? `${s.model.providerId}/${s.model.modelId}` : currentModel || "default";
+            const state = s.streaming ? chalk.cyan("streaming") : s.status === "running" ? chalk.yellow("running") : chalk.green("idle");
+            return `${currentMarker}${idx + 1}. \`${s.thebeSessionId.slice(0, 8)}\` — **${title}** [${state}] (model: \`${modelStr}\`)`;
+          });
+          const md = `### Active Agent Sessions (${statuses.length})\n\n${rows.join("\n")}\n\n*Use \`/resume <id>\` to switch active agent session.*`;
+          insertBeforeFooter(makeMarkdown(md));
+          tui.requestRender();
+          break;
+        }
         case "thinking": {
           const id = ensureSession();
           if (arg) {
@@ -1538,6 +1684,7 @@ export function attachThebeChat(
             await product.setThinkingLevel(id, arg as ThinkingLevel);
             currentThinking = arg as ThinkingLevel;
             updateFooter();
+            updateEditorBorderColor();
             notice(`thinking level set to ${arg}`);
             break;
           }
@@ -1562,27 +1709,55 @@ export function attachThebeChat(
             await product.setThinkingLevel(id, selected.value as ThinkingLevel);
             currentThinking = selected.value as ThinkingLevel;
             updateFooter();
+            updateEditorBorderColor();
             notice(`thinking level set to ${selected.value}`);
           }
           break;
         }
         case "settings": {
+          const cfg = await loadThebeConfig();
           await attachSettingsMenu(tui, editor, {
             theme: currentTheme,
             thinking: currentThinking,
             tuiMode: tui.mode,
-            onTheme: (value) => applyTheme(value as ThemeName),
-            onThinking: async (value) => {
-              if (!product) return;
-              const id = ensureSession();
-              await product.setThinkingLevel(id, value as ThinkingLevel);
-              currentThinking = value as ThinkingLevel;
-              updateFooter();
-            },
-            onTuiMode: async (value) => {
-              await saveThebeConfig({ tuiMode: value as TuiMode });
-              if (tui.mode !== value && options.onTuiModeChange) {
-                await options.onTuiModeChange(value as TuiMode);
+            autoCompact: cfg.autoCompact ?? true,
+            steeringMode: cfg.steeringMode ?? "one-at-a-time",
+            followUpMode: cfg.followUpMode ?? "one-at-a-time",
+            hideThinking: cfg.hideThinking ?? false,
+            quietStartup: cfg.quietStartup ?? false,
+            fullscreenExitOutput: cfg.fullscreenExitOutput ?? "transcript",
+            fullscreenScrollbar: cfg.fullscreenScrollbar ?? "auto",
+            onSettingChange: async (id, value) => {
+              if (id === "theme") {
+                await applyTheme(value as ThemeName);
+              } else if (id === "thinking") {
+                if (product) {
+                  const sId = ensureSession();
+                  await product.setThinkingLevel(sId, value as ThinkingLevel);
+                  currentThinking = value as ThinkingLevel;
+                  updateFooter();
+                  updateEditorBorderColor();
+                }
+                await saveThebeConfig({ defaultThinkingLevel: value });
+              } else if (id === "tui") {
+                await saveThebeConfig({ tuiMode: value as TuiMode });
+                if (tui.mode !== value && options.onTuiModeChange) {
+                  await options.onTuiModeChange(value as TuiMode);
+                }
+              } else if (id === "autoCompact") {
+                await saveThebeConfig({ autoCompact: value === "true" });
+              } else if (id === "steeringMode") {
+                await saveThebeConfig({ steeringMode: value as "one-at-a-time" | "all" });
+              } else if (id === "followUpMode") {
+                await saveThebeConfig({ followUpMode: value as "one-at-a-time" | "all" });
+              } else if (id === "hideThinking") {
+                await saveThebeConfig({ hideThinking: value === "true" });
+              } else if (id === "quietStartup") {
+                await saveThebeConfig({ quietStartup: value === "true" });
+              } else if (id === "fullscreenExitOutput") {
+                await saveThebeConfig({ fullscreenExitOutput: value as "transcript" | "resume-hint" });
+              } else if (id === "fullscreenScrollbar") {
+                await saveThebeConfig({ fullscreenScrollbar: value as "auto" | "always" | "hidden" });
               }
             },
           });
@@ -1926,6 +2101,22 @@ export function attachThebeChat(
       tui.requestRender();
       return;
     }
+    if (trimmed.startsWith("!")) {
+      const isExcluded = trimmed.startsWith("!!");
+      const command = isExcluded ? trimmed.slice(2).trim() : trimmed.slice(1).trim();
+      editor.setText("");
+      isBashMode = false;
+      updateEditorBorderColor();
+      if (!command) {
+        return;
+      }
+      if (isExecutingBash) {
+        notice("A bash command is already running. Press Esc to cancel it first.");
+        return;
+      }
+      void runBash(command, isExcluded);
+      return;
+    }
     void (async () => {
       try {
         if (await handleSlash(trimmed)) {
@@ -1963,8 +2154,25 @@ export function attachThebeChat(
       const idx = thinkingCycle.indexOf(currentThinking);
       const next =
         thinkingCycle[(idx < 0 ? 0 : idx + 1) % thinkingCycle.length]!;
-      void handleSlash(`/thinking ${next}`);
+      currentThinking = next;
+      if (product && sessionId) {
+        void product.setThinkingLevel(sessionId, next).catch(() => {});
+      }
+      updateFooter();
+      updateEditorBorderColor();
       return;
+    }
+    if (matchesKey(data, "escape")) {
+      if (currentBashAbortController) {
+        currentBashAbortController.abort();
+        return;
+      }
+      if (isBashMode) {
+        editor.setText("");
+        isBashMode = false;
+        updateEditorBorderColor();
+        return;
+      }
     }
     if (isResponding && matchesKey(data, "alt+enter")) {
       const trimmed = editor.getText().trim();
@@ -1994,6 +2202,10 @@ export function attachThebeChat(
     updateFooter,
     handleSlash,
     isResponding: () => isResponding,
+    isExecutingBash: () => isExecutingBash,
+    abortBash: () => {
+      currentBashAbortController?.abort();
+    },
   };
 }
 
@@ -2025,6 +2237,10 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
         process.exit(0);
       }
       if (matchesKey(data, "escape")) {
+        if (chat.isExecutingBash()) {
+          chat.abortBash();
+          return { consume: true };
+        }
         if (chat.isResponding() && options.product) {
           const id = options.sessionId ?? options.product.lastThebeSessionId();
           if (id) {
@@ -2240,9 +2456,14 @@ function attachSettingsMenu(
     theme: ThemeName;
     thinking: ThinkingLevel;
     tuiMode: TuiMode;
-    onTheme: (value: string) => void | Promise<void>;
-    onThinking: (value: string) => void | Promise<void>;
-    onTuiMode: (value: string) => void | Promise<void>;
+    autoCompact?: boolean;
+    steeringMode?: "one-at-a-time" | "all";
+    followUpMode?: "one-at-a-time" | "all";
+    hideThinking?: boolean;
+    quietStartup?: boolean;
+    fullscreenExitOutput?: "transcript" | "resume-hint";
+    fullscreenScrollbar?: "auto" | "always" | "hidden";
+    onSettingChange: (id: string, value: string) => void | Promise<void>;
   },
 ): Promise<void> {
   return new Promise((resolvePromise) => {
@@ -2268,17 +2489,64 @@ function attachSettingsMenu(
         currentValue: options.tuiMode,
         values: ["regular", "fullscreen"],
       },
+      {
+        id: "autoCompact",
+        label: "Auto-compact",
+        description: "Automatically compact context when threshold reached",
+        currentValue: String(options.autoCompact ?? true),
+        values: ["true", "false"],
+      },
+      {
+        id: "steeringMode",
+        label: "Steering mode",
+        description: "Message delivery mode when steering agent",
+        currentValue: options.steeringMode ?? "one-at-a-time",
+        values: ["one-at-a-time", "all"],
+      },
+      {
+        id: "followUpMode",
+        label: "Follow-up mode",
+        description: "Follow-up queue processing mode",
+        currentValue: options.followUpMode ?? "one-at-a-time",
+        values: ["one-at-a-time", "all"],
+      },
+      {
+        id: "hideThinking",
+        label: "Hide thinking",
+        description: "Collapse or hide thinking process blocks in chat",
+        currentValue: String(options.hideThinking ?? false),
+        values: ["false", "true"],
+      },
+      {
+        id: "quietStartup",
+        label: "Quiet startup",
+        description: "Suppress banner and tips on launch",
+        currentValue: String(options.quietStartup ?? false),
+        values: ["false", "true"],
+      },
+      {
+        id: "fullscreenExitOutput",
+        label: "Exit output",
+        description: "What to print when exiting fullscreen TUI",
+        currentValue: options.fullscreenExitOutput ?? "transcript",
+        values: ["transcript", "resume-hint"],
+      },
+      {
+        id: "fullscreenScrollbar",
+        label: "Scrollbar",
+        description: "Scrollbar display in fullscreen mode",
+        currentValue: options.fullscreenScrollbar ?? "auto",
+        values: ["auto", "always", "hidden"],
+      },
     ];
     const list = new SettingsList(
       items,
-      Math.min(items.length + 2, 10),
+      Math.min(items.length + 2, 14),
       options.theme === "light" ? lightSettingsListTheme : defaultSettingsListTheme,
       (id, newValue) => {
         list.updateValue(id, newValue);
         tui.requestRender();
-        if (id === "theme") void options.onTheme(newValue);
-        if (id === "thinking") void options.onThinking(newValue);
-        if (id === "tui") void options.onTuiMode(newValue);
+        void options.onSettingChange(id, newValue);
       },
       () => {
         tui.removeChild(list);
