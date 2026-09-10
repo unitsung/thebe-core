@@ -473,13 +473,18 @@ export async function createPiCodingAgentRuntime(
           const chars = msgs.reduce((acc, m) => acc + (m.text?.length ?? 0), 0);
           usedTokens = Math.ceil(chars / 4);
         }
+        const sessionStats = (session as { getSessionStats?: () => ThebeSessionContext["sessionStats"] }).getSessionStats?.();
+        const sessionName = (session as { sessionManager?: { getSessionName?: () => string | undefined } }).sessionManager?.getSessionName?.();
+        const costAmount = sessionStats?.cost ?? 0;
         return {
           contextUsage: { usedTokens, maxTokens },
-          estimatedCost: { amount: 0, currency: "USD" },
+          estimatedCost: { amount: costAmount, currency: "USD" },
           compaction: {
             lastCompactedAt: undefined,
             nearThreshold: usedTokens > maxTokens * 0.8,
           },
+          sessionStats,
+          sessionName,
         };
       },
       async listBackgroundTasks(): Promise<BackgroundTask[]> {

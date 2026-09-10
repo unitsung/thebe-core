@@ -48,6 +48,15 @@ export async function saveThebeConfig(
   }
 }
 
+export const DEFAULT_THINKING_LEVEL_MAP: Record<string, string | null> = {
+  minimal: "minimal",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+  max: "max",
+};
+
 export type CustomModelDefinition = {
   id: string;
   name?: string;
@@ -133,9 +142,7 @@ export async function saveCustomProvider(
       };
       if (isReasoning) {
         modelEntry.thinkingLevelMap = newModel.thinkingLevelMap ?? {
-          low: "low",
-          medium: "medium",
-          high: "high",
+          ...DEFAULT_THINKING_LEVEL_MAP,
         };
       }
       if (idx >= 0) {
