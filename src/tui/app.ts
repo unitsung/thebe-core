@@ -48,6 +48,7 @@ import {
   saveThebeConfig,
   saveProviderEndpoint,
   saveCustomProvider,
+  fetchRemoteModels,
 } from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
@@ -648,30 +649,7 @@ export function attachThebeChat(
       .toLowerCase()
       .replace(/[^a-z0-9_-]/g, "-");
 
-    // 4. Model ID
-    let suggestedModel = "custom-model";
-    if (providerId.includes("deepseek") || baseUrl.includes("deepseek")) {
-      suggestedModel = "deepseek-chat";
-    } else if (providerId.includes("ollama") || baseUrl.includes("11434")) {
-      suggestedModel = "llama3.1";
-    } else if (api === "anthropic-messages") {
-      suggestedModel = "claude-3-7-sonnet";
-    } else if (api === "openai-responses") {
-      suggestedModel = "gpt-4o";
-    }
-
-    const modelInput = await attachPromptInput(tui, {
-      prompt: chalk.cyan(`Model ID [default: ${suggestedModel}]: `),
-      placeholder: suggestedModel,
-      focusBack: editor,
-    });
-    if (modelInput === null) {
-      notice("custom endpoint setup cancelled");
-      return null;
-    }
-    const modelId = modelInput.trim() || suggestedModel;
-
-    // 5. API Key
+    // 4. API Key
     const keyInput = await attachPromptInput(tui, {
       prompt: chalk.cyan(
         "API key (optional for local/keyless servers, press Enter to skip): ",
@@ -685,6 +663,67 @@ export function attachThebeChat(
     }
     const apiKey = keyInput.trim() || "none";
 
+    // 5. Model Selection (Auto-fetch from endpoint with manual fallback)
+    let suggestedModel = "custom-model";
+    if (providerId.includes("deepseek") || baseUrl.includes("deepseek")) {
+      suggestedModel = "deepseek-chat";
+    } else if (providerId.includes("ollama") || baseUrl.includes("11434")) {
+      suggestedModel = "llama3.1";
+    } else if (api === "anthropic-messages") {
+      suggestedModel = "claude-3-7-sonnet";
+    } else if (api === "openai-responses") {
+      suggestedModel = "gpt-4o";
+    }
+
+    notice("fetching available models from endpoint...");
+    tui.requestRender();
+
+    const remoteModels = await fetchRemoteModels(baseUrl, apiKey, api);
+    let selectedModelId = "";
+
+    if (remoteModels && remoteModels.length > 0) {
+      notice(`discovered ${remoteModels.length} models from endpoint`);
+      const selectItems: SelectItem[] = remoteModels.map((m) => ({
+        label: m.name && m.name !== m.id ? `${m.id} (${m.name})` : m.id,
+        value: m.id,
+      }));
+      selectItems.push({
+        label: chalk.dim("+ Enter model ID manually..."),
+        value: "__manual__",
+      });
+
+      const chosenModel = await attachSelectList(tui, selectItems, editor);
+      if (!chosenModel) {
+        notice("custom endpoint setup cancelled");
+        return null;
+      }
+      if (chosenModel.value === "__manual__") {
+        const modelInput = await attachPromptInput(tui, {
+          prompt: chalk.cyan(`Model ID [default: ${suggestedModel}]: `),
+          placeholder: suggestedModel,
+          focusBack: editor,
+        });
+        if (modelInput === null) {
+          notice("custom endpoint setup cancelled");
+          return null;
+        }
+        selectedModelId = modelInput.trim() || suggestedModel;
+      } else {
+        selectedModelId = chosenModel.value;
+      }
+    } else {
+      const modelInput = await attachPromptInput(tui, {
+        prompt: chalk.cyan(`Model ID [default: ${suggestedModel}]: `),
+        placeholder: suggestedModel,
+        focusBack: editor,
+      });
+      if (modelInput === null) {
+        notice("custom endpoint setup cancelled");
+        return null;
+      }
+      selectedModelId = modelInput.trim() || suggestedModel;
+    }
+
     // 6. Save to models.json, auth.json, config.json
     const compat =
       api === "openai-completions"
@@ -694,21 +733,34 @@ export function attachThebeChat(
           }
         : undefined;
 
+    const modelsToSave =
+      remoteModels && remoteModels.length > 0
+        ? remoteModels.map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+            contextWindow: 128000,
+            maxTokens: 4096,
+            reasoning: false,
+          }))
+        : [];
+
+    if (!modelsToSave.some((m) => m.id === selectedModelId)) {
+      modelsToSave.unshift({
+        id: selectedModelId,
+        name: selectedModelId,
+        contextWindow: 128000,
+        maxTokens: 4096,
+        reasoning: false,
+      });
+    }
+
     await saveCustomProvider({
       providerId,
       name: providerId.charAt(0).toUpperCase() + providerId.slice(1),
       baseUrl,
       api,
       apiKey,
-      models: [
-        {
-          id: modelId,
-          name: modelId,
-          contextWindow: 128000,
-          maxTokens: 4096,
-          reasoning: false,
-        },
-      ],
+      models: modelsToSave,
       compat,
     });
 
@@ -717,7 +769,7 @@ export function attachThebeChat(
       await product.auth().setApiKey(providerId, apiKey);
     } catch {}
 
-    return { providerId, modelId };
+    return { providerId, modelId: selectedModelId };
   }
 
   async function afterProviderLoggedIn(

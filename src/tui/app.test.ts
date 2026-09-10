@@ -941,5 +941,79 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     expect(after).toEqual(before);
     expect(notices(tui)).not.toContain("switched model to opencode/");
   });
+
+  it("/custom wizard runs API, Base URL, ID, Key, auto-fetches models and selects", async () => {
+    const { createServer } = await import("node:http");
+    const server = createServer((req, res) => {
+      const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+      if (url.pathname === "/v1/models" || url.pathname === "/models") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(
+          JSON.stringify({
+            data: [
+              { id: "auto-model-1", name: "Auto Model One" },
+              { id: "auto-model-2", name: "Auto Model Two" },
+            ],
+          }),
+        );
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+
+    const port = await new Promise<number>((resolve) => {
+      server.listen(0, "127.0.0.1", () => {
+        const addr = server.address();
+        resolve(typeof addr === "object" && addr ? addr.port : 0);
+      });
+    });
+
+    try {
+      const fake = createFakeRuntime();
+      const product = createThebeProduct({ runtime: fake.runtime, provider });
+      const meta = await product.createSession();
+      const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+      const { handleSlash } = attachThebeChat(tui, {
+        product,
+        sessionId: meta.thebeSessionId,
+      });
+
+      const customPromise = handleSlash("/custom");
+      await flush();
+
+      // Step 1: Select API (SelectList) - Press Enter on first option (openai-completions)
+      const apiSelect = findNamed(tui, "SelectList");
+      apiSelect.handleInput("\r");
+      await flush();
+
+      // Step 2: Base URL endpoint (Input)
+      const urlInput = findNamed(tui, "Input");
+      typeAndConfirm(urlInput, `http://127.0.0.1:${port}/v1`);
+      await flush();
+
+      // Step 3: Provider ID (Input)
+      const idInput = findNamed(tui, "Input");
+      typeAndConfirm(idInput, "test-custom-provider");
+      await flush();
+
+      // Step 4: API Key (Input)
+      const keyInput = findNamed(tui, "Input");
+      typeAndConfirm(keyInput, "sk-custom-secret");
+      await flush();
+
+      // Step 5: Auto-fetched Model selection (SelectList)
+      const modelSelect = findNamed(tui, "SelectList");
+      expect(modelSelect).toBeDefined();
+      // Select first auto-fetched model (auto-model-1)
+      modelSelect.handleInput("\r");
+      await customPromise;
+
+      expect(notices(tui)).toContain("configured custom provider test-custom-provider (auto-model-1)");
+      expect(fake.apiKeys.get("test-custom-provider")).toBe("sk-custom-secret");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
 });
 
