@@ -117,7 +117,6 @@ describe("PiCodingAgentRuntime sessions", () => {
     const { faux, runtime } = await piWithFaux();
     faux.setResponses([
       fauxAssistantMessage("before-compact"),
-      fauxAssistantMessage("summary"),
       fauxAssistantMessage("after-compact"),
     ]);
     const product = createThebeProduct({
@@ -125,7 +124,7 @@ describe("PiCodingAgentRuntime sessions", () => {
       provider: emptyProvider(),
     });
     await product.send("one");
-    await product.compact();
+    await expect(product.compact()).rejects.toThrow(/Nothing to compact/i);
     const continued = await product.send("two");
     expect(continued.text.length).toBeGreaterThan(0);
     expect(product.messages().length).toBeGreaterThan(0);

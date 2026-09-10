@@ -1,0 +1,299 @@
+import { randomUUID } from "node:crypto";
+import type { ForkSessionOptions, RuntimeModelRef, ThinkingLevel } from "../../runtime/types.ts";
+import { httpError, type SessionRunStatus } from "../types.ts";
+import type { ProductSessionMeta } from "../store.ts";
+import type { ProductContext } from "./context.ts";
+
+export function createSessionApi(ctx: ProductContext) {
+  const {
+    options,
+    checkNotQuiesced,
+    sessionOptions,
+    touchMeta,
+    persist,
+    lookup,
+    openSession,
+    listMetas,
+    withRunState,
+    stamp,
+    streaming,
+    abortRequested,
+    appendEvent,
+    sessionLog,
+    pendingPermissions,
+    memory,
+    logs,
+    store,
+  } = ctx;
+
+  return {
+    async createSession(init?: {
+      title?: string;
+      labels?: Record<string, string>;
+      selectedContext?: ProductSessionMeta["selectedContext"];
+      model?: RuntimeModelRef;
+      builtinTools?: readonly string[];
+    }): Promise<ProductSessionMeta> {
+      checkNotQuiesced();
+      const effectiveModel = init?.model ?? options.model;
+      const session = await options.runtime.createSession(
+        sessionOptions(undefined, init?.builtinTools, effectiveModel),
+      );
+      const meta = touchMeta({
+        thebeSessionId: randomUUID(),
+        runtimeId: options.runtime.runtimeId,
+        runtimeSessionId: session.runtimeSessionId,
+        title: init?.title,
+        labels: init?.labels,
+        selectedContext: init?.selectedContext,
+        builtinTools: init?.builtinTools ? [...init.builtinTools] : undefined,
+      });
+      await persist(meta);
+      ctx.active = { meta, session };
+      if (effectiveModel) {
+        try {
+          await session.setModel(effectiveModel);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("unknown model")) {
+            throw err;
+          }
+        }
+      }
+      return meta;
+    },
+    async listSessions(query?: {
+      status?: string;
+      hostId?: string;
+      environmentId?: string;
+    }): Promise<
+      Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
+    > {
+      const rows = await listMetas();
+      let mapped = rows.map((row) => withRunState(row));
+      if (query?.status) {
+        mapped = mapped.filter((row) => row.status === query.status);
+      }
+      if (query?.hostId) {
+        mapped = mapped.filter(
+          (row) =>
+            (row.selectedContext?.hostId ?? row.selectedContext?.host) ===
+            query.hostId,
+        );
+      }
+      if (query?.environmentId) {
+        mapped = mapped.filter(
+          (row) =>
+            (row.selectedContext?.environmentId ??
+              row.selectedContext?.environment) === query.environmentId,
+        );
+      }
+      return mapped;
+    },
+    async getSession(thebeSessionId: string): Promise<ProductSessionMeta> {
+      return lookup(thebeSessionId);
+    },
+    async patchSession(
+      thebeSessionId: string,
+      patch: Partial<
+        Pick<
+          ProductSessionMeta,
+          | "title"
+          | "labels"
+          | "selectedContext"
+          | "shareMetadata"
+          | "rememberedPermissions"
+        >
+      >,
+    ): Promise<ProductSessionMeta> {
+      const current = await lookup(thebeSessionId);
+      const meta = touchMeta({
+        ...current,
+        title: patch.title ?? current.title,
+        labels: patch.labels ?? current.labels,
+        selectedContext: patch.selectedContext ?? current.selectedContext,
+        shareMetadata: patch.shareMetadata ?? current.shareMetadata,
+        rememberedPermissions:
+          patch.rememberedPermissions !== undefined
+            ? patch.rememberedPermissions
+            : current.rememberedPermissions,
+      });
+      await persist(meta);
+      if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
+        ctx.active.meta = meta;
+      }
+      return meta;
+    },
+    /**
+     * Removes the Thebe session mapping/metadata only (unlink, not erase).
+     * The Pi-native session, its transcript/branches and exports stay in the
+     * runtime; resuming the same runtimeSessionId still works. There is no
+     * undelete: the mapping must be recreated by resuming/forking.
+     */
+    async deleteSession(thebeSessionId: string): Promise<void> {
+      if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
+        ctx.active.session.dispose();
+        ctx.active = undefined;
+      }
+      memory.delete(thebeSessionId);
+      logs.delete(thebeSessionId);
+      await store.delete(thebeSessionId);
+    },
+    async sessionStatus(): Promise<
+      Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
+    > {
+      const rows = await listMetas();
+      return rows.map((row) => withRunState(row));
+    },
+    async resume(thebeSessionId: string): Promise<ProductSessionMeta> {
+      checkNotQuiesced();
+      const opened = await openSession(thebeSessionId);
+      return opened.meta;
+    },
+    async fork(
+      thebeSessionId?: string,
+      optionsOrEntryId?:
+        | string
+        | { atEntryId?: string; mode?: ForkSessionOptions["mode"] },
+    ): Promise<ProductSessionMeta> {
+      checkNotQuiesced();
+      const forkOpts: ForkSessionOptions =
+        typeof optionsOrEntryId === "string"
+          ? { atEntryId: optionsOrEntryId }
+          : optionsOrEntryId ?? {};
+      const source = thebeSessionId
+        ? await lookup(thebeSessionId)
+        : ctx.active?.meta;
+      if (!source) {
+        throw new Error("no session to fork");
+      }
+      const child = await options.runtime.forkSession(
+        source.runtimeSessionId,
+        sessionOptions(undefined, source.builtinTools),
+        forkOpts,
+      );
+      const meta = stamp({
+        thebeSessionId: randomUUID(),
+        runtimeId: options.runtime.runtimeId,
+        runtimeSessionId: child.runtimeSessionId,
+        parentThebeSessionId: source.thebeSessionId,
+        selectedContext: source.selectedContext,
+        labels: source.labels,
+        shareMetadata: source.shareMetadata,
+        title: source.title,
+        builtinTools: source.builtinTools ? [...source.builtinTools] : undefined,
+      });
+      await persist(meta);
+      ctx.active = { meta, session: child };
+      return meta;
+    },
+    async children(thebeSessionId: string): Promise<ProductSessionMeta[]> {
+      const rows = await listMetas();
+      return rows.filter((row) => row.parentThebeSessionId === thebeSessionId);
+    },
+    async compact(
+      thebeSessionId?: string,
+      customInstructions?: string,
+    ): Promise<void> {
+      const opened = await openSession(thebeSessionId);
+      const id = opened.meta.thebeSessionId;
+      const unsub = opened.session.subscribe((event) => {
+        appendEvent(id, event);
+      });
+      try {
+        await opened.session.compact(customInstructions);
+      } finally {
+        unsub();
+      }
+    },
+    async setAutoCompactionEnabled(
+      thebeSessionId: string | undefined,
+      enabled: boolean,
+    ): Promise<void> {
+      ctx.autoCompactOverride = enabled;
+      const opened = await openSession(thebeSessionId);
+      opened.session.setAutoCompactionEnabled?.(enabled);
+    },
+    async interrupt(thebeSessionId?: string): Promise<void> {
+      const opened = await openSession(thebeSessionId);
+      const id = opened.meta.thebeSessionId;
+      abortRequested.add(id);
+      await opened.session.abort();
+      // The runtime emits `interrupted` on the aborted handle only; a resume
+      // handle has no listeners, so ensure the session log sees exactly one.
+      const tail = sessionLog(id).events.at(-1);
+      if (!tail || tail.type !== "interrupted") {
+        appendEvent(id, { type: "interrupted" });
+      }
+    },
+    /**
+     * History-only revert to the last user turn. External side effects
+     * (bash runs, file writes, container changes) are NOT rolled back;
+     * clients must not present this as undoing what the agent did.
+     */
+    async revert(thebeSessionId?: string): Promise<void> {
+      const opened = await openSession(thebeSessionId);
+      await opened.session.revert();
+    },
+    async unrevert(thebeSessionId?: string): Promise<void> {
+      const opened = await openSession(thebeSessionId);
+      await opened.session.unrevert();
+    },
+    /**
+     * Resolves one pending approval. `remember` persists the decision for
+     * this tool on this session only (no TTL, no cross-session sharing);
+     * pending entries are in-memory, so a restart turns them into
+     * `unknown permission` 404s and the client should re-prompt. Resolving
+     * twice is a deterministic 404, not silent success.
+     */
+    async resolvePermission(
+      thebeSessionId: string,
+      permissionId: string,
+      decision: { response: "allow" | "deny"; remember?: boolean },
+    ): Promise<void> {
+      const pending = pendingPermissions.get(permissionId);
+      if (!pending) {
+        throw new Error(`unknown permission: ${permissionId}`);
+      }
+      pendingPermissions.delete(permissionId);
+      if (decision.remember) {
+        const meta = await lookup(thebeSessionId);
+        meta.rememberedPermissions = {
+          ...meta.rememberedPermissions,
+          [pending.request.toolName]: decision.response,
+        };
+        await persist(touchMeta(meta));
+        if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
+          ctx.active.meta = meta;
+        }
+      }
+      pending.resolve(decision.response);
+    },
+    pendingPermissionIds(): string[] {
+      return [...pendingPermissions.keys()];
+    },
+    async setModel(
+      thebeSessionId: string,
+      model: RuntimeModelRef,
+    ): Promise<void> {
+      if (streaming.has(thebeSessionId)) {
+        throw httpError(409, "session is streaming; switch model when idle");
+      }
+      const opened = await openSession(thebeSessionId);
+      await opened.session.setModel(model);
+    },
+    async setThinkingLevel(
+      thebeSessionId: string,
+      level: ThinkingLevel,
+    ): Promise<void> {
+      if (streaming.has(thebeSessionId)) {
+        throw httpError(
+          409,
+          "session is streaming; switch thinking level when idle",
+        );
+      }
+      const opened = await openSession(thebeSessionId);
+      await opened.session.setThinkingLevel(level);
+    },
+  };
+}

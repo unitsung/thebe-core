@@ -23,6 +23,30 @@ describe("mapPiEvent", () => {
     ).not.toContain("message_update");
   });
 
+  it("maps compaction_end with token estimates", async () => {
+    expect(
+      mapPiEvent({
+        type: "compaction_start",
+        reason: "threshold",
+      }),
+    ).toEqual({ type: "compaction_start", reason: "threshold" });
+    expect(
+      mapPiEvent({
+        type: "compaction_end",
+        reason: "threshold",
+        aborted: false,
+        result: { tokensBefore: 90000, estimatedTokensAfter: 21000 },
+      } as unknown as { type: string }),
+    ).toEqual({
+      type: "compaction_end",
+      aborted: false,
+      reason: "threshold",
+      tokensBefore: 90000,
+      estimatedTokensAfter: 21000,
+      errorMessage: undefined,
+    });
+  });
+
   it("maps queue arrays to counts", async () => {
     const event = mapPiEvent({
       type: "queue_update",

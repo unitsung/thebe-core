@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -188,6 +188,28 @@ describe("Thebe product service (fake runtime)", () => {
     expect(fake.compactCalls()).toBe(1);
   });
 
+  it("passes compact instructions and toggles official auto-compact", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "first" }]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const meta = await product.createSession();
+    const before = await product.getContextUsage(meta.thebeSessionId);
+    expect(before.compaction.enabled).toBe(true);
+    await product.send("one");
+    await product.compact(meta.thebeSessionId, "keep the API decisions");
+    expect(fake.compactCalls()).toBe(1);
+    expect(fake.compactInstructions()).toEqual(["keep the API decisions"]);
+    const after = await product.getContextUsage(meta.thebeSessionId);
+    expect(after.compaction.lastCompactedAt).toBeDefined();
+    await product.setAutoCompactionEnabled(meta.thebeSessionId, false);
+    const disabled = await product.getContextUsage(meta.thebeSessionId);
+    expect(disabled.compaction.enabled).toBe(false);
+    expect(disabled.compaction.nearThreshold).toBe(false);
+  });
+
   it("records enabled skill identity/version/source in audit and does not auto-load extras", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-audit-"));
     const auditPath = join(dir, "audit.jsonl");
@@ -362,5 +384,82 @@ describe("Thebe product service (fake runtime)", () => {
     await pending;
     const meta = await product.getSession(sessionId);
     expect(meta.rememberedPermissions).toMatchObject({ bash: "allow" });
+  });
+
+  it("lists skills, mcp tools, subagent profiles, spawn, and fork messages", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-product-features-"));
+    const prevCwd = process.cwd();
+    const prevHome = process.env.HOME;
+    process.chdir(dir);
+    process.env.HOME = dir;
+    try {
+      await mkdir(join(dir, ".thebe", "skills", "demo"), { recursive: true });
+      await writeFile(
+        join(dir, ".thebe", "skills", "demo", "SKILL.md"),
+        "---\nname: demo-skill\ndescription: Demo skill\n---\nDo the demo.\n",
+      );
+      await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".thebe", "agents", "researcher.md"),
+        "---\nname: researcher\ndescription: Research helper\n---\nYou research.\n",
+      );
+      await writeFile(
+        join(dir, ".thebe", "mcp.json"),
+        JSON.stringify({ mcpServers: { notes: { command: "notes-mcp" } } }),
+      );
+
+      const fake = createFakeRuntime();
+      fake.queueTurns([
+        { kind: "text", text: "parent-ok" },
+        { kind: "text", text: "child-ok" },
+      ]);
+      const product = createThebeProduct({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+      });
+      const parent = await product.createSession({ title: "parent" });
+      await product.prompt("parent-turn", {
+        thebeSessionId: parent.thebeSessionId,
+      });
+
+      const skills = await product.listSkills();
+      expect(skills.map((skill) => skill.name)).toContain("demo-skill");
+      await product.enableSkill("demo-skill");
+      expect((await product.getSkill("demo-skill"))?.enabled).toBe(true);
+      await product.disableSkill("demo-skill");
+      expect((await product.getSkill("demo-skill"))?.enabled).toBe(false);
+
+      const tools = await product.listMcpTools();
+      expect(tools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["container.list", "list_core_events"]),
+      );
+      const servers = await product.listMcpServers();
+      expect(servers.map((server) => server.name)).toContain("notes");
+
+      const profiles = await product.listSubagentProfiles();
+      expect(profiles.map((profile) => profile.name)).toContain("researcher");
+      const child = await product.spawnSubagent({
+        profileName: "researcher",
+        taskPrompt: "do research",
+        parentSessionId: parent.thebeSessionId,
+      });
+      expect(child.parentThebeSessionId).toBe(parent.thebeSessionId);
+      const listed = await product.listSubagents(parent.thebeSessionId);
+      expect(
+        listed.some((row) => row.thebeSessionId === child.thebeSessionId),
+      ).toBe(true);
+
+      const forks = await product.getForkMessages(parent.thebeSessionId);
+      expect(forks.some((turn) => turn.text.includes("parent-turn"))).toBe(
+        true,
+      );
+    } finally {
+      process.chdir(prevCwd);
+      if (prevHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = prevHome;
+      }
+    }
   });
 });

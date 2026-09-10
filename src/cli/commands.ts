@@ -144,9 +144,21 @@ export async function runCliCommand(
       return 0;
     }
     case "session-compact": {
-      await product.compact(command.sessionId);
-      log("compacted");
-      return 0;
+      try {
+        await product.compact(command.sessionId);
+        log("compacted");
+        return 0;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (
+          message.includes("Nothing to compact") ||
+          message.includes("Already compacted")
+        ) {
+          log(message);
+          return 0;
+        }
+        throw error;
+      }
     }
     case "session-export": {
       const exported = await product.exportSession(command.sessionId);
