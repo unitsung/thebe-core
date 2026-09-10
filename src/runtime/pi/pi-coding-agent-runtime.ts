@@ -297,11 +297,19 @@ export async function createPiCodingAgentRuntime(
       "providerId" in options.model
         ? (options.model as RuntimeModelRef)
         : undefined);
-    const resolvedModel = requestedModel
+    let resolvedModel = requestedModel
       ? resolveModelRef(requestedModel.providerId, requestedModel.modelId)
-      : options.model
-        ? options.model
-        : resolveModelRef("opencode", "muse-spark-1.3-free");
+      : undefined;
+    if (requestedModel && !resolvedModel) {
+      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+      resolvedModel = resolveModelRef(
+        requestedModel.providerId,
+        requestedModel.modelId,
+      );
+    }
+    resolvedModel ??= options.model
+      ? options.model
+      : resolveModelRef("opencode", "muse-spark-1.3-free");
 
     const { session } = await sdk.createAgentSession({
       cwd: create.cwd ?? cwd,
@@ -481,7 +489,11 @@ export async function createPiCodingAgentRuntime(
         // no-op
       },
       async setModel(model: RuntimeModelRef): Promise<void> {
-        const resolved = resolveModelRef(model.providerId, model.modelId);
+        let resolved = resolveModelRef(model.providerId, model.modelId);
+        if (!resolved) {
+          await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+          resolved = resolveModelRef(model.providerId, model.modelId);
+        }
         if (!resolved) {
           throw new Error(
             `unknown model: ${model.providerId}/${model.modelId}`,
@@ -629,6 +641,7 @@ export async function createPiCodingAgentRuntime(
   const auth: RuntimeAuth = {
     async setApiKey(providerId, apiKey) {
       await modelRuntime.setRuntimeApiKey(providerId, apiKey);
+      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
     },
     async loginOAuth(providerId, interaction) {
       const entry = ensureOAuthLogin(providerId, interaction?.openUrl);
@@ -843,6 +856,7 @@ export async function createPiCodingAgentRuntime(
       }));
     },
     async listModels(query?: { all?: boolean; providerId?: string }) {
+      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       const models = (
         query?.providerId
           ? modelRuntime.getModels(query.providerId)
@@ -875,6 +889,7 @@ export async function createPiCodingAgentRuntime(
       return list;
     },
     async listAvailableModels(query?: { providerId?: string }) {
+      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       const available = (await modelRuntime.getAvailable(
         query?.providerId,
       )) as PiModelShape[];
@@ -901,6 +916,7 @@ export async function createPiCodingAgentRuntime(
       return list;
     },
     async listProviders() {
+      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       return auth.listProviders();
     },
     async forkSession(runtimeSessionId, create, fork) {

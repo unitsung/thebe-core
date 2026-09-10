@@ -365,6 +365,10 @@ export class SearchableProviderPicker implements Component, Focusable {
         const bIsCur = b.id === this.currentProvider;
         if (aIsCur && !bIsCur) return -1;
         if (!aIsCur && bIsCur) return 1;
+        const aIsCustom = a.id === "custom";
+        const bIsCustom = b.id === "custom";
+        if (aIsCustom && !bIsCustom) return -1;
+        if (!aIsCustom && bIsCustom) return 1;
         return a.id.localeCompare(b.id);
       });
     } else {
@@ -453,10 +457,12 @@ export class SearchableProviderPicker implements Component, Focusable {
         const item = this.filteredProviders[i]!;
         const isSelected = i === this.selectedIndex;
         const isCurrent = item.id === this.currentProvider;
+        const isCustom = item.id === "custom";
         const cursor = isSelected ? chalk.cyan("→ ") : "  ";
         const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
-        const status =
-          item.authStatus === "connected"
+        const status = isCustom
+          ? chalk.dim("endpoint")
+          : item.authStatus === "connected"
             ? chalk.green("connected")
             : item.authStatus === "error"
               ? chalk.red("error")
@@ -465,7 +471,11 @@ export class SearchableProviderPicker implements Component, Focusable {
           ? chalk.cyan(item.displayName ?? item.id)
           : (item.displayName ?? item.id);
         const count = this.modelCounts.get(item.id);
-        const countBadge = count ? chalk.dim(`${count} models`) : "";
+        const countBadge = isCustom
+          ? chalk.cyan("compatible")
+          : count
+            ? chalk.dim(`${count} models`)
+            : "";
         const parts = [
           `  ${cursor}${currentMarker}${nameText}`,
           chalk.dim(`[${item.id}]`),
@@ -553,6 +563,7 @@ export async function attachSearchableProviderPicker(
     product: ThebeProduct;
     currentModel?: string;
     focusBack?: unknown;
+    includeCustom?: boolean;
   },
 ): Promise<RuntimeProvider | null> {
   const [providers, models] = await Promise.all([
@@ -563,6 +574,19 @@ export async function attachSearchableProviderPicker(
   const modelCounts = new Map<string, number>();
   for (const m of models) {
     modelCounts.set(m.providerId, (modelCounts.get(m.providerId) ?? 0) + 1);
+  }
+
+  const allProviders = [...providers];
+  if (
+    options.includeCustom !== false &&
+    !allProviders.some((p) => p.id === "custom")
+  ) {
+    allProviders.unshift({
+      id: "custom",
+      displayName: "Custom Provider (OpenAI / Anthropic Compatible)",
+      authMethods: ["apiKey"],
+      authStatus: "missing",
+    });
   }
 
   return new Promise((resolvePromise) => {
@@ -579,7 +603,7 @@ export async function attachSearchableProviderPicker(
     };
 
     const picker = new SearchableProviderPicker({
-      providers,
+      providers: allProviders,
       modelCounts,
       currentProvider: options.currentModel?.split("/")[0],
       onSelect: (provider) => finish(provider),

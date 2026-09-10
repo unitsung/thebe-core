@@ -44,7 +44,11 @@ import {
   attachSearchableProviderPicker,
 } from "./model-picker.ts";
 import { attachSearchableSessionPicker } from "./session-picker.ts";
-import { saveThebeConfig, saveProviderEndpoint } from "./config.ts";
+import {
+  saveThebeConfig,
+  saveProviderEndpoint,
+  saveCustomProvider,
+} from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
 
@@ -86,6 +90,7 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   { name: "thinking", category: "Agent", description: "Set thinking level", argumentHint: "[level]" },
   // Provider
   { name: "login", category: "Provider", aliases: ["connect"], description: "Connect provider (API key, endpoint, or OAuth)", argumentHint: "[provider]" },
+  { name: "custom", category: "Provider", aliases: ["endpoint", "proxy"], description: "Configure custom endpoint (OpenAI / Anthropic compatible)", argumentHint: "[provider]" },
   { name: "logout", category: "Provider", description: "Remove provider credentials", argumentHint: "[provider]" },
   // System
   { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
@@ -113,6 +118,8 @@ const EXTRA_SLASH_ALIASES = new Map<string, string>([
   ["provider", "provider"],
   ["followup", "followup"],
   ["unrevert", "unrevert"],
+  ["endpoint", "custom"],
+  ["proxy", "custom"],
 ]);
 
 export function resolveSlashName(name: string): string {
@@ -544,9 +551,179 @@ export function attachThebeChat(
     } catch {}
   }
 
+  async function runCustomProviderWizard(
+    initialProviderId?: string,
+  ): Promise<{ providerId: string; modelId: string } | null> {
+    if (!product) return null;
+
+    // 1. Choose API Protocol format (OpenAI Chat Completions / OpenAI Responses / Anthropic Messages / Google)
+    const apiChoices = [
+      {
+        label: "1. OpenAI Chat Completions (openai-completions)",
+        value: "openai-completions",
+        hint: "Ollama, vLLM, DeepSeek, LM Studio, OneAPI, proxies",
+      },
+      {
+        label: "2. OpenAI Responses (openai-responses)",
+        value: "openai-responses",
+        hint: "OpenAI Responses API endpoint (/responses)",
+      },
+      {
+        label: "3. Anthropic Messages (anthropic-messages)",
+        value: "anthropic-messages",
+        hint: "Anthropic Messages API (/v1/messages, Claude proxies)",
+      },
+      {
+        label: "4. Google Generative AI (google-generative-ai)",
+        value: "google-generative-ai",
+        hint: "Google Gemini API (/v1beta, AI Studio)",
+      },
+    ];
+
+    const chosenApi = await attachSelectList(
+      tui,
+      apiChoices.map((c) => ({
+        label: `${c.label}  ${chalk.dim(c.hint)}`,
+        value: c.value,
+      })),
+      editor,
+    );
+    if (!chosenApi) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    const api = chosenApi.value;
+
+    // 2. Base URL endpoint
+    let defaultPlaceholder = "https://api.deepseek.com/v1";
+    if (api === "openai-completions") {
+      defaultPlaceholder = "https://api.deepseek.com/v1 (or http://localhost:11434/v1)";
+    } else if (api === "openai-responses") {
+      defaultPlaceholder = "https://api.openai.com/v1";
+    } else if (api === "anthropic-messages") {
+      defaultPlaceholder = "https://api.anthropic.com";
+    } else if (api === "google-generative-ai") {
+      defaultPlaceholder = "https://generativelanguage.googleapis.com/v1beta";
+    }
+
+    const endpoint = await attachPromptInput(tui, {
+      prompt: chalk.cyan("Base URL endpoint: "),
+      placeholder: defaultPlaceholder,
+      focusBack: editor,
+    });
+    if (endpoint === null) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    if (!endpoint.trim()) {
+      notice("custom endpoint setup cancelled (Base URL is required)");
+      return null;
+    }
+    const baseUrl = endpoint.trim().replace(/\/+$/, "");
+
+    // 3. Provider ID / Name
+    const suggestedId =
+      initialProviderId && initialProviderId !== "custom"
+        ? initialProviderId
+        : baseUrl.includes("deepseek")
+          ? "deepseek"
+          : baseUrl.includes("ollama") || baseUrl.includes("11434")
+            ? "ollama"
+            : baseUrl.includes("moonshot") || baseUrl.includes("kimi")
+              ? "moonshot"
+              : baseUrl.includes("qwen")
+                ? "qwen"
+                : "custom";
+
+    const providerInput = await attachPromptInput(tui, {
+      prompt: chalk.cyan(`Provider ID [default: ${suggestedId}]: `),
+      placeholder: suggestedId,
+      focusBack: editor,
+    });
+    if (providerInput === null) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    const providerId = (providerInput.trim() || suggestedId)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "-");
+
+    // 4. Model ID
+    let suggestedModel = "custom-model";
+    if (providerId.includes("deepseek") || baseUrl.includes("deepseek")) {
+      suggestedModel = "deepseek-chat";
+    } else if (providerId.includes("ollama") || baseUrl.includes("11434")) {
+      suggestedModel = "llama3.1";
+    } else if (api === "anthropic-messages") {
+      suggestedModel = "claude-3-7-sonnet";
+    } else if (api === "openai-responses") {
+      suggestedModel = "gpt-4o";
+    }
+
+    const modelInput = await attachPromptInput(tui, {
+      prompt: chalk.cyan(`Model ID [default: ${suggestedModel}]: `),
+      placeholder: suggestedModel,
+      focusBack: editor,
+    });
+    if (modelInput === null) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    const modelId = modelInput.trim() || suggestedModel;
+
+    // 5. API Key
+    const keyInput = await attachPromptInput(tui, {
+      prompt: chalk.cyan(
+        "API key (optional for local/keyless servers, press Enter to skip): ",
+      ),
+      placeholder: "sk-... or press Enter if keyless",
+      focusBack: editor,
+    });
+    if (keyInput === null) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    const apiKey = keyInput.trim() || "none";
+
+    // 6. Save to models.json, auth.json, config.json
+    const compat =
+      api === "openai-completions"
+        ? {
+            supportsDeveloperRole: false,
+            supportsReasoningEffort: false,
+          }
+        : undefined;
+
+    await saveCustomProvider({
+      providerId,
+      name: providerId.charAt(0).toUpperCase() + providerId.slice(1),
+      baseUrl,
+      api,
+      apiKey,
+      models: [
+        {
+          id: modelId,
+          name: modelId,
+          contextWindow: 128000,
+          maxTokens: 4096,
+          reasoning: false,
+        },
+      ],
+      compat,
+    });
+
+    // 7. Update runtime auth credentials
+    try {
+      await product.auth().setApiKey(providerId, apiKey);
+    } catch {}
+
+    return { providerId, modelId };
+  }
+
   async function afterProviderLoggedIn(
     providerId: string,
     actionLabel: string,
+    preferredModelId?: string,
   ): Promise<void> {
     if (!product || !sessionId) {
       notice(actionLabel);
@@ -559,9 +736,13 @@ export function attachThebeChat(
       );
       return;
     }
-    await applyModel(sessionId, scoped[0]!);
+    const targetModel =
+      (preferredModelId
+        ? scoped.find((m) => m.modelId === preferredModelId)
+        : undefined) ?? scoped[0]!;
+    await applyModel(sessionId, targetModel);
     notice(
-      `${actionLabel}. selected ${scoped[0]!.providerId}/${scoped[0]!.modelId}`,
+      `${actionLabel}. selected ${targetModel.providerId}/${targetModel.modelId}`,
     );
   }
 
@@ -1415,7 +1596,23 @@ export function attachThebeChat(
           );
           break;
         }
+        case "custom":
         case "login": {
+          const isCustomDirect = name === "custom" || arg.trim() === "custom";
+          if (isCustomDirect) {
+            const configured = await runCustomProviderWizard(
+              arg.trim() === "custom" ? undefined : arg.trim(),
+            );
+            if (configured) {
+              await afterProviderLoggedIn(
+                configured.providerId,
+                `configured custom provider ${configured.providerId} (${configured.modelId})`,
+                configured.modelId,
+              );
+            }
+            break;
+          }
+
           const providers = await product.listProviders();
           let target = arg.trim();
           if (!target) {
@@ -1423,10 +1620,24 @@ export function attachThebeChat(
               product,
               currentModel,
               focusBack: editor,
+              includeCustom: true,
             });
             if (!chosen) break;
             target = chosen.id;
           }
+
+          if (target === "custom") {
+            const configured = await runCustomProviderWizard();
+            if (configured) {
+              await afterProviderLoggedIn(
+                configured.providerId,
+                `configured custom provider ${configured.providerId} (${configured.modelId})`,
+                configured.modelId,
+              );
+            }
+            break;
+          }
+
           const providerObj = resolveListedProvider(providers, target);
           if (!providerObj) {
             notice(`unknown provider: ${target}`);
