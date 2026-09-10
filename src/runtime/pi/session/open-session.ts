@@ -4,17 +4,17 @@ import type {
   NormalizedEvent,
   RuntimeModelRef,
   RuntimeSession,
-} from "../types.ts";
-import { PI_BUILTIN_TOOLS } from "../types.ts";
-import { permissionRisk, summarizeArgs } from "../../tools/redaction.ts";
-import { createExplicitResourceLoader } from "./explicit-loader.ts";
-import type { PiSdk } from "./load-pi.ts";
-import { sanitizeBashEnv } from "./bash-env.ts";
-import { loadThebeUserConfig } from "./user-config.ts";
+} from "../../types.ts";
+import { PI_BUILTIN_TOOLS } from "../../types.ts";
+import { permissionRisk, summarizeArgs } from "../../../tools/redaction.ts";
+import { createExplicitResourceLoader } from "../sdk/explicit-loader.ts";
+import type { PiSdk } from "../sdk/load-pi.ts";
+import { sanitizeBashEnv } from "../config/bash-env.ts";
+import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
 import { toPiTool } from "./pi-tools.ts";
 import { wrapSession as wrapPiSession } from "./wrap-session.ts";
-import type { PiModelShape } from "./model-shape.ts";
+import type { PiModelShape } from "../config/model-shape.ts";
 
 export async function openPiSession(
   sdk: PiSdk,

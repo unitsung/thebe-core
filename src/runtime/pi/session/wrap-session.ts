@@ -7,19 +7,18 @@ import type {
   ThinkingLevel,
   BackgroundTask,
   ThebeSessionContext,
-} from "../types.ts";
+} from "../../types.ts";
 import {
   PI_BUILTIN_TOOLS,
   asPromptInput,
   isInlineTextFile,
-} from "../types.ts";
+} from "../../types.ts";
 import { mapPiEvent, mapPiMessages } from "./map-events.ts";
 import { exportPiSession } from "./pi-export.ts";
 import type { PiSession } from "./pi-session.ts";
 import { lastAssistantText } from "./pi-tools.ts";
-import { DEFAULT_COMPACTION_RESERVE_TOKENS } from "./user-config.ts";
-
-import type { PiModelShape } from "./model-shape.ts";
+import { DEFAULT_COMPACTION_RESERVE_TOKENS } from "../config/user-config.ts";
+import type { PiModelShape } from "../config/model-shape.ts";
 
 export function wrapSession(
   session: PiSession,

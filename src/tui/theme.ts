@@ -12,11 +12,19 @@ import type { ThinkingLevel } from "../runtime/types.ts";
 const chalk = new Chalk({ level: 3 });
 
 export const defaultSelectListTheme: SelectListTheme = {
-  selectedPrefix: (text: string) => chalk.blue(text),
-  selectedText: (text: string) => chalk.bold(text),
+  selectedPrefix: (text: string) => chalk.cyan(text),
+  selectedText: (text: string) => {
+    const match = text.match(/^(→\s+)(\S+)(\s+)(.*)$/);
+    if (match) {
+      const [, arrow, name, spaces, desc] = match;
+      return `${chalk.cyan(arrow)}${chalk.bold.cyan(name)}${spaces}${chalk.dim(desc)}`;
+    }
+    return chalk.bold.cyan(text);
+  },
   description: (text: string) => chalk.dim(text),
-  scrollInfo: (text: string) => chalk.dim(text),
-  noMatch: (text: string) => chalk.dim(text),
+  scrollInfo: (text: string) =>
+    chalk.dim(`${text.trim()} · ↑/↓: navigate · Tab: complete · Enter: select · Esc: dismiss`),
+  noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const defaultMarkdownTheme: MarkdownTheme = {
@@ -38,10 +46,18 @@ export const defaultMarkdownTheme: MarkdownTheme = {
 
 export const lightSelectListTheme: SelectListTheme = {
   selectedPrefix: (text: string) => chalk.blue(text),
-  selectedText: (text: string) => chalk.bold.black(text),
+  selectedText: (text: string) => {
+    const match = text.match(/^(→\s+)(\S+)(\s+)(.*)$/);
+    if (match) {
+      const [, arrow, name, spaces, desc] = match;
+      return `${chalk.blue(arrow)}${chalk.bold.blue(name)}${spaces}${chalk.dim(desc)}`;
+    }
+    return chalk.bold.blue(text);
+  },
   description: (text: string) => chalk.dim(text),
-  scrollInfo: (text: string) => chalk.dim(text),
-  noMatch: (text: string) => chalk.dim(text),
+  scrollInfo: (text: string) =>
+    chalk.dim(`${text.trim()} · ↑/↓: navigate · Tab: complete · Enter: select · Esc: dismiss`),
+  noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const lightMarkdownTheme: MarkdownTheme = {

@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RuntimeExport } from "../types.ts";
-import { piDistUrl } from "./load-pi.ts";
+import type { RuntimeExport } from "../../types.ts";
+import { piDistUrl } from "../sdk/load-pi.ts";
 
 type AgentSession = {
   sessionManager: unknown;

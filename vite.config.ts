@@ -24,13 +24,13 @@ export default defineConfig({
         codeSplitting: {
           groups: [
             { name: "env", test: /[/\\]src[/\\]config[/\\]env\.ts$/, priority: 40 },
-            { name: "http", test: /[/\\]src[/\\]http[/\\]/, priority: 30 },
+            { name: "http", test: /[/\\]src[/\\]http[/\\](?!serve\.ts$)/, priority: 30 },
             {
               name: "arcane",
               test: /[/\\]src[/\\]adapters[/\\]/,
               priority: 30,
             },
-            { name: "tui-app", test: /[/\\]src[/\\]tui[/\\]/, priority: 25 },
+            { name: "tui-app", test: /[/\\]src[/\\]tui[/\\](?!main\.ts$)/, priority: 25 },
             {
               name: "core",
               test: /[/\\]src[/\\](agent|product|runtime|tools|policy|providers|stream-guard|audit|auth|config)[/\\]/,

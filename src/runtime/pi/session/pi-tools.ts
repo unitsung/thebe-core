@@ -1,6 +1,6 @@
-import type { CustomToolDefinition } from "../types.ts";
+import type { CustomToolDefinition } from "../../types.ts";
 import { mapPiMessages } from "./map-events.ts";
-import type { PiSdk } from "./load-pi.ts";
+import type { PiSdk } from "../sdk/load-pi.ts";
 import type { PiSession } from "./pi-session.ts";
 
 export function toPiTool(sdk: PiSdk, tool: CustomToolDefinition) {

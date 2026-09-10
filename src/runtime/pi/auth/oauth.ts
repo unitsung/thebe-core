@@ -1,4 +1,4 @@
-import type { RuntimeAuth, RuntimeProvider } from "../types.ts";
+import type { RuntimeAuth, RuntimeProvider } from "../../types.ts";
 
 type PendingOAuthLogin = {
   providerId: string;

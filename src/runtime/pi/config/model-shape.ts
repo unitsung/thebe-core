@@ -1,4 +1,4 @@
-import type { RuntimeModel } from "../types.ts";
+import type { RuntimeModel } from "../../types.ts";
 
 export type PiModelShape = {
   id: string;

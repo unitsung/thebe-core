@@ -13,6 +13,7 @@ export {
   formatCwd,
   formatCwdForFooter,
   formatSessionTree,
+  renderStartScreen,
 } from "./display/format.ts";
 export { copyToClipboard, openBrowser } from "./display/clipboard.ts";
 export { attachPromptInput, attachSelectList } from "./overlays/index.ts";
