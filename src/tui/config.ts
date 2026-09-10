@@ -5,6 +5,7 @@ import type { TuiMode } from "@earendil-works/pi-tui";
 export type ThebeUserConfig = {
   tuiMode?: TuiMode;
   theme?: "dark" | "light";
+  providers?: Record<string, { baseUrl?: string }>;
 };
 
 export function getThebeConfigDir(): string {
@@ -45,4 +46,33 @@ export async function saveThebeConfig(
   } catch {
     return {};
   }
+}
+
+export async function saveProviderEndpoint(
+  providerId: string,
+  baseUrl: string,
+): Promise<void> {
+  try {
+    const current = await loadThebeConfig();
+    const providers = current.providers ?? {};
+    providers[providerId] = { baseUrl };
+    await saveThebeConfig({ providers });
+
+    // Also persist to models.json for pi ModelRuntime
+    const configDir = getThebeConfigDir();
+    const agentDir = process.env.THEBE_AGENT_DIR ?? join(configDir, "agent");
+    await mkdir(agentDir, { recursive: true });
+    const modelsJsonPath = join(agentDir, "models.json");
+    let existingJson: Record<string, unknown> = {};
+    try {
+      existingJson = JSON.parse(await readFile(modelsJsonPath, "utf8")) as Record<string, unknown>;
+    } catch {}
+    const existingProviders = (existingJson.providers ?? {}) as Record<string, Record<string, unknown>>;
+    existingProviders[providerId] = {
+      ...(existingProviders[providerId] ?? {}),
+      baseUrl,
+    };
+    existingJson.providers = existingProviders;
+    await writeFile(modelsJsonPath, JSON.stringify(existingJson, null, 2), "utf8");
+  } catch {}
 }

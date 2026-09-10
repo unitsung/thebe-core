@@ -32,12 +32,12 @@ const tuiMode =
     ? flags.tuiMode
     : userConfig.tuiMode ?? "regular";
 
-const { product, version } = await bootstrapThebe({ fromDir: here });
+const { product, version, model: bootModel } = await bootstrapThebe({ fromDir: here });
 
 const defaultModelRef: { providerId: string; modelId: string } =
   flags.kind === "tui" && flags.model
     ? flags.model
-    : { providerId: "opencode", modelId: "muse-spark-1.3-free" };
+    : bootModel ?? { providerId: "opencode", modelId: "muse-spark-1.3-free" };
 
 const modelRef = `${defaultModelRef.providerId}/${defaultModelRef.modelId}`;
 

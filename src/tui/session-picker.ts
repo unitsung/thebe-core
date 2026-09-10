@@ -3,6 +3,7 @@ import {
   fuzzyFilter,
   Input,
   matchesKey,
+  truncateToWidth,
   type Component,
   type Focusable,
   type TUI,
@@ -61,7 +62,7 @@ export class SearchableSessionPicker implements Component, Focusable {
 
     this.searchInput = new Input({
       prompt: chalk.cyan("Search: "),
-      placeholder: "Type to filter sessions (title, ID, status)...",
+      placeholder: "filter sessions",
       placeholderStyle: (t) => chalk.dim(t),
     });
 
@@ -167,120 +168,57 @@ export class SearchableSessionPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
+    lines.push(`  ${chalk.bold("Switch Session")}  ${chalk.dim("select session")}`);
 
-    // Header bar
-    lines.push(
-      chalk.cyan(
-        "─── Switch Session ─────────────────────────────────────────────",
-      ),
-    );
+    const searchRendered = this.searchInput.render(Math.max(10, width - 4));
+    lines.push(`  ${searchRendered[0] ?? ""}`);
 
-    // Live search input
-    const inputLines = this.searchInput.render(width);
-    lines.push(...inputLines);
-
-    // Session count indicator
-    const countInfo = chalk.dim(
-      `Sessions: ${this.filteredSessions.length} matching (${this.allSessions.length} total)`,
-    );
-    lines.push(countInfo);
-    lines.push(chalk.dim("─".repeat(Math.min(width, 60))));
-
-    // Empty state
-    if (this.filteredSessions.length === 0) {
-      const query = this.searchInput.getValue().trim();
-      lines.push(
-        chalk.yellow(
-          query
-            ? `  No sessions match "${query}".`
-            : "  No existing sessions found.",
+    const total = this.filteredSessions.length;
+    if (total === 0) {
+      lines.push(chalk.yellow("    No matching sessions"));
+    } else {
+      const startIndex = Math.max(
+        0,
+        Math.min(
+          this.selectedIndex - Math.floor(this.pageSize / 2),
+          total - this.pageSize,
         ),
       );
-      lines.push(chalk.dim("  Press Esc to close, or /new to start a new session."));
-      lines.push(chalk.cyan("────────────────────────────────────────────────────────────────"));
-      return lines;
-    }
+      const endIndex = Math.min(startIndex + this.pageSize, total);
 
-    // Paginated window
-    const startIndex =
-      Math.floor(this.selectedIndex / this.pageSize) * this.pageSize;
-    const visibleItems = this.filteredSessions.slice(
-      startIndex,
-      startIndex + this.pageSize,
-    );
-
-    for (let i = 0; i < visibleItems.length; i++) {
-      const item = visibleItems[i]!;
-      const actualIndex = startIndex + i;
-      const isSelected = actualIndex === this.selectedIndex;
-      const isCurrent = item.thebeSessionId === this.currentSessionId;
-
-      const cursor = isSelected ? chalk.cyan.bold("❯ ") : "  ";
-      const currentBadge = isCurrent
-        ? chalk.cyan.bold("✓ ")
-        : chalk.dim("  ");
-
-      const title = item.title ? item.title : "(untitled)";
-      const titleFormatted = isSelected
-        ? chalk.cyan.bold(title)
-        : chalk.white(title);
-
-      const idBadge = chalk.dim(`[${item.thebeSessionId.slice(0, 8)}]`);
-
-      const statusBadge =
-        item.status === "active"
-          ? chalk.green(`[${item.status}]`)
-          : item.status === "done"
-            ? chalk.dim(`[${item.status}]`)
-            : chalk.yellow(`[${item.status}]`);
-
-      const dateStr = item.lastActiveAt
-        ? item.lastActiveAt.slice(0, 19).replace("T", " ")
-        : item.createdAt
-          ? item.createdAt.slice(0, 19).replace("T", " ")
+      for (let i = startIndex; i < endIndex; i++) {
+        const item = this.filteredSessions[i]!;
+        const isSelected = i === this.selectedIndex;
+        const isCurrent = item.thebeSessionId === this.currentSessionId;
+        const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
+        const title = item.title ? item.title : "(untitled)";
+        const titleText = isSelected ? chalk.cyan(title) : title;
+        const idBadge = chalk.dim(`[${item.thebeSessionId.slice(0, 8)}]`);
+        const statusBadge =
+          item.status === "active"
+            ? chalk.green(`[${item.status}]`)
+            : chalk.dim(`[${item.status}]`);
+        const branchBadge = item.parentThebeSessionId
+          ? chalk.magenta("↳ branch")
           : "";
-      const dateBadge = dateStr ? chalk.dim(dateStr) : "";
 
-      const branchBadge = item.parentThebeSessionId
-        ? chalk.magenta("↳ branch")
-        : "";
+        const parts = [
+          `  ${cursor}${currentMarker}${titleText}`,
+          idBadge,
+          statusBadge,
+          branchBadge,
+        ].filter(Boolean);
 
-      const parts = [
-        `${cursor}${currentBadge}${titleFormatted}`,
-        idBadge,
-        statusBadge,
-        branchBadge,
-        dateBadge,
-      ].filter(Boolean);
+        lines.push(parts.join(" "));
+      }
 
-      lines.push(parts.join(" "));
+      if (total > this.pageSize) {
+        lines.push(chalk.dim(`    (${this.selectedIndex + 1}/${total})`));
+      }
     }
 
-    // Scrollbar indicator if multiple pages
-    if (this.filteredSessions.length > this.pageSize) {
-      const totalPages = Math.ceil(
-        this.filteredSessions.length / this.pageSize,
-      );
-      const currentPage =
-        Math.floor(this.selectedIndex / this.pageSize) + 1;
-      lines.push(
-        chalk.dim(
-          `  Page ${currentPage}/${totalPages} (↑↓ navigate, PgUp/PgDn jump)`,
-        ),
-      );
-    }
-
-    lines.push(chalk.dim("─".repeat(Math.min(width, 60))));
-    lines.push(
-      chalk.dim("  Enter resume  •  ↑↓ navigate  •  Esc cancel"),
-    );
-    lines.push(
-      chalk.cyan(
-        "────────────────────────────────────────────────────────────────",
-      ),
-    );
-
-    return lines;
+    return lines.map((line) => truncateToWidth(line, width, ""));
   }
 }
 

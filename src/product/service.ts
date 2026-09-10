@@ -514,7 +514,14 @@ export function createThebeProduct(options: {
       await persist(meta);
       active = { meta, session };
       if (effectiveModel) {
-        await session.setModel(effectiveModel);
+        try {
+          await session.setModel(effectiveModel);
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes("unknown model")) {
+            throw err;
+          }
+        }
       }
       return meta;
     },
