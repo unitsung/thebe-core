@@ -255,7 +255,7 @@ describe("Thebe TUI product slash commands", () => {
       SLASH_COMMANDS.filter((c) => c.category === category).map((c) => c.name);
     expect(byCategory("Session")).toEqual(
       expect.arrayContaining([
-        "sessions",
+        "resume",
         "new",
         "compact",
         "copy",
@@ -274,12 +274,14 @@ describe("Thebe TUI product slash commands", () => {
     );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
+    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("provider");
     expect(resolveSlashName("models")).toBe("model");
     expect(resolveSlashName("connect")).toBe("login");
     expect(resolveSlashName("themes")).toBe("theme");
     expect(resolveSlashName("undo")).toBe("revert");
     expect(resolveSlashName("exit")).toBe("quit");
-    expect(resolveSlashName("resume")).toBe("sessions");
+    expect(resolveSlashName("sessions")).toBe("resume");
+    expect(resolveSlashName("continue")).toBe("resume");
   });
 
   it("handles /usage displaying context, token stats, turns, and cache hit rate", async () => {

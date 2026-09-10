@@ -49,6 +49,7 @@ import {
   saveProviderEndpoint,
   saveCustomProvider,
   fetchRemoteModels,
+  isReasoningModel,
 } from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
@@ -74,31 +75,32 @@ export type ThebeSlashCommand = SlashCommand & {
   aliases?: string[];
 };
 
-/** Same grouping OpenCode uses in the command palette: Session / Agent / Provider / System. */
+/** Canonical Slash commands strictly aligned with official Pi BUILTIN_SLASH_COMMANDS. */
 export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   // Session
-  { name: "sessions", category: "Session", aliases: ["resume", "continue"], description: "Browse and switch sessions", argumentHint: "[query]" },
+  { name: "resume", category: "Session", aliases: ["sessions", "continue"], description: "Resume a different session", argumentHint: "[query]" },
   { name: "new", category: "Session", description: "Start a new session", argumentHint: "[title]" },
-  { name: "name", category: "Session", aliases: ["rename"], description: "Set session title", argumentHint: "<title>" },
-  { name: "fork", category: "Session", description: "Fork session", argumentHint: "[messageId]" },
-  { name: "compact", category: "Session", aliases: ["summarize"], description: "Compact context" },
-  { name: "export", category: "Session", description: "Export session to HTML and JSONL", argumentHint: "[path]" },
-  { name: "copy", category: "Session", description: "Copy last assistant message to clipboard" },
+  { name: "tree", category: "Session", description: "Navigate session tree (switch branches)" },
+  { name: "fork", category: "Session", description: "Create a new fork from a previous user message", argumentHint: "[messageId]" },
+  { name: "name", category: "Session", aliases: ["rename"], description: "Set session display name", argumentHint: "<title>" },
+  { name: "compact", category: "Session", aliases: ["summarize"], description: "Manually compact the session context" },
+  { name: "export", category: "Session", description: "Export session (HTML default, or specify path: .html/.jsonl)", argumentHint: "[path]" },
+  { name: "copy", category: "Session", description: "Copy last agent message to clipboard" },
   { name: "revert", category: "Session", aliases: ["undo"], description: "Revert last user turn" },
   { name: "clear", category: "Session", description: "Clear the visible transcript" },
-  // Agent
-  { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Switch model", argumentHint: "[provider/model]" },
+  // Agent / Model / Thinking
+  { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Select model (opens selector UI)", argumentHint: "[provider/model]" },
   { name: "thinking", category: "Agent", description: "Set thinking level", argumentHint: "[level]" },
-  // Provider
-  { name: "login", category: "Provider", aliases: ["connect"], description: "Connect provider (API key, endpoint, or OAuth)", argumentHint: "[provider]" },
+  // Provider / Auth
+  { name: "login", category: "Provider", aliases: ["connect"], description: "Configure provider authentication", argumentHint: "[provider]" },
   { name: "custom", category: "Provider", aliases: ["endpoint", "proxy"], description: "Configure custom endpoint (OpenAI / Anthropic compatible)", argumentHint: "[provider]" },
-  { name: "logout", category: "Provider", description: "Remove provider credentials", argumentHint: "[provider]" },
+  { name: "logout", category: "Provider", description: "Remove provider authentication", argumentHint: "[provider]" },
   // System
+  { name: "session", category: "System", aliases: ["usage", "status"], description: "Show session info and stats" },
+  { name: "settings", category: "System", description: "Open settings menu" },
   { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
-  { name: "settings", category: "System", description: "Theme, thinking, TUI mode" },
   { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
-  { name: "usage", category: "System", aliases: ["session", "status"], description: "Token and context usage" },
-  { name: "hotkeys", category: "System", description: "Keyboard shortcuts" },
+  { name: "hotkeys", category: "System", description: "Show all keyboard shortcuts" },
   { name: "help", category: "System", description: "Show commands by category" },
   { name: "quit", category: "System", aliases: ["exit", "q"], description: "Quit Thebe" },
 ];
@@ -117,6 +119,8 @@ const EXTRA_SLASH_ALIASES = new Map<string, string>([
   ["allow", "allow"],
   ["deny", "deny"],
   ["provider", "provider"],
+  ["sessions", "resume"],
+  ["usage", "session"],
   ["followup", "followup"],
   ["unrevert", "unrevert"],
   ["endpoint", "custom"],
@@ -725,32 +729,34 @@ export function attachThebeChat(
     }
 
     // 6. Save to models.json, auth.json, config.json
-    const compat =
-      api === "openai-completions"
-        ? {
-            supportsDeveloperRole: false,
-            supportsReasoningEffort: false,
-          }
-        : undefined;
-
     const modelsToSave =
       remoteModels && remoteModels.length > 0
-        ? remoteModels.map((m) => ({
-            id: m.id,
-            name: m.name || m.id,
-            contextWindow: 128000,
-            maxTokens: 4096,
-            reasoning: false,
-          }))
+        ? remoteModels.map((m) => {
+            const reasoning = isReasoningModel(m.id, m.name);
+            return {
+              id: m.id,
+              name: m.name || m.id,
+              contextWindow: 128000,
+              maxTokens: 4096,
+              reasoning,
+              thinkingLevelMap: reasoning
+                ? { low: "low", medium: "medium", high: "high" }
+                : undefined,
+            };
+          })
         : [];
 
     if (!modelsToSave.some((m) => m.id === selectedModelId)) {
+      const reasoning = isReasoningModel(selectedModelId);
       modelsToSave.unshift({
         id: selectedModelId,
         name: selectedModelId,
         contextWindow: 128000,
         maxTokens: 4096,
-        reasoning: false,
+        reasoning,
+        thinkingLevelMap: reasoning
+          ? { low: "low", medium: "medium", high: "high" }
+          : undefined,
       });
     }
 
@@ -761,7 +767,6 @@ export function attachThebeChat(
       api,
       apiKey,
       models: modelsToSave,
-      compat,
     });
 
     // 7. Update runtime auth credentials
@@ -1098,6 +1103,7 @@ export function attachThebeChat(
           }
           break;
         }
+        case "session":
         case "usage": {
           const id = ensureSession();
           const meta = await product.getSession(id);
