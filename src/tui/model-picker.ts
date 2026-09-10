@@ -350,7 +350,7 @@ export class SearchableProviderPicker implements Component, Focusable {
 
     this.searchInput = new Input({
       prompt: chalk.cyan("Search: "),
-      placeholder: "Filter providers (e.g. opencode, anthropic)...",
+      placeholder: "filter providers",
       placeholderStyle: (t) => chalk.dim(t),
     });
 
@@ -432,7 +432,7 @@ export class SearchableProviderPicker implements Component, Focusable {
 
   render(width: number): string[] {
     const lines: string[] = [];
-    lines.push(`  ${chalk.bold("Provider")}`);
+    lines.push(`  ${chalk.bold("Provider")}  ${chalk.dim("select provider")}`);
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 
@@ -452,7 +452,9 @@ export class SearchableProviderPicker implements Component, Focusable {
       for (let i = startIndex; i < endIndex; i++) {
         const item = this.filteredProviders[i]!;
         const isSelected = i === this.selectedIndex;
+        const isCurrent = item.id === this.currentProvider;
         const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
         const status =
           item.authStatus === "connected"
             ? chalk.green("connected")
@@ -462,9 +464,19 @@ export class SearchableProviderPicker implements Component, Focusable {
         const nameText = isSelected
           ? chalk.cyan(item.displayName ?? item.id)
           : (item.displayName ?? item.id);
-        lines.push(
-          `  ${cursor}${nameText} ${chalk.dim(`[${item.id}]`)} ${status}`,
-        );
+        const count = this.modelCounts.get(item.id);
+        const countBadge = count ? chalk.dim(`${count} models`) : "";
+        const parts = [
+          `  ${cursor}${currentMarker}${nameText}`,
+          chalk.dim(`[${item.id}]`),
+          countBadge,
+          status,
+        ].filter(Boolean);
+        lines.push(parts.join(" "));
+      }
+
+      if (total > this.pageSize) {
+        lines.push(chalk.dim(`    (${this.selectedIndex + 1}/${total})`));
       }
     }
 

@@ -44,7 +44,7 @@ import {
   attachSearchableProviderPicker,
 } from "./model-picker.ts";
 import { attachSearchableSessionPicker } from "./session-picker.ts";
-import { saveThebeConfig } from "./config.ts";
+import { saveThebeConfig, saveProviderEndpoint } from "./config.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
 
@@ -76,30 +76,22 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   { name: "new", category: "Session", description: "Start a new session", argumentHint: "[title]" },
   { name: "name", category: "Session", aliases: ["rename"], description: "Set session title", argumentHint: "<title>" },
   { name: "fork", category: "Session", description: "Fork session", argumentHint: "[messageId]" },
-  { name: "tree", category: "Session", description: "Session branch tree" },
   { name: "compact", category: "Session", aliases: ["summarize"], description: "Compact context" },
   { name: "export", category: "Session", description: "Export session to HTML and JSONL", argumentHint: "[path]" },
   { name: "copy", category: "Session", description: "Copy last assistant message to clipboard" },
-  { name: "followup", category: "Session", description: "Queue a follow-up turn", argumentHint: "<text>" },
   { name: "revert", category: "Session", aliases: ["undo"], description: "Revert last user turn" },
-  { name: "unrevert", category: "Session", aliases: ["redo"], description: "Undo the last revert" },
   { name: "clear", category: "Session", description: "Clear the visible transcript" },
-  { name: "interrupt", category: "Session", description: "Abort the current run" },
-  { name: "allow", category: "Session", description: "Allow pending tool permission", argumentHint: "[id]" },
-  { name: "deny", category: "Session", description: "Deny pending tool permission", argumentHint: "[id]" },
-  { name: "session", category: "Session", aliases: ["status"], description: "Show session info and usage" },
   // Agent
   { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Switch model", argumentHint: "[provider/model]" },
   { name: "thinking", category: "Agent", description: "Set thinking level", argumentHint: "[level]" },
   // Provider
-  { name: "login", category: "Provider", aliases: ["connect"], description: "Connect provider (API key or OAuth)", argumentHint: "[provider]" },
+  { name: "login", category: "Provider", aliases: ["connect"], description: "Connect provider (API key, endpoint, or OAuth)", argumentHint: "[provider]" },
   { name: "logout", category: "Provider", description: "Remove provider credentials", argumentHint: "[provider]" },
-  { name: "provider", category: "Provider", description: "Browse a provider and pick one of its models", argumentHint: "[provider]" },
   // System
   { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
   { name: "settings", category: "System", description: "Theme, thinking, TUI mode" },
   { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
-  { name: "usage", category: "System", description: "Token and context usage" },
+  { name: "usage", category: "System", aliases: ["session", "status"], description: "Token and context usage" },
   { name: "hotkeys", category: "System", description: "Keyboard shortcuts" },
   { name: "help", category: "System", description: "Show commands by category" },
   { name: "quit", category: "System", aliases: ["exit", "q"], description: "Quit Thebe" },
@@ -112,27 +104,27 @@ for (const command of SLASH_COMMANDS) {
   }
 }
 
+const EXTRA_SLASH_ALIASES = new Map<string, string>([
+  ["fork", "fork"],
+  ["tree", "tree"],
+  ["interrupt", "interrupt"],
+  ["allow", "allow"],
+  ["deny", "deny"],
+  ["provider", "provider"],
+  ["followup", "followup"],
+  ["unrevert", "unrevert"],
+]);
+
 export function resolveSlashName(name: string): string {
-  return SLASH_ALIAS_TO_NAME.get(name) ?? name;
+  return SLASH_ALIAS_TO_NAME.get(name) ?? EXTRA_SLASH_ALIASES.get(name) ?? name;
 }
 
 function slashCommandsForAutocomplete(): SlashCommand[] {
-  const out: SlashCommand[] = [];
-  for (const command of SLASH_COMMANDS) {
-    out.push({
-      name: command.name,
-      description: command.description,
-      argumentHint: command.argumentHint,
-    });
-    for (const alias of command.aliases ?? []) {
-      out.push({
-        name: alias,
-        description: command.description,
-        argumentHint: command.argumentHint,
-      });
-    }
-  }
-  return out;
+  return SLASH_COMMANDS.map((command) => ({
+    name: command.name,
+    description: command.description,
+    argumentHint: command.argumentHint,
+  }));
 }
 
 const THINKING_LEVELS = new Set<ThinkingLevel>([
@@ -526,6 +518,32 @@ export function attachThebeChat(
     tui.requestRender();
   }
 
+  function clearMessagesView(): void {
+    const keep = new Set([children[0], footerText, editor]);
+    for (let i = children.length - 1; i >= 0; i--) {
+      if (!keep.has(children[i])) {
+        children.splice(i, 1);
+      }
+    }
+    tui.requestRender();
+  }
+
+  async function loadAndDisplaySessionHistory(thebeId: string): Promise<void> {
+    if (!product) return;
+    clearMessagesView();
+    try {
+      const msgs = await product.loadMessages(thebeId);
+      for (const m of msgs) {
+        if (m.role === "user" && m.text) {
+          insertBeforeFooter(makeMarkdown(m.text));
+        } else if (m.role === "assistant" && m.text) {
+          insertBeforeFooter(makeMarkdown(m.text));
+        }
+      }
+      tui.requestRender();
+    } catch {}
+  }
+
   async function afterProviderLoggedIn(
     providerId: string,
     actionLabel: string,
@@ -810,25 +828,37 @@ export function attachThebeChat(
         }
         case "resume":
         case "sessions": {
-          if (rawName === "resume" && arg && !arg.includes(" ")) {
-            const meta = await product.resume(arg);
-            sessionId = meta.thebeSessionId;
-            sessionTitle = meta.title;
-            void refreshContextUsage();
-            updateFooter();
-            notice(`resumed session ${sessionId}`);
-            break;
+          let targetSessionId: string | undefined;
+          if (arg && !arg.includes(" ")) {
+            const all = await product.listSessions();
+            const lowerArg = arg.toLowerCase();
+            const match = all.find((s) =>
+              s.thebeSessionId.toLowerCase() === lowerArg ||
+              s.thebeSessionId.toLowerCase().startsWith(lowerArg) ||
+              (s.title && s.title.toLowerCase().includes(lowerArg)),
+            );
+            if (!match) {
+              notice(`session not found: ${arg}`);
+              break;
+            }
+            targetSessionId = match.thebeSessionId;
+          } else {
+            const selected = await attachSearchableSessionPicker(tui, {
+              product,
+              currentSessionId: sessionId,
+              initialQuery: arg || undefined,
+              focusBack: editor,
+            });
+            if (selected) {
+              targetSessionId = selected.thebeSessionId;
+            }
           }
-          const selected = await attachSearchableSessionPicker(tui, {
-            product,
-            currentSessionId: sessionId,
-            initialQuery: arg || undefined,
-            focusBack: editor,
-          });
-          if (selected) {
-            const meta = await product.resume(selected.thebeSessionId);
+
+          if (targetSessionId) {
+            const meta = await product.resume(targetSessionId);
             sessionId = meta.thebeSessionId;
             sessionTitle = meta.title;
+            await loadAndDisplaySessionHistory(sessionId);
             void refreshContextUsage();
             updateFooter();
             notice(`resumed session ${sessionId} (${meta.title ?? "untitled"})`);
@@ -1389,17 +1419,13 @@ export function attachThebeChat(
           const providers = await product.listProviders();
           let target = arg.trim();
           if (!target) {
-            if (providers.length === 0) {
-              notice("no providers available to log in");
-              break;
-            }
-            const items: SelectItem[] = providers.map((p) => ({
-              label: `${p.displayName ?? p.id} [${p.id}] · ${p.authStatus === "connected" ? chalk.green("connected ●") : chalk.yellow("missing key ○")}`,
-              value: p.id,
-            }));
-            const selected = await attachSelectList(tui, items, editor);
-            if (!selected) break;
-            target = selected.value;
+            const chosen = await attachSearchableProviderPicker(tui, {
+              product,
+              currentModel,
+              focusBack: editor,
+            });
+            if (!chosen) break;
+            target = chosen.id;
           }
           const providerObj = resolveListedProvider(providers, target);
           if (!providerObj) {
@@ -1456,11 +1482,28 @@ export function attachThebeChat(
             notice(`API key required for ${targetProvider}`);
             break;
           }
+
+          let customBaseUrl: string | undefined;
+          if (
+            (targetProvider === "openai" || targetProvider === "anthropic") &&
+            process.stdin.isTTY
+          ) {
+            const endpoint = await attachPromptInput(tui, {
+              prompt: chalk.cyan(`Base URL endpoint for ${targetProvider} (optional, Enter to skip): `),
+              placeholder: targetProvider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com",
+              focusBack: editor,
+            });
+            if (endpoint && endpoint.trim()) {
+              customBaseUrl = endpoint.trim();
+              await saveProviderEndpoint(targetProvider, customBaseUrl);
+            }
+          }
+
           try {
             await product.auth().setApiKey(targetProvider, apiKey.trim());
             await afterProviderLoggedIn(
               targetProvider,
-              `saved API key for ${targetProvider}`,
+              `saved API key for ${targetProvider}${customBaseUrl ? ` (endpoint: ${customBaseUrl})` : ""}`,
             );
           } catch (e) {
             notice(
@@ -1473,17 +1516,13 @@ export function attachThebeChat(
           const providers = await product.listProviders();
           let target = arg.trim();
           if (!target) {
-            if (providers.length === 0) {
-              notice("no providers available to log out");
-              break;
-            }
-            const items: SelectItem[] = providers.map((p) => ({
-              label: `${p.displayName ?? p.id} [${p.id}] · ${p.authStatus === "connected" ? chalk.green("connected ●") : chalk.yellow("missing key ○")}`,
-              value: p.id,
-            }));
-            const selected = await attachSelectList(tui, items, editor);
-            if (!selected) break;
-            target = selected.value;
+            const chosen = await attachSearchableProviderPicker(tui, {
+              product,
+              currentModel,
+              focusBack: editor,
+            });
+            if (!chosen) break;
+            target = chosen.id;
           }
           const providerObj = resolveListedProvider(providers, target);
           if (!providerObj) {
@@ -1581,6 +1620,9 @@ export function attachThebeChat(
 
   void refreshContextUsage();
   updateFooter();
+  if (sessionId && product) {
+    void loadAndDisplaySessionHistory(sessionId);
+  }
   return {
     editor,
     updateFooter,
@@ -1598,6 +1640,7 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
     tui = mode === "fullscreen"
       ? new TuiAltScreen(terminal, true)
       : new TuiMainScreen(terminal);
+    tui.setClearOnShrink(true);
     const chat = attachThebeChat(tui, {
       ...options,
       tuiMode: mode,
@@ -1682,11 +1725,34 @@ async function runOAuthLogin(
     if (hint) {
       notice(hint);
     }
+
+    const abortController = new AbortController();
+    let autoConnected = false;
+
+    // Background poller: automatically detect when browser completes OAuth callback
+    const pollTimer = setInterval(async () => {
+      try {
+        const check = await auth.check(providerId);
+        if (check.ok) {
+          autoConnected = true;
+          clearInterval(pollTimer);
+          abortController.abort();
+        }
+      } catch {}
+    }, 500);
+
     const callback = await attachPromptInput(tui, {
       prompt: chalk.cyan(`OAuth callback for ${providerId}: `),
-      placeholder: "paste redirect URL or code",
+      placeholder: "waiting for browser callback (or paste redirect URL/code here)",
       focusBack,
+      abortSignal: abortController.signal,
     });
+    clearInterval(pollTimer);
+
+    if (autoConnected) {
+      return true;
+    }
+
     if (callback === null || !callback.trim()) {
       const already = await auth.check(providerId);
       if (already.ok) {
@@ -1744,6 +1810,7 @@ export function attachPromptInput(
     prompt: string;
     placeholder?: string;
     focusBack?: unknown;
+    abortSignal?: AbortSignal;
   },
 ): Promise<string | null> {
   return new Promise((resolvePromise) => {
@@ -1763,6 +1830,13 @@ export function attachPromptInput(
       tui.requestRender();
       resolvePromise(value);
     };
+    if (options.abortSignal) {
+      if (options.abortSignal.aborted) {
+        finish(null);
+        return;
+      }
+      options.abortSignal.addEventListener("abort", () => finish(null), { once: true });
+    }
     input.onSubmit = (value) => finish(value);
     input.onEscape = () => finish(null);
     const origHandleInput = input.handleInput.bind(input);

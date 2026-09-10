@@ -267,7 +267,7 @@ describe("Thebe TUI product slash commands", () => {
       expect.arrayContaining(["model", "thinking"]),
     );
     expect(byCategory("Provider")).toEqual(
-      expect.arrayContaining(["login", "logout", "provider"]),
+      expect.arrayContaining(["login", "logout"]),
     );
     expect(byCategory("System")).toEqual(
       expect.arrayContaining(["theme", "help", "quit", "settings"]),
@@ -895,8 +895,11 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
     const loginPromise = handleSlash("/login");
     await flush();
-    const list = findNamed(tui, "SelectList");
-    const index = providers.findIndex((p) => p.id === chosen!.id);
+    const list = findNamed(tui, "SearchableProviderPicker") as unknown as {
+      filteredProviders: Array<{ id: string }>;
+      handleInput: (data: string) => void;
+    };
+    const index = list.filteredProviders.findIndex((p) => p.id === chosen!.id);
     for (let i = 0; i < index; i++) {
       list.handleInput("\x1b[B");
     }

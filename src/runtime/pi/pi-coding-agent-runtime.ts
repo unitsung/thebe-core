@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type {
   AgentRuntime,
@@ -101,6 +101,44 @@ export async function createPiCodingAgentRuntime(
   }
   if (options.agentDir) {
     mkdirSync(options.agentDir, { recursive: true });
+    const modelsPath = `${options.agentDir}/models.json`;
+    let data: Record<string, unknown> = {};
+    try {
+      data = JSON.parse(readFileSync(modelsPath, "utf8")) as Record<string, unknown>;
+    } catch {}
+    const providers = (data.providers ?? {}) as Record<string, Record<string, unknown>>;
+    try {
+      const configPath = join(
+        process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe"),
+        "config.json",
+      );
+      const userConfig = JSON.parse(readFileSync(configPath, "utf8")) as {
+        providers?: Record<string, { baseUrl?: string }>;
+      };
+      if (userConfig.providers) {
+        for (const [pId, pCfg] of Object.entries(userConfig.providers)) {
+          if (pCfg?.baseUrl) {
+            providers[pId] = { ...(providers[pId] ?? {}), baseUrl: pCfg.baseUrl };
+          }
+        }
+      }
+    } catch {}
+    if (process.env.OPENAI_BASE_URL) {
+      providers["openai"] = {
+        ...(providers["openai"] ?? {}),
+        baseUrl: process.env.OPENAI_BASE_URL,
+      };
+    }
+    if (process.env.ANTHROPIC_BASE_URL) {
+      providers["anthropic"] = {
+        ...(providers["anthropic"] ?? {}),
+        baseUrl: process.env.ANTHROPIC_BASE_URL,
+      };
+    }
+    data.providers = providers;
+    try {
+      writeFileSync(modelsPath, JSON.stringify(data, null, 2), "utf8");
+    } catch {}
   }
 
   const modelRuntime =
@@ -763,22 +801,35 @@ export async function createPiCodingAgentRuntime(
     },
     async resumeSession(runtimeSessionId, create) {
       const existing = live.get(runtimeSessionId);
-      if (existing && inMemory) {
+      if (existing) {
         return wrapSession(existing, create);
       }
-      const listed = inMemory
-        ? []
-        : await sdk.SessionManager.list(create.cwd ?? cwd, options.sessionDir);
-      const info = listed.find(
-        (row: { id: string; path: string }) => row.id === runtimeSessionId,
-      );
-      if (!info) {
-        throw new Error(`unknown runtime session: ${runtimeSessionId}`);
+      let info: { id: string; path: string } | undefined;
+      if (!inMemory) {
+        const listed = (await sdk.SessionManager.list(
+          create.cwd ?? cwd,
+          options.sessionDir,
+        )) as Array<{ id: string; path: string }>;
+        info = listed.find((row) => row.id === runtimeSessionId);
+        if (!info) {
+          const all = (await sdk.SessionManager.listAll(
+            options.sessionDir,
+          )) as Array<{ id: string; path: string }>;
+          info = all.find((row) => row.id === runtimeSessionId);
+        }
       }
-      return openPiSession(
-        create,
-        sdk.SessionManager.open(info.path, options.sessionDir),
-      );
+      if (info) {
+        return openPiSession(
+          create,
+          sdk.SessionManager.open(info.path, options.sessionDir),
+        );
+      }
+      const sessionManager = inMemory
+        ? sdk.SessionManager.inMemory(create.cwd ?? cwd, { id: runtimeSessionId })
+        : sdk.SessionManager.create(create.cwd ?? cwd, options.sessionDir, {
+            id: runtimeSessionId,
+          });
+      return openPiSession(create, sessionManager);
     },
     async listSessions() {
       if (inMemory) {

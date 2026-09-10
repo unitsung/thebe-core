@@ -21,6 +21,7 @@ export type ThebeBootstrap = {
   ) => Promise<{ text: string; tools: string[] }>;
   handler: ReturnType<typeof createThebeApp>["handler"];
   version: string;
+  model?: { providerId: string; modelId: string };
 };
 
 export type BootstrapOptions = {
@@ -43,27 +44,50 @@ export async function bootstrapThebe(
   const baseUrl = process.env.ARCANE_BASE_URL;
   const arcaneKey = process.env.ARCANE_API_KEY;
   const openCodeKey = process.env.OPENCODE_API_KEY;
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
-  if (!openCodeKey) {
-    failEnv("Missing OPENCODE_API_KEY", fromDir);
-  }
   if (requireArcane && (!baseUrl || !arcaneKey)) {
     failEnv("Missing ARCANE_BASE_URL or ARCANE_API_KEY", fromDir);
   }
 
-  const defaultModel = options?.model ?? {
-    providerId: "opencode",
-    modelId: "muse-spark-1.3-free",
-  };
+  let defaultModel = options?.model;
+  let primaryApiKey: { providerId: string; key: string } | undefined;
+
+  if (openCodeKey) {
+    primaryApiKey = { providerId: "opencode", key: openCodeKey };
+    defaultModel ??= { providerId: "opencode", modelId: "muse-spark-1.3-free" };
+  } else if (openaiKey) {
+    primaryApiKey = { providerId: "openai", key: openaiKey };
+    defaultModel ??= { providerId: "openai", modelId: "gpt-4o" };
+  } else if (anthropicKey) {
+    primaryApiKey = { providerId: "anthropic", key: anthropicKey };
+    defaultModel ??= { providerId: "anthropic", modelId: "claude-sonnet-4" };
+  } else {
+    defaultModel ??= { providerId: "opencode", modelId: "muse-spark-1.3-free" };
+  }
+
+  const agentDir =
+    process.env.THEBE_AGENT_DIR ??
+    join(process.env.HOME ?? ".", ".thebe", "agent");
 
   const runtime = await createPiCodingAgentRuntime({
     cwd: process.cwd(),
     sessionDir: process.env.THEBE_SESSION_DIR,
-    agentDir: process.env.THEBE_AGENT_DIR,
-    apiKey: { providerId: "opencode", key: openCodeKey! },
+    agentDir,
+    apiKey: primaryApiKey,
     model: defaultModel,
   });
-  await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey!);
+
+  if (openCodeKey) {
+    await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
+  }
+  if (openaiKey) {
+    await applyThebeApiKey(runtime.auth(), "openai", openaiKey);
+  }
+  if (anthropicKey) {
+    await applyThebeApiKey(runtime.auth(), "anthropic", anthropicKey);
+  }
 
   const provider: ContainerInfoProvider =
     baseUrl && arcaneKey
@@ -92,6 +116,7 @@ export async function bootstrapThebe(
     send: app.send,
     handler: app.handler,
     version,
+    model: defaultModel,
   };
 }
 
