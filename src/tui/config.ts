@@ -189,3 +189,102 @@ export async function saveProviderEndpoint(
     await writeFile(modelsJsonPath, JSON.stringify(existingJson, null, 2), "utf8");
   } catch {}
 }
+
+export async function fetchRemoteModels(
+  baseUrl: string,
+  apiKey?: string,
+  api?: string,
+  timeoutMs = 4000,
+): Promise<Array<{ id: string; name?: string }> | null> {
+  const cleanUrl = baseUrl.replace(/\/+$/, "");
+  const candidateUrls: string[] = [];
+
+  if (api === "google-generative-ai") {
+    candidateUrls.push(
+      apiKey && apiKey !== "none"
+        ? `${cleanUrl}/models?key=${apiKey}`
+        : `${cleanUrl}/models`,
+    );
+  } else {
+    candidateUrls.push(`${cleanUrl}/models`);
+    if (cleanUrl.endsWith("/v1")) {
+      candidateUrls.push(`${cleanUrl.slice(0, -3)}/models`);
+      candidateUrls.push(`${cleanUrl.slice(0, -3)}/api/tags`);
+    } else {
+      candidateUrls.push(`${cleanUrl}/v1/models`);
+      candidateUrls.push(`${cleanUrl}/api/tags`);
+    }
+  }
+
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+  };
+  if (apiKey && apiKey !== "none" && apiKey !== "placeholder") {
+    headers.Authorization = `Bearer ${apiKey}`;
+    if (api === "anthropic-messages") {
+      headers["x-api-key"] = apiKey;
+      headers["anthropic-version"] = "2023-06-01";
+    }
+  }
+
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url, {
+        headers,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json()) as any;
+      const list: Array<{ id: string; name?: string }> = [];
+      const seen = new Set<string>();
+
+      const addModel = (rawId?: unknown, rawName?: unknown) => {
+        if (!rawId || typeof rawId !== "string") return;
+        let id = rawId.trim();
+        if (id.startsWith("models/")) {
+          id = id.slice("models/".length);
+        }
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        const name =
+          typeof rawName === "string" && rawName.trim()
+            ? rawName.trim()
+            : id;
+        list.push({ id, name });
+      };
+
+      if (Array.isArray(data?.data)) {
+        for (const item of data.data) {
+          if (typeof item === "string") {
+            addModel(item, item);
+          } else {
+            addModel(item?.id ?? item?.name, item?.display_name ?? item?.name ?? item?.id);
+          }
+        }
+      } else if (Array.isArray(data?.models)) {
+        for (const item of data.models) {
+          if (typeof item === "string") {
+            addModel(item, item);
+          } else {
+            addModel(item?.id ?? item?.name ?? item?.model, item?.displayName ?? item?.name ?? item?.model ?? item?.id);
+          }
+        }
+      } else if (Array.isArray(data)) {
+        for (const item of data) {
+          if (typeof item === "string") {
+            addModel(item, item);
+          } else {
+            addModel(item?.id ?? item?.name ?? item?.model, item?.displayName ?? item?.display_name ?? item?.name ?? item?.id);
+          }
+        }
+      }
+
+      if (list.length > 0) {
+        return list;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
