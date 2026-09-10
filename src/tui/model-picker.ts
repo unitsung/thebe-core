@@ -578,7 +578,7 @@ export async function attachSearchableProviderPicker(
 
   const allProviders = [...providers];
   if (
-    options.includeCustom !== false &&
+    options.includeCustom &&
     !allProviders.some((p) => p.id === "custom")
   ) {
     allProviders.unshift({
