@@ -9,10 +9,10 @@ import {
   fauxToolCall,
 } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { createThebeProduct } from "../../product/service.ts";
-import type { ContainerInfoProvider } from "../../providers/index.ts";
-import { loadPiSdk } from "./load-pi.ts";
-import { createPiCodingAgentRuntime } from "./pi-coding-agent-runtime.ts";
+import { createThebeProduct } from "../../../product/service.ts";
+import type { ContainerInfoProvider } from "../../../providers/index.ts";
+import { loadPiSdk } from "../sdk/load-pi.ts";
+import { createPiCodingAgentRuntime } from "../pi-coding-agent-runtime.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
 

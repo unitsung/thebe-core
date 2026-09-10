@@ -38,16 +38,11 @@ export async function copyToClipboard(
   text: string,
   write?: (data: string) => void,
 ): Promise<boolean> {
+  const osc = write ? writeOsc52(text, write) : false;
   try {
     await copyOfficial(text);
-    if (write) {
-      writeOsc52(text, write);
-    }
     return true;
   } catch {
-    if (!write) {
-      return false;
-    }
-    return writeOsc52(text, write);
+    return osc;
   }
 }

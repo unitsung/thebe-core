@@ -277,11 +277,13 @@ describe("Thebe TUI product slash commands", () => {
       expect.arrayContaining(["login", "logout"]),
     );
     expect(byCategory("System")).toEqual(
-      expect.arrayContaining(["theme", "help", "quit", "settings", "hotkeys"]),
+      expect.arrayContaining(["help", "quit", "settings", "hotkeys"]),
     );
     expect(byCategory("Thebe")).toEqual(
       expect.arrayContaining(["skills", "mcp", "subagent"]),
     );
+    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("theme");
+    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("tui");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("provider");
@@ -565,12 +567,12 @@ describe("Thebe TUI product slash commands", () => {
     expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
     expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
     expect(footer()).toMatch(/• minimal/);
-    expect(footer().trim().split("\n").at(-1)).toMatch(/• minimal/);
+    expect(footer().trim().split("\n")[1]).toMatch(/• minimal/);
 
     editor.handleInput("\x1b[Z");
     await new Promise((r) => setTimeout(r, 30));
     expect(notices()).not.toContain("thinking level set to low");
-    expect(footer().trim().split("\n").at(-1)).toMatch(/• low/);
+    expect(footer().trim().split("\n")[1]).toMatch(/• low/);
   });
 
   it("permission prompt Enter allow/deny resolves that permission", async () => {

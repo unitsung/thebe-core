@@ -36,8 +36,6 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   { name: "logout", category: "Provider", description: "Remove provider authentication", argumentHint: "[provider]" },
   // System
   { name: "settings", category: "System", description: "Open settings menu" },
-  { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
-  { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
   { name: "hotkeys", category: "System", description: "Show all keyboard shortcuts" },
   { name: "help", category: "System", description: "Show commands by category" },
   { name: "quit", category: "System", aliases: ["exit", "q"], description: "Quit Thebe" },
@@ -72,6 +70,9 @@ const EXTRA_SLASH_ALIASES = new Map<string, string>([
   ["proxy", "custom"],
   ["skill", "skills"],
   ["subagents", "subagent"],
+  ["theme", "theme"],
+  ["themes", "theme"],
+  ["tui", "tui"],
 ]);
 
 export function resolveSlashName(name: string): string {

@@ -1,4 +1,4 @@
-import type { EnabledResource } from "../types.ts";
+import type { EnabledResource } from "../../types.ts";
 import type { PiSdk } from "./load-pi.ts";
 
 type ResourceLoader = {

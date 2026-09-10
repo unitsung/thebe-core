@@ -254,6 +254,14 @@ export class SearchableModelPicker implements Component, Focusable {
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 
+    if (this.providers.length > 1) {
+      const active = this.getActiveProvider();
+      const tabs = this.providers
+        .map((p) => (p === active ? chalk.cyan(`[${p}]`) : chalk.dim(p)))
+        .join(" ");
+      lines.push(chalk.dim(`  Provider: ${tabs} (Tab to cycle)`));
+    }
+
     const total = this.filteredModels.length;
     if (total === 0) {
       lines.push(chalk.yellow("    No matching models"));
@@ -291,6 +299,10 @@ export class SearchableModelPicker implements Component, Focusable {
         );
       }
     }
+
+    lines.push(
+      chalk.dim("  ↑/↓: navigate · Enter: select · Tab: provider · Esc: cancel"),
+    );
 
     return fitLines(lines, width);
   }
@@ -481,6 +493,8 @@ export class SearchableProviderPicker implements Component, Focusable {
         lines.push(chalk.dim(`    (${this.selectedIndex + 1}/${total})`));
       }
     }
+
+    lines.push(chalk.dim("  ↑/↓: navigate · Enter: select · Esc: cancel"));
 
     return fitLines(lines, width);
   }

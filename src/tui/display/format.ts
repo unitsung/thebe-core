@@ -1,5 +1,93 @@
 import { execSync } from "node:child_process";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { chalk } from "../theme.ts";
+
+export interface StartScreenOptions {
+  version: string;
+  model?: string;
+  cwd: string;
+  branch?: string;
+  quiet?: boolean;
+  width?: number;
+  sessionTitle?: string;
+}
+
+export function renderStartScreen(options: StartScreenOptions): string {
+  const versionStr = `v${options.version}`;
+  const modelStr = options.model ? ` (connected to ${options.model})` : "";
+  const header = `${chalk.bold(chalk.cyan("Thebe"))} ${chalk.dim(`${versionStr}${modelStr}`)}`;
+
+  if (options.quiet) {
+    return `${header}\n${chalk.dim("Enter to send · Alt+Enter to queue · / commands · Ctrl+P model · Ctrl+C exit")}\n`;
+  }
+
+  const termWidth = options.width ?? (process.stdout?.columns ? process.stdout.columns : 80);
+  const cardWidth = Math.min(Math.max(48, termWidth - 4), 74);
+
+  const home = process.env.HOME || process.env.USERPROFILE;
+  const cwdDisplay = formatCwdForFooter(options.cwd, home);
+  const branchDisplay = options.branch ? `(git: ${chalk.cyan(options.branch)})` : "";
+
+  function makeCardLine(content: string, targetWidth: number): string {
+    const vis = visibleWidth(content);
+    if (vis > targetWidth - 4) {
+      const truncated = truncateToWidth(content, targetWidth - 4, "…");
+      const visTrunc = visibleWidth(truncated);
+      const pad = Math.max(0, targetWidth - 4 - visTrunc);
+      return `${chalk.dim("│ ")}${truncated}${" ".repeat(pad)}${chalk.dim(" │")}`;
+    }
+    const pad = Math.max(0, targetWidth - 4 - vis);
+    return `${chalk.dim("│ ")}${content}${" ".repeat(pad)}${chalk.dim(" │")}`;
+  }
+
+  const topBorder = chalk.dim(`╭${"─".repeat(cardWidth - 2)}╮`);
+  const botBorder = chalk.dim(`╰${"─".repeat(cardWidth - 2)}╯`);
+
+  const cardTitle = `${chalk.bold.cyan("✦ Thebe Agent")} ${chalk.dim(`v${options.version}`)} · ${chalk.green("Ready")}`;
+  const cardDesc = chalk.dim("Autonomous Homelab Ops & Coding Assistant with Pluggable Runtimes");
+  const cardGreeting = chalk.dim("Connected and standby. Ask anything or type / for available commands.");
+
+  const lines = [
+    topBorder,
+    makeCardLine(cardTitle, cardWidth),
+    makeCardLine(cardDesc, cardWidth),
+    makeCardLine(cardGreeting, cardWidth),
+    botBorder,
+    "",
+    chalk.bold("Environment:"),
+    `  ${chalk.dim("• Workspace :")} ${cwdDisplay} ${branchDisplay}`.trimEnd(),
+    `  ${chalk.dim("• Active LLM:")} ${options.model ? chalk.cyan(options.model) : chalk.dim("none")} ${chalk.dim("(Ctrl+P to switch)")}`,
+  ];
+
+  if (options.sessionTitle) {
+    lines.push(`  ${chalk.dim("• Session   :")} ${options.sessionTitle}`);
+  }
+
+  lines.push(
+    "",
+    chalk.bold("Quick Start:"),
+    `  ${chalk.dim("•")} ${chalk.cyan("Chat & Code")}   : Ask questions, plan refactors, write or debug code`,
+    `  ${chalk.dim("•")} ${chalk.green("Shell / Ops")}   : Prefix ${chalk.green("!")} for direct bash (${chalk.dim("!docker ps")}, ${chalk.dim("!git status")})`,
+    `  ${chalk.dim("•")} ${chalk.yellow("Command Menu")}  : Type ${chalk.yellow("/")} for slash commands (${chalk.dim("/model")}, ${chalk.dim("/session")}, ${chalk.dim("/settings")}, ${chalk.dim("/help")})`,
+    "",
+    chalk.bold("Try Asking:"),
+    `  ${chalk.yellow("→")} ${chalk.dim('"Explore project architecture and summarize key data flow"')}`,
+    `  ${chalk.yellow("→")} ${chalk.dim('"Inspect running docker containers and summarize error logs"')}`,
+    `  ${chalk.yellow("→")} ${chalk.dim('"Delegate a subagent to write tests and verify edge cases"')}`,
+    `  ${chalk.yellow("→")} ${chalk.dim('"Query connected MCP tools to diagnose database or network"')}`,
+    "",
+    chalk.bold("Keyboard Shortcuts:"),
+    `  ${chalk.cyan("Ctrl+P")}    ${chalk.dim("Switch model")}          ${chalk.cyan("Shift+Tab")}  ${chalk.dim("Cycle thinking level")}`,
+    `  ${chalk.cyan("Ctrl+T")}    ${chalk.dim("Toggle thinking UI")}    ${chalk.cyan("Ctrl+O")}     ${chalk.dim("Toggle tool details")}`,
+    `  ${chalk.cyan("Alt+Enter")} ${chalk.dim("Queue follow-up")}       ${chalk.cyan("Esc")}        ${chalk.dim("Interrupt / cancel")}`,
+    "",
+    chalk.dim("💡 Tip: Fold CoT/tools with Ctrl+T & Ctrl+O · Type /help for all commands"),
+    "",
+  );
+
+  return lines.join("\n");
+}
 
 /**
  * Compact token display. Same rules as official Pi

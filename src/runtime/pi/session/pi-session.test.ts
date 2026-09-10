@@ -8,11 +8,11 @@ import {
   fauxProvider,
 } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
-import { createThebeProduct } from "../../product/service.ts";
-import type { ContainerInfoProvider } from "../../providers/index.ts";
-import { PI_RUNTIME_ID } from "../types.ts";
-import { loadPiSdk } from "./load-pi.ts";
-import { createPiCodingAgentRuntime } from "./pi-coding-agent-runtime.ts";
+import { createThebeProduct } from "../../../product/service.ts";
+import type { ContainerInfoProvider } from "../../../providers/index.ts";
+import { PI_RUNTIME_ID } from "../../types.ts";
+import { loadPiSdk } from "../sdk/load-pi.ts";
+import { createPiCodingAgentRuntime } from "../pi-coding-agent-runtime.ts";
 
 function emptyProvider(): ContainerInfoProvider {
   return {
@@ -172,10 +172,13 @@ describe("PiCodingAgentRuntime sessions", () => {
     expect(setSpy).toHaveBeenCalledWith("faux", "sk-test");
     await runtime.auth().loginOAuth("faux", { type: "oauth" });
     expect(loginSpy).toHaveBeenCalled();
-    const src = await readFile(
-      new URL("./pi-coding-agent-runtime.ts", import.meta.url),
-      "utf8",
-    );
+    const src = [
+      await readFile(
+        new URL("../pi-coding-agent-runtime.ts", import.meta.url),
+        "utf8",
+      ),
+      await readFile(new URL("../auth/oauth.ts", import.meta.url), "utf8"),
+    ].join("\n");
     expect(src).not.toMatch(/function refresh/);
     expect(src).not.toContain("refresh_token");
   });

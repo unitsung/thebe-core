@@ -17,6 +17,9 @@ export type ChatFooterState = {
   thinking: string;
   isResponding: boolean;
   activeToolName?: string;
+  isBashMode?: boolean;
+  isExecutingBash?: boolean;
+  isMenuOpen?: boolean;
 };
 
 /** PWD line + stats/model line (+ optional tool status). */
@@ -57,24 +60,17 @@ export function formatFooterLines(state: ChatFooterState): string[] {
     statsParts.push(contextPercentDisplay);
   }
 
-  const statsLeft = statsParts.join(" ");
   const parsedModel = parseModelRef(state.model);
   const modelId = parsedModel.modelId || state.model || "no model";
-  const rightSide = `${modelId} • ${state.thinking}`;
-
-  const minPadding = 2;
-  const statsLeftWidth = visibleWidth(statsLeft);
-  const rightSideWidth = visibleWidth(rightSide);
-  const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
+  const rightSide = ` ${modelId} • ${state.thinking}`;
+  const statsLeft = statsParts.join(" ");
 
   let statsLine: string;
-  if (totalNeeded <= width) {
-    const padding = " ".repeat(
-      Math.max(0, width - statsLeftWidth - rightSideWidth),
-    );
-    statsLine = chalk.dim(statsLeft) + padding + chalk.dim(rightSide);
+  if (width < 35) {
+    statsLine = chalk.dim(truncateToWidth(statsLeft, width, "..."));
   } else {
-    const availableForRight = width - statsLeftWidth - minPadding;
+    const statsLeftWidth = visibleWidth(statsLeft);
+    const availableForRight = width - statsLeftWidth;
     if (availableForRight > 0) {
       const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
       const padding = " ".repeat(
@@ -87,11 +83,49 @@ export function formatFooterLines(state: ChatFooterState): string[] {
   }
 
   const lines = [pwdLine, statsLine];
-  if (state.isResponding) {
-    const statusStr = state.activeToolName
-      ? chalk.yellow(`● tool: ${state.activeToolName}`)
-      : chalk.cyan("● thinking...");
-    lines.push(statusStr);
+
+  if (state.isMenuOpen) {
+    const menuLabel = `${chalk.dim("✦ ")}${chalk.cyan("Commands")}`;
+    const menuHint =
+      width >= 75
+        ? `${menuLabel}${chalk.dim(" · ↑/↓: navigate · Tab: complete · Enter: select · Esc: dismiss")}`
+        : `${menuLabel}${chalk.dim(" · ↑/↓: navigate · Tab/Enter: select · Esc: dismiss")}`;
+    lines.push(truncateToWidth(menuHint, width, ""));
+  } else if (state.isBashMode) {
+    const bashLabel = `${chalk.dim("⚡ ")}${chalk.green("Bash")}`;
+    const bashHint =
+      width >= 75
+        ? `${bashLabel}${chalk.dim(" · Enter: run · Esc: exit · !!: exclude from context")}`
+        : `${bashLabel}${chalk.dim(" · Enter: run · Esc: exit")}`;
+    lines.push(truncateToWidth(bashHint, width, ""));
+  } else if (state.isResponding || state.isExecutingBash) {
+    const statusIndicator = state.isExecutingBash
+      ? chalk.green("⚡ running bash...")
+      : state.activeToolName
+        ? chalk.yellow(`● ${state.activeToolName}`)
+        : chalk.cyan("● working");
+    let respondingHint: string;
+    if (width >= 90) {
+      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T: fold · Ctrl+O: tools")}`;
+    } else if (width >= 65) {
+      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T/O: fold")}`;
+    } else {
+      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt")}`;
+    }
+    lines.push(truncateToWidth(respondingHint, width, ""));
+  } else {
+    let idleHint: string;
+    if (width >= 95) {
+      idleHint = chalk.dim("Enter: send · Alt+Enter: queue · /: menu · Ctrl+P: model · Shift+Tab: level · Ctrl+T: fold · Ctrl+O: tools");
+    } else if (width >= 70) {
+      idleHint = chalk.dim("Enter: send · Alt+Enter: queue · /: menu · Ctrl+P: model · Ctrl+T/O: fold");
+    } else if (width >= 50) {
+      idleHint = chalk.dim("Enter: send · /: menu · Ctrl+P: model · Esc: cancel");
+    } else {
+      idleHint = chalk.dim("Enter: send · /: menu");
+    }
+    lines.push(truncateToWidth(idleHint, width, ""));
   }
+
   return lines;
 }

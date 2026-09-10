@@ -2,7 +2,7 @@ import type { SlashHost } from "./context.ts";
 import { SLASH_COMMANDS, type SlashCategory } from "../slash.ts";
 
 export function handleHelpCommand(host: SlashHost, name: string): boolean {
-  const { tui, editor, children, footerText, notice, insertBeforeFooter, makeMarkdown } = host;
+  const { tui, notice, insertBeforeFooter, makeMarkdown } = host;
   if (name === "help") {
     const categories: SlashCategory[] = [
       "Session",
@@ -31,7 +31,7 @@ export function handleHelpCommand(host: SlashHost, name: string): boolean {
   }
   if (name === "hotkeys") {
     const hotkeysMarkdown = [
-      "### Keyboard Shortcuts",
+      "## Keyboard Shortcuts",
       "",
       "**Navigation**",
       "| Key | Action |",
@@ -62,6 +62,8 @@ export function handleHelpCommand(host: SlashHost, name: string): boolean {
       "| `Ctrl+C` | Exit |",
       "| `Shift+Tab` | Cycle thinking level (off → min → low → med → high → xhigh → max) |",
       "| `Ctrl+P` | Open model selector |",
+      "| `Ctrl+T` | Hide or show reasoning blocks |",
+      "| `Ctrl+O` | Expand or collapse tool output |",
       "| `Alt+Enter` | Queue follow-up message |",
       "| `/` | Slash commands autocomplete (use `/help` for list) |",
       "| `!` | Run bash command (included in context) |",
@@ -72,13 +74,7 @@ export function handleHelpCommand(host: SlashHost, name: string): boolean {
     return true;
   }
   if (name === "clear") {
-    const keep = new Set([children[0], footerText, editor]);
-    for (let i = children.length - 1; i >= 0; i--) {
-      if (!keep.has(children[i])) {
-        children.splice(i, 1);
-      }
-    }
-    tui.requestRender();
+    host.clearMessagesView();
     return true;
   }
   if (name === "quit" || name === "exit") {

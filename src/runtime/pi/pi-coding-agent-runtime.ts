@@ -1,26 +1,23 @@
 import { mkdirSync } from "node:fs";
-import type {
-  AgentRuntime,
-  RuntimeModelRef,
-} from "../types.ts";
+import type { AgentRuntime } from "../types.ts";
 import { PI_RUNTIME_ID } from "../types.ts";
-import { loadPiSdk } from "./load-pi.ts";
-import { sanitizeBashEnv } from "./bash-env.ts";
-import { syncAgentModelsFile } from "./agent-dir.ts";
+import { createPiRuntimeAuth } from "./auth/index.ts";
 import {
   ensureOpencodeFreeAlias,
   modelKey,
   resolveModelRef as resolvePiModel,
+  syncAgentModelsFile,
   toRuntimeModel,
   type PiModelShape,
-} from "./model-shape.ts";
-import { createPiRuntimeAuth } from "./oauth.ts";
-import { openPiSession } from "./open-session.ts";
-import type { PiSession } from "./pi-session.ts";
-import { wrapSession as wrapPiSession } from "./wrap-session.ts";
-import type { PiSdk } from "./load-pi.ts";
+} from "./config/index.ts";
+import { loadPiSdk, type PiSdk } from "./sdk/index.ts";
+import {
+  openPiSession,
+  wrapSession as wrapPiSession,
+  type PiSession,
+} from "./session/index.ts";
 
-export { sanitizeBashEnv } from "./bash-env.ts";
+export { sanitizeBashEnv } from "./config/index.ts";
 
 export type PiCodingAgentRuntimeOptions = {
   cwd?: string;

@@ -216,6 +216,8 @@ export class SearchableSessionPicker implements Component, Focusable {
       }
     }
 
+    lines.push(chalk.dim("  ↑/↓: navigate · Enter: switch · Esc: cancel"));
+
     return lines.map((line) => truncateToWidth(line, width, ""));
   }
 }

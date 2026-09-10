@@ -1,11 +1,10 @@
 /**
  * Chat shell: transcript, editor, footer, prompt, and slash dispatch.
  */
-import { initTheme } from "../runtime/pi/official-ui.ts";
+import { initTheme, ToolExecutionComponent } from "../runtime/pi/official-ui.ts";
 import {
   CombinedAutocompleteProvider,
   Editor,
-  Loader,
   Markdown,
   ProcessTerminal,
   Text,
@@ -32,7 +31,7 @@ import {
 import { loadThebeConfig, saveThebeConfig } from "./config.ts";
 import type { ThebeTuiOptions } from "./types.ts";
 import { slashCommandsForAutocomplete } from "./slash.ts";
-import { getGitBranch } from "./display/format.ts";
+import { getGitBranch, renderStartScreen } from "./display/format.ts";
 import { FooterDock } from "./display/footer.ts";
 import { attachSelectList } from "./overlays/index.ts";
 import { runCustomProviderWizard as runCustomProviderWizardFlow } from "./providers/wizard.ts";
@@ -40,6 +39,13 @@ import { dispatchSlash, type SlashHost } from "./commands/index.ts";
 import { readMarkdownSource, stashMarkdownSource } from "./display/markdown-source.ts";
 import { runChatBash } from "./chat/bash.ts";
 import { formatFooterLines } from "./chat/footer.ts";
+import {
+  ElapsedWorking,
+  ThinkingBlock,
+  createToolComponent,
+  makeReplyMarkdown,
+  toolResultPayload,
+} from "./chat/transcript.ts";
 
 export type ChatHandle = {
   editor: Editor;
@@ -71,15 +77,17 @@ export function attachThebeChat(
   const cachedBranch = getGitBranch();
 
   const appVersion = options.version ?? "0.1.0";
+  const initialWidth = tui.terminal?.columns ?? process.stdout.columns ?? 80;
   tui.addChild(
     new Text(
-      [
-        `${chalk.bold(chalk.cyan("Thebe"))} ${chalk.dim(`v${appVersion} (connected to ${currentModel})`)}`,
-        chalk.dim(
-          "Enter to send · Alt+Enter to queue · Esc to interrupt · / commands · Ctrl+P model · Ctrl+C exit",
-        ),
-        "",
-      ].join("\n"),
+      renderStartScreen({
+        version: appVersion,
+        model: currentModel,
+        cwd: process.cwd(),
+        branch: cachedBranch,
+        width: initialWidth,
+        sessionTitle,
+      }),
     ),
   );
 
@@ -99,8 +107,15 @@ export function attachThebeChat(
   let currentBashAbortController: AbortController | undefined;
   let streamUnsub: (() => void) | undefined;
   let replyMarkdown: Markdown | undefined;
-  let loader: Loader | undefined;
+  let working: ElapsedWorking | undefined;
+  let thinkingBlock: ThinkingBlock | undefined;
+  let hideThinking = false;
+  let toolsExpanded = false;
+  const toolComponents = new Map<string, ToolExecutionComponent>();
   let pendingPermissionId: string | undefined;
+  void loadThebeConfig().then((cfg) => {
+    hideThinking = cfg.hideThinking ?? false;
+  });
 
   const children = tui.children;
 
@@ -122,6 +137,14 @@ export function attachThebeChat(
     if (wasBashMode !== isBashMode) {
       updateEditorBorderColor();
     }
+    updateFooter();
+  };
+  const origEditorHandleInput = editor.handleInput.bind(editor);
+  editor.handleInput = (data: string) => {
+    origEditorHandleInput(data);
+    updateFooter();
+    queueMicrotask(() => updateFooter());
+    setTimeout(() => updateFooter(), 20);
   };
   updateEditorBorderColor();
 
@@ -153,6 +176,7 @@ export function attachThebeChat(
   function updateFooter(): void {
     const width = tui.terminal?.columns ?? process.stdout.columns ?? 80;
     const home = process.env.HOME || process.env.USERPROFILE;
+    const isMenuOpen = editor.isShowingAutocomplete?.() ?? false;
     const lines = formatFooterLines({
       width,
       cwd: process.cwd(),
@@ -167,6 +191,9 @@ export function attachThebeChat(
       thinking: currentThinking,
       isResponding,
       activeToolName,
+      isBashMode,
+      isExecutingBash,
+      isMenuOpen,
     });
     footerText.setText(lines.join("\n"));
     tui.requestRender();
@@ -219,18 +246,12 @@ export function attachThebeChat(
     return sessionId;
   }
 
-  function getActiveMarkdownTheme() {
-    return getTuiTheme(currentTheme).markdown;
-  }
-
   function getActiveSelectListTheme(): SelectListTheme {
     return getTuiTheme(currentTheme).selectList;
   }
 
   function makeMarkdown(text: string): Markdown {
-    const md = new Markdown(text, 1, 1, getActiveMarkdownTheme());
-    stashMarkdownSource(md, text);
-    return md;
+    return makeReplyMarkdown(text, getTuiTheme(currentTheme).markdown);
   }
 
   async function applyTheme(name: ThemeName, persist = true): Promise<void> {
@@ -267,6 +288,7 @@ export function attachThebeChat(
         children.splice(i, 1);
       }
     }
+    toolComponents.clear();
     tui.requestRender();
   }
 
@@ -280,10 +302,20 @@ export function attachThebeChat(
           insertBeforeFooter(makeMarkdown(m.text));
         } else if (m.role === "assistant" && m.text) {
           insertBeforeFooter(makeMarkdown(m.text));
-        } else if (m.role === "tool" && m.text) {
-          const status = m.isError ? chalk.red("error") : chalk.green("ok");
-          const label = chalk.dim(`[tool: ${m.toolName ?? "unknown"} · ${status}]\n`);
-          insertBeforeFooter(new Text(`${label}${m.text}`));
+        } else if (m.role === "tool") {
+          const component = createToolComponent(
+            tui,
+            m.toolName ?? "unknown",
+            m.toolCallId ?? m.id,
+            undefined,
+            toolsExpanded,
+          );
+          component.setArgsComplete();
+          component.updateResult(
+            toolResultPayload(m.text, Boolean(m.isError)),
+          );
+          toolComponents.set(m.toolCallId ?? m.id, component);
+          insertBeforeFooter(component);
         }
       }
       tui.requestRender();
@@ -359,25 +391,61 @@ export function attachThebeChat(
     );
   }
 
-  function beginStream(label = "Thinking..."): void {
+  function insertTool(component: ToolExecutionComponent): void {
+    const before = working ?? editor;
+    const index = children.indexOf(before as never);
+    const insertAt = index >= 0 ? index : Math.max(0, children.length - 1);
+    children.splice(insertAt, 0, component as never);
+    tui.requestRender();
+  }
+
+  function setToolsExpanded(expanded: boolean): void {
+    toolsExpanded = expanded;
+    for (const child of children) {
+      if (child instanceof ToolExecutionComponent) {
+        child.setExpanded(expanded);
+      }
+    }
+    tui.requestRender();
+  }
+
+  function setHideThinking(hidden: boolean): void {
+    hideThinking = hidden;
+    if (thinkingBlock) {
+      thinkingBlock.setHidden(hidden);
+    }
+    for (const child of children) {
+      if (child instanceof ThinkingBlock) {
+        child.setHidden(hidden);
+      }
+    }
+    void saveThebeConfig({ hideThinking: hidden });
+    tui.requestRender();
+  }
+
+  function beginStream(): void {
+    thinkingBlock = new ThinkingBlock(hideThinking);
+    insertBeforeFooter(thinkingBlock);
     replyMarkdown = makeMarkdown("");
     insertBeforeFooter(replyMarkdown);
-    loader = new Loader(
-      tui,
-      (s) => chalk.cyan(s),
-      (s) => chalk.dim(s),
-      label,
-    );
-    insertBeforeFooter(loader);
+    working = new ElapsedWorking(tui);
+    insertBeforeFooter(working);
     updateFooter();
   }
 
   function endStream(): void {
-    if (loader) {
-      tui.removeChild(loader);
-      loader.stop();
-      loader = undefined;
+    if (working) {
+      tui.removeChild(working);
+      working.stop();
+      working = undefined;
     }
+    if (thinkingBlock?.isEmpty()) {
+      const index = children.indexOf(thinkingBlock as never);
+      if (index >= 0) {
+        children.splice(index, 1);
+      }
+    }
+    thinkingBlock = undefined;
     streamUnsub?.();
     streamUnsub = undefined;
     replyMarkdown = undefined;
@@ -388,23 +456,54 @@ export function attachThebeChat(
   function onEvent(event: NormalizedEvent): void {
     if (event.type === "text_delta" && replyMarkdown) {
       const next = `${readMarkdownSource(replyMarkdown)}${event.text}`;
-      const index = children.indexOf(replyMarkdown);
-      if (index >= 0) {
-        const replacement = makeMarkdown(next);
-        children[index] = replacement;
-        replyMarkdown = replacement;
-        tui.requestRender();
-      }
+      replyMarkdown.setText(next);
+      stashMarkdownSource(replyMarkdown, next);
+      tui.requestRender();
+    } else if (event.type === "thinking_delta" && thinkingBlock) {
+      thinkingBlock.append(event.text);
+      tui.requestRender();
     } else if (event.type === "tool_start") {
       activeToolName = event.toolName;
+      working?.setLabel(event.toolName);
+      let component = toolComponents.get(event.toolCallId);
+      if (!component) {
+        component = createToolComponent(
+          tui,
+          event.toolName,
+          event.toolCallId,
+          event.args,
+          toolsExpanded,
+        );
+        toolComponents.set(event.toolCallId, component);
+        insertTool(component);
+      } else if (event.args) {
+        component.updateArgs(event.args);
+      }
       updateFooter();
-      notice(`tool start: ${event.toolName}…`);
+    } else if (event.type === "tool_update") {
+      const component = toolComponents.get(event.toolCallId);
+      if (component) {
+        if (event.args) {
+          component.updateArgs(event.args);
+        }
+        if (event.text) {
+          component.updateResult(toolResultPayload(event.text, false), true);
+        }
+      }
     } else if (event.type === "tool_end") {
       activeToolName = undefined;
+      working?.setLabel("Working");
+      const component = toolComponents.get(event.toolCallId);
+      if (component) {
+        if (event.args) {
+          component.updateArgs(event.args);
+        }
+        component.setArgsComplete();
+        component.updateResult(
+          toolResultPayload(event.text, event.isError, event.details),
+        );
+      }
       updateFooter();
-      notice(
-        `tool end: ${event.toolName} [${event.isError ? "error" : "ok"}]`,
-      );
     } else if (event.type === "permission_requested") {
       pendingPermissionId = event.permissionId;
       updateFooter();
@@ -586,6 +685,7 @@ export function attachThebeChat(
     refreshContextUsage,
     updateFooter,
     updateEditorBorderColor,
+    setHideThinking,
     applyTheme,
     applyModel,
     insertBeforeFooter,
@@ -605,13 +705,7 @@ export function attachThebeChat(
       return;
     }
     if (trimmed === "/clear") {
-      const keep = new Set([children[0], footerText, editor]);
-      for (let i = children.length - 1; i >= 0; i--) {
-        if (!keep.has(children[i])) {
-          children.splice(i, 1);
-        }
-      }
-      tui.requestRender();
+      clearMessagesView();
       return;
     }
     if (trimmed.startsWith("!")) {
@@ -673,6 +767,14 @@ export function attachThebeChat(
       }
       updateFooter();
       updateEditorBorderColor();
+      return;
+    }
+    if (matchesKey(data, "ctrl+t")) {
+      setHideThinking(!hideThinking);
+      return;
+    }
+    if (matchesKey(data, "ctrl+o")) {
+      setToolsExpanded(!toolsExpanded);
       return;
     }
     if (matchesKey(data, "escape")) {

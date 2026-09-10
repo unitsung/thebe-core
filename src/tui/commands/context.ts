@@ -27,6 +27,7 @@ export type SlashHost = {
   refreshContextUsage: () => Promise<void>;
   updateFooter: () => void;
   updateEditorBorderColor: () => void;
+  setHideThinking: (hidden: boolean) => void;
   applyTheme: (name: ThemeName, persist?: boolean) => Promise<void>;
   applyModel: (
     id: string,

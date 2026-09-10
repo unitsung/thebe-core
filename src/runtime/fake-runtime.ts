@@ -214,7 +214,14 @@ export function createFakeRuntime(
           break;
         }
         const toolCallId = call.id ?? randomUUID();
-        emit({ type: "tool_start", toolName: call.name, toolCallId });
+        emit({
+          type: "tool_start",
+          toolName: call.name,
+          toolCallId,
+          args: call.args
+            ? JSON.parse(summarizeArgs(call.args, 8_000))
+            : undefined,
+        });
         const needsApproval = state.toolsRequiringApproval.includes(call.name);
         if (needsApproval && state.permissionHandler) {
           const permissionId = randomUUID();

@@ -1,12 +1,15 @@
-import type { NormalizedEvent, RuntimeMessage } from "../types.ts";
+import type { NormalizedEvent, RuntimeMessage } from "../../types.ts";
+import { summarizeArgs } from "../../../tools/redaction.ts";
 
 type AgentSessionEvent = {
   type: string;
   assistantMessageEvent?: { type?: string; delta?: string };
   toolName?: string;
   toolCallId?: string;
+  args?: unknown;
   isError?: boolean;
   result?: unknown;
+  partialResult?: unknown;
   reason?: string;
   aborted?: boolean;
   errorMessage?: string;
@@ -32,13 +35,15 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
         type: "tool_start",
         toolName: event.toolName ?? "",
         toolCallId: event.toolCallId ?? "",
+        args: redactedArgs(event.args),
       };
     case "tool_execution_update":
       return {
         type: "tool_update",
         toolName: event.toolName ?? "",
         toolCallId: event.toolCallId ?? "",
-        text: toolText(event),
+        text: toolText(event.partialResult ?? event),
+        args: redactedArgs(event.args),
       };
     case "tool_execution_end":
       return {
@@ -47,6 +52,8 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
         toolCallId: event.toolCallId ?? "",
         isError: Boolean(event.isError),
         text: toolText(event.result),
+        args: redactedArgs(event.args),
+        details: resultDetails(event.result),
       };
     case "turn_end":
       return { type: "turn_end" };
@@ -167,6 +174,24 @@ function contentAttachments(
     }
   }
   return found.length > 0 ? found : undefined;
+}
+
+function redactedArgs(args: unknown): unknown {
+  if (args == null) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(summarizeArgs(args, 8_000));
+  } catch {
+    return undefined;
+  }
+}
+
+function resultDetails(value: unknown): unknown {
+  if (value && typeof value === "object" && "details" in value) {
+    return (value as { details?: unknown }).details;
+  }
+  return undefined;
 }
 
 function toolText(value: unknown): string {

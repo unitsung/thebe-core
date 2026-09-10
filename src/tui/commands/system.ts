@@ -108,7 +108,7 @@ export async function handleSystemCommand(
                 } else if (id === "followUpMode") {
                   await saveThebeConfig({ followUpMode: value as "one-at-a-time" | "all" });
                 } else if (id === "hideThinking") {
-                  await saveThebeConfig({ hideThinking: value === "true" });
+                  host.setHideThinking(value === "true");
                 } else if (id === "quietStartup") {
                   await saveThebeConfig({ quietStartup: value === "true" });
                 } else if (id === "fullscreenExitOutput") {

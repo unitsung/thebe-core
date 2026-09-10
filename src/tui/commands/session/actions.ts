@@ -82,11 +82,18 @@ case "copy": {
     const msgs = await product.loadMessages(id);
     text =
       msgs.filter((m) => m.role === "assistant").at(-1)?.text ?? "";
-  } else {
+  }
+  if (!text) {
     const markdowns = host.children.filter(
       (child) => child instanceof Markdown,
     );
-    text = readMarkdownSource(markdowns.at(-1) as Markdown) ?? "";
+    for (let i = markdowns.length - 1; i >= 0; i--) {
+      const source = readMarkdownSource(markdowns[i] as Markdown);
+      if (source.trim()) {
+        text = source;
+        break;
+      }
+    }
   }
   if (!text) {
     host.notice("no assistant response found to copy");

@@ -3,14 +3,27 @@ export const PI_RUNTIME_ID = "pi-coding-agent";
 export type NormalizedEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
-  | { type: "tool_start"; toolName: string; toolCallId: string }
-  | { type: "tool_update"; toolName: string; toolCallId: string; text?: string }
+  | {
+      type: "tool_start";
+      toolName: string;
+      toolCallId: string;
+      args?: unknown;
+    }
+  | {
+      type: "tool_update";
+      toolName: string;
+      toolCallId: string;
+      text?: string;
+      args?: unknown;
+    }
   | {
       type: "tool_end";
       toolName: string;
       toolCallId: string;
       isError: boolean;
       text: string;
+      args?: unknown;
+      details?: unknown;
     }
   | { type: "turn_end" }
   | { type: "session_end"; text: string }
