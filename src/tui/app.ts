@@ -96,7 +96,7 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
   { name: "custom", category: "Provider", aliases: ["endpoint", "proxy"], description: "Configure custom endpoint (OpenAI / Anthropic compatible)", argumentHint: "[provider]" },
   { name: "logout", category: "Provider", description: "Remove provider authentication", argumentHint: "[provider]" },
   // System
-  { name: "session", category: "System", aliases: ["usage", "status"], description: "Show session info and stats" },
+  { name: "usage", category: "System", aliases: ["session", "status"], description: "Show token usage, context window, and session stats" },
   { name: "settings", category: "System", description: "Open settings menu" },
   { name: "theme", category: "System", aliases: ["themes"], description: "Switch theme", argumentHint: "[dark|light]" },
   { name: "tui", category: "System", description: "regular or fullscreen viewport", argumentHint: "[regular|fullscreen]" },
@@ -120,7 +120,7 @@ const EXTRA_SLASH_ALIASES = new Map<string, string>([
   ["deny", "deny"],
   ["provider", "provider"],
   ["sessions", "resume"],
-  ["usage", "session"],
+  ["session", "usage"],
   ["followup", "followup"],
   ["unrevert", "unrevert"],
   ["endpoint", "custom"],
@@ -501,6 +501,10 @@ export function attachThebeChat(
     return getTuiTheme(currentTheme).markdown;
   }
 
+  function getActiveSelectListTheme(): SelectListTheme {
+    return getTuiTheme(currentTheme).selectList;
+  }
+
   function makeMarkdown(text: string): Markdown {
     const md = new Markdown(text, 1, 1, getActiveMarkdownTheme());
     stashMarkdownSource(md, text);
@@ -511,6 +515,7 @@ export function attachThebeChat(
     currentTheme = name;
     const pack = getTuiTheme(name);
     editor.borderColor = pack.editor.borderColor;
+    (editor as unknown as { theme: unknown }).theme = pack.editor;
     for (const child of children) {
       child.invalidate?.();
     }
@@ -592,6 +597,8 @@ export function attachThebeChat(
         value: c.value,
       })),
       editor,
+      undefined,
+      getActiveSelectListTheme(),
     );
     if (!chosenApi) {
       notice("custom endpoint setup cancelled");
@@ -696,7 +703,13 @@ export function attachThebeChat(
         value: "__manual__",
       });
 
-      const chosenModel = await attachSelectList(tui, selectItems, editor);
+      const chosenModel = await attachSelectList(
+        tui,
+        selectItems,
+        editor,
+        undefined,
+        getActiveSelectListTheme(),
+      );
       if (!chosenModel) {
         notice("custom endpoint setup cancelled");
         return null;
@@ -728,6 +741,25 @@ export function attachThebeChat(
       selectedModelId = modelInput.trim() || suggestedModel;
     }
 
+    // Ask user whether to enable thinking / reasoning capability for this model
+    const defaultReasoning = isReasoningModel(selectedModelId);
+    const reasoningPrompt = defaultReasoning
+      ? `Enable thinking/reasoning for ${selectedModelId}? [Y/n]: `
+      : `Enable thinking/reasoning for ${selectedModelId}? [y/N]: `;
+    const reasoningInput = await attachPromptInput(tui, {
+      prompt: chalk.cyan(reasoningPrompt),
+      placeholder: defaultReasoning ? "y" : "n",
+      focusBack: editor,
+    });
+    if (reasoningInput === null) {
+      notice("custom endpoint setup cancelled");
+      return null;
+    }
+    const trimmedReasoning = reasoningInput.trim().toLowerCase();
+    const enableReasoning = defaultReasoning
+      ? trimmedReasoning !== "n" && trimmedReasoning !== "no"
+      : trimmedReasoning === "y" || trimmedReasoning === "yes";
+
     // 6. Save to models.json, auth.json, config.json
     const modelsToSave =
       remoteModels && remoteModels.length > 0
@@ -746,15 +778,20 @@ export function attachThebeChat(
           })
         : [];
 
-    if (!modelsToSave.some((m) => m.id === selectedModelId)) {
-      const reasoning = isReasoningModel(selectedModelId);
+    const existingSelected = modelsToSave.find((m) => m.id === selectedModelId);
+    if (existingSelected) {
+      existingSelected.reasoning = enableReasoning;
+      existingSelected.thinkingLevelMap = enableReasoning
+        ? { low: "low", medium: "medium", high: "high" }
+        : undefined;
+    } else {
       modelsToSave.unshift({
         id: selectedModelId,
         name: selectedModelId,
         contextWindow: 128000,
         maxTokens: 4096,
-        reasoning,
-        thinkingLevelMap: reasoning
+        reasoning: enableReasoning,
+        thinkingLevelMap: enableReasoning
           ? { low: "low", medium: "medium", high: "high" }
           : undefined,
       });
@@ -815,6 +852,8 @@ export function attachThebeChat(
         { label: `Deny ${toolName}`, value: "deny" },
       ],
       editor,
+      undefined,
+      getActiveSelectListTheme(),
     );
     const id = sessionId ?? product.lastThebeSessionId();
     if (!selected || !id) {
@@ -1103,8 +1142,8 @@ export function attachThebeChat(
           }
           break;
         }
-        case "session":
-        case "usage": {
+        case "usage":
+        case "session": {
           const id = ensureSession();
           const meta = await product.getSession(id);
           let u = { usedTokens: contextTokensUsed, maxTokens: contextWindowTotal };
@@ -1224,39 +1263,16 @@ export function attachThebeChat(
               value: "fullscreen",
             },
           ];
-          const selected = await attachSelectList(tui, items, editor);
+          const selected = await attachSelectList(
+            tui,
+            items,
+            editor,
+            undefined,
+            getActiveSelectListTheme(),
+          );
           if (selected) {
             await applyMode(selected.value as TuiMode);
           }
-          break;
-        }
-        case "session": {
-          const id = sessionId ?? product.lastThebeSessionId();
-          if (!id) {
-            notice("no active session");
-            break;
-          }
-          const meta = await product.getSession(id);
-          let ctxDetails = "";
-          try {
-            const ctx = await product.getContextUsage(id);
-            const u = ctx.contextUsage;
-            ctxDetails = `context: ${formatTokens(u.usedTokens)} / ${formatTokens(u.maxTokens)} tokens (${((u.usedTokens / u.maxTokens) * 100).toFixed(1)}%)\nnear threshold: ${ctx.compaction.nearThreshold ? "yes" : "no"}`;
-          } catch {
-            ctxDetails = "context: stats unavailable";
-          }
-          notice(
-            [
-              `session: ${meta.thebeSessionId}`,
-              `runtime session: ${meta.runtimeSessionId}`,
-              `title: ${meta.title ?? "(untitled)"}`,
-              `model: ${currentModel}`,
-              `thinking: ${currentThinking}`,
-              `parent: ${meta.parentThebeSessionId ?? "(none)"}`,
-              `last active: ${meta.lastActiveAt ?? meta.updatedAt ?? "-"}`,
-              ctxDetails,
-            ].join("\n"),
-          );
           break;
         }
         case "name": {
@@ -1466,7 +1482,13 @@ export function attachThebeChat(
               value: lvl,
             };
           });
-          const selected = await attachSelectList(tui, items, editor);
+          const selected = await attachSelectList(
+            tui,
+            items,
+            editor,
+            undefined,
+            getActiveSelectListTheme(),
+          );
           if (selected) {
             await product.setThinkingLevel(id, selected.value as ThinkingLevel);
             currentThinking = selected.value as ThinkingLevel;
@@ -1519,6 +1541,7 @@ export function attachThebeChat(
             (item) => {
               void applyTheme(item.value as ThemeName, false);
             },
+            getActiveSelectListTheme(),
           );
           if (selected) {
             const chosen = selected.value as ThemeName;
@@ -1716,6 +1739,8 @@ export function attachThebeChat(
                 { label: `2. Set API Key for ${display}`, value: "apikey" },
               ],
               editor,
+              undefined,
+              getActiveSelectListTheme(),
             );
             if (!chosen) break;
             method = chosen.value === "apikey" ? "apikey" : "oauth";
@@ -2128,6 +2153,14 @@ const defaultSettingsListTheme: SettingsListTheme = {
   hint: (text) => chalk.dim(text),
 };
 
+const lightSettingsListTheme: SettingsListTheme = {
+  label: (text, selected) => (selected ? chalk.bold.blue(text) : chalk.black(text)),
+  value: (text, selected) => (selected ? chalk.blue(text) : chalk.dim(text)),
+  description: (text) => chalk.dim(text),
+  cursor: "→ ",
+  hint: (text) => chalk.dim(text),
+};
+
 function attachSettingsMenu(
   tui: TUI,
   focusBack: unknown,
@@ -2167,7 +2200,7 @@ function attachSettingsMenu(
     const list = new SettingsList(
       items,
       Math.min(items.length + 2, 10),
-      defaultSettingsListTheme,
+      options.theme === "light" ? lightSettingsListTheme : defaultSettingsListTheme,
       (id, newValue) => {
         list.updateValue(id, newValue);
         tui.requestRender();
@@ -2198,12 +2231,13 @@ export function attachSelectList(
   items: SelectItem[],
   focusBack?: { focus?: () => void } | unknown,
   onSelectionChange?: (item: SelectItem) => void,
+  theme?: SelectListTheme,
 ): Promise<SelectItem | null> {
   return new Promise((resolvePromise) => {
     const list = new SelectList(
       items,
       Math.min(items.length + 2, 10),
-      defaultSelectListTheme,
+      theme ?? defaultSelectListTheme,
     );
     const origHandleInput = list.handleInput.bind(list);
     list.handleInput = (keyData) => {

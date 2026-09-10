@@ -270,7 +270,7 @@ describe("Thebe TUI product slash commands", () => {
       expect.arrayContaining(["login", "logout"]),
     );
     expect(byCategory("System")).toEqual(
-      expect.arrayContaining(["theme", "help", "quit", "settings"]),
+      expect.arrayContaining(["theme", "help", "quit", "settings", "usage"]),
     );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
@@ -282,6 +282,8 @@ describe("Thebe TUI product slash commands", () => {
     expect(resolveSlashName("exit")).toBe("quit");
     expect(resolveSlashName("sessions")).toBe("resume");
     expect(resolveSlashName("continue")).toBe("resume");
+    expect(resolveSlashName("session")).toBe("usage");
+    expect(resolveSlashName("status")).toBe("usage");
   });
 
   it("handles /usage displaying context, token stats, turns, and cache hit rate", async () => {
@@ -1009,6 +1011,12 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       expect(modelSelect).toBeDefined();
       // Select first auto-fetched model (auto-model-1)
       modelSelect.handleInput("\r");
+      await flush();
+
+      // Step 6: Reasoning / thinking prompt (Input)
+      const reasoningInput = findNamed(tui, "Input");
+      expect(reasoningInput).toBeDefined();
+      typeAndConfirm(reasoningInput, "y");
       await customPromise;
 
       expect(notices(tui)).toContain("configured custom provider test-custom-provider (auto-model-1)");
