@@ -101,3 +101,55 @@ describe("fetchRemoteModels", () => {
     expect(models).toBeNull();
   });
 });
+
+describe("isReasoningModel and saveCustomProvider reasoning support", () => {
+  it("identifies reasoning models correctly", async () => {
+    const { isReasoningModel } = await import("./config.ts");
+    expect(isReasoningModel("deepseek-r1")).toBe(true);
+    expect(isReasoningModel("deepseek-r1:14b")).toBe(true);
+    expect(isReasoningModel("o1-preview")).toBe(true);
+    expect(isReasoningModel("o3-mini")).toBe(true);
+    expect(isReasoningModel("qwq-32b")).toBe(true);
+    expect(isReasoningModel("custom-model", "DeepSeek Reasoner")).toBe(true);
+    expect(isReasoningModel("qwen-2.5-coder")).toBe(false);
+    expect(isReasoningModel("llama-3.1-8b")).toBe(false);
+    expect(isReasoningModel("gpt-4o")).toBe(false);
+  });
+
+  it("persists reasoning flag and thinkingLevelMap and sets supportsReasoningEffort", async () => {
+    const { saveCustomProvider } = await import("./config.ts");
+    const { readFile, rm } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+
+    const tmpAgent = "/tmp/thebe-config-test-" + Date.now();
+    process.env.THEBE_AGENT_DIR = tmpAgent;
+
+    try {
+      await saveCustomProvider({
+        providerId: "test-deepseek-endpoint",
+        baseUrl: "https://api.deepseek.com/v1",
+        api: "openai-completions",
+        apiKey: "sk-test",
+        models: [
+          { id: "deepseek-r1:14b" },
+          { id: "deepseek-chat" },
+        ],
+      });
+
+      const modelsJson = JSON.parse(await readFile(join(tmpAgent, "models.json"), "utf8"));
+      const p = modelsJson.providers["test-deepseek-endpoint"];
+      expect(p).toBeDefined();
+      expect(p.compat?.supportsReasoningEffort).toBe(true);
+      expect(p.compat?.thinkingFormat).toBe("deepseek");
+
+      const r1 = p.models.find((m: any) => m.id === "deepseek-r1:14b");
+      const chat = p.models.find((m: any) => m.id === "deepseek-chat");
+      expect(r1.reasoning).toBe(true);
+      expect(r1.thinkingLevelMap).toEqual({ low: "low", medium: "medium", high: "high" });
+      expect(chat.reasoning).toBe(false);
+    } finally {
+      await rm(tmpAgent, { recursive: true, force: true }).catch(() => {});
+      delete process.env.THEBE_AGENT_DIR;
+    }
+  });
+});

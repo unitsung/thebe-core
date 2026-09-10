@@ -54,7 +54,20 @@ export type CustomModelDefinition = {
   contextWindow?: number;
   maxTokens?: number;
   reasoning?: boolean;
+  thinkingLevelMap?: Record<string, string | null>;
 };
+
+export function isReasoningModel(id: string, name?: string): boolean {
+  const text = `${id} ${name ?? ""}`.toLowerCase();
+  return (
+    /\b(r1|o1|o3|o4|qwq)\b/i.test(text) ||
+    /[-_](r1|o1|o3|o4)\b/i.test(text) ||
+    text.includes("deepseek-r1") ||
+    text.includes("reasoner") ||
+    text.includes("reasoning") ||
+    text.includes("thinking")
+  );
+}
 
 export type CustomProviderOptions = {
   providerId: string;
@@ -107,17 +120,47 @@ export async function saveCustomProvider(
       : [];
     for (const newModel of options.models) {
       const idx = existingModels.findIndex((m) => m.id === newModel.id);
+      const isReasoning =
+        newModel.reasoning !== undefined
+          ? Boolean(newModel.reasoning)
+          : isReasoningModel(newModel.id, newModel.name);
       const modelEntry: Record<string, unknown> = {
         id: newModel.id,
         name: newModel.name ?? newModel.id,
         contextWindow: newModel.contextWindow ?? 128000,
         maxTokens: newModel.maxTokens ?? 4096,
-        reasoning: Boolean(newModel.reasoning),
+        reasoning: isReasoning,
       };
+      if (isReasoning) {
+        modelEntry.thinkingLevelMap = newModel.thinkingLevelMap ?? {
+          low: "low",
+          medium: "medium",
+          high: "high",
+        };
+      }
       if (idx >= 0) {
         existingModels[idx] = { ...existingModels[idx], ...modelEntry };
       } else {
         existingModels.push(modelEntry);
+      }
+    }
+
+    const defaultCompat: Record<string, unknown> = {};
+    if (options.api === "openai-completions") {
+      defaultCompat.supportsDeveloperRole = false;
+      defaultCompat.supportsReasoningEffort = true;
+      if (
+        options.providerId.includes("deepseek") ||
+        options.baseUrl.includes("deepseek")
+      ) {
+        defaultCompat.thinkingFormat = "deepseek";
+      } else if (
+        options.providerId.includes("qwen") ||
+        options.baseUrl.includes("qwen")
+      ) {
+        defaultCompat.thinkingFormat = "qwen";
+      } else {
+        defaultCompat.thinkingFormat = "openai";
       }
     }
 
@@ -131,12 +174,11 @@ export async function saveCustomProvider(
     if (options.apiKey) {
       updatedProvider.apiKey = options.apiKey;
     }
-    if (options.compat) {
-      updatedProvider.compat = {
-        ...((currentProvider.compat as Record<string, unknown>) ?? {}),
-        ...options.compat,
-      };
-    }
+    updatedProvider.compat = {
+      ...defaultCompat,
+      ...((currentProvider.compat as Record<string, unknown>) ?? {}),
+      ...(options.compat ?? {}),
+    };
     existingProviders[options.providerId] = updatedProvider;
     modelsData.providers = existingProviders;
     await writeFile(modelsJsonPath, JSON.stringify(modelsData, null, 2), "utf8");
