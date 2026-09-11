@@ -679,7 +679,9 @@ export function createFakeRuntime(
         toolsRequiringApproval: [...(create.toolsRequiringApproval ?? [])],
         abortWaiters: [],
       };
-      sessions.set(id, state);
+      if (!create.inMemory) {
+        sessions.set(id, state);
+      }
       return makeSession(state);
     },
     async resumeSession(runtimeSessionId, create) {

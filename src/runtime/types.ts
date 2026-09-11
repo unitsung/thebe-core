@@ -221,6 +221,9 @@ export type CreateRuntimeSessionOptions = {
   model?: RuntimeModelRef;
   /** Official Pi auto-compaction. Default true when omitted. */
   autoCompact?: boolean;
+  inMemory?: boolean;
+  sandboxMode?: "none" | "workspace-jail" | "bwrap" | "gondolin";
+  workspacePath?: string;
 };
 
 export type ForkSessionMode = "new_session" | "branch_in_place";
