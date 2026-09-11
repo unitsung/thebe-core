@@ -148,7 +148,7 @@ export function attachSettingsMenu(
         id: "hideThinking",
         label: "Hide thinking",
         description: "Collapse or hide thinking process blocks in chat",
-        currentValue: String(options.hideThinking ?? false),
+        currentValue: String(options.hideThinking ?? true),
         values: ["false", "true"],
       },
       {

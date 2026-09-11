@@ -109,12 +109,12 @@ export function attachThebeChat(
   let replyMarkdown: Markdown | undefined;
   let working: ElapsedWorking | undefined;
   let thinkingBlock: ThinkingBlock | undefined;
-  let hideThinking = false;
+  let hideThinking = true;
   let toolsExpanded = false;
   const toolComponents = new Map<string, ToolExecutionComponent>();
   let pendingPermissionId: string | undefined;
   void loadThebeConfig().then((cfg) => {
-    hideThinking = cfg.hideThinking ?? false;
+    hideThinking = cfg.hideThinking ?? true;
   });
 
   const children = tui.children;
@@ -138,13 +138,6 @@ export function attachThebeChat(
       updateEditorBorderColor();
     }
     updateFooter();
-  };
-  const origEditorHandleInput = editor.handleInput.bind(editor);
-  editor.handleInput = (data: string) => {
-    origEditorHandleInput(data);
-    updateFooter();
-    queueMicrotask(() => updateFooter());
-    setTimeout(() => updateFooter(), 20);
   };
   updateEditorBorderColor();
 
@@ -254,6 +247,10 @@ export function attachThebeChat(
     return makeReplyMarkdown(text, getTuiTheme(currentTheme).markdown);
   }
 
+  function makeUserMessage(text: string): Markdown {
+    return makeMarkdown(text);
+  }
+
   async function applyTheme(name: ThemeName, persist = true): Promise<void> {
     currentTheme = name;
     try {
@@ -299,20 +296,28 @@ export function attachThebeChat(
       const msgs = await product.loadMessages(thebeId);
       for (const m of msgs) {
         if (m.role === "user" && m.text) {
-          insertBeforeFooter(makeMarkdown(m.text));
-        } else if (m.role === "assistant" && m.text) {
-          insertBeforeFooter(makeMarkdown(m.text));
+          insertBeforeFooter(makeUserMessage(m.text));
+        } else if (m.role === "assistant") {
+          if (m.thinking) {
+            const tb = new ThinkingBlock(hideThinking);
+            tb.append(m.thinking);
+            tb.finish();
+            insertBeforeFooter(tb);
+          }
+          if (m.text) {
+            insertBeforeFooter(makeMarkdown(m.text));
+          }
         } else if (m.role === "tool") {
           const component = createToolComponent(
             tui,
             m.toolName ?? "unknown",
             m.toolCallId ?? m.id,
-            undefined,
+            m.args,
             toolsExpanded,
           );
           component.setArgsComplete();
           component.updateResult(
-            toolResultPayload(m.text, Boolean(m.isError)),
+            toolResultPayload(m.text, Boolean(m.isError), m.details),
           );
           toolComponents.set(m.toolCallId ?? m.id, component);
           insertBeforeFooter(component);
@@ -391,7 +396,7 @@ export function attachThebeChat(
     );
   }
 
-  function insertTool(component: ToolExecutionComponent): void {
+  function insertBeforeWorking(component: Component): void {
     const before = working ?? editor;
     const index = children.indexOf(before as never);
     const insertAt = index >= 0 ? index : Math.max(0, children.length - 1);
@@ -439,13 +444,22 @@ export function attachThebeChat(
       working.stop();
       working = undefined;
     }
-    if (thinkingBlock?.isEmpty()) {
-      const index = children.indexOf(thinkingBlock as never);
+    if (thinkingBlock) {
+      thinkingBlock.finish();
+      if (thinkingBlock.isEmpty()) {
+        const index = children.indexOf(thinkingBlock as never);
+        if (index >= 0) {
+          children.splice(index, 1);
+        }
+      }
+    }
+    thinkingBlock = undefined;
+    if (replyMarkdown && !readMarkdownSource(replyMarkdown).trim()) {
+      const index = children.indexOf(replyMarkdown);
       if (index >= 0) {
         children.splice(index, 1);
       }
     }
-    thinkingBlock = undefined;
     streamUnsub?.();
     streamUnsub = undefined;
     replyMarkdown = undefined;
@@ -454,15 +468,27 @@ export function attachThebeChat(
   }
 
   function onEvent(event: NormalizedEvent): void {
-    if (event.type === "text_delta" && replyMarkdown) {
+    if (event.type === "text_delta") {
+      if (thinkingBlock && !thinkingBlock.isFinished()) {
+        thinkingBlock.finish();
+        working?.setLabel("Working");
+      }
+      if (!replyMarkdown) {
+        replyMarkdown = makeMarkdown("");
+        insertBeforeWorking(replyMarkdown);
+      }
       const next = `${readMarkdownSource(replyMarkdown)}${event.text}`;
       replyMarkdown.setText(next);
       stashMarkdownSource(replyMarkdown, next);
       tui.requestRender();
     } else if (event.type === "thinking_delta" && thinkingBlock) {
       thinkingBlock.append(event.text);
+      working?.setLabel("Thinking");
       tui.requestRender();
     } else if (event.type === "tool_start") {
+      if (thinkingBlock && !thinkingBlock.isFinished()) {
+        thinkingBlock.finish();
+      }
       activeToolName = event.toolName;
       working?.setLabel(event.toolName);
       let component = toolComponents.get(event.toolCallId);
@@ -475,10 +501,17 @@ export function attachThebeChat(
           toolsExpanded,
         );
         toolComponents.set(event.toolCallId, component);
-        insertTool(component);
+        insertBeforeWorking(component);
       } else if (event.args) {
         component.updateArgs(event.args);
       }
+      if (replyMarkdown && !readMarkdownSource(replyMarkdown).trim()) {
+        const idx = children.indexOf(replyMarkdown);
+        if (idx >= 0) {
+          children.splice(idx, 1);
+        }
+      }
+      replyMarkdown = undefined;
       updateFooter();
     } else if (event.type === "tool_update") {
       const component = toolComponents.get(event.toolCallId);
@@ -503,6 +536,7 @@ export function attachThebeChat(
           toolResultPayload(event.text, event.isError, event.details),
         );
       }
+      replyMarkdown = undefined;
       updateFooter();
     } else if (event.type === "permission_requested") {
       pendingPermissionId = event.permissionId;
@@ -566,7 +600,7 @@ export function attachThebeChat(
       isResponding = true;
       updateEditorBorderColor();
       editor.disableSubmit = true;
-      insertBeforeFooter(makeMarkdown(text));
+      insertBeforeFooter(makeUserMessage(text));
       beginStream();
       try {
         const reply = await options.send(text);
@@ -596,7 +630,7 @@ export function attachThebeChat(
       }
       isResponding = true;
       updateEditorBorderColor();
-      insertBeforeFooter(makeMarkdown(text));
+      insertBeforeFooter(makeUserMessage(text));
       beginStream();
       streamUnsub = product.subscribeLog(id, onEvent);
       try {
@@ -609,6 +643,8 @@ export function attachThebeChat(
           if (index >= 0) {
             children[index] = makeMarkdown(result.text);
           }
+        } else if (!replyMarkdown && result.text) {
+          insertBeforeWorking(makeMarkdown(result.text));
         }
       } catch (error) {
         notice(error instanceof Error ? error.message : String(error));
@@ -753,8 +789,12 @@ export function attachThebeChat(
   ];
   const originalHandleInput = editor.handleInput.bind(editor);
   editor.handleInput = (data: string) => {
-    if (matchesKey(data, "ctrl+p")) {
+    if (matchesKey(data, "ctrl+l") || matchesKey(data, "ctrl+p")) {
       void handleSlash("/model");
+      return;
+    }
+    if (matchesKey(data, "ctrl+x")) {
+      void handleSlash("/copy");
       return;
     }
     if (matchesKey(data, "shift+tab")) {
@@ -786,10 +826,11 @@ export function attachThebeChat(
         editor.setText("");
         isBashMode = false;
         updateEditorBorderColor();
+        updateFooter();
         return;
       }
     }
-    if (isResponding && matchesKey(data, "alt+enter")) {
+    if (isResponding && (matchesKey(data, "alt+enter") || matchesKey(data, "ctrl+q"))) {
       const trimmed = editor.getText().trim();
       if (trimmed && product && sessionId) {
         void product
@@ -805,6 +846,7 @@ export function attachThebeChat(
       }
     }
     originalHandleInput(data);
+    updateFooter();
   };
 
   void refreshContextUsage();

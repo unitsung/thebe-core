@@ -135,23 +135,22 @@ export class SearchableModelPicker implements Component, Focusable {
   }
 
   private recomputeFilteredModels(resetSelection = false): void {
-    const activeProvider = this.getActiveProvider();
-    const providerScoped =
-      activeProvider === "all"
-        ? this.allModels
-        : this.allModels.filter((m) =>
-            sameProvider(m.providerId, activeProvider),
-          );
-
     const query = this.searchInput.getValue().trim();
     if (!query) {
+      const activeProvider = this.getActiveProvider();
+      const providerScoped =
+        activeProvider === "all"
+          ? this.allModels
+          : this.allModels.filter((m) =>
+              sameProvider(m.providerId, activeProvider),
+            );
       this.filteredModels = this.sortModels(providerScoped);
     } else {
       const lower = query.toLowerCase();
       if (lower === "reasoning" || lower === "thinking") {
-        this.filteredModels = providerScoped.filter((m) => m.supportsThinking);
+        this.filteredModels = this.allModels.filter((m) => m.supportsThinking);
       } else {
-        this.filteredModels = fuzzyFilter(providerScoped, query, (m) => {
+        this.filteredModels = fuzzyFilter(this.allModels, query, (m) => {
           const isDefault = `${m.providerId}/${m.modelId}` === this.defaultModel ? " default" : "";
           const name = m.displayName ? ` ${m.displayName}` : "";
           return `${m.modelId} ${m.providerId} ${m.providerId}/${m.modelId}${name}${isDefault}`;
@@ -254,7 +253,8 @@ export class SearchableModelPicker implements Component, Focusable {
     const searchRendered = this.searchInput.render(Math.max(10, width - 4));
     lines.push(`  ${searchRendered[0] ?? ""}`);
 
-    if (this.providers.length > 1) {
+    const query = this.searchInput.getValue().trim();
+    if (!query && this.providers.length > 1) {
       const active = this.getActiveProvider();
       const tabs = this.providers
         .map((p) => (p === active ? chalk.cyan(`[${p}]`) : chalk.dim(p)))
@@ -281,7 +281,7 @@ export class SearchableModelPicker implements Component, Focusable {
         const key = `${item.providerId}/${item.modelId}`;
         const isCurrent = key === this.currentModel;
         const isDefault = Boolean(this.defaultModel) && key === this.defaultModel;
-        const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const cursor = isSelected ? chalk.cyan("› ") : "  ";
         const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
         const modelIdText = isSelected
           ? chalk.cyan(item.modelId)
@@ -300,9 +300,10 @@ export class SearchableModelPicker implements Component, Focusable {
       }
     }
 
-    lines.push(
-      chalk.dim("  ↑/↓: navigate · Enter: select · Tab: provider · Esc: cancel"),
-    );
+    const hint = query
+      ? "  ↑/↓: navigate · Enter: select · Esc: cancel"
+      : "  ↑/↓: navigate · Enter: select · Tab: provider · Esc: cancel";
+    lines.push(chalk.dim(hint));
 
     return fitLines(lines, width);
   }
