@@ -171,7 +171,18 @@ export async function handleSession(
   }
   if (method === "POST" && action === "permission" && extra) {
     const body = await readJson(request);
-    const response = body.response === "deny" ? "deny" : "allow";
+    const response =
+      body.response === "deny"
+        ? "deny"
+        : body.response === "allow"
+          ? "allow"
+          : null;
+    if (!response) {
+      return json(
+        { ok: false, error: "response must be 'allow' or 'deny'" },
+        400,
+      );
+    }
     await product.resolvePermission(id, extra, {
       response,
       remember: Boolean(body.remember),
@@ -286,6 +297,7 @@ export async function handleSession(
           "content-type": "text/html",
           "content-disposition": `attachment; filename="session-${id}.html"`,
           "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'",
         },
       });
     }

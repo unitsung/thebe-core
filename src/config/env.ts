@@ -32,7 +32,8 @@ export function envLocalCandidates(fromDir: string): string[] {
   }
   for (const start of starts) {
     let dir = start;
-    for (let i = 0; i < 8; i++) {
+    // dist/chunks → dist → package root is three hops; four is enough.
+    for (let i = 0; i < 4; i++) {
       if (!seen.has(dir)) {
         seen.add(dir);
         out.push(join(dir, ".env.local"));

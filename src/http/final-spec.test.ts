@@ -115,6 +115,41 @@ describe("thebe spec alignment tests", () => {
       );
       expect(exported.headers.get("x-content-type-options")).toBe("nosniff");
       expect(exported.headers.get("content-disposition")).toContain("attachment");
+
+      const html = await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/export?format=html`,
+        ),
+      );
+      expect(html.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(html.headers.get("content-disposition")).toContain("attachment");
+      expect(html.headers.get("content-security-policy")).toContain(
+        "default-src 'none'",
+      );
+    });
+
+    it("rejects DNS-rebinding Host headers even when Origin matches Host", async () => {
+      const fake = createFakeRuntime();
+      const app = createThebeApp({
+        runtime: fake.runtime,
+        provider: mockProvider(),
+        version: "0.1.0",
+        allowedHosts: ["127.0.0.1", "localhost"],
+      });
+      const res = await app.handler.handle(
+        new Request("http://attacker.example/v1/session", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "http://attacker.example",
+            "sec-fetch-site": "same-origin",
+          },
+          body: JSON.stringify({}),
+        }),
+      );
+      expect(res.status).toBe(403);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toContain("host not allowed");
     });
   });
 

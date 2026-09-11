@@ -1,13 +1,30 @@
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadEnvLocal } from "../config/env.ts";
 import { bootstrapThebe } from "../product/bootstrap.ts";
+import {
+  productionTokenError,
+  resolveThebeListen,
+} from "./bind.ts";
 import { listenThebeHttp } from "./index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const { handler: app, version } = await bootstrapThebe({ fromDir: here });
+loadEnvLocal(here);
 
-const port = Number(process.env.THEBE_PORT ?? "8787");
-const host = process.env.THEBE_HOST ?? "0.0.0.0";
+const listen = resolveThebeListen(process.env);
+const tokenError = productionTokenError(listen.token, process.env.NODE_ENV);
+if (tokenError) {
+  console.error(tokenError);
+  process.exit(1);
+}
 
-const { url } = await listenThebeHttp(app, { host, port });
-console.log(`THEBE_LISTEN ${url} (${version})`);
+const { handler: app, version } = await bootstrapThebe({
+  fromDir: here,
+  allowedHosts: listen.allowedHosts,
+});
+
+const { url, bind } = await listenThebeHttp(app, {
+  host: listen.host,
+  port: listen.port,
+});
+console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);

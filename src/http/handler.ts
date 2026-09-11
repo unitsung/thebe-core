@@ -40,6 +40,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return json({ events: [] });
     }
     if (request.method === "POST" && path === "/v1/devices") {
+      // TODO: validate and persist device registration
       return json({ ok: true });
     }
     if (request.method === "POST" && path === "/v1/messages") {
@@ -48,6 +49,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     if (request.method === "GET" && path === "/v1/system/status") {
       return json({ ok: true, quiesced: Boolean(options.product?.isQuiesced()) });
     }
+    // Admin-equivalent: gated only by THEBE_TOKEN (or open if token is unset).
     if (request.method === "POST" && path === "/v1/system/quiesce") {
       if (!options.product) {
         return json({ ok: false, error: "product service unavailable" }, 503);

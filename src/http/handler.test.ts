@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createThebeHttpHandler } from "./handler.ts";
+import {
+  resetSessionLogStreamsForTests,
+  sessionLogStream,
+} from "./parse.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -96,6 +100,33 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         "diagnose_from_events",
       ]),
     );
+  });
+
+  it("POST /mcp tools/call rejects names outside the MCP allow-list", async () => {
+    const { createFakeRuntime } = await import("../runtime/fake-runtime.ts");
+    const { createThebeApp } = await import("../product/app.ts");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      version: "0.1.0",
+    });
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "bash" },
+        }),
+      }),
+    );
+    const body = await json(res);
+    expect(body.error).toMatchObject({
+      code: -32000,
+      message: "unknown tool: bash",
+    });
   });
 
   it("POST /mcp tools/call without product does not execute local tools", async () => {
@@ -560,6 +591,9 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       ),
     );
     expect(html.headers.get("content-type")).toContain("text/html");
+    expect(html.headers.get("content-security-policy")).toContain(
+      "default-src 'none'",
+    );
     const bad = await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session}/export?format=pdf`,
@@ -893,5 +927,79 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       ),
     );
     await expect(first).rejects.toThrow();
+  });
+
+  it("permission response must be allow or deny", async () => {
+    const { app, session } = await sessionApp([{ kind: "text", text: "x" }]);
+    const invalid = await app.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${session}/permission/perm_x`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ response: "yes" }),
+        },
+      ),
+    );
+    expect(invalid.status).toBe(400);
+    const missing = await app.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${session}/permission/perm_x`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      ),
+    );
+    expect(missing.status).toBe(400);
+  });
+
+  it("closes idle follow log streams and caps concurrent streams", async () => {
+    resetSessionLogStreamsForTests({ max: 2 });
+    try {
+      const { app, session } = await sessionApp([{ kind: "text", text: "x" }]);
+      const idleAc = new AbortController();
+      const idle = sessionLogStream(
+        app.product,
+        session,
+        new Request("http://127.0.0.1:8787/log", { signal: idleAc.signal }),
+        0,
+        { idleMs: 30 },
+      );
+      const idleReader = idle.body!.getReader();
+      const idleDone = idleReader.read();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect((await idleDone).done).toBe(true);
+
+      const firstAc = new AbortController();
+      const secondAc = new AbortController();
+      const first = await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
+          { signal: firstAc.signal },
+        ),
+      );
+      const second = await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
+          { signal: secondAc.signal },
+        ),
+      );
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const third = await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
+        ),
+      );
+      expect(third.status).toBe(429);
+      firstAc.abort();
+      secondAc.abort();
+      await first.body?.cancel();
+      await second.body?.cancel();
+    } finally {
+      resetSessionLogStreamsForTests();
+    }
   });
 });

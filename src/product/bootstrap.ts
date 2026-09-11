@@ -28,6 +28,7 @@ export type BootstrapOptions = {
   fromDir?: string;
   requireArcane?: boolean;
   model?: { providerId: string; modelId: string };
+  allowedHosts?: string[];
 };
 
 /**
@@ -111,6 +112,7 @@ export async function bootstrapThebe(
     productStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
+    allowedHosts: options?.allowedHosts,
   });
 
   return {

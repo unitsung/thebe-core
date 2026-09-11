@@ -37,7 +37,7 @@ _Avoid_: naming this Ask, a second agent loop, a parallel Thebe CLI suite
 _Avoid_: a homegrown renderer, a Thebe-written web chat
 
 **Serve**:
-Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). iOS compatibility: `/v1/health`, `/v1/events`, `/v1/devices`, `/mcp`. Default port 8787. Auth is optional `X-Thebe-Token`.
+Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). iOS compatibility: `/v1/health`, `/v1/events`, `/v1/devices`, `/mcp`. Default bind `127.0.0.1:8787`; logs print both the local URL and `bind=host:port`. `NODE_ENV=production` requires `THEBE_TOKEN` (`X-Thebe-Token`). `POST /v1/system/quiesce` is admin-equivalent (token is the only gate). Credential PUT/POST is plaintext HTTP; production should sit behind Tailscale or an HTTPS reverse proxy.
 _Avoid_: a second agent loop, MCP servers as a product, pairing/APNs as v0 features
 
 **Tool Layer**:
