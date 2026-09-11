@@ -104,6 +104,7 @@ export async function bootstrapThebe(
     process.env.THEBE_PRODUCT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
 
+  const idleMs = Number(process.env.THEBE_SESSION_IDLE_TIMEOUT_MS ?? "0");
   const app = createThebeApp({
     runtime,
     provider,
@@ -113,6 +114,8 @@ export async function bootstrapThebe(
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
     allowedHosts: options?.allowedHosts,
+    sessionIdleTimeoutMs:
+      Number.isFinite(idleMs) && idleMs > 0 ? idleMs : undefined,
   });
 
   return {

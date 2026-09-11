@@ -26,7 +26,19 @@ export type ProductSessionMeta = {
   builtinTools?: string[];
   firstMessage?: string;
   messageCount?: number;
+  /** Current Pi/fake tree leaf. Used with `branch_in_place` forks. */
+  leafId?: string;
+  /** Hidden from `GET /v1/session`; listed under parent `/children`. */
+  inPlace?: boolean;
 };
+
+const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
+
+export function assertValidSessionId(id: string): void {
+  if (!SESSION_ID_RE.test(id)) {
+    throw new Error(`invalid session id: ${id}`);
+  }
+}
 
 const FORBIDDEN_KEYS = [
   "transcript",
@@ -49,6 +61,7 @@ export function assertMetadataOnly(record: Record<string, unknown>): void {
 
 export function createProductStore(dir?: string) {
   async function save(meta: ProductSessionMeta): Promise<void> {
+    assertValidSessionId(meta.thebeSessionId);
     assertMetadataOnly(meta as unknown as Record<string, unknown>);
     if (!dir) {
       return;
@@ -62,6 +75,7 @@ export function createProductStore(dir?: string) {
   }
 
   async function load(thebeSessionId: string): Promise<ProductSessionMeta> {
+    assertValidSessionId(thebeSessionId);
     if (!dir) {
       throw new Error("ProductStore has no directory");
     }
@@ -89,6 +103,7 @@ export function createProductStore(dir?: string) {
   }
 
   async function remove(thebeSessionId: string): Promise<void> {
+    assertValidSessionId(thebeSessionId);
     if (!dir) {
       return;
     }

@@ -18,13 +18,37 @@ if (tokenError) {
   process.exit(1);
 }
 
-const { handler: app, version } = await bootstrapThebe({
+const { handler: app, version, product } = await bootstrapThebe({
   fromDir: here,
   allowedHosts: listen.allowedHosts,
 });
 
-const { url, bind } = await listenThebeHttp(app, {
+const { server, url, bind } = await listenThebeHttp(app, {
   host: listen.host,
   port: listen.port,
 });
 console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);
+
+let shuttingDown = false;
+const shutdown = (signal: string) => {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.error(`received ${signal}; draining`);
+  const force = setTimeout(() => process.exit(1), 8_000);
+  force.unref?.();
+  void (async () => {
+    await product.quiesce().catch(() => {});
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve());
+    });
+  })()
+    .catch(() => {})
+    .finally(() => {
+      clearTimeout(force);
+      process.exit(0);
+    });
+};
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));

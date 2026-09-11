@@ -750,30 +750,30 @@ X-Content-Type-Options: nosniff
 
 ### 9.2 P0：协议完整性
 
-- [ ] `/v1/messages` 是否只是主路径的薄适配器，完整支持 files、mode、permissions、SSE？
-- [ ] SSE 是否只在 `session_end`/`error`/`interrupted` 结束，而非 `turn_end`？
-- [ ] SSE 断线后如何恢复（cursor 补发 或 message 刷新兜底）？
-- [ ] 普通 `mode: prompt` 在 active run 时是否返回明确冲突状态，而非底层异常裸传？
-- [ ] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？
-- [ ] Fork 是否区分 `new_session` 与 `branch_in_place` 两种模式？
-- [ ] `GET /v1/session/:id/message/:messageId` 是否存在，列表是否分页、带 stable ids？
+- [x] `/v1/messages` 是否只是主路径的薄适配器，完整支持 files、mode、permissions、SSE？JSON 路径 `nonInteractive` 自动拒绝审批避免死锁（不是完整交互审批）；`Accept: text/event-stream` 或 `stream: true` 走 SSE
+- [x] SSE 是否只在 `session_end`/`error`/`interrupted` 结束，而非 `turn_end`？`/v1/messages` SSE `closeOnTerminal`；`GET /log?follow=true` 保持观察流（idle 5min），不因 `turn_end` 关闭
+- [x] SSE 断线后如何恢复（cursor 补发 或 message 刷新兜底）？`id:` + `?after=` / `Last-Event-ID` 进程内补发；`GET /message` 为跨进程兜底（事件日志不落盘）
+- [x] 普通 `mode: prompt` 在 active run 时是否返回明确冲突状态，而非底层异常裸传？`409` `code: session_running`；已知 session id 时锁在 `openSession` 之前
+- [x] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？session 作用域、无长期 TTL；高危 `deny` 按参数哈希记忆，`allow` 仍为工具级；pending TTL 10min；重复提交 404；interrupt 拒绝所有 pending
+- [x] Fork 是否区分 `new_session` 与 `branch_in_place` 两种模式？`branch_in_place` 写 `inPlace` 子映射、隐藏于顶层列表、同 runtime session；仍会分配新的 Thebe session id 供 `/children` 使用
+- [x] `GET /v1/session/:id/message/:messageId` 是否存在，列表是否分页、带 stable ids？`limit`/`after`/`before`，id 来自 runtime
 
 ### 9.3 P1：功能补全
 
-- [ ] `GET /v1/provider/auth`、OAuth 系列端点、`PUT`/`POST /auth` 是否实现？
-- [ ] `setThinkingLevel()` 的 HTTP 入口是否存在？
-- [ ] `GET /v1/session/:id/children`、`revert`/`unrevert` 是否实现？
-- [ ] `GET /v1/session/:id/context`（token 用量/成本/compaction 状态）是否实现？
-- [ ] `export?format=jsonl|html` 是否使用 Pi-native export？
-- [ ] 工具白名单是否支持"空数组=纯对话模式"语义，且按 session 持久化？
-- [ ] `DELETE /session/:id` 是否删除 runtime session，还是仅 archive/unlink？
+- [x] `GET /v1/provider/auth`、OAuth 系列端点、`PUT`/`POST /auth` 是否实现？另有 `GET .../oauth/login` SSE（authorize 一次后关闭，非完整 device-flow 长连接）、`POST .../oauth/login`、`POST/DELETE .../oauth/logout`、`POST /v1/auth`
+- [x] `setThinkingLevel()` 的 HTTP 入口是否存在？`POST /v1/session/:id/thinking`
+- [x] `GET /v1/session/:id/children`、`revert`/`unrevert` 是否实现？revert 只改对话图，不回滚外部副作用
+- [x] `GET /v1/session/:id/context`（token 用量/成本/compaction 状态）是否实现？Pi stats + 启发式 fallback
+- [x] `export?format=jsonl|html` 是否使用 Pi-native export？失败时本地 fallback
+- [x] 工具白名单是否支持"空数组=纯对话模式"语义，且按 session 持久化？
+- [x] `DELETE /session/:id` 是否删除 runtime session，还是仅 archive/unlink？仅 unlink Thebe 映射，Pi 原生 session 保留
 
 ### 9.4 P2：产品决策待定
 
-- [ ] `diff` 保持 501 是否返回结构化错误码？
-- [ ] 是否需要 `share`、全局 `GET /v1/event`？
-- [ ] Subagent 并行子会话是否纳入路线图？
-- [ ] Goal mode 是否纳入路线图？
+- [x] `diff` 保持 501 是否返回结构化错误码？`code: feature_not_implemented`
+- [x] 是否需要 `share`、全局 `GET /v1/event`？share 仅为 `{ shared }` metadata，无链接；`GET /v1/event` 与 `/v1/events` 返回进程内事件窗口（非跨 session SSE）。后台任务诚实 501
+- [x] Subagent 并行子会话是否纳入路线图？按 §3.12 不作为 HTTP 核心协议；库 + TUI `/subagent` 存在，spawn 为顺序子会话并剥离保留工具
+- [x] Goal mode 是否纳入路线图？按 §3.12 不纳入 HTTP；`src/agent/goal.ts` 库存在且未接线到 HTTP/TUI
 
 ---
 

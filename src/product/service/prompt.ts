@@ -66,5 +66,8 @@ export function createPromptApi(ctx: ProductContext) {
     isStreaming(thebeSessionId: string): boolean {
       return streaming.has(thebeSessionId);
     },
+    recentEvents(limit?: number) {
+      return ctx.recentEvents(limit);
+    },
   };
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { RESERVED_TOOLS } from "../../agent/subagent.ts";
 import { hashParameters } from "../../audit/audit-log.ts";
 import type { EnabledResource } from "../../runtime/types.ts";
 import {
@@ -115,8 +116,10 @@ export function createResourceApi(ctx: ProductContext) {
       const extraPrompt = profile.systemPrompt
         ? `${systemPrompt}\n\n# Subagent: ${profile.name}\n${profile.systemPrompt}`
         : systemPrompt;
+      const rawTools = profile.tools ?? parent.builtinTools;
+      const childTools = rawTools?.filter((name) => !RESERVED_TOOLS.has(name));
       const session = await options.runtime.createSession({
-        ...sessionOptions(undefined, profile.tools ?? parent.builtinTools),
+        ...sessionOptions(undefined, childTools),
         systemPrompt: extraPrompt,
       });
       const meta = touchMeta({
@@ -131,7 +134,7 @@ export function createResourceApi(ctx: ProductContext) {
           profile: profile.name,
         },
         selectedContext: parent.selectedContext,
-        builtinTools: profile.tools ? [...profile.tools] : parent.builtinTools,
+        builtinTools: childTools ? [...childTools] : parent.builtinTools,
       });
       await persist(meta);
       ctx.active = { meta, session };

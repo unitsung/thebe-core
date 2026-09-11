@@ -36,8 +36,14 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     if (request.method === "GET" && path === "/v1/health") {
       return json({ ok: true, version: options.version });
     }
-    if (request.method === "GET" && path === "/v1/events") {
-      return json({ events: [] });
+    if (
+      request.method === "GET" &&
+      (path === "/v1/events" || path === "/v1/event")
+    ) {
+      if (!options.product) {
+        return json({ events: [] });
+      }
+      return json({ events: options.product.recentEvents() });
     }
     if (request.method === "POST" && path === "/v1/devices") {
       // TODO: validate and persist device registration
@@ -63,6 +69,15 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       }
       await options.product.unquiesce();
       return json({ ok: true, status: "active" });
+    }
+    if (request.method === "POST" && path === "/v1/system/reap") {
+      if (!options.product) {
+        return json({ ok: false, error: "product service unavailable" }, 503);
+      }
+      return json({
+        ok: true,
+        ...(await options.product.reapIdleSessions()),
+      });
     }
     if (request.method === "GET" && path === "/v1/agent/running") {
       if (!options.product) {

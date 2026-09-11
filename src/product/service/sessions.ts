@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { hashParameters } from "../../audit/audit-log.ts";
 import type { ForkSessionOptions, RuntimeModelRef, ThinkingLevel } from "../../runtime/types.ts";
+import { TOOLS_REQUIRING_APPROVAL } from "../../runtime/types.ts";
 import { httpError, type SessionRunStatus } from "../types.ts";
 import type { ProductSessionMeta } from "../store.ts";
 import type { ProductContext } from "./context.ts";
@@ -70,7 +72,9 @@ export function createSessionApi(ctx: ProductContext) {
       Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
     > {
       const rows = await listMetas();
-      let mapped = rows.map((row) => withRunState(row));
+      let mapped = rows
+        .filter((row) => !row.inPlace)
+        .map((row) => withRunState(row));
       if (query?.status) {
         mapped = mapped.filter((row) => row.status === query.status);
       }
@@ -106,6 +110,7 @@ export function createSessionApi(ctx: ProductContext) {
         >
       >,
     ): Promise<ProductSessionMeta> {
+      checkNotQuiesced();
       const current = await lookup(thebeSessionId);
       const meta = touchMeta({
         ...current,
@@ -131,8 +136,13 @@ export function createSessionApi(ctx: ProductContext) {
      * undelete: the mapping must be recreated by resuming/forking.
      */
     async deleteSession(thebeSessionId: string): Promise<void> {
+      checkNotQuiesced();
+      const opened = ctx.openedSessions.get(thebeSessionId);
+      if (opened) {
+        opened.session.dispose();
+        ctx.openedSessions.delete(thebeSessionId);
+      }
       if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
-        ctx.active.session.dispose();
         ctx.active = undefined;
       }
       memory.delete(thebeSessionId);
@@ -143,7 +153,7 @@ export function createSessionApi(ctx: ProductContext) {
       Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
     > {
       const rows = await listMetas();
-      return rows.map((row) => withRunState(row));
+      return rows.filter((row) => !row.inPlace).map((row) => withRunState(row));
     },
     async resume(thebeSessionId: string): Promise<ProductSessionMeta> {
       checkNotQuiesced();
@@ -172,6 +182,7 @@ export function createSessionApi(ctx: ProductContext) {
         sessionOptions(undefined, source.builtinTools),
         forkOpts,
       );
+      const inPlace = forkOpts.mode === "branch_in_place";
       const meta = stamp({
         thebeSessionId: randomUUID(),
         runtimeId: options.runtime.runtimeId,
@@ -182,6 +193,8 @@ export function createSessionApi(ctx: ProductContext) {
         shareMetadata: source.shareMetadata,
         title: source.title,
         builtinTools: source.builtinTools ? [...source.builtinTools] : undefined,
+        inPlace: inPlace || undefined,
+        leafId: child.getLeafId?.() ?? forkOpts.atEntryId,
       });
       await persist(meta);
       ctx.active = { meta, session: child };
@@ -195,6 +208,7 @@ export function createSessionApi(ctx: ProductContext) {
       thebeSessionId?: string,
       customInstructions?: string,
     ): Promise<void> {
+      checkNotQuiesced();
       const opened = await openSession(thebeSessionId);
       const id = opened.meta.thebeSessionId;
       const unsub = opened.session.subscribe((event) => {
@@ -218,6 +232,7 @@ export function createSessionApi(ctx: ProductContext) {
       const opened = await openSession(thebeSessionId);
       const id = opened.meta.thebeSessionId;
       abortRequested.add(id);
+      ctx.rejectPendingFor(id);
       await opened.session.abort();
       // The runtime emits `interrupted` on the aborted handle only; a resume
       // handle has no listeners, so ensure the session log sees exactly one.
@@ -232,10 +247,12 @@ export function createSessionApi(ctx: ProductContext) {
      * clients must not present this as undoing what the agent did.
      */
     async revert(thebeSessionId?: string): Promise<void> {
+      checkNotQuiesced();
       const opened = await openSession(thebeSessionId);
       await opened.session.revert();
     },
     async unrevert(thebeSessionId?: string): Promise<void> {
+      checkNotQuiesced();
       const opened = await openSession(thebeSessionId);
       await opened.session.unrevert();
     },
@@ -252,15 +269,27 @@ export function createSessionApi(ctx: ProductContext) {
       decision: { response: "allow" | "deny"; remember?: boolean },
     ): Promise<void> {
       const pending = pendingPermissions.get(permissionId);
-      if (!pending) {
+      if (!pending || pending.thebeSessionId !== thebeSessionId) {
         throw new Error(`unknown permission: ${permissionId}`);
       }
       pendingPermissions.delete(permissionId);
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
       if (decision.remember) {
         const meta = await lookup(thebeSessionId);
+        const highRisk =
+          pending.request.risk === "high" ||
+          (TOOLS_REQUIRING_APPROVAL as readonly string[]).includes(
+            pending.request.toolName,
+          );
+        const key =
+          decision.response === "deny" && highRisk
+            ? `${pending.request.toolName}:${hashParameters(pending.request.args ?? {})}`
+            : pending.request.toolName;
         meta.rememberedPermissions = {
           ...meta.rememberedPermissions,
-          [pending.request.toolName]: decision.response,
+          [key]: decision.response,
         };
         await persist(touchMeta(meta));
         if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
@@ -276,6 +305,7 @@ export function createSessionApi(ctx: ProductContext) {
       thebeSessionId: string,
       model: RuntimeModelRef,
     ): Promise<void> {
+      checkNotQuiesced();
       if (streaming.has(thebeSessionId)) {
         throw httpError(409, "session is streaming; switch model when idle");
       }
@@ -286,6 +316,7 @@ export function createSessionApi(ctx: ProductContext) {
       thebeSessionId: string,
       level: ThinkingLevel,
     ): Promise<void> {
+      checkNotQuiesced();
       if (streaming.has(thebeSessionId)) {
         throw httpError(
           409,

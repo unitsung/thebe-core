@@ -142,6 +142,7 @@ export function createControlApi(ctx: ProductContext) {
       thebeSessionId: string,
       toolCallId: string,
     ): Promise<void> {
+      ctx.checkNotQuiesced();
       const opened = await openSession(thebeSessionId);
       await opened.session.stopToolCall(toolCallId);
     },
@@ -182,6 +183,10 @@ export function createControlApi(ctx: ProductContext) {
     },
     async unquiesce(): Promise<void> {
       await options.runtime.unquiesce();
+    },
+    async reapIdleSessions(idleMs?: number): Promise<{ reaped: number }> {
+      const reaped = await ctx.reapIdleSessions(idleMs);
+      return { reaped };
     },
     isQuiesced(): boolean {
       return options.runtime.isQuiesced();

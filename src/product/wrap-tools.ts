@@ -15,11 +15,13 @@ export function wrapCustomTools(
     toolWatchdogMs?: number;
     onEvent?: (event: NormalizedEvent) => void;
     onStop?: () => void | Promise<void>;
+    sessionId?: () => string | undefined;
   },
 ): CustomToolDefinition[] {
   return tools.map((tool) => ({
     ...tool,
     execute: async (toolCallId, params, signal) => {
+      const started = Date.now();
       const decision = await options.policy.beforeToolCall({
         toolCall: { name: tool.name },
       });
@@ -30,11 +32,14 @@ export function wrapCustomTools(
           responseBytes: 0,
           budgetConsumed: 0,
           redactionFired: false,
+          sessionId: options.sessionId?.(),
+          result: "denied",
+          durationMs: Date.now() - started,
         });
         if (await options.policy.shouldStopAfterTurn()) {
           await options.onStop?.();
         }
-        return redactResult({
+        return wrapResult(tool.name, {
           isError: true,
           content: [
             {
@@ -82,6 +87,9 @@ export function wrapCustomTools(
           responseBytes: Buffer.byteLength(text),
           budgetConsumed: 0,
           redactionFired: text.includes(REDACTED),
+          sessionId: options.sessionId?.(),
+          result: wrapped.isError ? "error" : "ok",
+          durationMs: Date.now() - started,
         });
         return wrapped;
       } catch (error) {
@@ -94,29 +102,18 @@ export function wrapCustomTools(
           responseBytes: 0,
           budgetConsumed: 0,
           redactionFired: message.includes(REDACTED),
+          sessionId: options.sessionId?.(),
+          result: "error",
+          durationMs: Date.now() - started,
         });
-        if (signal?.aborted || timedOut) {
-          return wrapResult(tool.name, {
-            isError: true,
-            content: [{ type: "text", text: message }],
-            details: timedOut ? { watchdogTimeout: true } : {},
-          });
-        }
-        throw new Error(message);
+        return wrapResult(tool.name, {
+          isError: true,
+          content: [{ type: "text", text: message }],
+          details: timedOut ? { watchdogTimeout: true } : {},
+        });
       }
     },
   }));
-}
-
-function redactResult(result: CustomToolResult): CustomToolResult {
-  return {
-    isError: result.isError,
-    details: result.details ?? {},
-    content: result.content.map((block) => ({
-      type: "text" as const,
-      text: redactToolOutput(block.text),
-    })),
-  };
 }
 
 function wrapResult(toolName: string, result: CustomToolResult): CustomToolResult {

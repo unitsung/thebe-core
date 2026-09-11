@@ -14,6 +14,7 @@ import { loadPiSdk, type PiSdk } from "./sdk/index.ts";
 import {
   openPiSession,
   wrapSession as wrapPiSession,
+  toolControllersFor,
   type PiSession,
 } from "./session/index.ts";
 
@@ -124,6 +125,7 @@ export async function createPiCodingAgentRuntime(
           async () => {
             await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
           },
+          toolControllersFor(existing),
         );
       }
       let info: { id: string; path: string } | undefined;
@@ -200,6 +202,39 @@ export async function createPiCodingAgentRuntime(
     },
     async forkSession(runtimeSessionId, create, fork) {
       const parent = live.get(runtimeSessionId);
+      const wrapLive = (session: PiSession) =>
+        wrapPiSession(
+          session,
+          create,
+          undefined,
+          resolveModelRef,
+          async () => {
+            await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+          },
+          toolControllersFor(session),
+        );
+      if (fork?.mode === "branch_in_place") {
+        if (parent) {
+          if (fork.atEntryId) {
+            await parent.navigateTree(fork.atEntryId);
+          }
+          return wrapLive(parent);
+        }
+        const listed = inMemory
+          ? []
+          : await sdk.SessionManager.list(create.cwd ?? cwd, options.sessionDir);
+        const info = listed.find(
+          (row: { id: string; path: string }) => row.id === runtimeSessionId,
+        );
+        if (!info) {
+          throw new Error(`unknown runtime session: ${runtimeSessionId}`);
+        }
+        const manager = sdk.SessionManager.open(info.path, options.sessionDir);
+        if (fork.atEntryId) {
+          await manager.navigateTree?.(fork.atEntryId);
+        }
+        return open(create, manager);
+      }
       if (!parent) {
         const listed = inMemory
           ? []

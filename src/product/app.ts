@@ -21,13 +21,23 @@ export function createThebeApp(options: {
   callerId?: string;
   model?: import("../runtime/types.ts").RuntimeModelRef;
   allowedHosts?: string[];
+  sessionIdleTimeoutMs?: number;
 }): {
   product: ThebeProduct;
   prompt: ThebeAppPrompt;
   send: ThebeAppSend;
   handler: ReturnType<typeof createThebeHttpHandler>;
 } {
-  const product = createThebeProduct(options);
+  const product = createThebeProduct({
+    runtime: options.runtime,
+    provider: options.provider,
+    auditPath: options.auditPath,
+    productStoreDir: options.productStoreDir,
+    now: options.now,
+    callerId: options.callerId,
+    model: options.model,
+    sessionIdleTimeoutMs: options.sessionIdleTimeoutMs,
+  });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await product.prompt(text);
     return { text: result.text, tools: result.tools };

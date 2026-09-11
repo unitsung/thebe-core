@@ -49,7 +49,11 @@ export type PendingPermission = {
   request: PermissionRequest;
   thebeSessionId?: string;
   resolve: (decision: "allow" | "deny") => void;
+  timer?: ReturnType<typeof setTimeout>;
 };
+
+const MAX_SESSION_LOG_EVENTS = 5_000;
+const PERMISSION_TTL_MS = 10 * 60 * 1000;
 
 export function createProductContext(options: CreateThebeProductOptions) {
 const now = options.now ?? (() => new Date());
@@ -83,13 +87,38 @@ function checkNotQuiesced(): void {
     );
   }
 }
-let active: { meta: ProductSessionMeta; session: RuntimeSession } | undefined;
+const openedSessions = new Map<
+  string,
+  { meta: ProductSessionMeta; session: RuntimeSession }
+>();
+let lastActiveId: string | undefined;
 const lastEvents: NormalizedEvent[] = [];
 const logs = new Map<string, SessionLog>();
 const pendingPermissions = new Map<string, PendingPermission>();
 const streaming = new Set<string>();
 const abortRequested = new Set<string>();
+const promptLocks = new Set<string>();
+const nonInteractiveRuns = new Set<string>();
 let requestStop: () => void | Promise<void> = () => {};
+
+function getActive():
+  | { meta: ProductSessionMeta; session: RuntimeSession }
+  | undefined {
+  return lastActiveId ? openedSessions.get(lastActiveId) : undefined;
+}
+
+function setActive(
+  value:
+    | { meta: ProductSessionMeta; session: RuntimeSession }
+    | undefined,
+): void {
+  if (!value) {
+    lastActiveId = undefined;
+    return;
+  }
+  openedSessions.set(value.meta.thebeSessionId, value);
+  lastActiveId = value.meta.thebeSessionId;
+}
 
 function sessionLog(thebeSessionId: string): SessionLog {
   const existing = logs.get(thebeSessionId);
@@ -106,29 +135,67 @@ function appendEvent(
   event: NormalizedEvent,
 ): void {
   lastEvents.push(event);
+  if (lastEvents.length > MAX_SESSION_LOG_EVENTS) {
+    lastEvents.splice(0, lastEvents.length - MAX_SESSION_LOG_EVENTS);
+  }
   const log = sessionLog(thebeSessionId);
   log.events.push(event);
+  if (log.events.length > MAX_SESSION_LOG_EVENTS) {
+    log.events.splice(0, log.events.length - MAX_SESSION_LOG_EVENTS);
+  }
   for (const listener of log.listeners) {
     listener(event);
   }
+}
+
+function rememberedDecision(
+  map: Record<string, "allow" | "deny"> | undefined,
+  request: PermissionRequest,
+): "allow" | "deny" | undefined {
+  if (!map) {
+    return undefined;
+  }
+  const scoped = map[`${request.toolName}:${hashParameters(request.args ?? {})}`];
+  if (scoped) {
+    return scoped;
+  }
+  return map[request.toolName];
 }
 
 function permissionHandler(explicitSessionId?: string) {
   return {
     async request(request: PermissionRequest): Promise<"allow" | "deny"> {
       const thebeSessionId =
-        explicitSessionId ?? active?.meta.thebeSessionId;
-      const remembered = thebeSessionId
-        ? (await lookupRemembered(thebeSessionId))?.[request.toolName]
-        : active?.meta.rememberedPermissions?.[request.toolName];
+        explicitSessionId ?? getActive()?.meta.thebeSessionId;
+      const remembered = rememberedDecision(
+        thebeSessionId
+          ? await lookupRemembered(thebeSessionId)
+          : getActive()?.meta.rememberedPermissions,
+        request,
+      );
       if (remembered) {
         return remembered;
       }
+      if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId)) {
+        return "deny";
+      }
       return await new Promise<"allow" | "deny">((resolve) => {
+        const timer = setTimeout(() => {
+          const pending = pendingPermissions.get(request.permissionId);
+          if (!pending) {
+            return;
+          }
+          pendingPermissions.delete(request.permissionId);
+          pending.resolve("deny");
+        }, PERMISSION_TTL_MS);
+        if (typeof timer === "object" && "unref" in timer) {
+          timer.unref();
+        }
         pendingPermissions.set(request.permissionId, {
           request,
           thebeSessionId,
           resolve,
+          timer,
         });
       });
     },
@@ -141,14 +208,13 @@ async function lookupRemembered(
   try {
     return (await lookup(thebeSessionId)).rememberedPermissions;
   } catch {
-    return active?.meta.rememberedPermissions;
+    return getActive()?.meta.rememberedPermissions;
   }
 }
 
 function baseTools() {
   return createContainerTools(options.provider, {
     policy,
-    audit,
     callerId,
   });
 }
@@ -168,8 +234,9 @@ function sessionOptions(
           policy,
           audit,
           toolWatchdogMs: options.toolWatchdogMs,
+          sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
           onEvent: (event) => {
-            const sid = explicitSessionId ?? active?.meta.thebeSessionId;
+            const sid = explicitSessionId ?? getActive()?.meta.thebeSessionId;
             if (sid) {
               appendEvent(sid, event);
             }
@@ -223,17 +290,31 @@ async function openSession(
   thebeSessionId?: string,
 ): Promise<{ meta: ProductSessionMeta; session: RuntimeSession }> {
   if (thebeSessionId) {
+    const cached = openedSessions.get(thebeSessionId);
+    if (cached) {
+      lastActiveId = thebeSessionId;
+      if (cached.meta.leafId && cached.session.navigateTo) {
+        await cached.session.navigateTo(cached.meta.leafId);
+      }
+      requestStop = () => cached.session.abort();
+      return cached;
+    }
     const meta = await lookup(thebeSessionId);
     const session = await options.runtime.resumeSession(
       meta.runtimeSessionId,
       sessionOptions(meta.thebeSessionId, meta.builtinTools),
     );
+    if (meta.leafId && session.navigateTo) {
+      await session.navigateTo(meta.leafId);
+    }
     requestStop = () => session.abort();
-    active = { meta, session };
-    return active;
+    const opened = { meta, session };
+    setActive(opened);
+    return opened;
   }
-  if (active) {
-    return active;
+  const current = getActive();
+  if (current) {
+    return current;
   }
   const session = await options.runtime.createSession(sessionOptions());
   requestStop = () => session.abort();
@@ -243,8 +324,9 @@ async function openSession(
     runtimeSessionId: session.runtimeSessionId,
   });
   await persist(meta);
-  active = { meta, session };
-  return active;
+  const opened = { meta, session };
+  setActive(opened);
+  return opened;
 }
 
 async function runPrompt(
@@ -252,18 +334,48 @@ async function runPrompt(
   promptOptions: ThebePromptOptions = {},
 ): Promise<ThebePromptResult> {
   checkNotQuiesced();
-  const opened = await openSession(promptOptions.thebeSessionId);
-  const thebeSessionId = opened.meta.thebeSessionId;
   const mode = promptOptions.mode ?? "prompt";
-  if (streaming.has(thebeSessionId) && mode === "prompt") {
-    throw httpError(
-      409,
-      "session is streaming; use steer or followUp",
-    );
+  const lockId = promptOptions.thebeSessionId;
+  if (lockId && mode === "prompt") {
+    if (streaming.has(lockId) || promptLocks.has(lockId)) {
+      throw httpError(
+        409,
+        "session is streaming; use steer or followUp",
+        "session_running",
+      );
+    }
+    promptLocks.add(lockId);
+  }
+  let thebeSessionId = lockId;
+  try {
+  const opened = await openSession(promptOptions.thebeSessionId);
+  const sid = opened.meta.thebeSessionId;
+  thebeSessionId = sid;
+  if (mode === "prompt") {
+    if (!lockId) {
+      if (streaming.has(sid) || promptLocks.has(sid)) {
+        throw httpError(
+          409,
+          "session is streaming; use steer or followUp",
+          "session_running",
+        );
+      }
+      promptLocks.add(sid);
+    }
+    if (streaming.has(sid)) {
+      throw httpError(
+        409,
+        "session is streaming; use steer or followUp",
+        "session_running",
+      );
+    }
+  }
+  if (promptOptions.nonInteractive) {
+    nonInteractiveRuns.add(sid);
   }
   const queueOnly =
     (mode === "steer" || mode === "followUp") &&
-    streaming.has(thebeSessionId);
+    streaming.has(sid);
   if (!queueOnly) {
     policy.beginRun();
     lastEvents.length = 0;
@@ -293,7 +405,7 @@ async function runPrompt(
         .map((message) => message.toolName)
         .filter((name): name is string => Boolean(name)),
       events: lastEvents.slice(),
-      thebeSessionId,
+      thebeSessionId: sid,
     };
   }
   const guard = createStreamGuard({
@@ -315,7 +427,7 @@ async function runPrompt(
   });
   requestStop = () => opened.session.abort();
   const unsub = opened.session.subscribe((event) => {
-    appendEvent(thebeSessionId, event);
+    appendEvent(sid, event);
     if (
       event.type === "text_delta" ||
       event.type === "tool_start" ||
@@ -334,7 +446,7 @@ async function runPrompt(
       guard.notifyAgentEnd();
     }
   });
-  streaming.add(thebeSessionId);
+  streaming.add(sid);
   guard.beginRun();
   guard.armTtfb();
   try {
@@ -357,24 +469,34 @@ async function runPrompt(
       text: reply,
       tools,
       events: lastEvents.slice(),
-      thebeSessionId,
+      thebeSessionId: sid,
     };
   } catch (error) {
     // Normalize run failures onto the session log. User-initiated aborts
     // already emitted `interrupted` via the session abort path, so they
     // must not also surface as errors.
-    if (abortRequested.delete(thebeSessionId)) {
+    if (abortRequested.delete(sid)) {
       throw error;
     }
-    appendEvent(thebeSessionId, {
+    appendEvent(sid, {
       type: "error",
       message: error instanceof Error ? error.message : String(error),
     });
     throw error;
   } finally {
-    streaming.delete(thebeSessionId);
+    streaming.delete(sid);
     unsub();
     guard.dispose();
+    nonInteractiveRuns.delete(sid);
+    promptLocks.delete(sid);
+  }
+  } finally {
+    if (thebeSessionId) {
+      nonInteractiveRuns.delete(thebeSessionId);
+      promptLocks.delete(thebeSessionId);
+    } else if (lockId) {
+      promptLocks.delete(lockId);
+    }
   }
 }
 
@@ -410,6 +532,64 @@ function withRunState(
   };
 }
 
+function rejectPendingFor(thebeSessionId: string): void {
+  for (const [id, pending] of [...pendingPermissions.entries()]) {
+    if (pending.thebeSessionId === thebeSessionId) {
+      pendingPermissions.delete(id);
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+      }
+      pending.resolve("deny");
+    }
+  }
+}
+
+async function reapIdleSessions(idleMs?: number): Promise<number> {
+  const timeout = idleMs ?? options.sessionIdleTimeoutMs ?? 0;
+  if (timeout <= 0) {
+    return 0;
+  }
+  const cutoff = Date.now() - timeout;
+  let reaped = 0;
+  for (const [id, opened] of [...openedSessions.entries()]) {
+    if (streaming.has(id) || hasPendingFor(id)) {
+      continue;
+    }
+    const last = Date.parse(opened.meta.lastActiveAt ?? "");
+    if (!Number.isFinite(last) || last > cutoff) {
+      continue;
+    }
+    opened.session.dispose();
+    openedSessions.delete(id);
+    logs.delete(id);
+    if (lastActiveId === id) {
+      lastActiveId = undefined;
+    }
+    reaped += 1;
+  }
+  return reaped;
+}
+
+function recentEvents(
+  limit = 200,
+): Array<NormalizedEvent & { thebeSessionId: string }> {
+  const out: Array<NormalizedEvent & { thebeSessionId: string }> = [];
+  for (const [id, log] of logs) {
+    for (const event of log.events) {
+      out.push({ ...event, thebeSessionId: id });
+    }
+  }
+  return out.slice(-limit);
+}
+
+const idleTimeoutMs = options.sessionIdleTimeoutMs ?? 0;
+if (idleTimeoutMs > 0) {
+  const interval = setInterval(() => {
+    void reapIdleSessions(idleTimeoutMs);
+  }, Math.min(idleTimeoutMs, 60_000));
+  interval.unref?.();
+}
+
   return {
     options,
     now,
@@ -433,10 +613,10 @@ function withRunState(
       autoCompactOverride = value;
     },
     get active() {
-      return active;
+      return getActive();
     },
     set active(value: { meta: ProductSessionMeta; session: RuntimeSession } | undefined) {
-      active = value;
+      setActive(value);
     },
     get requestStop() {
       return requestStop;
@@ -460,6 +640,10 @@ function withRunState(
     listMetas,
     hasPendingFor,
     withRunState,
+    openedSessions,
+    rejectPendingFor,
+    reapIdleSessions,
+    recentEvents,
   };
 }
 

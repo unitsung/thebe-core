@@ -34,20 +34,40 @@ export async function handleProductApi(
       return json({ providers: await product.auth().listProviders() });
     }
     if (
-      request.method === "POST" &&
       parts[0] === "v1" &&
       parts[1] === "provider" &&
       parts[3] === "oauth"
     ) {
       const providerId = parts[2] ?? "";
-      if (parts[4] === "authorize") {
+      if (
+        request.method === "GET" &&
+        parts[4] === "login"
+      ) {
+        return oauthLoginStream(product, providerId);
+      }
+      if (
+        request.method === "POST" &&
+        (parts[4] === "authorize" || parts[4] === "login")
+      ) {
+        if (parts[4] === "login") {
+          const body = await readJson(request);
+          const input = oauthCallbackInput(body);
+          if (!input) {
+            return json(
+              { ok: false, error: "callback url or code required" },
+              400,
+            );
+          }
+          await product.auth().submitOAuthCallback(providerId, input);
+          return json({ ok: true, providerId });
+        }
         const result = await product.auth().authorizeOAuth(providerId);
         if ("connected" in result && result.connected) {
           return json({ ok: true, connected: true, providerId });
         }
         return json({ ok: true, ...result }, 202);
       }
-      if (parts[4] === "callback") {
+      if (parts[4] === "callback" && request.method === "POST") {
         const body = await readJson(request);
         const input = oauthCallbackInput(body);
         if (!input) {
@@ -58,6 +78,23 @@ export async function handleProductApi(
         }
         await product.auth().submitOAuthCallback(providerId, input);
         return json({ ok: true, providerId });
+      }
+      if (
+        (request.method === "POST" || request.method === "DELETE") &&
+        parts[4] === "logout"
+      ) {
+        if (product.isQuiesced()) {
+          return json(
+            {
+              ok: false,
+              error:
+                "System is quiesced for maintenance; write operations are temporarily disabled",
+            },
+            503,
+          );
+        }
+        await product.auth().logout(providerId);
+        return json({ ok: true });
       }
     }
     if (request.method === "GET" && path === "/v1/model") {
@@ -71,8 +108,39 @@ export async function handleProductApi(
     if (parts[0] === "v1" && parts[1] === "provider" && parts[2]) {
       const providerId = parts[2];
       if (request.method === "POST" && parts[3] === "test") {
-        const res = await product.auth().testProvider(providerId);
-        return json({ ok: res.ok, message: res.message }, res.ok ? 200 : 400);
+        const body = await readJson(request);
+        const authRes = await product.auth().testProvider(providerId);
+        if (!authRes.ok) {
+          return json({ ok: false, message: authRes.message }, 400);
+        }
+        const activeTest = body.activeTest === true;
+        if (!activeTest) {
+          return json({ ok: true, message: authRes.message });
+        }
+        const models = await product.listAvailableModels({ providerId });
+        const model = models[0];
+        if (!model) {
+          return json({ ok: true, message: authRes.message });
+        }
+        try {
+          const probed = await product.testModel({
+            providerId: model.providerId,
+            modelId: model.modelId,
+          });
+          return json({
+            ok: true,
+            message: `probed ${model.modelId}`,
+            latencyMs: probed.latencyMs,
+          });
+        } catch (error) {
+          return json(
+            {
+              ok: false,
+              message: error instanceof Error ? error.message : String(error),
+            },
+            400,
+          );
+        }
       }
       if (request.method === "POST" && parts[3] === "api-key") {
         const body = await readJson(request);
@@ -89,11 +157,48 @@ export async function handleProductApi(
       }
     }
     if (
+      request.method === "POST" &&
+      path === "/v1/auth"
+    ) {
+      if (product.isQuiesced()) {
+        return json(
+          {
+            ok: false,
+            error:
+              "System is quiesced for maintenance; write operations are temporarily disabled",
+          },
+          503,
+        );
+      }
+      const body = await readJson(request);
+      const providerId =
+        typeof body.providerId === "string" ? body.providerId : "";
+      const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
+      if (!providerId || !apiKey) {
+        return json(
+          { ok: false, error: "providerId and apiKey required" },
+          400,
+        );
+      }
+      await product.auth().setApiKey(providerId, apiKey);
+      return json({ ok: true });
+    }
+    if (
       request.method === "PUT" &&
       parts[0] === "v1" &&
       parts[1] === "auth" &&
       parts[2]
     ) {
+      if (product.isQuiesced()) {
+        return json(
+          {
+            ok: false,
+            error:
+              "System is quiesced for maintenance; write operations are temporarily disabled",
+          },
+          503,
+        );
+      }
       const body = await readJson(request);
       const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
       if (!apiKey) {
@@ -115,4 +220,52 @@ export async function handleProductApi(
   } catch (error) {
     return productError(error);
   }
+}
+
+function oauthLoginStream(product: ThebeProduct, providerId: string): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      const send = (event: string, data: unknown) => {
+        controller.enqueue(
+          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`),
+        );
+      };
+      void (async () => {
+        try {
+          const result = await product.auth().authorizeOAuth(providerId);
+          if ("connected" in result && result.connected) {
+            send("success", { providerId });
+          } else {
+            if (result.url) {
+              send("auth", { url: result.url, providerId });
+            }
+            if (result.deviceCode) {
+              send("device_code", result.deviceCode);
+            }
+            send("progress", {
+              message: result.instructions ?? "complete login in the browser",
+            });
+          }
+        } catch (error) {
+          send("error", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        }
+      })();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
 }
