@@ -269,9 +269,14 @@ async function runPrompt(
     lastEvents.length = 0;
   }
   const body = asPromptInput(input);
-  if (!opened.meta.title && body.text.trim()) {
-    opened.meta.title = body.text.trim().slice(0, 80);
+  const promptText = body.text.trim();
+  if (!opened.meta.title && promptText) {
+    opened.meta.title = promptText.slice(0, 80);
   }
+  if (!opened.meta.firstMessage && promptText) {
+    opened.meta.firstMessage = promptText.slice(0, 100);
+  }
+  opened.meta.messageCount = (opened.meta.messageCount ?? 0) + 1;
   opened.meta = stamp(opened.meta);
   await persist(opened.meta);
   if (queueOnly) {

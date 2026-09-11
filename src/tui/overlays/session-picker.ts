@@ -4,10 +4,12 @@ import {
   Input,
   matchesKey,
   truncateToWidth,
+  visibleWidth,
   type Component,
   type Focusable,
   type TUI,
 } from "@earendil-works/pi-tui";
+import { formatSessionAge } from "../display/format.ts";
 import type { ThebeProduct } from "../../product/service.ts";
 
 export type ProductSessionRow = {
@@ -19,6 +21,8 @@ export type ProductSessionRow = {
   createdAt?: string;
   updatedAt?: string;
   lastActiveAt?: string;
+  firstMessage?: string;
+  messageCount?: number;
 };
 
 export interface SearchableSessionPickerOptions {
@@ -96,7 +100,7 @@ export class SearchableSessionPicker implements Component, Focusable {
         this.allSessions,
         query,
         (s) =>
-          `${s.title ?? ""} ${s.thebeSessionId} ${s.status} ${s.lastActiveAt ?? s.createdAt ?? ""}`,
+          `${s.title ?? ""} ${s.firstMessage ?? ""} ${s.thebeSessionId} ${s.status} ${s.lastActiveAt ?? s.createdAt ?? ""}`,
       );
       this.filteredSessions = matches;
     }
@@ -112,7 +116,7 @@ export class SearchableSessionPicker implements Component, Focusable {
       return;
     }
 
-    if (matchesKey(data, "enter") || matchesKey(data, "return") || data === "\r" || data === "\n") {
+    if (matchesKey(data, "return") || matchesKey(data, "enter")) {
       const selected = this.filteredSessions[this.selectedIndex];
       if (selected) {
         this.onSelectCallback(selected);
@@ -188,10 +192,10 @@ export class SearchableSessionPicker implements Component, Focusable {
         const item = this.filteredSessions[i]!;
         const isSelected = i === this.selectedIndex;
         const isCurrent = item.thebeSessionId === this.currentSessionId;
-        const cursor = isSelected ? chalk.cyan("→ ") : "  ";
+        const cursor = isSelected ? chalk.cyan("› ") : "  ";
         const currentMarker = isCurrent ? chalk.cyan("✓ ") : "  ";
-        const title = item.title ? item.title : "(untitled)";
-        const titleText = isSelected ? chalk.cyan(title) : title;
+        const displayText = item.title || item.firstMessage || "(untitled)";
+        const titleText = isSelected ? chalk.cyan(displayText) : displayText;
         const idBadge = chalk.dim(`[${item.thebeSessionId.slice(0, 8)}]`);
         const statusBadge =
           item.status === "active"
@@ -201,20 +205,32 @@ export class SearchableSessionPicker implements Component, Focusable {
           ? chalk.magenta("↳ branch")
           : "";
 
-        const parts = [
+        const timeStr = item.lastActiveAt || item.updatedAt || item.createdAt;
+        const ageBadge = timeStr
+          ? chalk.dim(formatSessionAge(new Date(timeStr)))
+          : "";
+        const msgBadge = item.messageCount
+          ? chalk.dim(`${item.messageCount} msg${item.messageCount > 1 ? "s" : ""}`)
+          : "";
+
+        const leftParts = [
           `  ${cursor}${currentMarker}${titleText}`,
           idBadge,
-          statusBadge,
           branchBadge,
-        ].filter(Boolean);
+        ].filter(Boolean).join(" ");
+        const rightParts = [statusBadge, msgBadge, ageBadge].filter(Boolean).join(" ");
 
-        lines.push(parts.join(" "));
+        const leftWidth = visibleWidth(leftParts);
+        const rightWidth = visibleWidth(rightParts);
+        const pad = Math.max(1, width - leftWidth - rightWidth - 2);
+        lines.push(`${leftParts}${" ".repeat(pad)}${rightParts}`);
       }
 
       if (total > this.pageSize) {
         lines.push(chalk.dim(`    (${this.selectedIndex + 1}/${total})`));
       }
     }
+
 
     lines.push(chalk.dim("  ↑/↓: navigate · Enter: switch · Esc: cancel"));
 

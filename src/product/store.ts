@@ -24,6 +24,8 @@ export type ProductSessionMeta = {
   shareMetadata?: Record<string, unknown>;
   rememberedPermissions?: Record<string, "allow" | "deny">;
   builtinTools?: string[];
+  firstMessage?: string;
+  messageCount?: number;
 };
 
 const FORBIDDEN_KEYS = [
