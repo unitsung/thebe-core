@@ -9,8 +9,8 @@ export type ThebeListenOptions = {
 export async function listenThebeHttp(
   app: ReturnType<typeof createThebeHttpHandler>,
   options: ThebeListenOptions = {},
-): Promise<{ server: Server; url: string }> {
-  const host = options.host ?? "0.0.0.0";
+): Promise<{ server: Server; url: string; bind: string }> {
+  const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 8787;
   const server = createServer((req, res) => {
     void handleNode(app, req, res);
@@ -22,8 +22,10 @@ export async function listenThebeHttp(
   const address = server.address();
   const bound =
     address && typeof address === "object" ? address.port : port;
-  const urlHost = host === "0.0.0.0" ? "127.0.0.1" : host;
-  return { server, url: `http://${urlHost}:${bound}` };
+  const wildcard = host === "0.0.0.0" || host === "::";
+  const urlHost = wildcard ? "127.0.0.1" : host;
+  const bind = `${host}:${bound}`;
+  return { server, url: `http://${urlHost}:${bound}`, bind };
 }
 
 async function handleNode(

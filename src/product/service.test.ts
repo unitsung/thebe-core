@@ -386,6 +386,28 @@ describe("Thebe product service (fake runtime)", () => {
     expect(meta.rememberedPermissions).toMatchObject({ bash: "allow" });
   });
 
+  it("re-reads rememberedPermissions at tool dispatch so a later deny sticks", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const sessionId = (await product.createSession()).thebeSessionId;
+    await product.patchSession(sessionId, {
+      rememberedPermissions: { bash: "deny" },
+    });
+    const result = await product.prompt("run bash", { thebeSessionId: sessionId });
+    expect(result.text).toBe("after");
+    expect(product.pendingPermissionIds()).toHaveLength(0);
+    const tool = product.messages().find((message) => message.role === "tool");
+    expect(tool?.isError).toBe(true);
+    expect(tool?.text).toContain("denied");
+  });
+
   it("lists skills, mcp tools, subagent profiles, spawn, and fork messages", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-product-features-"));
     const prevCwd = process.cwd();

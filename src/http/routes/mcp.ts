@@ -12,6 +12,12 @@ const ALIASES: Record<string, (typeof CONTAINER_TOOL_NAMES)[number]> = {
   container_logs: "container.logs",
 };
 
+const ALL_TOOL_NAMES = new Set<string>([
+  ...CONTAINER_TOOL_NAMES,
+  ...MCP_EVENT_TOOLS,
+  ...Object.keys(ALIASES),
+]);
+
 function listedTools(): Array<{
   name: string;
   description: string;
@@ -42,6 +48,9 @@ async function callTool(
   name: string,
   args: unknown,
 ): Promise<string> {
+  if (!ALL_TOOL_NAMES.has(name)) {
+    throw new Error(`unknown tool: ${name}`);
+  }
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
     if (name === "list_core_events") {
       return JSON.stringify({ events: [] });

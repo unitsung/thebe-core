@@ -7,7 +7,7 @@ describe("listenThebeHttp", () => {
     const app = createThebeHttpHandler({
       version: "0.1.0",
     });
-    const { server, url } = await listenThebeHttp(app, {
+    const { server, url, bind } = await listenThebeHttp(app, {
       host: "127.0.0.1",
       port: 0,
     });
@@ -18,6 +18,8 @@ describe("listenThebeHttp", () => {
         ok: true,
         version: "0.1.0",
       });
+      expect(bind.startsWith("127.0.0.1:")).toBe(true);
+      expect(url.startsWith("http://127.0.0.1:")).toBe(true);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));

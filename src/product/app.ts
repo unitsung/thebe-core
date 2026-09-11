@@ -20,6 +20,7 @@ export function createThebeApp(options: {
   now?: () => Date;
   callerId?: string;
   model?: import("../runtime/types.ts").RuntimeModelRef;
+  allowedHosts?: string[];
 }): {
   product: ThebeProduct;
   prompt: ThebeAppPrompt;
@@ -35,6 +36,7 @@ export function createThebeApp(options: {
     version: options.version ?? "0.1.0",
     token: options.token,
     product,
+    allowedHosts: options.allowedHosts,
   });
   return { product, prompt, send: prompt, handler };
 }

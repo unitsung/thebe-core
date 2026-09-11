@@ -197,6 +197,17 @@ Thebe 通过 SDK 嵌入 Pi，属于非交互场景。**若 `PiCodingAgentRuntime
 
 **建议**：Thebe 生产部署文档应明确采用上述某种隔离方案，`Gondolin micro-VM` 值得作为候选方案调研，因其允许"推理在主机、工具执行在隔离环境"的细粒度划分。
 
+Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担隔离（容器、专用系统用户、或上述 micro-VM）。HTTP 入口的默认值：
+
+| 项 | 默认 / 规则 |
+|---|---|
+| `THEBE_HOST` | `127.0.0.1`。局域网暴露需显式 `THEBE_HOST=0.0.0.0` |
+| 监听日志 | `THEBE_LISTEN <url> (<version>) bind=<host>:<port>`，避免把 `0.0.0.0` 显示成本机地址 |
+| `THEBE_TOKEN` | `NODE_ENV=production` 时强制非空；请求头 `X-Thebe-Token` |
+| `THEBE_ALLOWED_HOSTS` | 逗号分隔 Host 白名单。默认 bind 环回时启用 localhost/`127.0.0.1`/`::1`；`0.0.0.0` 且未设置此变量时不限制 Host，以便 LAN 访问 |
+| 凭证端点 | `PUT /v1/auth/:providerId` 与 `POST /v1/provider/:id/api-key` 走明文 HTTP，生产环境应放在 Tailscale 或 HTTPS 反代后面 |
+| `POST /v1/system/quiesce` | 等同管理员权限，只靠 token 门禁，无角色隔离 |
+
 ---
 
 ## 3. 完整 HTTP API 参考
@@ -211,8 +222,8 @@ Thebe 通过 SDK 嵌入 Pi，属于非交互场景。**若 `PiCodingAgentRuntime
 | `GET /v1/event` | 可选的跨 session 全局事件流（dashboard / 多 session UI） | 【建议】待产品决定 |
 | `GET /v1/session/status` | 批量返回 session 执行状态（idle/running/awaiting_permission/interrupted） | 【待确认】已报告完成 |
 | `GET /v1/agent/running` 或 `GET /v1/session?status=running` | 全局正在执行的 session 横切视图 | 【建议】参考产品设计，二选一实现即可，不必两者都做 |
-| `POST /v1/system/quiesce` | 拒绝新 prompt/fork/resume，in-flight 运行正常跑完，读请求不受影响 | 【建议】用于升级/维护前的优雅排空 |
-| `POST /v1/system/unquiesce` | 恢复正常接受请求 | 【建议】 |
+| `POST /v1/system/quiesce` | 拒绝新 prompt/fork/resume，in-flight 运行正常跑完，读请求不受影响。**等同管理员权限**，只靠 `THEBE_TOKEN`，无角色隔离 | 【建议】用于升级/维护前的优雅排空 |
+| `POST /v1/system/unquiesce` | 恢复正常接受请求（同样等同管理员权限） | 【建议】 |
 | `GET /v1/system/status` | 是否处于 quiesce 状态 | 【建议】 |
 
 ### 3.2 Session 生命周期
@@ -387,9 +398,10 @@ POST /v1/session/:id/permission/:permissionId
 | `GET /v1/provider/:id/oauth/login`（SSE） | 启动 OAuth 授权，流式返回状态 | 【产品参考，具体设计见下方】 |
 | `POST /v1/provider/:id/oauth/login` | 手动提交 OAuth code（配合 SSE 的 prompt_request 事件） | 【产品参考】 |
 | `POST /v1/provider/:id/oauth/logout` | 注销 OAuth | 【产品参考】 |
-| `POST /v1/provider/:id/api-key` | 存储 API key | 【产品参考】 |
+| `POST /v1/provider/:id/api-key` | 存储 API key。HTTP 明文传输，生产环境需 Tailscale 或 HTTPS 反代 | 【产品参考】 |
 | `DELETE /v1/provider/:id/api-key` | 删除 API key | 【产品参考】 |
 | `POST /v1/provider/:id/test` | 主动发起最小化测试请求，验证配置真的可用（而非只看静态认证状态） | 【产品参考】 |
+| `PUT /v1/auth/:providerId` | 兼容入口，同样以明文 JSON 接收 `apiKey` | 已实现；生产环境需 TLS 终止 |
 
 **Provider Auth 具体设计参考【产品参考，来自真实项目源码文档】**：
 
@@ -728,13 +740,13 @@ X-Content-Type-Options: nosniff
 
 ### 9.1 P0：安全基线（最高优先级）
 
-- [ ] `PiCodingAgentRuntime` 创建 session 时是否显式设置了 `defaultProjectTrust`？（第 2.3 节）
-- [ ] Thebe 生产部署是否已有容器/VM 级别的进程隔离？（第 2.1、2.5 节，Pi 官方声明自身不提供沙箱）
-- [ ] Custom tool 输出拼入 agent 上下文前，是否有"不可信数据"标记机制以降低 prompt injection 风险？（第 2.4 节）
-- [ ] Bash 工具执行时，是否过滤了 Thebe 服务自身的敏感进程环境变量？（第 7.1 节）
-- [ ] 是否有等价的 Origin/Sec-Fetch-Site 请求校验，叠加在 Host header 白名单之上？（第 7.2 节）
-- [ ] 任何文件预览类接口是否带 `X-Content-Type-Options: nosniff` 与恰当的 `Content-Disposition`？（第 7.3 节）
-- [ ] 权限开关变更后，是否在工具**实际调用时**重新校验，而非只在创建时检查一次？（第 7.4 节）
+- [x] `PiCodingAgentRuntime` 创建 session 时是否显式设置了 `defaultProjectTrust`？（第 2.3 节）`open-session.ts` 设为 `always`
+- [x] Thebe 生产部署是否已有容器/VM 级别的进程隔离？（第 2.1、2.5 节，Pi 官方声明自身不提供沙箱）代码不提供沙箱；部署要求见第 2.5 节，由运行环境承担
+- [x] Custom tool 输出拼入 agent 上下文前，是否有"不可信数据"标记机制以降低 prompt injection 风险？（第 2.4 节）`wrap-tools.ts` 用 `<tool_output>` 包裹
+- [x] Bash 工具执行时，是否过滤了 Thebe 服务自身的敏感进程环境变量？（第 7.1 节）`sanitizeBashEnv`
+- [x] 是否有等价的 Origin/Sec-Fetch-Site 请求校验，叠加在 Host header 白名单之上？（第 7.2 节）`security.ts`；环回 bind 默认启用 Host 白名单，`THEBE_ALLOWED_HOSTS` 可扩展
+- [x] 任何文件预览类接口是否带 `X-Content-Type-Options: nosniff` 与恰当的 `Content-Disposition`？（第 7.3 节）HTML export 另加 CSP `default-src 'none'`
+- [x] 权限开关变更后，是否在工具**实际调用时**重新校验，而非只在创建时检查一次？（第 7.4 节）custom tools 在 `execute` 时走 PolicyEngine；内置工具的 `permissionHandler` 每次 request 现查 `rememberedPermissions`
 
 ### 9.2 P0：协议完整性
 
