@@ -6,6 +6,7 @@ import { createResourceApi } from "./resources.ts";
 import { createSessionApi } from "./sessions.ts";
 
 export type { CreateThebeProductOptions } from "./context.ts";
+export { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./context.ts";
 export {
   DEFAULT_MODEL_TEST_TIMEOUT_MS,
   httpError,

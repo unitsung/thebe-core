@@ -298,6 +298,20 @@ export async function createPiCodingAgentRuntime(
         livenessRegistry.delete(sessionId);
       };
     },
+    reapInactiveSessions(): number {
+      let reaped = 0;
+      for (const [sessionId, isActive] of [...livenessRegistry.entries()]) {
+        if (isActive()) {
+          continue;
+        }
+        livenessRegistry.delete(sessionId);
+        const session = live.get(sessionId);
+        live.delete(sessionId);
+        session?.dispose();
+        reaped += 1;
+      }
+      return reaped;
+    },
   };
 }
 

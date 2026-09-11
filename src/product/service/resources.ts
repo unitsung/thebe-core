@@ -118,12 +118,13 @@ export function createResourceApi(ctx: ProductContext) {
         : systemPrompt;
       const rawTools = profile.tools ?? parent.builtinTools;
       const childTools = rawTools?.filter((name) => !RESERVED_TOOLS.has(name));
+      const thebeSessionId = randomUUID();
       const session = await options.runtime.createSession({
-        ...sessionOptions(undefined, childTools),
+        ...sessionOptions(thebeSessionId, childTools),
         systemPrompt: extraPrompt,
       });
       const meta = touchMeta({
-        thebeSessionId: randomUUID(),
+        thebeSessionId,
         runtimeId: options.runtime.runtimeId,
         runtimeSessionId: session.runtimeSessionId,
         parentThebeSessionId: parent.thebeSessionId,

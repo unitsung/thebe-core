@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { hashParameters } from "../../audit/audit-log.ts";
 import type { ForkSessionOptions, RuntimeModelRef, ThinkingLevel } from "../../runtime/types.ts";
-import { TOOLS_REQUIRING_APPROVAL } from "../../runtime/types.ts";
+import { rememberedPermissionKey } from "../remembered-permissions.ts";
 import { httpError, type SessionRunStatus } from "../types.ts";
 import type { ProductSessionMeta } from "../store.ts";
 import type { ProductContext } from "./context.ts";
@@ -38,11 +37,12 @@ export function createSessionApi(ctx: ProductContext) {
     }): Promise<ProductSessionMeta> {
       checkNotQuiesced();
       const effectiveModel = init?.model ?? options.model;
+      const thebeSessionId = randomUUID();
       const session = await options.runtime.createSession(
-        sessionOptions(undefined, init?.builtinTools, effectiveModel),
+        sessionOptions(thebeSessionId, init?.builtinTools, effectiveModel),
       );
       const meta = touchMeta({
-        thebeSessionId: randomUUID(),
+        thebeSessionId,
         runtimeId: options.runtime.runtimeId,
         runtimeSessionId: session.runtimeSessionId,
         title: init?.title,
@@ -124,6 +124,10 @@ export function createSessionApi(ctx: ProductContext) {
             : current.rememberedPermissions,
       });
       await persist(meta);
+      const opened = ctx.openedSessions.get(thebeSessionId);
+      if (opened) {
+        opened.meta = meta;
+      }
       if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
         ctx.active.meta = meta;
       }
@@ -177,14 +181,15 @@ export function createSessionApi(ctx: ProductContext) {
       if (!source) {
         throw new Error("no session to fork");
       }
+      const childThebeId = randomUUID();
       const child = await options.runtime.forkSession(
         source.runtimeSessionId,
-        sessionOptions(undefined, source.builtinTools),
+        sessionOptions(childThebeId, source.builtinTools),
         forkOpts,
       );
       const inPlace = forkOpts.mode === "branch_in_place";
       const meta = stamp({
-        thebeSessionId: randomUUID(),
+        thebeSessionId: childThebeId,
         runtimeId: options.runtime.runtimeId,
         runtimeSessionId: child.runtimeSessionId,
         parentThebeSessionId: source.thebeSessionId,
@@ -278,20 +283,19 @@ export function createSessionApi(ctx: ProductContext) {
       }
       if (decision.remember) {
         const meta = await lookup(thebeSessionId);
-        const highRisk =
-          pending.request.risk === "high" ||
-          (TOOLS_REQUIRING_APPROVAL as readonly string[]).includes(
-            pending.request.toolName,
-          );
-        const key =
-          decision.response === "deny" && highRisk
-            ? `${pending.request.toolName}:${hashParameters(pending.request.args ?? {})}`
-            : pending.request.toolName;
+        const key = rememberedPermissionKey(
+          pending.request,
+          decision.response,
+        );
         meta.rememberedPermissions = {
           ...meta.rememberedPermissions,
           [key]: decision.response,
         };
         await persist(touchMeta(meta));
+        const opened = ctx.openedSessions.get(thebeSessionId);
+        if (opened) {
+          opened.meta = meta;
+        }
         if (ctx.active?.meta.thebeSessionId === thebeSessionId) {
           ctx.active.meta = meta;
         }

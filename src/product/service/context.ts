@@ -16,9 +16,12 @@ import {
 } from "../../runtime/types.ts";
 import { createStreamGuard } from "../../stream-guard/index.ts";
 import { createContainerTools } from "../../tools/container-tools.ts";
+import { rememberedDecision } from "../remembered-permissions.ts";
 import { createProductStore, type ProductSessionMeta } from "../store.ts";
 import { wrapCustomTools } from "../wrap-tools.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult, type SessionRunStatus } from "../types.ts";
+
+export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 export type CreateThebeProductOptions = {
   runtime: AgentRuntime;
@@ -118,6 +121,10 @@ function setActive(
   }
   openedSessions.set(value.meta.thebeSessionId, value);
   lastActiveId = value.meta.thebeSessionId;
+  options.runtime.registerSessionLiveness?.(
+    value.session.runtimeSessionId,
+    () => openedSessions.has(value.meta.thebeSessionId),
+  );
 }
 
 function sessionLog(thebeSessionId: string): SessionLog {
@@ -146,20 +153,6 @@ function appendEvent(
   for (const listener of log.listeners) {
     listener(event);
   }
-}
-
-function rememberedDecision(
-  map: Record<string, "allow" | "deny"> | undefined,
-  request: PermissionRequest,
-): "allow" | "deny" | undefined {
-  if (!map) {
-    return undefined;
-  }
-  const scoped = map[`${request.toolName}:${hashParameters(request.args ?? {})}`];
-  if (scoped) {
-    return scoped;
-  }
-  return map[request.toolName];
 }
 
 function permissionHandler(explicitSessionId?: string) {
@@ -241,7 +234,12 @@ function sessionOptions(
               appendEvent(sid, event);
             }
           },
-          onStop: () => requestStop(),
+          onStop: () => {
+            const sid = explicitSessionId ?? getActive()?.meta.thebeSessionId;
+            if (sid) {
+              void openedSessions.get(sid)?.session.abort();
+            }
+          },
         }),
     builtinTools: effectiveBuiltinTools,
     systemPrompt: isChatOnly ? "You are a helpful assistant." : systemPrompt,
@@ -545,7 +543,11 @@ function rejectPendingFor(thebeSessionId: string): void {
 }
 
 async function reapIdleSessions(idleMs?: number): Promise<number> {
-  const timeout = idleMs ?? options.sessionIdleTimeoutMs ?? 0;
+  const timeout =
+    idleMs ??
+    (options.sessionIdleTimeoutMs === undefined
+      ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
+      : options.sessionIdleTimeoutMs);
   if (timeout <= 0) {
     return 0;
   }
@@ -567,6 +569,7 @@ async function reapIdleSessions(idleMs?: number): Promise<number> {
     }
     reaped += 1;
   }
+  options.runtime.reapInactiveSessions?.();
   return reaped;
 }
 
@@ -582,7 +585,10 @@ function recentEvents(
   return out.slice(-limit);
 }
 
-const idleTimeoutMs = options.sessionIdleTimeoutMs ?? 0;
+const idleTimeoutMs =
+  options.sessionIdleTimeoutMs === undefined
+    ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
+    : options.sessionIdleTimeoutMs;
 if (idleTimeoutMs > 0) {
   const interval = setInterval(() => {
     void reapIdleSessions(idleTimeoutMs);
@@ -605,6 +611,7 @@ if (idleTimeoutMs > 0) {
     logs,
     pendingPermissions,
     streaming,
+    promptLocks,
     abortRequested,
     get autoCompactOverride() {
       return autoCompactOverride;

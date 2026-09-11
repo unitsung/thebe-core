@@ -204,7 +204,7 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 | `THEBE_HOST` | `127.0.0.1`。局域网暴露需显式 `THEBE_HOST=0.0.0.0` |
 | 监听日志 | `THEBE_LISTEN <url> (<version>) bind=<host>:<port>`，避免把 `0.0.0.0` 显示成本机地址 |
 | `THEBE_TOKEN` | `NODE_ENV=production` 时强制非空；请求头 `X-Thebe-Token` |
-| `THEBE_ALLOWED_HOSTS` | 逗号分隔 Host 白名单。默认 bind 环回时启用 localhost/`127.0.0.1`/`::1`；`0.0.0.0` 且未设置此变量时不限制 Host，以便 LAN 访问 |
+| `THEBE_ALLOWED_HOSTS` | 逗号分隔 Host 白名单，始终叠加 localhost/`127.0.0.1`/`::1`。`THEBE_HOST=0.0.0.0` 时也启用该白名单；局域网 Host 必须写进此变量，否则 DNS-rebinding 的 Origin==Host 会被拒绝 |
 | 凭证端点 | `PUT /v1/auth/:providerId` 与 `POST /v1/provider/:id/api-key` 走明文 HTTP，生产环境应放在 Tailscale 或 HTTPS 反代后面 |
 | `POST /v1/system/quiesce` | 等同管理员权限，只靠 token 门禁，无角色隔离 |
 
@@ -754,7 +754,7 @@ X-Content-Type-Options: nosniff
 - [x] SSE 是否只在 `session_end`/`error`/`interrupted` 结束，而非 `turn_end`？`/v1/messages` SSE `closeOnTerminal`；`GET /log?follow=true` 保持观察流（idle 5min），不因 `turn_end` 关闭
 - [x] SSE 断线后如何恢复（cursor 补发 或 message 刷新兜底）？`id:` + `?after=` / `Last-Event-ID` 进程内补发；`GET /message` 为跨进程兜底（事件日志不落盘）
 - [x] 普通 `mode: prompt` 在 active run 时是否返回明确冲突状态，而非底层异常裸传？`409` `code: session_running`；已知 session id 时锁在 `openSession` 之前
-- [x] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？session 作用域、无长期 TTL；高危 `deny` 按参数哈希记忆，`allow` 仍为工具级；pending TTL 10min；重复提交 404；interrupt 拒绝所有 pending
+- [x] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？session 作用域、无长期 TTL；高危工具（bash/write/edit）的 `allow` 与 `deny` 均按参数哈希记忆；`PATCH { bash: "deny" }` 仍为工具级拒绝；pending TTL 10min；重复提交 404；interrupt 拒绝所有 pending
 - [x] Fork 是否区分 `new_session` 与 `branch_in_place` 两种模式？`branch_in_place` 写 `inPlace` 子映射、隐藏于顶层列表、同 runtime session；仍会分配新的 Thebe session id 供 `/children` 使用
 - [x] `GET /v1/session/:id/message/:messageId` 是否存在，列表是否分页、带 stable ids？`limit`/`after`/`before`，id 来自 runtime
 

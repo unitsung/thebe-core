@@ -17,10 +17,13 @@ describe("resolveThebeListen", () => {
     );
   });
 
-  it("keeps wildcard binds usable without a Host allowlist", () => {
+  it("keeps a Host allowlist on wildcard binds so DNS-rebinding cannot skip it", () => {
     const config = resolveThebeListen({ THEBE_HOST: "0.0.0.0" });
     expect(config.host).toBe("0.0.0.0");
-    expect(config.allowedHosts).toBeUndefined();
+    expect(config.allowedHosts).toEqual(
+      expect.arrayContaining(["127.0.0.1", "localhost", "::1"]),
+    );
+    expect(config.allowedHosts).not.toContain("evil.com");
   });
 
   it("merges THEBE_ALLOWED_HOSTS onto the loopback set", () => {

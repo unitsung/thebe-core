@@ -6,6 +6,7 @@ import {
   productionTokenError,
   resolveThebeListen,
 } from "./bind.ts";
+import { drainThebeHttpServer } from "./drain.ts";
 import { listenThebeHttp } from "./index.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,12 +39,7 @@ const shutdown = (signal: string) => {
   console.error(`received ${signal}; draining`);
   const force = setTimeout(() => process.exit(1), 8_000);
   force.unref?.();
-  void (async () => {
-    await product.quiesce().catch(() => {});
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-    });
-  })()
+  void drainThebeHttpServer(server, () => product.quiesce())
     .catch(() => {})
     .finally(() => {
       clearTimeout(force);

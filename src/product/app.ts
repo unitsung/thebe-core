@@ -1,5 +1,6 @@
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import type { AgentRuntime } from "../runtime/types.ts";
+import { resolveAllowedHosts } from "../http/bind.ts";
 import { createThebeHttpHandler } from "../http/handler.ts";
 import { createThebeProduct, type ThebeProduct } from "./service.ts";
 
@@ -46,7 +47,7 @@ export function createThebeApp(options: {
     version: options.version ?? "0.1.0",
     token: options.token,
     product,
-    allowedHosts: options.allowedHosts,
+    allowedHosts: options.allowedHosts ?? resolveAllowedHosts("127.0.0.1"),
   });
   return { product, prompt, send: prompt, handler };
 }

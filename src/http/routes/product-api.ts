@@ -13,6 +13,19 @@ export async function handleProductApi(
   }
   const url = new URL(request.url);
   const parts = path.split("/").filter(Boolean);
+  const quiescedWrite = (): Response | undefined => {
+    if (!product.isQuiesced()) {
+      return undefined;
+    }
+    return json(
+      {
+        ok: false,
+        error:
+          "System is quiesced for maintenance; write operations are temporarily disabled",
+      },
+      503,
+    );
+  };
   try {
     if (parts[0] === "v1" && parts[1] === "session") {
       return await handleSession(request, url, parts, product);
@@ -43,12 +56,20 @@ export async function handleProductApi(
         request.method === "GET" &&
         parts[4] === "login"
       ) {
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
+        }
         return oauthLoginStream(product, providerId);
       }
       if (
         request.method === "POST" &&
         (parts[4] === "authorize" || parts[4] === "login")
       ) {
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
+        }
         if (parts[4] === "login") {
           const body = await readJson(request);
           const input = oauthCallbackInput(body);
@@ -68,6 +89,10 @@ export async function handleProductApi(
         return json({ ok: true, ...result }, 202);
       }
       if (parts[4] === "callback" && request.method === "POST") {
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
+        }
         const body = await readJson(request);
         const input = oauthCallbackInput(body);
         if (!input) {
@@ -83,15 +108,9 @@ export async function handleProductApi(
         (request.method === "POST" || request.method === "DELETE") &&
         parts[4] === "logout"
       ) {
-        if (product.isQuiesced()) {
-          return json(
-            {
-              ok: false,
-              error:
-                "System is quiesced for maintenance; write operations are temporarily disabled",
-            },
-            503,
-          );
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
         }
         await product.auth().logout(providerId);
         return json({ ok: true });
@@ -108,19 +127,20 @@ export async function handleProductApi(
     if (parts[0] === "v1" && parts[1] === "provider" && parts[2]) {
       const providerId = parts[2];
       if (request.method === "POST" && parts[3] === "test") {
-        const body = await readJson(request);
         const authRes = await product.auth().testProvider(providerId);
         if (!authRes.ok) {
           return json({ ok: false, message: authRes.message }, 400);
         }
-        const activeTest = body.activeTest === true;
-        if (!activeTest) {
-          return json({ ok: true, message: authRes.message });
-        }
         const models = await product.listAvailableModels({ providerId });
         const model = models[0];
         if (!model) {
-          return json({ ok: true, message: authRes.message });
+          return json(
+            {
+              ok: false,
+              message: "no available model to probe",
+            },
+            400,
+          );
         }
         try {
           const probed = await product.testModel({
@@ -143,6 +163,10 @@ export async function handleProductApi(
         }
       }
       if (request.method === "POST" && parts[3] === "api-key") {
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
+        }
         const body = await readJson(request);
         const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
         if (!apiKey) {
@@ -152,6 +176,10 @@ export async function handleProductApi(
         return json({ ok: true });
       }
       if (request.method === "DELETE" && parts[3] === "api-key") {
+        const blocked = quiescedWrite();
+        if (blocked) {
+          return blocked;
+        }
         await product.auth().logout(providerId);
         return json({ ok: true });
       }
@@ -160,15 +188,9 @@ export async function handleProductApi(
       request.method === "POST" &&
       path === "/v1/auth"
     ) {
-      if (product.isQuiesced()) {
-        return json(
-          {
-            ok: false,
-            error:
-              "System is quiesced for maintenance; write operations are temporarily disabled",
-          },
-          503,
-        );
+      const blocked = quiescedWrite();
+      if (blocked) {
+        return blocked;
       }
       const body = await readJson(request);
       const providerId =
@@ -189,15 +211,9 @@ export async function handleProductApi(
       parts[1] === "auth" &&
       parts[2]
     ) {
-      if (product.isQuiesced()) {
-        return json(
-          {
-            ok: false,
-            error:
-              "System is quiesced for maintenance; write operations are temporarily disabled",
-          },
-          503,
-        );
+      const blocked = quiescedWrite();
+      if (blocked) {
+        return blocked;
       }
       const body = await readJson(request);
       const apiKey = typeof body.apiKey === "string" ? body.apiKey : "";
@@ -213,6 +229,10 @@ export async function handleProductApi(
       parts[1] === "auth" &&
       parts[2]
     ) {
+      const blocked = quiescedWrite();
+      if (blocked) {
+        return blocked;
+      }
       await product.auth().logout(parts[2]);
       return json({ ok: true });
     }

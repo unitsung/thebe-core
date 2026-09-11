@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createFakeRuntime } from "../runtime/fake-runtime.ts";
 import { createThebeApp } from "./app.ts";
+import { hashParameters } from "../audit/audit-log.ts";
 import { createThebeProduct } from "./service.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
@@ -383,7 +384,10 @@ describe("Thebe product service (fake runtime)", () => {
     });
     await pending;
     const meta = await product.getSession(sessionId);
-    expect(meta.rememberedPermissions).toMatchObject({ bash: "allow" });
+    expect(meta.rememberedPermissions?.bash).toBeUndefined();
+    expect(
+      meta.rememberedPermissions?.[`bash:${hashParameters({ command: "ls" })}`],
+    ).toBe("allow");
   });
 
   it("re-reads rememberedPermissions at tool dispatch so a later deny sticks", async () => {
