@@ -30,7 +30,7 @@ export async function handleMessagesCompatibility(
     if (wantsStream) {
       if (
         (parsed.mode ?? "prompt") === "prompt" &&
-        product.isStreaming(sessionId)
+        product.isBusy(sessionId)
       ) {
         return json(
           {
@@ -41,15 +41,21 @@ export async function handleMessagesCompatibility(
           409,
         );
       }
+      const stream = sessionLogStream(product, sessionId, request, 0, {
+        closeOnTerminal: true,
+      });
       void product
         .prompt(
           { text: parsed.text, files: parsed.files },
           { thebeSessionId: sessionId, mode: parsed.mode },
         )
-        .catch(() => {});
-      return sessionLogStream(product, sessionId, request, 0, {
-        closeOnTerminal: true,
-      });
+        .catch((error) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          product.emitLog(sessionId, { type: "error", message });
+          product.emitLog(sessionId, { type: "session_end", text: "" });
+        });
+      return stream;
     }
     const result = await product.prompt(
       { text: parsed.text, files: parsed.files },

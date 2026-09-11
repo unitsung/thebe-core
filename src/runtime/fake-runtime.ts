@@ -56,6 +56,7 @@ type FakeSessionState = {
   abortWaiters: Array<() => void>;
   leafId?: string;
   toolAborts: Map<string, AbortController>;
+  probeReply?: string;
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [
@@ -161,6 +162,7 @@ export function createFakeRuntime(
   let compactCalls = 0;
   const compactInstructions: Array<string | undefined> = [];
   let quiesced = false;
+  const livenessRegistry = new Map<string, () => boolean>();
 
   function queueTurns(turns: FakeQueuedTurn[]): void {
     queue.push(...turns);
@@ -189,6 +191,17 @@ export function createFakeRuntime(
 
     async function runQueued(): Promise<void> {
       const turn = queue.shift();
+      if (!turn && state.probeReply) {
+        emit({ type: "text_delta", text: state.probeReply });
+        state.messages.push({
+          id: randomUUID(),
+          role: "assistant",
+          text: state.probeReply,
+        });
+        emit({ type: "turn_end" });
+        emit({ type: "session_end", text: state.probeReply });
+        return;
+      }
       if (!turn || turn.kind === "hang") {
         await new Promise<void>((_resolve, reject) => {
           if (aborted) {
@@ -394,6 +407,9 @@ export function createFakeRuntime(
       },
       async abort(): Promise<void> {
         aborted = true;
+        for (const controller of state.toolAborts.values()) {
+          controller.abort();
+        }
         emit({ type: "interrupted" });
         const waiters = state.abortWaiters.splice(0);
         for (const waiter of waiters) {
@@ -477,7 +493,11 @@ export function createFakeRuntime(
         state.thinkingLevel = level;
       },
       async stopToolCall(toolCallId: string): Promise<void> {
-        state.toolAborts.get(toolCallId)?.abort();
+        const controller = state.toolAborts.get(toolCallId);
+        if (!controller) {
+          return;
+        }
+        controller.abort();
         state.toolAborts.delete(toolCallId);
         emit({
           type: "tool_end",
@@ -681,6 +701,11 @@ export function createFakeRuntime(
         toolsRequiringApproval: [...(create.toolsRequiringApproval ?? [])],
         abortWaiters: [],
         toolAborts: new Map(),
+        probeReply:
+          (create.builtinTools?.length ?? -1) === 0 &&
+          create.customTools.length === 0
+            ? "ok"
+            : undefined,
       };
       if (!create.inMemory) {
         sessions.set(id, state);
@@ -770,6 +795,27 @@ export function createFakeRuntime(
     },
     isQuiesced(): boolean {
       return quiesced;
+    },
+    registerSessionLiveness(
+      sessionId: string,
+      isActive: () => boolean,
+    ): () => void {
+      livenessRegistry.set(sessionId, isActive);
+      return () => {
+        livenessRegistry.delete(sessionId);
+      };
+    },
+    reapInactiveSessions(): number {
+      let reaped = 0;
+      for (const [sessionId, isActive] of [...livenessRegistry.entries()]) {
+        if (isActive()) {
+          continue;
+        }
+        livenessRegistry.delete(sessionId);
+        sessions.delete(sessionId);
+        reaped += 1;
+      }
+      return reaped;
     },
   };
 

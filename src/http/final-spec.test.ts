@@ -37,12 +37,20 @@ describe("thebe spec alignment tests", () => {
         AWS_ACCESS_KEY: "aws-key",
         PI_SESSION_ID: "pi-session-1",
         PI_OPENAI_KEY: "sk-pi-secret",
+        PI_AGENT_DIR: "/secret/pi-agent",
+        PI_CREDENTIAL: "cred",
+        ARCANE_BASE_URL: "http://arcane.local",
+        AWS_ACCESS_KEY_ID: "AKIA",
       };
       const sanitized = sanitizeBashEnv(hostEnv);
       expect(sanitized.PATH).toBe("/usr/local/bin:/usr/bin");
       expect(sanitized.USER).toBe("thebe-user");
       expect(sanitized.PI_SESSION_ID).toBe("pi-session-1");
       expect(sanitized.PI_OPENAI_KEY).toBeUndefined();
+      expect(sanitized.PI_AGENT_DIR).toBeUndefined();
+      expect(sanitized.PI_CREDENTIAL).toBeUndefined();
+      expect(sanitized.ARCANE_BASE_URL).toBeUndefined();
+      expect(sanitized.AWS_ACCESS_KEY_ID).toBeUndefined();
       expect(sanitized.THEBE_API_TOKEN).toBeUndefined();
       expect(sanitized.THEBE_SERVER_SECRET).toBeUndefined();
       expect(sanitized.DATABASE_URL).toBeUndefined();

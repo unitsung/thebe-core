@@ -5,6 +5,7 @@ import { ArcaneAdapter } from "../adapters/arcane-adapter.ts";
 import { applyThebeApiKey } from "../auth/credentials.ts";
 import { envLocalCandidates, loadEnvLocal } from "../config/env.ts";
 import { createThebeApp } from "./app.ts";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./service/context.ts";
 import type { ThebeProduct } from "./service.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createPiCodingAgentRuntime } from "../runtime/pi/pi-coding-agent-runtime.ts";
@@ -104,7 +105,11 @@ export async function bootstrapThebe(
     process.env.THEBE_PRODUCT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
 
-  const idleMs = Number(process.env.THEBE_SESSION_IDLE_TIMEOUT_MS ?? "0");
+  const idleRaw = process.env.THEBE_SESSION_IDLE_TIMEOUT_MS;
+  const idleParsed =
+    idleRaw === undefined || idleRaw.trim() === ""
+      ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
+      : Number(idleRaw);
   const app = createThebeApp({
     runtime,
     provider,
@@ -115,7 +120,7 @@ export async function bootstrapThebe(
     model: defaultModel,
     allowedHosts: options?.allowedHosts,
     sessionIdleTimeoutMs:
-      Number.isFinite(idleMs) && idleMs > 0 ? idleMs : undefined,
+      Number.isFinite(idleParsed) && idleParsed > 0 ? idleParsed : 0,
   });
 
   return {

@@ -386,4 +386,5 @@ export interface AgentRuntime {
     sessionId: string,
     isActive: () => boolean,
   ): () => void;
+  reapInactiveSessions?(): number;
 }

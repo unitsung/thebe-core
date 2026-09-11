@@ -71,6 +71,20 @@ export async function handleMcp(
   const body = await readJson(request);
   const id = body.id ?? 1;
   const method = body.method;
+  if (method === "tools/call" && product?.isQuiesced()) {
+    return json(
+      {
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: -32003,
+          message:
+            "System is quiesced for maintenance; write operations are temporarily disabled",
+        },
+      },
+      503,
+    );
+  }
   if (method === "tools/list") {
     return json({
       jsonrpc: "2.0",

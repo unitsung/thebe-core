@@ -10,8 +10,10 @@ export type ThebeListenConfig = {
 
 /**
  * Resolve HTTP bind settings after `.env.local` has been loaded.
- * Wildcard binds (`0.0.0.0` / `::`) skip the Host allowlist unless
- * `THEBE_ALLOWED_HOSTS` is set, so LAN access keeps working.
+ * Host allowlist is always on (loopback plus bind host). Wildcard binds
+ * (`0.0.0.0` / `::`) still require `THEBE_ALLOWED_HOSTS` for LAN Host
+ * headers; otherwise DNS-rebinding Origin==Host of an attacker host
+ * would pass.
  */
 export function resolveThebeListen(
   env: NodeJS.ProcessEnv = process.env,
@@ -38,12 +40,9 @@ export function resolveThebeListen(
 export function resolveAllowedHosts(
   bindHost: string,
   extra: string[] = [],
-): string[] | undefined {
+): string[] {
   const extras = extra.map((value) => value.trim()).filter(Boolean);
   const wildcard = bindHost === "0.0.0.0" || bindHost === "::";
-  if (wildcard && extras.length === 0) {
-    return undefined;
-  }
   const hosts = new Set(["127.0.0.1", "localhost", "::1"]);
   if (!wildcard && bindHost) {
     hosts.add(bindHost);

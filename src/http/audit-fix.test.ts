@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 import { canonicalJson } from "../audit/audit-log.ts";
 import { createThebeApp } from "../product/app.ts";
+import { createPolicyEngine } from "../policy/policy-engine.ts";
 import { createThebeProduct } from "../product/service.ts";
 import { assertValidSessionId, createProductStore } from "../product/store.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createFakeRuntime } from "../runtime/fake-runtime.ts";
+import { createContainerTools } from "../tools/container-tools.ts";
+import { wrapCustomTools } from "../product/wrap-tools.ts";
+import { hashParameters } from "../audit/audit-log.ts";
+import { resolveAllowedHosts } from "./bind.ts";
+import { drainThebeHttpServer } from "./drain.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 import { listenThebeHttp, MAX_HTTP_BODY_BYTES } from "./listen.ts";
 
@@ -301,5 +307,269 @@ describe("audit remediation", () => {
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const text = await res.text();
     expect(text).toMatch(/event: (auth|device_code|success)/);
+  });
+
+  it("remember allow for bash does not authorize a different command", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after-ls" },
+      { kind: "tools", calls: [{ name: "bash", args: { command: "rm -rf /" } }] },
+      { kind: "text", text: "after-rm" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+    });
+    const first = product.prompt("ls");
+    await vi.waitFor(() => {
+      expect(product.pendingPermissionIds().length).toBe(1);
+    });
+    const sessionId = product.lastThebeSessionId()!;
+    await product.resolvePermission(sessionId, product.pendingPermissionIds()[0]!, {
+      response: "allow",
+      remember: true,
+    });
+    await first;
+    const meta = await product.getSession(sessionId);
+    expect(meta.rememberedPermissions?.bash).toBeUndefined();
+    expect(
+      meta.rememberedPermissions?.[
+        `bash:${hashParameters({ command: "ls" })}`
+      ],
+    ).toBe("allow");
+
+    const second = product.prompt("rm", { thebeSessionId: sessionId });
+    await vi.waitFor(() => {
+      expect(product.pendingPermissionIds().length).toBe(1);
+    });
+    await product.resolvePermission(sessionId, product.pendingPermissionIds()[0]!, {
+      response: "deny",
+    });
+    const result = await second;
+    expect(result.text).toBe("after-rm");
+  });
+
+  it("createThebeApp default Host allowlist rejects attacker Origin==Host", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      version: "0.1.0",
+    });
+    const res = await app.handler.handle(
+      new Request("http://evil.com:8787/v1/session", {
+        method: "POST",
+        headers: {
+          host: "evil.com:8787",
+          origin: "http://evil.com:8787",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects mutating requests whose Host is an unbound attacker on wildcard bind", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      version: "0.1.0",
+      allowedHosts: resolveAllowedHosts("0.0.0.0"),
+    });
+    const res = await app.handler.handle(
+      new Request("http://evil.com:8787/v1/session", {
+        method: "POST",
+        headers: {
+          host: "evil.com:8787",
+          origin: "http://evil.com:8787",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it("provider /test without static-only opt-in actually probes the model", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      version: "0.1.0",
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/fake/api-key", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey: "k" }),
+      }),
+    );
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/fake/test", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; message?: string };
+    expect(body.ok).toBe(true);
+    expect(body.message).toMatch(/probed/);
+  });
+
+  it("drainThebeHttpServer waits for server.close after quiesce", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      version: "0.1.0",
+    });
+    const { server, url } = await listenThebeHttp(app.handler, {
+      host: "127.0.0.1",
+      port: 0,
+    });
+    let closed = false;
+    const original = server.close.bind(server);
+    server.close = ((cb?: (err?: Error) => void) => {
+      closed = true;
+      return original(cb);
+    }) as typeof server.close;
+    await drainThebeHttpServer(server, () => app.product.quiesce());
+    expect(closed).toBe(true);
+    expect(app.product.isQuiesced()).toBe(true);
+    await expect(fetch(`${url}/v1/health`)).rejects.toThrow();
+  });
+
+  it("stopToolCall aborts an in-flight custom tool", async () => {
+    let aborted = false;
+    const hanging = {
+      name: "slow",
+      label: "Slow",
+      description: "hangs until aborted",
+      parameters: { type: "object", properties: {} },
+      execute: async (
+        _id: string,
+        _params: unknown,
+        signal?: AbortSignal,
+      ) => {
+        await new Promise<void>((_resolve, reject) => {
+          const onAbort = () => {
+            aborted = true;
+            reject(new Error("aborted"));
+          };
+          if (signal?.aborted) {
+            onAbort();
+            return;
+          }
+          signal?.addEventListener("abort", onAbort, { once: true });
+        });
+        return { content: [{ type: "text" as const, text: "done" }], details: {} };
+      },
+    };
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "slow", id: "call-1" }] },
+      { kind: "text", text: "after" },
+    ]);
+    const session = await fake.runtime.createSession({
+      customTools: [hanging],
+      builtinTools: ["bash"],
+    });
+    const pending = session.prompt("go");
+    await vi.waitFor(async () => {
+      await session.stopToolCall("call-1");
+      expect(aborted).toBe(true);
+    });
+    await Promise.allSettled([pending]);
+    expect(aborted).toBe(true);
+  });
+
+  it("wrapCustomTools is the only audit writer for container tools", async () => {
+    const records: unknown[] = [];
+    const policy = createPolicyEngine({ now: () => new Date() });
+    const audit = {
+      append: async (record: unknown) => {
+        records.push(record);
+      },
+    };
+    const tools = wrapCustomTools(
+      createContainerTools(mockProvider(), { policy, callerId: "test" }),
+      { policy, audit: audit as never },
+    );
+    await tools[0]!.execute("c1", {});
+    expect(records).toHaveLength(1);
+  });
+
+  it("idle reap disposes opened sessions when configured", async () => {
+    let now = Date.parse("2026-01-01T00:00:00.000Z");
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      now: () => new Date(now),
+      sessionIdleTimeoutMs: 1_000,
+    });
+    await product.createSession();
+    now += 5_000;
+    const result = await product.reapIdleSessions(1_000);
+    expect(result.reaped).toBeGreaterThan(0);
+  });
+
+  it("branch_in_place on a cold parent keeps the same runtime session", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "one" }]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+    });
+    const parent = await product.createSession();
+    await product.send("hi", parent.thebeSessionId);
+    await product.interrupt(parent.thebeSessionId);
+    const child = await product.fork(parent.thebeSessionId, {
+      mode: "branch_in_place",
+    });
+    expect(child.runtimeSessionId).toBe(parent.runtimeSessionId);
+    expect(child.inPlace).toBe(true);
+    expect(child.thebeSessionId).not.toBe(parent.thebeSessionId);
+  });
+
+  it("quiesce blocks remaining auth writes including DELETE /v1/auth", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+      version: "0.1.0",
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/system/quiesce", { method: "POST" }),
+    );
+    const del = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/auth/fake", { method: "DELETE" }),
+    );
+    expect(del.status).toBe(503);
+    const key = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/fake/api-key", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ apiKey: "x" }),
+      }),
+    );
+    expect(key.status).toBe(503);
+    const mcp = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "container.list", arguments: {} },
+        }),
+      }),
+    );
+    expect(mcp.status).toBe(503);
   });
 });

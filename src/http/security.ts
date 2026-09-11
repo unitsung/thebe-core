@@ -22,7 +22,15 @@ export function validateRequestSecurity(
     return { ok: true };
   }
 
-  const host = request.headers.get("host");
+  const host =
+    request.headers.get("host") ??
+    (() => {
+      try {
+        return new URL(request.url).host;
+      } catch {
+        return null;
+      }
+    })();
   if (allowedHosts && allowedHosts.size > 0) {
     if (!host || !hostInAllowlist(host, allowedHosts)) {
       return { ok: false, reason: "host not allowed" };

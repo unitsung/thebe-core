@@ -118,18 +118,24 @@ export function wrapSession(
       await session.abort();
     },
     async stopToolCall(toolCallId: string): Promise<void> {
-      toolControllers?.get(toolCallId)?.abort();
+      const controller = toolControllers?.get(toolCallId);
+      const hadController = Boolean(controller);
+      controller?.abort();
       const bash = session as {
         abortBash?: () => void | Promise<void>;
       };
-      await bash.abortBash?.();
-      emit({
-        type: "tool_end",
-        toolName: "interrupted",
-        toolCallId,
-        isError: true,
-        text: "tool call stopped by user",
-      });
+      if (!hadController) {
+        await bash.abortBash?.();
+      }
+      if (hadController || typeof bash.abortBash === "function") {
+        emit({
+          type: "tool_end",
+          toolName: "interrupted",
+          toolCallId,
+          isError: true,
+          text: "tool call stopped by user",
+        });
+      }
     },
     subscribe(listener) {
       listeners.add(listener);

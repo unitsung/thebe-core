@@ -66,6 +66,12 @@ export function createPromptApi(ctx: ProductContext) {
     isStreaming(thebeSessionId: string): boolean {
       return streaming.has(thebeSessionId);
     },
+    isBusy(thebeSessionId: string): boolean {
+      return streaming.has(thebeSessionId) || ctx.promptLocks.has(thebeSessionId);
+    },
+    emitLog(thebeSessionId: string, event: NormalizedEvent): void {
+      ctx.appendEvent(thebeSessionId, event);
+    },
     recentEvents(limit?: number) {
       return ctx.recentEvents(limit);
     },
