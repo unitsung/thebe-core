@@ -96,6 +96,22 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
 export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
   const out: RuntimeMessage[] = [];
   let index = 0;
+
+  const toolCallArgs = new Map<string, unknown>();
+  for (const raw of messages) {
+    const m = raw as { role?: string; content?: unknown };
+    if (m?.role === "assistant" && Array.isArray(m.content)) {
+      for (const block of m.content) {
+        if (block && typeof block === "object") {
+          const b = block as { type?: string; id?: string; arguments?: unknown };
+          if (b.type === "toolCall" && b.id) {
+            toolCallArgs.set(b.id, b.arguments);
+          }
+        }
+      }
+    }
+  }
+
   for (const raw of messages) {
     const message = raw as {
       id?: string;
@@ -105,6 +121,8 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
       toolCallId?: string;
       isError?: boolean;
       errorMessage?: string;
+      args?: unknown;
+      details?: unknown;
     };
     const id = typeof message.id === "string" ? message.id : `pi-${index}`;
     index += 1;
@@ -122,11 +140,15 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
         id,
         role: "assistant",
         text: contentToText(message.content) || message.errorMessage || "",
+        thinking: contentThinking(message.content),
         attachments: contentAttachments(message.content),
       });
       continue;
     }
     if (message.role === "toolResult" || message.role === "tool") {
+      const args = message.toolCallId
+        ? toolCallArgs.get(message.toolCallId) ?? message.args
+        : message.args;
       out.push({
         id,
         role: "tool",
@@ -134,10 +156,26 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
         toolName: message.toolName,
         toolCallId: message.toolCallId,
         isError: message.isError,
+        args: redactedArgs(args),
+        details: message.details,
       });
     }
   }
   return out;
+}
+
+function contentThinking(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object") {
+      const b = block as { type?: string; thinking?: string };
+      if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
+        parts.push(b.thinking.trim());
+      }
+    }
+  }
+  return parts.length > 0 ? parts.join("\n") : undefined;
 }
 
 function contentAttachments(

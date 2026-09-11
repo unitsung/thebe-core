@@ -39,8 +39,12 @@ export class ElapsedWorking extends Loader {
     this.refresh();
   }
 
+  getElapsedSeconds(): number {
+    return Math.max(0, Math.floor((Date.now() - this.startedAt) / 1000));
+  }
+
   private refresh(): void {
-    const seconds = Math.max(0, Math.floor((Date.now() - this.startedAt) / 1000));
+    const seconds = this.getElapsedSeconds();
     this.setMessage(`${this.label} ${seconds}s`);
   }
 
@@ -56,6 +60,9 @@ export class ElapsedWorking extends Loader {
 export class ThinkingBlock {
   private body = "";
   hidden: boolean;
+  private startedAt = Date.now();
+  private finished = false;
+  private durationSeconds?: number;
 
   constructor(hidden: boolean) {
     this.hidden = hidden;
@@ -63,6 +70,25 @@ export class ThinkingBlock {
 
   append(delta: string): void {
     this.body += delta;
+  }
+
+  finish(seconds?: number): void {
+    if (!this.finished) {
+      this.finished = true;
+      this.durationSeconds =
+        seconds ?? Math.max(1, Math.round((Date.now() - this.startedAt) / 1000));
+    }
+  }
+
+  isFinished(): boolean {
+    return this.finished;
+  }
+
+  getDurationSeconds(): number {
+    if (this.durationSeconds !== undefined) {
+      return this.durationSeconds;
+    }
+    return Math.max(1, Math.round((Date.now() - this.startedAt) / 1000));
   }
 
   setHidden(hidden: boolean): void {
@@ -79,13 +105,63 @@ export class ThinkingBlock {
     if (this.isEmpty()) {
       return [];
     }
+    const sec = this.getDurationSeconds();
     if (this.hidden) {
-      return [truncateToWidth(chalk.dim("  reasoning hidden · Ctrl+T"), width, "")];
+      const label = this.finished
+        ? `  thought for ${sec}s · Ctrl+T`
+        : `  Thinking (${sec}s)... · Ctrl+T`;
+      return [truncateToWidth(chalk.dim(label), width, "")];
     }
+    const header = this.finished
+      ? chalk.dim(`  thought for ${sec}s · Ctrl+T`)
+      : chalk.dim(`  Thinking (${sec}s)... · Ctrl+T`);
     const lines = this.body.replace(/\s+$/, "").split("\n");
-    const styled = lines.map((line) => chalk.italic(chalk.dim(line)));
-    return styled.map((line) => truncateToWidth(`  ${line}`, width, ""));
+    const styled = lines.map((line) => chalk.italic(chalk.dim(`  ${line}`)));
+    return [
+      truncateToWidth(header, width, ""),
+      ...styled.map((l) => truncateToWidth(l, width, "")),
+    ];
   }
+}
+
+function formatToolArgs(toolName: string, args: unknown): string {
+  if (!args || typeof args !== "object") {
+    return typeof args === "string" ? args : "";
+  }
+  const record = args as Record<string, unknown>;
+  if (typeof record.command === "string") {
+    return record.command;
+  }
+  if (typeof record.path === "string") {
+    return record.path;
+  }
+  if (typeof record.file_path === "string") {
+    return record.file_path;
+  }
+  if (typeof record.TargetFile === "string") {
+    return record.TargetFile;
+  }
+  if (typeof record.pattern === "string") {
+    return record.path ? `${record.pattern} in ${record.path}` : record.pattern;
+  }
+  if (typeof record.query === "string") {
+    return record.query;
+  }
+  if (typeof record.prompt === "string") {
+    return record.prompt.length > 80 ? `${record.prompt.slice(0, 77)}...` : record.prompt;
+  }
+  if (typeof record.url === "string") {
+    return record.url;
+  }
+  if (typeof record.Url === "string") {
+    return record.Url;
+  }
+  for (const [, val] of Object.entries(record)) {
+    if (typeof val === "string" && val.trim()) {
+      return val.length > 80 ? `${val.slice(0, 77)}...` : val;
+    }
+  }
+  return "";
 }
 
 function pathFromArgs(args: unknown): string {
@@ -98,6 +174,9 @@ function pathFromArgs(args: unknown): string {
   }
   if (typeof record.file_path === "string") {
     return record.file_path;
+  }
+  if (typeof record.TargetFile === "string") {
+    return record.TargetFile;
   }
   return "";
 }
@@ -140,8 +219,8 @@ export function createToolRenderers(toolName: string) {
   return {
     renderCall(args: unknown, theme: Theme) {
       const title = theme.fg("toolTitle", theme.bold(toolName));
-      const path = pathFromArgs(args);
-      const rest = path ? ` ${theme.fg("accent", path)}` : "";
+      const argStr = formatToolArgs(toolName, args);
+      const rest = argStr ? ` ${theme.fg("accent", argStr)}` : "";
       return new Text(`${title}${rest}`, 0, 0);
     },
     renderResult(

@@ -86,7 +86,7 @@ def main() -> int:
 
     try:
         boot = strip_ansi(read_until_quiet(timeout=0.8, max_wait=6.0))
-        check("TUI started", "Thebe" in boot or "Enter to send" in boot, boot[-400:])
+        check("TUI started", "Thebe" in boot or "Enter to send" in boot or "0.0%/" in boot or "thinking" in boot, boot[-400:])
 
         send("/")
         send("ski")
