@@ -61,24 +61,61 @@ export function formatFooterLines(state: ChatFooterState): string[] {
   }
 
   const parsedModel = parseModelRef(state.model);
+  const providerId = parsedModel.providerId;
   const modelId = parsedModel.modelId || state.model || "no model";
-  const rightSide = ` ${modelId} • ${state.thinking}`;
-  const statsLeft = statsParts.join(" ");
+
+  const thinkingSuffix =
+    state.thinking === "off" ? " • thinking off" : ` • ${state.thinking}`;
+  const rightSideWithoutProvider = `${modelId}${thinkingSuffix}`;
+  let rightSide = providerId
+    ? `(${providerId}) ${rightSideWithoutProvider}`
+    : rightSideWithoutProvider;
+
+  const minPadding = 2;
+  let statsLeft = statsParts.join(" ");
+  let statsLeftWidth = visibleWidth(statsLeft);
+
+  if (statsLeftWidth > width) {
+    statsLeft = truncateToWidth(statsLeft, width, "...");
+    statsLeftWidth = visibleWidth(statsLeft);
+  }
+
+  // If adding provider exceeds width, drop provider prefix
+  if (statsLeftWidth + minPadding + visibleWidth(rightSide) > width) {
+    rightSide = rightSideWithoutProvider;
+  }
 
   let statsLine: string;
-  if (width < 35) {
-    statsLine = chalk.dim(truncateToWidth(statsLeft, width, "..."));
+  const rightSideWidth = visibleWidth(rightSide);
+  const totalNeeded = statsLeftWidth + minPadding + rightSideWidth;
+
+  if (totalNeeded <= width) {
+    const padding = " ".repeat(
+      Math.max(0, width - statsLeftWidth - rightSideWidth),
+    );
+    statsLine = chalk.dim(statsLeft) + padding + chalk.dim(rightSide);
   } else {
-    const statsLeftWidth = visibleWidth(statsLeft);
-    const availableForRight = width - statsLeftWidth;
+    const availableForRight = width - statsLeftWidth - minPadding;
     if (availableForRight > 0) {
-      const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
-      const padding = " ".repeat(
-        Math.max(0, width - statsLeftWidth - visibleWidth(truncatedRight)),
-      );
-      statsLine = chalk.dim(statsLeft) + padding + chalk.dim(truncatedRight);
+      // Preserve thinking level when truncating model ID
+      const thinkingSuffixWidth = visibleWidth(thinkingSuffix);
+      if (availableForRight > thinkingSuffixWidth + 4) {
+        const availableForModel = availableForRight - thinkingSuffixWidth;
+        const truncatedModel = truncateToWidth(modelId, availableForModel, "…");
+        const fittedRight = `${truncatedModel}${thinkingSuffix}`;
+        const padding = " ".repeat(
+          Math.max(0, width - statsLeftWidth - visibleWidth(fittedRight)),
+        );
+        statsLine = chalk.dim(statsLeft) + padding + chalk.dim(fittedRight);
+      } else {
+        const truncatedRight = truncateToWidth(rightSide, availableForRight, "");
+        const padding = " ".repeat(
+          Math.max(0, width - statsLeftWidth - visibleWidth(truncatedRight)),
+        );
+        statsLine = chalk.dim(statsLeft) + padding + chalk.dim(truncatedRight);
+      }
     } else {
-      statsLine = chalk.dim(truncateToWidth(statsLeft, width, "..."));
+      statsLine = chalk.dim(statsLeft);
     }
   }
 
@@ -113,18 +150,6 @@ export function formatFooterLines(state: ChatFooterState): string[] {
       respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt")}`;
     }
     lines.push(truncateToWidth(respondingHint, width, ""));
-  } else {
-    let idleHint: string;
-    if (width >= 95) {
-      idleHint = chalk.dim("Enter: send · Alt+Enter: queue · /: menu · Ctrl+P: model · Shift+Tab: level · Ctrl+T: fold · Ctrl+O: tools");
-    } else if (width >= 70) {
-      idleHint = chalk.dim("Enter: send · Alt+Enter: queue · /: menu · Ctrl+P: model · Ctrl+T/O: fold");
-    } else if (width >= 50) {
-      idleHint = chalk.dim("Enter: send · /: menu · Ctrl+P: model · Esc: cancel");
-    } else {
-      idleHint = chalk.dim("Enter: send · /: menu");
-    }
-    lines.push(truncateToWidth(idleHint, width, ""));
   }
 
   return lines;

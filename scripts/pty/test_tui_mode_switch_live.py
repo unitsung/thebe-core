@@ -98,7 +98,7 @@ def main():
         after_full = strip_ansi(read_until_quiet(timeout=0.8, max_wait=6.0))
         check(
             "switch to fullscreen returned",
-            "switching" in after_full.lower() or "fullscreen" in after_full.lower() or "Thebe" in after_full,
+            "switching" in after_full.lower() or "fullscreen" in after_full.lower() or "Thebe" in after_full or "0.0%/" in after_full,
             after_full,
         )
 

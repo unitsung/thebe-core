@@ -69,7 +69,7 @@ export async function handleSystemCommand(
               autoCompact: cfg.autoCompact ?? true,
               steeringMode: cfg.steeringMode ?? "one-at-a-time",
               followUpMode: cfg.followUpMode ?? "one-at-a-time",
-              hideThinking: cfg.hideThinking ?? false,
+              hideThinking: cfg.hideThinking ?? true,
               quietStartup: cfg.quietStartup ?? false,
               fullscreenExitOutput: cfg.fullscreenExitOutput ?? "transcript",
               fullscreenScrollbar: cfg.fullscreenScrollbar ?? "auto",

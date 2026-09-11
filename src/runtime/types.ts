@@ -64,6 +64,9 @@ export type RuntimeMessage = {
   toolCallId?: string;
   isError?: boolean;
   attachments?: Array<{ mediaType?: string }>;
+  thinking?: string;
+  args?: unknown;
+  details?: unknown;
 };
 
 export type PromptFileMode = "inline" | "reference" | "lines";
