@@ -1,4 +1,31 @@
-import type { RuntimeSession, RuntimeModelRef, NormalizedEvent } from "../runtime/types.ts";
+import type { RuntimeSession, RuntimeModelRef } from "../runtime/types.ts";
+
+export type GoalEvent =
+  | {
+      type: "goal_started";
+      goal: string;
+      criteria?: string[];
+      maxIterations: number;
+    }
+  | {
+      type: "goal_iteration";
+      iteration: number;
+      maxIterations: number;
+    }
+  | {
+      type: "goal_reviewed";
+      iteration: number;
+      complete: boolean;
+      score: number;
+      critique: string;
+      remainingTasks?: string[];
+    }
+  | {
+      type: "goal_completed";
+      complete: boolean;
+      totalIterations: number;
+      summary: string;
+    };
 
 export interface GoalOptions {
   goal: string;
@@ -99,7 +126,7 @@ export interface RunGoalLoopOptions {
   session: RuntimeSession;
   options: GoalOptions;
   reviewEvaluator?: GoalReviewEvaluator;
-  onEvent?: (event: NormalizedEvent) => void;
+  onEvent?: (event: GoalEvent) => void;
 }
 
 /**
@@ -110,7 +137,7 @@ export async function runGoalLoop(params: RunGoalLoopOptions): Promise<GoalRunRe
   const maxIterations = options.maxIterations ?? 5;
   const evaluator = reviewEvaluator ?? defaultHeuristicReview;
 
-  const emit = (event: NormalizedEvent) => {
+  const emit = (event: GoalEvent) => {
     if (onEvent) {
       onEvent(event);
     }

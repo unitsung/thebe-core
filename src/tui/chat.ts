@@ -15,6 +15,7 @@ import {
   type SelectListTheme,
   type TUI,
   type TuiMode,
+  type Component,
 } from "@earendil-works/pi-tui";
 import type {
   NormalizedEvent,
@@ -891,6 +892,18 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
     tui.addInputListener((data) => {
       if (matchesKey(data, "ctrl+c")) {
         tui?.stop();
+        if (options.product) {
+          const force = setTimeout(() => process.exit(0), 1_000);
+          force.unref?.();
+          void options.product
+            .quiesce()
+            .catch(() => {})
+            .finally(() => {
+              clearTimeout(force);
+              process.exit(0);
+            });
+          return { consume: true };
+        }
         process.exit(0);
       }
       if (matchesKey(data, "escape")) {

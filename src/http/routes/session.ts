@@ -198,16 +198,34 @@ export async function handleSession(
     return json({ ok: true });
   }
   if (method === "GET" && action === "background-task" && !extra) {
-    return json({ tasks: await product.listBackgroundTasks(id) });
+    return json(
+      {
+        ok: false,
+        code: "feature_not_implemented",
+        error: "background-task tracking is not implemented",
+      },
+      501,
+    );
   }
   if (method === "POST" && action === "background-task" && parts[5] === "stop") {
-    const taskId = parts[4] ?? "";
-    await product.stopBackgroundTask(id, taskId);
-    return json({ ok: true });
+    return json(
+      {
+        ok: false,
+        code: "feature_not_implemented",
+        error: "background-task tracking is not implemented",
+      },
+      501,
+    );
   }
   if (method === "POST" && action === "background-task" && extra === "stop-all") {
-    await product.stopAllBackgroundTasks(id);
-    return json({ ok: true });
+    return json(
+      {
+        ok: false,
+        code: "feature_not_implemented",
+        error: "background-task tracking is not implemented",
+      },
+      501,
+    );
   }
   if (method === "POST" && action === "fork") {
     const body = await readJson(request);

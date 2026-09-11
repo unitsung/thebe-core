@@ -36,11 +36,13 @@ describe("thebe spec alignment tests", () => {
         ARCANE_SECRET_KEY: "arcane-key-789",
         AWS_ACCESS_KEY: "aws-key",
         PI_SESSION_ID: "pi-session-1",
+        PI_OPENAI_KEY: "sk-pi-secret",
       };
       const sanitized = sanitizeBashEnv(hostEnv);
       expect(sanitized.PATH).toBe("/usr/local/bin:/usr/bin");
       expect(sanitized.USER).toBe("thebe-user");
       expect(sanitized.PI_SESSION_ID).toBe("pi-session-1");
+      expect(sanitized.PI_OPENAI_KEY).toBeUndefined();
       expect(sanitized.THEBE_API_TOKEN).toBeUndefined();
       expect(sanitized.THEBE_SERVER_SECRET).toBeUndefined();
       expect(sanitized.DATABASE_URL).toBeUndefined();
@@ -256,6 +258,18 @@ describe("thebe spec alignment tests", () => {
         sessions: Array<{ thebeSessionId: string }>;
       };
       expect(childrenData.sessions.some((s) => s.thebeSessionId === forkedMeta.thebeSessionId)).toBe(true);
+
+      const listed = await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session"),
+      );
+      const listedData = (await listed.json()) as {
+        sessions: Array<{ thebeSessionId: string; inPlace?: boolean }>;
+      };
+      expect(
+        listedData.sessions.some(
+          (s) => s.thebeSessionId === forkedMeta.thebeSessionId,
+        ),
+      ).toBe(false);
     });
   });
 
@@ -370,9 +384,9 @@ describe("thebe spec alignment tests", () => {
           `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task`,
         ),
       );
-      expect(listRes.status).toBe(200);
-      const listData = (await listRes.json()) as { tasks: unknown[] };
-      expect(Array.isArray(listData.tasks)).toBe(true);
+      expect(listRes.status).toBe(501);
+      const listData = (await listRes.json()) as { code?: string };
+      expect(listData.code).toBe("feature_not_implemented");
 
       const stopOne = await app.handler.handle(
         new Request(
@@ -380,7 +394,7 @@ describe("thebe spec alignment tests", () => {
           { method: "POST" },
         ),
       );
-      expect(stopOne.status).toBe(200);
+      expect(stopOne.status).toBe(501);
 
       const stopAll = await app.handler.handle(
         new Request(
@@ -388,7 +402,7 @@ describe("thebe spec alignment tests", () => {
           { method: "POST" },
         ),
       );
-      expect(stopAll.status).toBe(200);
+      expect(stopAll.status).toBe(501);
     });
 
     it("supports provider testing and API key management", async () => {

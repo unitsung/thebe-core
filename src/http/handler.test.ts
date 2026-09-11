@@ -698,7 +698,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(text).toContain("id: ");
   });
 
-  it("permission duplicates 404 and resolve-after-interrupt stays 200", async () => {
+  it("permission duplicates 404 and interrupt expires the pending approval", async () => {
     const { app, session } = await sessionApp([
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
       { kind: "text", text: "after" },
@@ -724,8 +724,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         },
       ),
     );
-    expect(resolve.status).toBe(200);
-    await pending;
+    expect(resolve.status).toBe(404);
+    await Promise.allSettled([pending]);
     const again = await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session}/permission/${permissionId}`,

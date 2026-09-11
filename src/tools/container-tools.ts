@@ -70,20 +70,34 @@ export function createContainerTools(
         });
         throw new Error(decision.reason);
       }
-      const result = await layer.invoke(name, args);
-      const text = JSON.stringify(result);
-      await options.audit?.append({
-        method: name,
-        parameterHash: hashParameters(args),
-        responseBytes: Buffer.byteLength(text),
-        budgetConsumed: decision.budgetConsumed,
-        redactionFired:
-          text.includes(REDACTED) || text.includes(TRUNCATION_MARKER),
-      });
-      return {
-        content: [{ type: "text" as const, text }],
-        details: {},
-      };
+      try {
+        const result = await layer.invoke(name, args);
+        const text = JSON.stringify(result);
+        await options.audit?.append({
+          method: name,
+          parameterHash: hashParameters(args),
+          responseBytes: Buffer.byteLength(text),
+          budgetConsumed: decision.budgetConsumed,
+          redactionFired:
+            text.includes(REDACTED) || text.includes(TRUNCATION_MARKER),
+          result: "ok",
+        });
+        return {
+          content: [{ type: "text" as const, text }],
+          details: {},
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await options.audit?.append({
+          method: name,
+          parameterHash: hashParameters(args),
+          responseBytes: 0,
+          budgetConsumed: decision.budgetConsumed,
+          redactionFired: false,
+          result: "error",
+        });
+        throw new Error(message);
+      }
     };
 
   return [

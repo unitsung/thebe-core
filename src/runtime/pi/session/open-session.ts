@@ -16,6 +16,54 @@ import { toPiTool } from "./pi-tools.ts";
 import { wrapSession as wrapPiSession } from "./wrap-session.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
 
+const sessionToolControllers = new WeakMap<object, Map<string, AbortController>>();
+
+export function toolControllersFor(
+  session: object,
+): Map<string, AbortController> {
+  let map = sessionToolControllers.get(session);
+  if (!map) {
+    map = new Map();
+    sessionToolControllers.set(session, map);
+  }
+  return map;
+}
+
+function abortablePiTool<T extends { execute?: (...args: never[]) => unknown }>(
+  tool: T,
+  controllers: Map<string, AbortController>,
+): T {
+  const original = tool.execute;
+  if (typeof original !== "function") {
+    return tool;
+  }
+  return {
+    ...tool,
+    execute: async (
+      toolCallId: string,
+      params: unknown,
+      signal?: AbortSignal,
+    ) => {
+      const ac = new AbortController();
+      controllers.set(toolCallId, ac);
+      const onAbort = () => ac.abort();
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        return await (
+          original as (
+            toolCallId: string,
+            params: unknown,
+            signal?: AbortSignal,
+          ) => Promise<unknown>
+        )(toolCallId, params, ac.signal);
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+        controllers.delete(toolCallId);
+      }
+    },
+  };
+}
+
 export async function openPiSession(
   sdk: PiSdk,
   args: {
@@ -120,6 +168,7 @@ export async function openPiSession(
     compaction: { enabled: autoCompact },
   });
   settingsManager.setDefaultProjectTrust?.("always");
+  const controllers = new Map<string, AbortController>();
   const sanitizedBash = sdk.createBashTool(create.cwd ?? cwd, {
     spawnHook: (ctx: {
       command: string;
@@ -131,8 +180,12 @@ export async function openPiSession(
     }),
   });
   const piCustomTools = [
-    ...create.customTools.map((tool) => toPiTool(sdk, tool)),
-    ...(tools.includes("bash") ? [sanitizedBash] : []),
+    ...create.customTools.map((tool) =>
+      abortablePiTool(toPiTool(sdk, tool), controllers),
+    ),
+    ...(tools.includes("bash")
+      ? [abortablePiTool(sanitizedBash, controllers)]
+      : []),
   ];
 
   const requestedModel =
@@ -169,6 +222,7 @@ export async function openPiSession(
     settingsManager,
   });
   live.set(session.sessionId, session as PiSession);
+  sessionToolControllers.set(session as object, controllers);
   return wrapPiSession(
     session as PiSession,
     create,
@@ -177,5 +231,6 @@ export async function openPiSession(
     async () => {
       await args.modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
     },
+    controllers,
   );
 }

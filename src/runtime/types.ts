@@ -352,6 +352,8 @@ export interface RuntimeSession {
     options?: { excludeFromContext?: boolean },
   ): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
   getForkMessages?(): Array<{ entryId: string; text: string }>;
+  navigateTo?(leafId: string): Promise<void>;
+  getLeafId?(): string | undefined;
   dispose(): void;
 }
 

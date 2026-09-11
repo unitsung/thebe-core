@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { createThebeHttpHandler } from "./handler.ts";
 
+export const MAX_HTTP_BODY_BYTES = 10 * 1024 * 1024;
+
 export type ThebeListenOptions = {
   host?: string;
   port?: number;
@@ -60,13 +62,26 @@ async function handleNode(
     }
     res.end();
   } catch (error) {
-    res.writeHead(500, { "content-type": "application/json" });
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
+    const statusHint =
+      error && typeof error === "object" && "status" in error
+        ? Number((error as { status: unknown }).status)
+        : 500;
+    const status =
+      Number.isInteger(statusHint) && statusHint >= 400 && statusHint < 600
+        ? statusHint
+        : 500;
+    res.writeHead(status, { "content-type": "application/json" });
     res.end(
       JSON.stringify({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
       }),
     );
+    req.destroy();
   }
 }
 
@@ -81,17 +96,32 @@ async function toRequest(req: IncomingMessage): Promise<Request> {
       headers.set(key, value.join(", "));
     }
   }
+  const abort = new AbortController();
+  req.on("close", () => {
+    if (!abort.signal.aborted) {
+      abort.abort();
+    }
+  });
   const method = req.method ?? "GET";
   if (method === "GET" || method === "HEAD") {
-    return new Request(url, { method, headers });
+    return new Request(url, { method, headers, signal: abort.signal });
   }
   const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buf.length;
+    if (size > MAX_HTTP_BODY_BYTES) {
+      const error = new Error("Payload Too Large") as Error & { status: number };
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(buf);
   }
   return new Request(url, {
     method,
     headers,
     body: Buffer.concat(chunks),
+    signal: abort.signal,
   });
 }

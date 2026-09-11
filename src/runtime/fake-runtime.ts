@@ -21,6 +21,11 @@ import {
   isInlineTextFile,
 } from "./types.ts";
 import { permissionRisk, summarizeArgs } from "../tools/redaction.ts";
+import {
+  isInlineTextAttachment,
+  renderInlineTextFile,
+  renderLinesSnippet,
+} from "./prompt-files.ts";
 
 export type FakeQueuedTurn =
   | { kind: "text"; text: string }
@@ -49,6 +54,8 @@ type FakeSessionState = {
   // Shared across resumed handles of the same underlying session, like abort
   // on a real runtime session: any handle's abort unblocks a hanging turn.
   abortWaiters: Array<() => void>;
+  leafId?: string;
+  toolAborts: Map<string, AbortController>;
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [
@@ -269,16 +276,20 @@ export function createFakeRuntime(
           text = `unknown tool: ${call.name}`;
         } else {
           try {
+            const ac = new AbortController();
+            state.toolAborts.set(toolCallId, ac);
             const result = await tool.execute(
               toolCallId,
               call.args ?? {},
-              undefined,
+              ac.signal,
             );
             text = result.content.map((block) => block.text).join("\n");
             isError = Boolean(result.isError);
           } catch (error) {
             isError = true;
             text = error instanceof Error ? error.message : String(error);
+          } finally {
+            state.toolAborts.delete(toolCallId);
           }
         }
         inboundToolResults.push({
@@ -317,22 +328,8 @@ export function createFakeRuntime(
       state.reverted = undefined;
       const prompt = asPromptInput(input);
       const inlined = (prompt.files ?? [])
-        .filter(
-          (file) =>
-            (!file.mode || file.mode === "inline") &&
-            file.data &&
-            isInlineTextFile(file.mediaType),
-        )
-        .map((file) => {
-          const name = file.filename ?? "attachment";
-          let text: string;
-          try {
-            text = Buffer.from(file.data ?? "", "base64").toString("utf8");
-          } catch {
-            text = "";
-          }
-          return `[file: ${name} (${file.mediaType})]\n${text}`;
-        })
+        .filter(isInlineTextAttachment)
+        .map(renderInlineTextFile)
         .join("\n\n");
       const references = (prompt.files ?? [])
         .filter((file) => file.mode === "reference")
@@ -343,10 +340,7 @@ export function createFakeRuntime(
         .join("\n");
       const lines = (prompt.files ?? [])
         .filter((file) => file.mode === "lines")
-        .map(
-          (file) =>
-            `[file snippet: ${file.path ?? file.filename ?? "attachment"} lines ${file.lineRange?.start ?? 1}-${file.lineRange?.end ?? 1} (${file.mediaType})]`,
-        )
+        .map((file) => renderLinesSnippet(file))
         .join("\n");
       const otherFiles = (prompt.files ?? [])
         .filter(
@@ -483,6 +477,8 @@ export function createFakeRuntime(
         state.thinkingLevel = level;
       },
       async stopToolCall(toolCallId: string): Promise<void> {
+        state.toolAborts.get(toolCallId)?.abort();
+        state.toolAborts.delete(toolCallId);
         emit({
           type: "tool_end",
           toolName: "interrupted",
@@ -490,6 +486,12 @@ export function createFakeRuntime(
           isError: true,
           text: "tool call stopped by user",
         });
+      },
+      async navigateTo(leafId: string): Promise<void> {
+        state.leafId = leafId;
+      },
+      getLeafId(): string | undefined {
+        return state.leafId ?? state.messages.at(-1)?.id;
       },
       async getContextUsage(): Promise<ThebeSessionContext> {
         const totalChars = state.messages.reduce(
@@ -678,6 +680,7 @@ export function createFakeRuntime(
         permissionHandler: create.permissionHandler,
         toolsRequiringApproval: [...(create.toolsRequiringApproval ?? [])],
         abortWaiters: [],
+        toolAborts: new Map(),
       };
       if (!create.inMemory) {
         sessions.set(id, state);
@@ -707,6 +710,12 @@ export function createFakeRuntime(
         }
         copied = copied.slice(0, index + 1);
       }
+      if (fork?.mode === "branch_in_place") {
+        applyCreate(parent, create);
+        parent.leafId = fork.atEntryId ?? parent.messages.at(-1)?.id;
+        parent.messages = parentMessages;
+        return makeSession(parent);
+      }
       const id = randomUUID();
       const state: FakeSessionState = {
         id,
@@ -725,6 +734,8 @@ export function createFakeRuntime(
           ...(create.toolsRequiringApproval ?? parent.toolsRequiringApproval),
         ],
         abortWaiters: [],
+        toolAborts: new Map(),
+        leafId: copied.at(-1)?.id,
       };
       sessions.set(id, state);
       parent.messages = parentMessages;

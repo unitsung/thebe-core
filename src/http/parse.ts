@@ -82,6 +82,7 @@ type ParsedPromptBody =
       mode: PromptMode;
       files: PromptFile[];
       sessionId?: string;
+      stream?: boolean;
     }
   | { ok: false; error: string; status?: number };
 
@@ -109,7 +110,8 @@ export async function readPromptBody(request: Request): Promise<ParsedPromptBody
       : typeof body.thebeSessionId === "string"
         ? body.thebeSessionId
         : undefined;
-  return { ok: true, text, mode, files: filesResult.files, sessionId };
+  const stream = body.stream === true;
+  return { ok: true, text, mode, files: filesResult.files, sessionId, stream };
 }
 
 function parsePromptFiles(value: unknown): ParsedPromptBody {
@@ -165,10 +167,20 @@ function parsePromptFiles(value: unknown): ParsedPromptBody {
     }
 
     if (mode === "lines") {
-      if (!path && !filename) {
-        return { ok: false, error: "lines mode requires path or filename" };
+      if (!path && !filename && !data) {
+        return {
+          ok: false,
+          error: "lines mode requires path, filename, or data",
+        };
       }
-      files.push({ mode: "lines", mediaType, path, filename, lineRange });
+      files.push({
+        mode: "lines",
+        mediaType,
+        path,
+        filename,
+        lineRange,
+        data,
+      });
       continue;
     }
 
@@ -214,23 +226,29 @@ export function oauthCallbackInput(body: Record<string, unknown>): string | unde
 
 export function productError(error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
-  const statusHint =
+  const extra =
     error instanceof Error
-      ? (error as Error & { status?: unknown }).status
+      ? (error as Error & { status?: unknown; code?: unknown })
       : undefined;
+  const statusHint = extra?.status;
+  const code = extra?.code;
+  const body: Record<string, unknown> = { ok: false, error: message };
+  if (typeof code === "string") {
+    body.code = code;
+  }
   if (
     typeof statusHint === "number" &&
     Number.isInteger(statusHint) &&
     statusHint >= 400 &&
     statusHint < 600
   ) {
-    return json({ ok: false, error: message }, statusHint);
+    return json(body, statusHint);
   }
   const notFound =
-    /unknown|no session|not found|ProductStore has no directory/i.test(
+    /unknown|no session|not found|ProductStore has no directory|invalid session id/i.test(
       message,
     );
-  return json({ ok: false, error: message }, notFound ? 404 : 500);
+  return json(body, notFound ? 404 : 500);
 }
 
 export const SESSION_LOG_IDLE_MS = 5 * 60 * 1000;
@@ -251,7 +269,7 @@ export function sessionLogStream(
   thebeSessionId: string,
   request: Request,
   after: number,
-  options?: { idleMs?: number },
+  options?: { idleMs?: number; closeOnTerminal?: boolean },
 ): Response {
   if (activeSessionLogStreams >= maxSessionLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
@@ -302,6 +320,15 @@ export function sessionLogStream(
           controller.enqueue(encoder.encode(line));
           bumpIdle();
         } catch {
+          close();
+          return;
+        }
+        if (
+          options?.closeOnTerminal &&
+          (event.type === "session_end" ||
+            event.type === "error" ||
+            event.type === "interrupted")
+        ) {
           close();
         }
       };

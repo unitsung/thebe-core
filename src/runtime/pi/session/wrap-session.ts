@@ -13,6 +13,11 @@ import {
   asPromptInput,
   isInlineTextFile,
 } from "../../types.ts";
+import {
+  isInlineTextAttachment,
+  renderInlineTextFile,
+  renderLinesSnippet,
+} from "../../prompt-files.ts";
 import { mapPiEvent, mapPiMessages } from "./map-events.ts";
 import { exportPiSession } from "./pi-export.ts";
 import type { PiSession } from "./pi-session.ts";
@@ -26,6 +31,7 @@ export function wrapSession(
   existingListeners: Set<(event: NormalizedEvent) => void> | undefined,
   resolveModelRef: (providerId: string, modelId: string) => PiModelShape | undefined,
   refreshModels?: () => Promise<void>,
+  toolControllers?: Map<string, AbortController>,
 ): RuntimeSession {
   const listeners =
     existingListeners ?? new Set<(event: NormalizedEvent) => void>();
@@ -70,22 +76,8 @@ export function wrapSession(
         },
       }));
     const inlined = (prompt.files ?? [])
-      .filter(
-        (file) =>
-          (!file.mode || file.mode === "inline") &&
-          file.data &&
-          isInlineTextFile(file.mediaType),
-      )
-      .map((file) => {
-        const name = file.filename ?? "attachment";
-        let text: string;
-        try {
-          text = Buffer.from(file.data!, "base64").toString("utf8");
-        } catch {
-          text = "";
-        }
-        return `[file: ${name} (${file.mediaType})]\n${text}`;
-      })
+      .filter(isInlineTextAttachment)
+      .map(renderInlineTextFile)
       .join("\n\n");
     const references = (prompt.files ?? [])
       .filter((file) => file.mode === "reference")
@@ -96,10 +88,7 @@ export function wrapSession(
       .join("\n");
     const lines = (prompt.files ?? [])
       .filter((file) => file.mode === "lines")
-      .map(
-        (file) =>
-          `[file snippet: ${file.path ?? file.filename ?? "attachment"} lines ${file.lineRange?.start ?? 1}-${file.lineRange?.end ?? 1} (${file.mediaType})]`,
-      )
+      .map((file) => renderLinesSnippet(file, create.cwd))
       .join("\n");
     const otherFiles = (prompt.files ?? [])
       .filter(
@@ -129,6 +118,11 @@ export function wrapSession(
       await session.abort();
     },
     async stopToolCall(toolCallId: string): Promise<void> {
+      toolControllers?.get(toolCallId)?.abort();
+      const bash = session as {
+        abortBash?: () => void | Promise<void>;
+      };
+      await bash.abortBash?.();
       emit({
         type: "tool_end",
         toolName: "interrupted",
@@ -153,6 +147,12 @@ export function wrapSession(
     },
     exportSession: () => exportPiSession(session as never),
     messages: () => mapPiMessages(session.messages),
+    async navigateTo(leafId: string): Promise<void> {
+      await session.navigateTree(leafId);
+    },
+    getLeafId(): string | undefined {
+      return session.sessionManager.getLeafId() ?? undefined;
+    },
     getForkMessages(): Array<{ entryId: string; text: string }> {
       const forking = session as {
         getUserMessagesForForking?: () => Array<{
