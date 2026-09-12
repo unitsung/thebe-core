@@ -12,6 +12,22 @@ import type { ThinkingLevel } from "../../runtime/types.ts";
 import { chalk, defaultSelectListTheme, type ThemeName } from "../theme.ts";
 import { THINKING_LEVELS } from "../slash.ts";
 
+export type DismissibleOverlay = {
+  dismiss?: () => void;
+};
+
+/**
+ * Close an app-managed modal before removing it from the component tree.
+ *
+ * Removing a picker directly leaves the promise returned by its attach helper
+ * pending forever. Session switches and renderer handoffs use this hook so a
+ * menu cannot survive as a stale, invisible input owner.
+ */
+export function dismissOverlay(component: unknown): void {
+  const dismiss = (component as DismissibleOverlay | undefined)?.dismiss;
+  dismiss?.();
+}
+
 export function insertOverlay(tui: TUI, component: unknown, focusBack?: unknown): void {
   const idx = focusBack ? tui.children.indexOf(focusBack as never) : -1;
   if (idx >= 0) {
@@ -54,6 +70,7 @@ export function attachPromptInput(
       }
       options.abortSignal.addEventListener("abort", () => finish(null), { once: true });
     }
+    (input as unknown as DismissibleOverlay).dismiss = () => finish(null);
     input.onSubmit = (value) => finish(value);
     input.onEscape = () => finish(null);
     const origHandleInput = input.handleInput.bind(input);
@@ -90,7 +107,10 @@ export function attachSettingsMenu(
     theme: ThemeName;
     thinking: ThinkingLevel;
     tuiMode: TuiMode;
+    permissionMode?: "ask" | "read-only" | "full-access";
     autoCompact?: boolean;
+    autoSummary?: boolean;
+    autoSummaryDelayMs?: number;
     steeringMode?: "one-at-a-time" | "all";
     followUpMode?: "one-at-a-time" | "all";
     hideThinking?: boolean;
@@ -101,6 +121,16 @@ export function attachSettingsMenu(
   },
 ): Promise<void> {
   return new Promise((resolvePromise) => {
+    let resolved = false;
+    let list: SettingsList;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      tui.removeChild(list);
+      if (focusBack) tui.setFocus(focusBack as never);
+      tui.requestRender();
+      resolvePromise();
+    };
     const items: SettingItem[] = [
       {
         id: "theme",
@@ -124,11 +154,32 @@ export function attachSettingsMenu(
         values: ["regular", "fullscreen"],
       },
       {
+        id: "permissionMode",
+        label: "Permissions",
+        description: "Ask before risky tools, or auto-approve them (not a sandbox)",
+        currentValue: options.permissionMode ?? "ask",
+        values: ["ask", "read-only", "full-access"],
+      },
+      {
         id: "autoCompact",
         label: "Auto-compact",
         description: "Automatically compact context when threshold reached",
         currentValue: String(options.autoCompact ?? true),
         values: ["true", "false"],
+      },
+      {
+        id: "autoSummary",
+        label: "Auto-summary",
+        description: "Summarize a completed task after an idle delay",
+        currentValue: String(options.autoSummary ?? true),
+        values: ["true", "false"],
+      },
+      {
+        id: "autoSummaryDelay",
+        label: "Summary delay",
+        description: "Idle seconds before generating the task summary",
+        currentValue: `${Math.round((options.autoSummaryDelayMs ?? 120_000) / 1000)}s`,
+        values: ["60s", "120s", "300s"],
       },
       {
         id: "steeringMode",
@@ -148,7 +199,7 @@ export function attachSettingsMenu(
         id: "hideThinking",
         label: "Hide thinking",
         description: "Collapse or hide thinking process blocks in chat",
-        currentValue: String(options.hideThinking ?? true),
+        currentValue: String(options.hideThinking ?? false),
         values: ["false", "true"],
       },
       {
@@ -173,7 +224,7 @@ export function attachSettingsMenu(
         values: ["auto", "always", "hidden"],
       },
     ];
-    const list = new SettingsList(
+    list = new SettingsList(
       items,
       Math.min(items.length + 2, 14),
       options.theme === "light" ? lightSettingsListTheme : defaultSettingsListTheme,
@@ -182,13 +233,9 @@ export function attachSettingsMenu(
         tui.requestRender();
         void options.onSettingChange(id, newValue);
       },
-      () => {
-        tui.removeChild(list);
-        if (focusBack) tui.setFocus(focusBack as never);
-        tui.requestRender();
-        resolvePromise();
-      },
+      finish,
     );
+    (list as unknown as DismissibleOverlay).dismiss = finish;
     const origHandleInput = list.handleInput.bind(list);
     list.handleInput = (keyData) => {
       origHandleInput(keyData);
@@ -208,7 +255,17 @@ export function attachSelectList(
   theme?: import("@earendil-works/pi-tui").SelectListTheme,
 ): Promise<SelectItem | null> {
   return new Promise((resolvePromise) => {
-    const list = new SelectList(
+    let resolved = false;
+    let list: SelectList;
+    const finish = (value: SelectItem | null) => {
+      if (resolved) return;
+      resolved = true;
+      tui.removeChild(list);
+      if (focusBack) tui.setFocus(focusBack as never);
+      tui.requestRender();
+      resolvePromise(value);
+    };
+    list = new SelectList(
       items,
       Math.min(items.length + 2, 10),
       theme ?? defaultSelectListTheme,
@@ -222,17 +279,12 @@ export function attachSelectList(
       list.onSelectionChange = onSelectionChange;
     }
     list.onSelect = (item) => {
-      tui.removeChild(list);
-      if (focusBack) tui.setFocus(focusBack as never);
-      tui.requestRender();
-      resolvePromise(item);
+      finish(item);
     };
     list.onCancel = () => {
-      tui.removeChild(list);
-      if (focusBack) tui.setFocus(focusBack as never);
-      tui.requestRender();
-      resolvePromise(null);
+      finish(null);
     };
+    (list as unknown as DismissibleOverlay).dismiss = () => finish(null);
     insertOverlay(tui, list, focusBack);
     tui.setFocus(list);
     tui.requestRender();

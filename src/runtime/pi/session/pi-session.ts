@@ -16,12 +16,17 @@ export type PiSession = {
   messages: unknown[];
   setModel: (model: unknown) => Promise<void>;
   setThinkingLevel: (level: string) => void;
+  thinkingLevel?: string;
+  getAvailableThinkingLevels?: () => string[];
+  supportsThinking?: () => boolean;
   navigateTree: (targetId: string) => Promise<unknown>;
   getUserMessagesForForking: () => Array<{ entryId: string; text: string }>;
+  reload?: () => Promise<void>;
   setAutoCompactionEnabled?: (enabled: boolean) => void;
   autoCompactionEnabled?: boolean;
   isStreaming?: boolean;
   sessionManager: {
+    getSessionFile?: () => string | undefined;
     getLeafId: () => string | null;
     createBranchedSession: (leaf: string) => string | undefined;
     getEntries: () => Array<{

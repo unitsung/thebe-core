@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { ForkSessionOptions, RuntimeModelRef, ThinkingLevel } from "../../runtime/types.ts";
+import type {
+  ForkSessionOptions,
+  RuntimeModelRef,
+  RuntimeThinkingInfo,
+  ThinkingLevel,
+  PermissionRememberScope,
+} from "../../runtime/types.ts";
 import { rememberedPermissionKey } from "../remembered-permissions.ts";
 import { httpError, type SessionRunStatus } from "../types.ts";
 import type { ProductSessionMeta } from "../store.ts";
@@ -25,6 +31,7 @@ export function createSessionApi(ctx: ProductContext) {
     memory,
     logs,
     store,
+    cancelSubagentsForParent,
   } = ctx;
 
   return {
@@ -133,16 +140,23 @@ export function createSessionApi(ctx: ProductContext) {
       }
       return meta;
     },
-    /**
-     * Removes the Thebe session mapping/metadata only (unlink, not erase).
-     * The Pi-native session, its transcript/branches and exports stay in the
-     * runtime; resuming the same runtimeSessionId still works. There is no
-     * undelete: the mapping must be recreated by resuming/forking.
-     */
+    /** Removes both the runtime transcript and the Thebe metadata mapping. */
     async deleteSession(thebeSessionId: string): Promise<void> {
       checkNotQuiesced();
+      if (streaming.has(thebeSessionId)) {
+        throw httpError(409, "cannot delete a running session or one awaiting confirmation");
+      }
+      await cancelSubagentsForParent(thebeSessionId);
+      const awaitingConfirmation = [...pendingPermissions.values()].some(
+        (pending) => pending.thebeSessionId === thebeSessionId,
+      );
+      if (awaitingConfirmation) {
+        throw httpError(409, "cannot delete a running session or one awaiting confirmation");
+      }
+      const meta = await lookup(thebeSessionId);
       const opened = ctx.openedSessions.get(thebeSessionId);
       if (opened) {
+        ctx.cancelAutoSummary(thebeSessionId);
         opened.session.dispose();
         ctx.openedSessions.delete(thebeSessionId);
       }
@@ -151,6 +165,7 @@ export function createSessionApi(ctx: ProductContext) {
       }
       memory.delete(thebeSessionId);
       logs.delete(thebeSessionId);
+      await options.runtime.deleteSession(meta.runtimeSessionId);
       await store.delete(thebeSessionId);
     },
     async sessionStatus(): Promise<
@@ -233,6 +248,18 @@ export function createSessionApi(ctx: ProductContext) {
       const opened = await openSession(thebeSessionId);
       opened.session.setAutoCompactionEnabled?.(enabled);
     },
+    async setAutoSummaryEnabled(enabled: boolean): Promise<void> {
+      ctx.setAutoSummaryEnabled(enabled);
+    },
+    autoSummaryEnabled(): boolean {
+      return ctx.autoSummaryEnabled();
+    },
+    async setAutoSummaryDelayMs(delayMs: number): Promise<void> {
+      ctx.setAutoSummaryDelayMs(delayMs);
+    },
+    autoSummaryDelayMs(): number {
+      return ctx.autoSummaryDelayMs();
+    },
     async interrupt(thebeSessionId?: string): Promise<void> {
       const opened = await openSession(thebeSessionId);
       const id = opened.meta.thebeSessionId;
@@ -263,7 +290,10 @@ export function createSessionApi(ctx: ProductContext) {
     },
     /**
      * Resolves one pending approval. `remember` persists the decision for
-     * this tool on this session only (no TTL, no cross-session sharing);
+     * this tool on this session only (no TTL, no cross-session sharing).
+     * `rememberScope: "request"` hashes high-risk arguments; `"tool"` is an
+     * explicit session-wide decision for the named tool; `"conversation"`
+     * applies to every approval-gated tool in this saved conversation;
      * pending entries are in-memory, so a restart turns them into
      * `unknown permission` 404s and the client should re-prompt. Resolving
      * twice is a deterministic 404, not silent success.
@@ -271,7 +301,11 @@ export function createSessionApi(ctx: ProductContext) {
     async resolvePermission(
       thebeSessionId: string,
       permissionId: string,
-      decision: { response: "allow" | "deny"; remember?: boolean },
+      decision: {
+        response: "allow" | "deny";
+        remember?: boolean;
+        rememberScope?: PermissionRememberScope;
+      },
     ): Promise<void> {
       const pending = pendingPermissions.get(permissionId);
       if (!pending || pending.thebeSessionId !== thebeSessionId) {
@@ -286,6 +320,7 @@ export function createSessionApi(ctx: ProductContext) {
         const key = rememberedPermissionKey(
           pending.request,
           decision.response,
+          decision.rememberScope ?? "request",
         );
         meta.rememberedPermissions = {
           ...meta.rememberedPermissions,
@@ -319,7 +354,7 @@ export function createSessionApi(ctx: ProductContext) {
     async setThinkingLevel(
       thebeSessionId: string,
       level: ThinkingLevel,
-    ): Promise<void> {
+    ): Promise<RuntimeThinkingInfo> {
       checkNotQuiesced();
       if (streaming.has(thebeSessionId)) {
         throw httpError(
@@ -329,6 +364,13 @@ export function createSessionApi(ctx: ProductContext) {
       }
       const opened = await openSession(thebeSessionId);
       await opened.session.setThinkingLevel(level);
+      return opened.session.getThinkingInfo();
+    },
+    async getThinkingInfo(
+      thebeSessionId: string,
+    ): Promise<RuntimeThinkingInfo> {
+      const opened = await openSession(thebeSessionId);
+      return opened.session.getThinkingInfo();
     },
   };
 }

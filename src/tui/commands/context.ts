@@ -1,6 +1,6 @@
 import type { Editor, Markdown, TUI } from "@earendil-works/pi-tui";
 import type { ThebeProduct } from "../../product/service.ts";
-import type { ThinkingLevel } from "../../runtime/types.ts";
+import type { RuntimeThinkingInfo, ThinkingLevel } from "../../runtime/types.ts";
 import type { ThemeName } from "../theme.ts";
 import type { ThebeTuiOptions } from "../types.ts";
 import type { FooterDock } from "../display/footer.ts";
@@ -28,6 +28,7 @@ export type SlashHost = {
   updateFooter: () => void;
   updateEditorBorderColor: () => void;
   setHideThinking: (hidden: boolean) => void;
+  setThinkingLevel: (level: ThinkingLevel) => Promise<RuntimeThinkingInfo>;
   applyTheme: (name: ThemeName, persist?: boolean) => Promise<void>;
   applyModel: (
     id: string,

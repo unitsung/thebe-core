@@ -15,6 +15,7 @@ import {
   type RuntimeModelRef,
   type RuntimeProvider,
   type RuntimeSession,
+  type RuntimeThinkingInfo,
   type ThinkingLevel,
   type BackgroundTask,
   type ThebeSessionContext,
@@ -28,7 +29,7 @@ import {
 } from "./prompt-files.ts";
 
 export type FakeQueuedTurn =
-  | { kind: "text"; text: string }
+  | { kind: "text"; text: string; thinking?: string }
   | {
       kind: "tools";
       calls: Array<{ name: string; args?: unknown; id?: string }>;
@@ -57,6 +58,7 @@ type FakeSessionState = {
   leafId?: string;
   toolAborts: Map<string, AbortController>;
   probeReply?: string;
+  resourceReloads: number;
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [
@@ -189,6 +191,25 @@ export function createFakeRuntime(
       }
     };
 
+    function getThinkingInfo(): RuntimeThinkingInfo {
+      const model = models.find(
+        (candidate) =>
+          candidate.providerId === state.model.providerId &&
+          candidate.modelId === state.model.modelId,
+      );
+      const supportsThinking = model?.supportsThinking ?? false;
+      const availableLevels: ThinkingLevel[] = supportsThinking
+        ? ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+        : ["off"];
+      return {
+        level: availableLevels.includes(state.thinkingLevel)
+          ? state.thinkingLevel
+          : "off",
+        availableLevels,
+        supportsThinking,
+      };
+    }
+
     async function runQueued(): Promise<void> {
       const turn = queue.shift();
       if (!turn && state.probeReply) {
@@ -219,6 +240,9 @@ export function createFakeRuntime(
         throw new Error(turn.message);
       }
       if (turn.kind === "text") {
+        if (turn.thinking) {
+          emit({ type: "thinking_delta", text: turn.thinking });
+        }
         emit({ type: "text_delta", text: turn.text });
         state.messages.push({
           id: randomUUID(),
@@ -471,10 +495,14 @@ export function createFakeRuntime(
       messages(): RuntimeMessage[] {
         return state.messages.slice();
       },
+      getThinkingInfo,
       getForkMessages(): Array<{ entryId: string; text: string }> {
         return state.messages
           .filter((m) => m.role === "user" && m.text)
           .map((m) => ({ entryId: m.id, text: m.text ?? "" }));
+      },
+      async reloadResources(): Promise<void> {
+        state.resourceReloads += 1;
       },
       async setModel(model: RuntimeModelRef): Promise<void> {
         const known = models.some(
@@ -490,7 +518,9 @@ export function createFakeRuntime(
         state.model = model;
       },
       async setThinkingLevel(level: ThinkingLevel): Promise<void> {
-        state.thinkingLevel = level;
+        state.thinkingLevel = getThinkingInfo().availableLevels.includes(level)
+          ? level
+          : "off";
       },
       async stopToolCall(toolCallId: string): Promise<void> {
         const controller = state.toolAborts.get(toolCallId);
@@ -701,6 +731,7 @@ export function createFakeRuntime(
         toolsRequiringApproval: [...(create.toolsRequiringApproval ?? [])],
         abortWaiters: [],
         toolAborts: new Map(),
+        resourceReloads: 0,
         probeReply:
           (create.builtinTools?.length ?? -1) === 0 &&
           create.customTools.length === 0
@@ -760,6 +791,7 @@ export function createFakeRuntime(
         ],
         abortWaiters: [],
         toolAborts: new Map(),
+        resourceReloads: 0,
         leafId: copied.at(-1)?.id,
       };
       sessions.set(id, state);
@@ -783,6 +815,10 @@ export function createFakeRuntime(
     },
     async listProviders() {
       return auth.listProviders();
+    },
+    async deleteSession(runtimeSessionId: string): Promise<void> {
+      livenessRegistry.delete(runtimeSessionId);
+      sessions.delete(runtimeSessionId);
     },
     auth() {
       return auth;

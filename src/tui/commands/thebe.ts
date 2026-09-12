@@ -8,6 +8,42 @@ export async function handleThebeCommand(
   name: string,
   arg: string,
 ): Promise<boolean> {
+  const renderSubagentList = (runs: Awaited<ReturnType<ThebeProduct["listSubagents"]>>): void => {
+    host.notice(
+      runs.length === 0
+        ? "no subagent runs"
+        : runs
+            .map(
+              (run) =>
+                `${run.runId.slice(0, 8)} · ${run.profileName} · ${run.status} · ${run.turns}/${run.maxTurns} · ${run.task}`,
+            )
+            .join("\n"),
+    );
+  };
+
+  const watchSubagent = (run: Awaited<ReturnType<ThebeProduct["spawnSubagent"]>>): void => {
+    void product.waitSubagent(run.runId).then((completed) => {
+      if (completed.status === "completed") {
+        host.notice(`subagent ${completed.profileName} completed`);
+        if (completed.result) {
+          host.insertBeforeFooter(
+            host.makeMarkdown(
+              `### Subagent result · ${completed.profileName}\n\n${completed.result}`,
+            ),
+          );
+          host.tui.requestRender();
+        }
+      } else if (completed.status === "cancelled") {
+        host.notice(`subagent ${completed.profileName} cancelled`);
+      } else {
+        host.notice(
+          `subagent ${completed.profileName} failed: ${completed.error ?? "unknown error"}`,
+        );
+      }
+    }).catch((error) => {
+      host.notice(`subagent failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  };
   switch (name) {
           case "skills":
           case "skill": {
@@ -16,7 +52,7 @@ export async function handleThebeCommand(
             if (action === "list" || (!action && arg === "list")) {
               const skills = await product.listSkills();
               if (skills.length === 0) {
-                host.notice("no skills found in .thebe/skills or ~/.thebe/skills");
+                host.notice("no skills found in .thebe/skills or .pi/skills (project/global)");
                 break;
               }
               host.notice(
@@ -41,7 +77,7 @@ export async function handleThebeCommand(
             }
             const skills = await product.listSkills();
             if (skills.length === 0) {
-              host.notice("no skills found in .thebe/skills or ~/.thebe/skills");
+              host.notice("no skills found in .thebe/skills or .pi/skills (project/global)");
               break;
             }
             const picked = await attachSelectList(
@@ -102,14 +138,13 @@ export async function handleThebeCommand(
                     ? ["(no external MCP servers in mcp.json)"]
                     : servers.map(
                         (server) =>
-                          `${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}`,
+                          `${server.status === "ready" ? "[ready]" : server.status === "error" ? "[error]" : server.disabled ? "[disabled]" : "[configured]"} ${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}${server.toolCount ? ` · ${server.toolCount} tools` : ""}${server.error ? ` · ${server.error}` : ""}`,
                       );
                 if (!action) {
                   const picked = await attachSelectList(
                     host.tui,
                     [
                       { label: "List MCP tools", value: "list" },
-                      { label: "Test MCP tool", value: "call" },
                       { label: "View MCP servers", value: "servers" },
                     ],
                     host.editor,
@@ -125,25 +160,6 @@ export async function handleThebeCommand(
                     host.notice(serverLines.join("\n"));
                     break;
                   }
-                  const toolPick = await attachSelectList(
-                    host.tui,
-                    tools.map((tool) => ({
-                      label: `${tool.name} — ${tool.description}`,
-                      value: tool.name,
-                    })),
-                    host.editor,
-                    undefined,
-                    host.getActiveSelectListTheme(),
-                  );
-                  if (!toolPick) break;
-                  try {
-                    const result = await product.invokeTool(toolPick.value, {});
-                    host.notice(`MCP ${toolPick.value}:\n${result}`);
-                  } catch (err) {
-                    host.notice(
-                      `MCP call failed: ${err instanceof Error ? err.message : String(err)}`,
-                    );
-                  }
                   break;
                 }
                 host.notice(toolLines.join("\n"));
@@ -158,7 +174,7 @@ export async function handleThebeCommand(
                   : servers
                       .map(
                         (server) =>
-                          `${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}`,
+                          `${server.status === "ready" ? "[ready]" : server.status === "error" ? "[error]" : server.disabled ? "[disabled]" : "[configured]"} ${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}${server.toolCount ? ` · ${server.toolCount} tools` : ""}${server.error ? ` · ${server.error}` : ""}`,
                       )
                       .join("\n"),
               );
@@ -198,24 +214,13 @@ export async function handleThebeCommand(
             if (action === "list" || arg === "list") {
               const id = host.sessionId ?? product.lastThebeSessionId();
               const kids = await product.listSubagents(id);
-              if (kids.length === 0) {
-                host.notice("no active subagents");
-                break;
-              }
-              host.notice(
-                kids
-                  .map(
-                    (kid) =>
-                      `${kid.thebeSessionId.slice(0, 8)} — ${kid.title || "untitled"} [${kid.streaming ? "streaming" : kid.status}]`,
-                  )
-                  .join("\n"),
-              );
+              renderSubagentList(kids);
               break;
             }
             if (action === "profiles") {
               const profiles = await product.listSubagentProfiles();
               if (profiles.length === 0) {
-                host.notice("no subagent profiles in .thebe/agents or ~/.thebe/agents");
+                host.notice("no subagent profiles found");
                 break;
               }
               host.notice(
@@ -229,24 +234,38 @@ export async function handleThebeCommand(
               break;
             }
             if (action === "spawn") {
-              if (!profileName) {
-                host.notice("usage: /subagent spawn <profile> [task]");
+              if (!profileName || !task) {
+                host.notice("usage: /subagent spawn <profile> <task>");
                 break;
               }
               const parentId = host.ensureSession();
-              const meta = await product.spawnSubagent({
+              const run = await product.spawnSubagent({
                 profileName,
-                taskPrompt: task || undefined,
+                taskPrompt: task,
                 parentSessionId: parentId,
               });
-              host.notice(`spawned subagent ${meta.thebeSessionId} from profile ${profileName}`);
+              host.notice(`subagent ${run.runId.slice(0, 8)} ${run.status}`);
+              watchSubagent(run);
+              break;
+            }
+            if (action === "cancel") {
+              if (!profileName) {
+                host.notice("usage: /subagent cancel <runId>");
+                break;
+              }
+              const cancelled = await product.cancelSubagent(
+                profileName,
+                host.sessionId ?? product.lastThebeSessionId(),
+              );
+              host.notice(`subagent ${cancelled.runId.slice(0, 8)} ${cancelled.status}`);
               break;
             }
             const picked = await attachSelectList(
               host.tui,
               [
-                { label: "List active subagents", value: "list" },
+                { label: "List subagent runs", value: "list" },
                 { label: "Spawn subagent from profile", value: "spawn" },
+                { label: "Cancel a subagent run", value: "cancel" },
                 { label: "View profiles", value: "profiles" },
               ],
               host.editor,
@@ -257,23 +276,28 @@ export async function handleThebeCommand(
             if (picked.value === "list") {
               const id = host.sessionId ?? product.lastThebeSessionId();
               const kids = await product.listSubagents(id);
-              host.notice(
-                kids.length === 0
-                  ? "no active subagents"
-                  : kids
-                      .map(
-                        (kid) =>
-                          `${kid.thebeSessionId.slice(0, 8)} — ${kid.title || "untitled"} [${kid.streaming ? "streaming" : kid.status}]`,
-                      )
-                      .join("\n"),
+              renderSubagentList(kids);
+              break;
+            }
+            if (picked.value === "cancel") {
+              const runId = await attachPromptInput(host.tui, {
+                prompt: "Run ID: ",
+                placeholder: "paste the run ID or its first 8 characters",
+                focusBack: host.editor,
+              });
+              if (!runId?.trim()) break;
+              const cancelled = await product.cancelSubagent(
+                runId.trim(),
+                host.sessionId ?? product.lastThebeSessionId(),
               );
+              host.notice(`subagent ${cancelled.runId.slice(0, 8)} ${cancelled.status}`);
               break;
             }
             if (picked.value === "profiles") {
               const profiles = await product.listSubagentProfiles();
               host.notice(
                 profiles.length === 0
-                  ? "no subagent profiles in .thebe/agents or ~/.thebe/agents"
+                  ? "no subagent profiles found"
                   : profiles
                       .map(
                         (profile) =>
@@ -285,7 +309,7 @@ export async function handleThebeCommand(
             }
             const profiles = await product.listSubagentProfiles();
             if (profiles.length === 0) {
-              host.notice("no subagent profiles in .thebe/agents or ~/.thebe/agents");
+              host.notice("no subagent profiles found");
               break;
             }
             const profilePick = await attachSelectList(
@@ -301,17 +325,22 @@ export async function handleThebeCommand(
             if (!profilePick) break;
             const taskText = await attachPromptInput(host.tui, {
               prompt: "Task: ",
-              placeholder: "optional task for the subagent",
+              placeholder: "required task for the subagent",
               focusBack: host.editor,
             });
             if (taskText === null) break;
+            if (!taskText.trim()) {
+              host.notice("subagent task cannot be empty");
+              break;
+            }
             const parentId = host.ensureSession();
-            const meta = await product.spawnSubagent({
+            const run = await product.spawnSubagent({
               profileName: profilePick.value,
-              taskPrompt: taskText.trim() || undefined,
+              taskPrompt: taskText.trim(),
               parentSessionId: parentId,
             });
-            host.notice(`spawned subagent ${meta.thebeSessionId} from profile ${profilePick.value}`);
+            host.notice(`subagent ${run.runId.slice(0, 8)} ${run.status}`);
+            watchSubagent(run);
             break;
           }
     default:

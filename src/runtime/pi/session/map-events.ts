@@ -1,4 +1,8 @@
-import type { NormalizedEvent, RuntimeMessage } from "../../types.ts";
+import type {
+  NormalizedEvent,
+  RuntimeMessage,
+  ThinkingLevel,
+} from "../../types.ts";
 import { summarizeArgs } from "../../../tools/redaction.ts";
 
 type AgentSessionEvent = {
@@ -13,6 +17,7 @@ type AgentSessionEvent = {
   reason?: string;
   aborted?: boolean;
   errorMessage?: string;
+  level?: string;
 };
 
 export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefined {
@@ -55,6 +60,22 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
         args: redactedArgs(event.args),
         details: resultDetails(event.result),
       };
+    case "thinking_level_changed":
+      if (
+        event.level === "off" ||
+        event.level === "minimal" ||
+        event.level === "low" ||
+        event.level === "medium" ||
+        event.level === "high" ||
+        event.level === "xhigh" ||
+        event.level === "max"
+      ) {
+        return {
+          type: "thinking_level_changed",
+          level: event.level as ThinkingLevel,
+        };
+      }
+      return undefined;
     case "turn_end":
       return { type: "turn_end" };
     case "agent_end":

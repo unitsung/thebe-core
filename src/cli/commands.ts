@@ -233,8 +233,8 @@ export async function runCliCommand(
         error(`invalid thinking level: ${command.level}`);
         return 2;
       }
-      await product.setThinkingLevel(command.sessionId, level);
-      log(level);
+      const applied = await product.setThinkingLevel(command.sessionId, level);
+      log(applied.level);
       return 0;
     }
     default: {

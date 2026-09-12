@@ -3,10 +3,14 @@ import { join } from "node:path";
 import type { TuiMode } from "@earendil-works/pi-tui";
 
 export type ThebeUserConfig = {
+  externalEditor?: string;
   tuiMode?: TuiMode;
   theme?: "dark" | "light";
   defaultThinkingLevel?: string;
   autoCompact?: boolean;
+  autoSummary?: boolean;
+  autoSummaryDelayMs?: number;
+  permissionMode?: "ask" | "read-only" | "full-access";
   steeringMode?: "one-at-a-time" | "all";
   followUpMode?: "one-at-a-time" | "all";
   hideThinking?: boolean;
@@ -25,6 +29,29 @@ export function getThebeConfigDir(): string {
 
 export function getThebeConfigPath(): string {
   return join(getThebeConfigDir(), "config.json");
+}
+
+export function getThebeAgentDir(): string {
+  return process.env.THEBE_AGENT_DIR ?? join(getThebeConfigDir(), "agent");
+}
+
+export async function ensureThebeConfigFile(): Promise<string> {
+  const configPath = getThebeConfigPath();
+  await mkdir(getThebeConfigDir(), { recursive: true });
+  try {
+    await writeFile(configPath, "{}\n", { encoding: "utf8", flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+  }
+  return configPath;
+}
+
+export function getExternalEditorCommand(config: ThebeUserConfig): string {
+  const configured = config.externalEditor?.trim();
+  if (configured) return configured;
+  return process.env.VISUAL || process.env.EDITOR || (process.platform === "win32" ? "notepad" : "nano");
 }
 
 export async function loadThebeConfig(): Promise<ThebeUserConfig> {

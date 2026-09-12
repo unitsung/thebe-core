@@ -3,6 +3,7 @@ export const PI_RUNTIME_ID = "pi-coding-agent";
 export type NormalizedEvent =
   | { type: "text_delta"; text: string }
   | { type: "thinking_delta"; text: string }
+  | { type: "thinking_level_changed"; level: ThinkingLevel }
   | {
       type: "tool_start";
       toolName: string;
@@ -38,6 +39,7 @@ export type NormalizedEvent =
       errorMessage?: string;
     }
   | { type: "interrupted" }
+  | { type: "summary_ready"; summary: string; generatedAt: string }
   | { type: "queue_update"; steering: number; followUp: number }
   | {
       type: "permission_requested";
@@ -126,6 +128,14 @@ export type ThinkingLevel =
   | "xhigh"
   | "max";
 
+export type RuntimeThinkingInfo = {
+  /** The level the runtime will actually use for the current model. */
+  level: ThinkingLevel;
+  /** Levels accepted by the current model, including `off`. */
+  availableLevels: ThinkingLevel[];
+  supportsThinking: boolean;
+};
+
 export type RuntimeModelRef = {
   providerId: string;
   modelId: string;
@@ -149,7 +159,14 @@ export type RuntimeProvider = {
 export type PermissionDecision = {
   response: "allow" | "deny";
   remember?: boolean;
+  /** Whether a remembered decision applies to one request, tool, or conversation. */
+  rememberScope?: PermissionRememberScope;
 };
+
+export type PermissionRememberScope = "request" | "tool" | "conversation";
+
+/** Approval policy for tools that the runtime marks as requiring confirmation. */
+export type PermissionMode = "ask" | "read-only" | "full-access";
 
 export type PermissionRequest = {
   permissionId: string;
@@ -341,6 +358,7 @@ export interface RuntimeSession {
   messages(): RuntimeMessage[];
   setModel(model: RuntimeModelRef): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): Promise<void>;
+  getThinkingInfo(): RuntimeThinkingInfo;
   getContextUsage(): Promise<ThebeSessionContext>;
   listBackgroundTasks(): Promise<BackgroundTask[]>;
   stopBackgroundTask(taskId: string): Promise<void>;
@@ -354,6 +372,8 @@ export interface RuntimeSession {
   getForkMessages?(): Array<{ entryId: string; text: string }>;
   navigateTo?(leafId: string): Promise<void>;
   getLeafId?(): string | undefined;
+  /** Reload Pi resources after changing enabled skills or extensions. */
+  reloadResources?(): Promise<void>;
   dispose(): void;
 }
 
@@ -365,6 +385,8 @@ export interface AgentRuntime {
     options: CreateRuntimeSessionOptions,
   ): Promise<RuntimeSession>;
   listSessions(): Promise<RuntimeSessionSummary[]>;
+  /** Permanently removes a runtime session and its persisted transcript. */
+  deleteSession(runtimeSessionId: string): Promise<void>;
   forkSession(
     runtimeSessionId: string,
     options: CreateRuntimeSessionOptions,

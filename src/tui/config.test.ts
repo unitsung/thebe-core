@@ -1,6 +1,48 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, type Server } from "node:http";
-import { fetchRemoteModels } from "./config.ts";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  ensureThebeConfigFile,
+  fetchRemoteModels,
+  getExternalEditorCommand,
+  getThebeAgentDir,
+  getThebeConfigPath,
+} from "./config.ts";
+
+describe("Thebe user config", () => {
+  it("uses the configured directory, creates once, and follows Pi editor precedence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-user-config-"));
+    const previousConfigDir = process.env.THEBE_CONFIG_DIR;
+    const previousVisual = process.env.VISUAL;
+    const previousEditor = process.env.EDITOR;
+    process.env.THEBE_CONFIG_DIR = dir;
+    process.env.VISUAL = "visual-editor";
+    process.env.EDITOR = "fallback-editor";
+
+    try {
+      expect(getThebeConfigPath()).toBe(join(dir, "config.json"));
+      expect(getThebeAgentDir()).toBe(join(dir, "agent"));
+      expect(getExternalEditorCommand({})).toBe("visual-editor");
+      expect(getExternalEditorCommand({ externalEditor: "nvim" })).toBe("nvim");
+
+      const path = await ensureThebeConfigFile();
+      expect(await readFile(path, "utf8")).toBe("{}\n");
+      await writeFile(path, '{"theme":"dark"}\n', "utf8");
+      await ensureThebeConfigFile();
+      expect(await readFile(path, "utf8")).toBe('{"theme":"dark"}\n');
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
+      else process.env.THEBE_CONFIG_DIR = previousConfigDir;
+      if (previousVisual === undefined) delete process.env.VISUAL;
+      else process.env.VISUAL = previousVisual;
+      if (previousEditor === undefined) delete process.env.EDITOR;
+      else process.env.EDITOR = previousEditor;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("fetchRemoteModels", () => {
   let server: Server;

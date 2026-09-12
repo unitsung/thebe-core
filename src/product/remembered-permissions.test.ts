@@ -30,4 +30,40 @@ describe("remembered permissions", () => {
       }),
     ).toBe("deny");
   });
+
+  it("supports an explicit session-wide tool allow", () => {
+    const bash = {
+      toolName: "bash",
+      args: { command: "ls" },
+      risk: "high" as const,
+    };
+    expect(rememberedPermissionKey(bash, "allow", "tool")).toBe("bash");
+    expect(
+      rememberedDecision(
+        { bash: "allow" },
+        { ...bash, args: { command: "rm -rf /" } },
+      ),
+    ).toBe("allow");
+  });
+
+  it("supports a conversation-wide allow after specific rules", () => {
+    const bash = {
+      toolName: "bash",
+      args: { command: "ls" },
+      risk: "high" as const,
+    };
+    expect(rememberedPermissionKey(bash, "allow", "conversation")).toBe("*");
+    expect(
+      rememberedDecision(
+        { "*": "allow" },
+        { ...bash, args: { command: "git status" } },
+      ),
+    ).toBe("allow");
+    expect(
+      rememberedDecision(
+        { "*": "allow", bash: "deny" },
+        { ...bash, args: { command: "git status" } },
+      ),
+    ).toBe("deny");
+  });
 });

@@ -67,6 +67,48 @@ case "sessions": {
   }
   break;
 }
+case "delete": {
+  const rows = await product.listSessions();
+  const lowerArg = arg.toLowerCase();
+  const target = arg
+    ? rows.find(
+        (row) =>
+          row.thebeSessionId.toLowerCase() === lowerArg ||
+          row.thebeSessionId.toLowerCase().startsWith(lowerArg) ||
+          row.title?.toLowerCase() === lowerArg,
+      )
+    : rows.find((row) => row.thebeSessionId === host.sessionId);
+  if (!target) {
+    host.notice(arg ? `session not found: ${arg}` : "no active session to delete");
+    break;
+  }
+  const confirmed = await attachSelectList(
+    host.tui,
+    [
+      { label: "Cancel", value: "cancel" },
+      {
+        label: `Delete ${target.title || target.thebeSessionId.slice(0, 8)} and transcript`,
+        value: "delete",
+      },
+    ],
+    host.editor,
+    undefined,
+    host.getActiveSelectListTheme(),
+  );
+  if (confirmed?.value !== "delete") {
+    host.notice("session deletion cancelled");
+    break;
+  }
+  await product.deleteSession(target.thebeSessionId);
+  if (host.sessionId === target.thebeSessionId) {
+    host.sessionId = undefined;
+    host.sessionTitle = undefined;
+    host.clearMessagesView();
+    host.updateFooter();
+  }
+  host.notice(`deleted session ${target.thebeSessionId.slice(0, 8)}`);
+  break;
+}
 case "name": {
   const id = host.ensureSession();
   if (!arg) {
@@ -82,7 +124,7 @@ case "name": {
 case "fork": {
   const id = host.ensureSession();
   const turns = await product.getForkMessages(id);
-  const applyFork = async (entryId?: string) => {
+  const applyFork = async (entryId?: string, selectedText?: string) => {
     const meta = await product.fork(
       id,
       entryId ? { atEntryId: entryId } : undefined,
@@ -90,6 +132,12 @@ case "fork": {
     host.sessionId = meta.thebeSessionId;
     host.sessionTitle = meta.title;
     await host.loadAndDisplaySessionHistory(host.sessionId);
+    // Pi's fork flow branches before the selected user message and puts that
+    // message back in the editor so the user can continue or edit it. Keep
+    // the same behavior instead of silently leaving the new branch empty.
+    if (selectedText !== undefined) {
+      host.editor.setText(selectedText);
+    }
     void host.refreshContextUsage();
     host.updateFooter();
     host.notice(
@@ -113,7 +161,7 @@ case "fork": {
       host.notice(`fork turn not found: ${arg}`);
       break;
     }
-    await applyFork(target.entryId);
+    await applyFork(target.entryId, target.text);
     break;
   }
   if (turns.length === 0) {
@@ -135,7 +183,8 @@ case "fork": {
     host.getActiveSelectListTheme(),
   );
   if (selected) {
-    await applyFork(selected.value);
+    const target = turns.find((turn) => turn.entryId === selected.value);
+    await applyFork(selected.value, target?.text);
   }
   break;
 }

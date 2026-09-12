@@ -5,11 +5,15 @@ import { ArcaneAdapter } from "../adapters/arcane-adapter.ts";
 import { applyThebeApiKey } from "../auth/credentials.ts";
 import { envLocalCandidates, loadEnvLocal } from "../config/env.ts";
 import { createThebeApp } from "./app.ts";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "./service/context.ts";
+import {
+  DEFAULT_AUTO_SUMMARY_DELAY_MS,
+  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
+} from "./service/context.ts";
 import type { ThebeProduct } from "./service.ts";
 import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createPiCodingAgentRuntime } from "../runtime/pi/pi-coding-agent-runtime.ts";
 import type { AgentRuntime } from "../runtime/types.ts";
+import { loadThebeUserConfig } from "../runtime/pi/config/user-config.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -41,6 +45,7 @@ export async function bootstrapThebe(
 ): Promise<ThebeBootstrap> {
   const fromDir = options?.fromDir ?? dirname(fileURLToPath(import.meta.url));
   loadEnvLocal(fromDir);
+  const userConfig = loadThebeUserConfig();
 
   const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
@@ -118,6 +123,13 @@ export async function bootstrapThebe(
     productStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
+    autoCompact: userConfig.autoCompact,
+    autoSummary: userConfig.autoSummary,
+    autoSummaryDelayMs:
+      userConfig.autoSummaryDelayMs ?? DEFAULT_AUTO_SUMMARY_DELAY_MS,
+    permissionMode: userConfig.permissionMode,
+    maxSubagentConcurrency: userConfig.maxSubagentConcurrency,
+    maxSubagentsPerParent: userConfig.maxSubagentsPerParent,
     allowedHosts: options?.allowedHosts,
     sessionIdleTimeoutMs:
       Number.isFinite(idleParsed) && idleParsed > 0 ? idleParsed : 0,

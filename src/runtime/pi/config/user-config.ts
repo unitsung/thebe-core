@@ -6,6 +6,11 @@ export const DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384;
 
 export function loadThebeUserConfig(): {
   autoCompact?: boolean;
+  autoSummary?: boolean;
+  autoSummaryDelayMs?: number;
+  permissionMode?: "ask" | "read-only" | "full-access";
+  maxSubagentConcurrency?: number;
+  maxSubagentsPerParent?: number;
   providers?: Record<string, { baseUrl?: string }>;
 } {
   try {
@@ -15,6 +20,11 @@ export function loadThebeUserConfig(): {
     );
     const parsed = JSON.parse(readFileSync(configPath, "utf8")) as {
       autoCompact?: boolean;
+      autoSummary?: boolean;
+      autoSummaryDelayMs?: number;
+      permissionMode?: "ask" | "read-only" | "full-access";
+      maxSubagentConcurrency?: number;
+      maxSubagentsPerParent?: number;
       providers?: Record<string, { baseUrl?: string }>;
     };
     return typeof parsed === "object" && parsed !== null ? parsed : {};

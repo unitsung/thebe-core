@@ -59,6 +59,15 @@ describe("transcript components", () => {
     expect(unfoldedLines.join("\n")).toContain("Second thought.");
   });
 
+  it("shows an active thinking indicator when the provider redacts the body", () => {
+    const tb = new ThinkingBlock(false);
+
+    expect(tb.render(80).join("\n")).toContain("Thinking...");
+
+    tb.finish(1);
+    expect(tb.render(80)).toEqual([]);
+  });
+
   it("ElapsedWorking counts elapsed seconds and sets labels", () => {
     const term = new TestTerminal();
     const tui = new TuiMainScreen(term);
@@ -112,7 +121,19 @@ describe("transcript components", () => {
       { args: { path: "src/foo.ts" } },
     );
     const diffRendered = diffResultComp.render(80).join("\n");
-    expect(diffRendered).toContain("+const b = 2;");
+    expect(diffRendered).not.toContain("+const b = 2;");
+    expect(diffRendered).toContain("Ctrl+O");
+
+    const expandedDiffRendered = editRenderers.renderResult(
+      {
+        content: [{ type: "text", text: sampleDiff }],
+        details: { diff: sampleDiff },
+      },
+      { expanded: true, isPartial: false },
+      theme,
+      { args: { path: "src/foo.ts" } },
+    ).render(80).join("\n");
+    expect(expandedDiffRendered).toContain("+const b = 2;");
 
     // Test tool component
     const toolComp = createToolComponent(
@@ -125,6 +146,11 @@ describe("transcript components", () => {
     toolComp.setArgsComplete();
     toolComp.updateResult(toolResultPayload(sampleDiff, false, { diff: sampleDiff }));
 
+    const collapsedToolLines = toolComp.render(80);
+    expect(collapsedToolLines).toHaveLength(3);
+    expect(collapsedToolLines.join("\n")).not.toContain("+const b = 2;");
+
+    toolComp.setExpanded(true);
     const compLines = toolComp.render(80).join("\n");
     expect(compLines).toContain("edit_file");
     expect(compLines).toContain("src/foo.ts");

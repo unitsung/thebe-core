@@ -186,6 +186,12 @@ export async function handleSession(
     await product.resolvePermission(id, extra, {
       response,
       remember: Boolean(body.remember),
+      rememberScope:
+        body.rememberScope === "tool"
+          ? "tool"
+          : body.rememberScope === "conversation"
+            ? "conversation"
+            : "request",
     });
     return json({ ok: true });
   }
@@ -294,8 +300,8 @@ export async function handleSession(
         400,
       );
     }
-    await product.setThinkingLevel(id, level);
-    return json({ ok: true });
+    const applied = await product.setThinkingLevel(id, level);
+    return json({ ok: true, thinking: applied });
   }
   if (method === "GET" && action === "export") {
     const format = url.searchParams.get("format");

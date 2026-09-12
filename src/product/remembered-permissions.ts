@@ -1,6 +1,7 @@
 import { hashParameters } from "../audit/audit-log.ts";
 import {
   TOOLS_REQUIRING_APPROVAL,
+  type PermissionRememberScope,
   type PermissionRequest,
 } from "../runtime/types.ts";
 
@@ -17,13 +18,22 @@ export function isHighRiskTool(
 /**
  * Persist key for a remember decision. High-risk tools (bash/write/edit)
  * are scoped to the argument hash for both allow and deny so one `ls`
- * allow cannot authorize `rm -rf`. Tool-wide keys remain for PATCH
- * session-wide deny and for non-approval tools.
+ * allow cannot authorize `rm -rf`. A tool-wide key is only written when the
+ * user explicitly chooses the session-wide option (or patches that metadata).
+ * Conversation-wide decisions use `*` and are checked after exact and
+ * tool-wide rules, so a narrower deny still wins.
  */
 export function rememberedPermissionKey(
   request: Pick<PermissionRequest, "toolName" | "args" | "risk">,
   response: "allow" | "deny",
+  scope: PermissionRememberScope = "request",
 ): string {
+  if (scope === "conversation") {
+    return "*";
+  }
+  if (scope === "tool") {
+    return request.toolName;
+  }
   if (isHighRiskTool(request.toolName, request.risk)) {
     return `${request.toolName}:${hashParameters(request.args ?? {})}`;
   }
@@ -44,11 +54,12 @@ export function rememberedDecision(
     return scoped;
   }
   const wide = map[request.toolName];
-  if (wide === "deny") {
-    return "deny";
+  if (wide) {
+    return wide;
   }
-  if (wide === "allow" && !isHighRiskTool(request.toolName, request.risk)) {
-    return "allow";
+  const conversation = map["*"];
+  if (conversation) {
+    return conversation;
   }
   return undefined;
 }

@@ -1,8 +1,6 @@
 import type { ThebeProduct } from "../../product/service.ts";
-import {
-  CONTAINER_TOOL_DESCRIPTIONS,
-  CONTAINER_TOOL_NAMES,
-} from "../../tools/container-tools.ts";
+import { CONTAINER_TOOL_NAMES } from "../../tools/container-tools.ts";
+import { listCoreMcpTools } from "../../product/resources/mcp.ts";
 import { asObject, json, readJson } from "../json.ts";
 
 const MCP_EVENT_TOOLS = ["list_core_events", "diagnose_from_events"] as const;
@@ -18,29 +16,16 @@ const ALL_TOOL_NAMES = new Set<string>([
   ...Object.keys(ALIASES),
 ]);
 
-function listedTools(): Array<{
+function listedCoreTools(): Array<{
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
 }> {
-  const container = CONTAINER_TOOL_NAMES.map((name) => ({
+  return listCoreMcpTools().map(({ name, description, inputSchema }) => ({
     name,
-    description: CONTAINER_TOOL_DESCRIPTIONS[name],
-    inputSchema: { type: "object" },
+    description,
+    inputSchema,
   }));
-  return [
-    ...container,
-    {
-      name: "list_core_events",
-      description: "List recent webhook events stored on Thebe Core.",
-      inputSchema: { type: "object" },
-    },
-    {
-      name: "diagnose_from_events",
-      description: "Summarize the most likely issue from Thebe Core events.",
-      inputSchema: { type: "object" },
-    },
-  ];
 }
 
 async function callTool(
@@ -48,29 +33,65 @@ async function callTool(
   name: string,
   args: unknown,
 ): Promise<string> {
-  if (!ALL_TOOL_NAMES.has(name)) {
-    throw new Error(`unknown tool: ${name}`);
-  }
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
-    if (name === "list_core_events") {
-      return JSON.stringify({ events: [] });
-    }
-    return JSON.stringify({ summary: "No recent Core events." });
+    if (!product) throw new Error("MCP tools require the Thebe product service");
+    return product.invokeTool(name, asObject(args) ?? {});
   }
   const mapped = ALIASES[name] ?? name;
-  if (!product) {
-    throw new Error("MCP tools require the Thebe product service");
+  if (ALL_TOOL_NAMES.has(name)) {
+    if (!product) {
+      throw new Error("MCP tools require the Thebe product service");
+    }
+    return product.invokeTool(mapped, asObject(args) ?? {});
   }
-  return product.invokeTool(mapped, asObject(args) ?? {});
+  if (product && name.startsWith("mcp:")) {
+    return product.invokeTool(name, asObject(args) ?? {});
+  }
+  throw new Error(`unknown tool: ${name}`);
+}
+
+async function listedTools(product?: ThebeProduct): Promise<Array<{
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+}>> {
+  if (!product) return listedCoreTools();
+  return (await product.listMcpTools()).map(({ name, description, inputSchema }) => ({
+    name,
+    description,
+    inputSchema,
+  }));
+}
+
+function mcpError(id: unknown, code: number, message: string): Response {
+  return json({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
 export async function handleMcp(
   request: Request,
   product?: ThebeProduct,
+  version = "0.1.0",
 ): Promise<Response> {
   const body = await readJson(request);
-  const id = body.id ?? 1;
-  const method = body.method;
+  const id = body.id ?? null;
+  const method = typeof body.method === "string" ? body.method : "";
+  if (method.startsWith("notifications/")) {
+    return new Response(null, { status: 204 });
+  }
+  if (method === "ping") {
+    return json({ jsonrpc: "2.0", id, result: {} });
+  }
+  if (method === "initialize") {
+    return json({
+      jsonrpc: "2.0",
+      id,
+      result: {
+        protocolVersion: "2025-06-18",
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "thebe-core", version },
+      },
+    });
+  }
   if (method === "tools/call" && product?.isQuiesced()) {
     return json(
       {
@@ -89,12 +110,13 @@ export async function handleMcp(
     return json({
       jsonrpc: "2.0",
       id,
-      result: { tools: listedTools() },
+      result: { tools: await listedTools(product) },
     });
   }
   if (method === "tools/call") {
     const params = asObject(body.params);
     const name = typeof params.name === "string" ? params.name : "";
+    if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
       const text = await callTool(product, name, params.arguments);
       return json({
@@ -103,19 +125,12 @@ export async function handleMcp(
         result: { content: [{ type: "text", text }] },
       });
     } catch (error) {
-      return json({
-        jsonrpc: "2.0",
+      return mcpError(
         id,
-        error: {
-          code: -32000,
-          message: error instanceof Error ? error.message : String(error),
-        },
-      });
+        -32000,
+        error instanceof Error ? error.message : String(error),
+      );
     }
   }
-  return json({
-    jsonrpc: "2.0",
-    id,
-    error: { code: -32601, message: "Method not found" },
-  });
+  return mcpError(id, -32601, "Method not found");
 }

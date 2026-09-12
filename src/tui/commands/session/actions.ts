@@ -36,6 +36,21 @@ case "compact": {
   }
   break;
 }
+case "summary": {
+  const id = host.ensureSession();
+  const meta = await product.getSession(id);
+  if (!meta.lastSummary) {
+    host.notice("no task summary has been generated yet");
+    break;
+  }
+  host.insertBeforeFooter(
+    host.makeMarkdown(
+      `### Task summary\n\n${meta.lastSummary}\n\n_Generated ${meta.lastSummaryAt ?? "at an unknown time"}_`,
+    ),
+  );
+  host.tui.requestRender();
+  break;
+}
 case "export": {
   const id = host.ensureSession();
   const exported = await product.exportSession(id);
@@ -158,6 +173,7 @@ case "unrevert": {
   }
   break;
 }
+case "history":
 case "messages": {
   const id = host.ensureSession();
   const messages = await product.loadMessages(id);
@@ -174,8 +190,8 @@ case "messages": {
   const slice = messages.slice(-limit);
   const header =
     limit < messages.length
-      ? `[Showing last ${slice.length} of ${messages.length} messages. Use /messages all or /messages <n> for more]\n`
-      : `[Showing all ${messages.length} messages]\n`;
+      ? `Showing the last ${slice.length} of ${messages.length} messages. Use /history all or /history <n> for more.\n`
+      : `Showing all ${messages.length} messages.\n`;
   host.notice(
     header +
       slice

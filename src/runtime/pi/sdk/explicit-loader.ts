@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import type { EnabledResource } from "../../types.ts";
 import type { PiSdk } from "./load-pi.ts";
 
@@ -22,21 +23,30 @@ export function createExplicitResourceLoader(options: {
   extensions?: unknown[];
   extensionRuntime?: unknown;
 }): ResourceLoader {
-  const skills = (options.enabledResources ?? [])
-    .filter((resource) => resource.kind === "skill")
-    .map((resource) => ({
-      name: resource.identity,
-      description: resource.identity,
-      filePath: resource.source,
-      baseDir: resource.source,
-      sourceInfo: options.sdk.createSyntheticSourceInfo(resource.source, {
-        source: resource.source,
-        scope: "temporary",
-        origin: "top-level",
-        baseDir: resource.source,
-      }),
-      disableModelInvocation: false,
-    }));
+  const getSkillBaseDir = (source: string): string =>
+    source.includes("://") ? source : dirname(source);
+
+  const loadEnabledSkills = () =>
+    (options.enabledResources ?? [])
+      .filter((resource) => resource.kind === "skill")
+      .map((resource) => {
+        const baseDir = getSkillBaseDir(resource.source);
+        return {
+          name: resource.identity,
+          description: resource.identity,
+          filePath: resource.source,
+          baseDir,
+          sourceInfo: options.sdk.createSyntheticSourceInfo(resource.source, {
+            source: resource.source,
+            scope: "temporary",
+            origin: "top-level",
+            baseDir,
+          }),
+          disableModelInvocation: false,
+        };
+      });
+
+  let skills = loadEnabledSkills();
 
   return {
     getExtensions: () => ({
@@ -54,6 +64,8 @@ export function createExplicitResourceLoader(options: {
     getAppendSystemPrompt: () => [],
     getAppendSystemPromptSources: () => [],
     extendResources: () => {},
-    reload: async () => {},
+    reload: async () => {
+      skills = loadEnabledSkills();
+    },
   };
 }

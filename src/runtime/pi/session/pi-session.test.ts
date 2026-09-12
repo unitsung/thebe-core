@@ -6,6 +6,8 @@ import {
   createModels,
   fauxAssistantMessage,
   fauxProvider,
+  fauxThinking,
+  fauxToolCall,
 } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { createThebeProduct } from "../../../product/service.ts";
@@ -81,6 +83,115 @@ describe("PiCodingAgentRuntime sessions", () => {
     const listed = await second.runtime.listSessions();
     expect(listed.some((row) => row.runtimeSessionId === meta.runtimeSessionId)).toBe(
       true,
+    );
+  });
+
+  it("deletes the persisted Pi transcript with the Thebe session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-pi-delete-"));
+    const { faux, runtime } = await piWithFaux(dir);
+    faux.setResponses([fauxAssistantMessage("delete-ready")]);
+    const product = createThebeProduct({
+      runtime,
+      provider: emptyProvider(),
+      productStoreDir: join(dir, "meta"),
+    });
+    const meta = await product.createSession({ title: "delete-real-session" });
+    await product.send("persist this", meta.thebeSessionId);
+    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(true);
+
+    await product.deleteSession(meta.thebeSessionId);
+
+    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(false);
+    expect(await runtime.listSessions()).toHaveLength(0);
+  });
+
+  it("reports the effective thinking level and restores it after resume", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-pi-thinking-"));
+    const first = await piWithFaux(dir);
+    const model = first.faux.getModel() as unknown as {
+      reasoning?: boolean;
+      thinkingLevelMap?: Record<string, string | null>;
+    };
+    model.reasoning = true;
+    model.thinkingLevelMap = {
+      minimal: "minimal",
+      low: "low",
+      medium: "medium",
+      high: "high",
+      xhigh: "xhigh",
+      max: "max",
+    };
+    const product = createThebeProduct({
+      runtime: first.runtime,
+      provider: emptyProvider(),
+      productStoreDir: join(dir, "meta"),
+    });
+    const created = await product.createSession();
+    first.faux.setResponses([fauxAssistantMessage("seed")]);
+    await product.send("seed", created.thebeSessionId);
+    await expect(product.setThinkingLevel(created.thebeSessionId, "high"))
+      .resolves.toMatchObject({ level: "high" });
+
+    const second = await piWithFaux(dir);
+    const resumedModel = second.faux.getModel() as unknown as {
+      reasoning?: boolean;
+      thinkingLevelMap?: Record<string, string | null>;
+    };
+    resumedModel.reasoning = true;
+    resumedModel.thinkingLevelMap = model.thinkingLevelMap;
+    const registeredResumedModel = second.modelRuntime.getModel(
+      "faux",
+      second.faux.getModel().id,
+    ) as unknown as {
+      reasoning?: boolean;
+      thinkingLevelMap?: Record<string, string | null>;
+    };
+    registeredResumedModel.reasoning = true;
+    registeredResumedModel.thinkingLevelMap = model.thinkingLevelMap;
+    const resumed = createThebeProduct({
+      runtime: second.runtime,
+      provider: emptyProvider(),
+      productStoreDir: join(dir, "meta"),
+    });
+    await resumed.resume(created.thebeSessionId);
+    await expect(resumed.getThinkingInfo(created.thebeSessionId))
+      .resolves.toMatchObject({ level: "high" });
+  });
+
+  it("forwards Pi thinking and tool events through the product log", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const model = faux.getModel() as unknown as {
+      reasoning?: boolean;
+      thinkingLevelMap?: Record<string, string | null>;
+    };
+    model.reasoning = true;
+    model.thinkingLevelMap = { high: "high" };
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxThinking("inspect the workspace"),
+        fauxToolCall("container.list", {}, { id: "call_container_list" }),
+      ]),
+      fauxAssistantMessage("tools are visible"),
+    ]);
+    const product = createThebeProduct({
+      runtime,
+      provider: emptyProvider(),
+    });
+    const created = await product.createSession();
+    const events: string[] = [];
+    product.subscribeLog(created.thebeSessionId, (event) => {
+      events.push(event.type);
+    });
+
+    await product.send("list containers", created.thebeSessionId);
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        "thinking_delta",
+        "tool_start",
+        "tool_end",
+        "text_delta",
+      ]),
     );
   });
 

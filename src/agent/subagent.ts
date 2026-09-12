@@ -205,7 +205,9 @@ export interface RunSubagentOptions {
   runtime: AgentRuntime;
   profile: SubagentProfile;
   task: string;
+  /** @deprecated Parent context is intentionally never inherited. */
   contextText?: string;
+  signal?: AbortSignal;
   onEvent?: (event: NormalizedEvent) => void;
 }
 
@@ -217,15 +219,14 @@ export async function runSubagent(options: RunSubagentOptions): Promise<{
   turns: number;
   subagent: string;
 }> {
-  const { runtime, profile, task, contextText, onEvent } = options;
+  const { runtime, profile, task, signal, onEvent } = options;
 
   // Filter tools strictly
   const safeTools = (profile.tools ?? []).filter((t) => !RESERVED_TOOLS.has(t));
 
-  let systemPrompt = profile.systemPrompt;
-  if (profile.inheritContext && contextText) {
-    systemPrompt += `\n\n### Prior Session Context:\n${contextText}`;
-  }
+  const systemPrompt = profile.systemPrompt;
+  // A one-shot subagent is deliberately context-isolated. Keep the legacy
+  // option in the type for profile compatibility, but never consume it.
 
   // Create ephemeral in-memory session (pure in-memory, not persisted in session store)
   const session = await runtime.createSession({
@@ -237,7 +238,20 @@ export async function runSubagent(options: RunSubagentOptions): Promise<{
   });
 
   let turns = 0;
-  const maxTurns = profile.maxTurns ?? 5;
+  const configuredMaxTurns = profile.maxTurns ?? 5;
+  const maxTurns = Number.isFinite(configuredMaxTurns)
+    ? Math.max(1, Math.min(50, Math.floor(configuredMaxTurns)))
+    : 5;
+
+  const abortOnSignal = () => {
+    void session.abort().catch(() => {});
+  };
+  if (signal?.aborted) {
+    await session.abort();
+    session.dispose();
+    throw new Error("subagent aborted");
+  }
+  signal?.addEventListener("abort", abortOnSignal, { once: true });
 
   const unsubscribe = session.subscribe((event) => {
     if (event.type === "turn_end") {
@@ -264,6 +278,7 @@ export async function runSubagent(options: RunSubagentOptions): Promise<{
       subagent: profile.name,
     };
   } finally {
+    signal?.removeEventListener("abort", abortOnSignal);
     unsubscribe();
     session.dispose();
   }

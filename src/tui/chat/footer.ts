@@ -143,9 +143,9 @@ export function formatFooterLines(state: ChatFooterState): string[] {
         : chalk.cyan("● working");
     let respondingHint: string;
     if (width >= 90) {
-      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T: fold · Ctrl+O: tools")}`;
+      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T: thinking · Ctrl+O: tools")}`;
     } else if (width >= 65) {
-      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T/O: fold")}`;
+      respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt · Alt+Enter: queue · Ctrl+T/O: toggle")}`;
     } else {
       respondingHint = `${statusIndicator} ${chalk.dim("· Esc: interrupt")}`;
     }

@@ -22,7 +22,7 @@ export function handleHelpCommand(host: SlashHost, name: string): boolean {
             ? ` (${c.aliases.map((a) => `/${a}`).join(", ")})`
             : "";
         lines.push(
-          `  /${c.name.padEnd(12)} ${c.argumentHint ?? ""} — ${c.description ?? ""}${alias}`,
+          `  /${c.name.padEnd(12)} — ${c.description ?? ""}${alias}`,
         );
       }
     }

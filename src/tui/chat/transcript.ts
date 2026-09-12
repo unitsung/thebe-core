@@ -19,6 +19,16 @@ import {
 import { chalk } from "../theme.ts";
 import { stashMarkdownSource } from "../display/markdown-source.ts";
 
+class SingleLineText {
+  constructor(private readonly text: string) {}
+
+  render(width: number): string[] {
+    return [truncateToWidth(this.text, width, "")];
+  }
+
+  invalidate(): void {}
+}
+
 export class ElapsedWorking extends Loader {
   private startedAt = Date.now();
   private tick: ReturnType<typeof setInterval> | undefined;
@@ -103,7 +113,10 @@ export class ThinkingBlock {
 
   render(width: number): string[] {
     if (this.isEmpty()) {
-      return [];
+      if (this.finished) {
+        return [];
+      }
+      return [truncateToWidth(chalk.dim("  Thinking... · Ctrl+T"), width, "")];
     }
     const sec = this.getDurationSeconds();
     if (this.hidden) {
@@ -215,13 +228,28 @@ function resultText(result: {
     .join("\n");
 }
 
+function compactToolResult(text: string, lineCount: number): string {
+  const firstLine = text.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  const clipped = firstLine.length > 120 ? `${firstLine.slice(0, 119)}…` : firstLine;
+  const remaining = Math.max(0, lineCount - 1);
+  const suffix = [] as string[];
+  if (firstLine.length > clipped.length) suffix.push("more");
+  if (remaining > 0) suffix.push(`${remaining} more lines`);
+  if (suffix.length > 0) suffix.push("Ctrl+O");
+  return `${clipped}${suffix.length > 0 ? ` · ${suffix.join(" · ")}` : ""}`;
+}
+
 export function createToolRenderers(toolName: string) {
   return {
+    // Keep the transcript on the same visual plane as normal agent output.
+    // The official default shell paints a full-width box; self-rendering lets
+    // the compact one-line call/result pair avoid pushing the output area.
+    renderShell: "self" as const,
     renderCall(args: unknown, theme: Theme) {
       const title = theme.fg("toolTitle", theme.bold(toolName));
       const argStr = formatToolArgs(toolName, args);
       const rest = argStr ? ` ${theme.fg("accent", argStr)}` : "";
-      return new Text(`${title}${rest}`, 0, 0);
+      return new SingleLineText(`${title}${rest}`);
     },
     renderResult(
       result: {
@@ -232,8 +260,8 @@ export function createToolRenderers(toolName: string) {
       theme: Theme,
       context?: { args?: unknown },
     ) {
-      if (options.isPartial && !result.content?.length) {
-        return new Text(theme.fg("warning", "working"), 0, 0);
+      if (options.isPartial) {
+        return new SingleLineText(theme.fg("warning", "working…"));
       }
       const text = resultText(result);
       if (!text.trim()) {
@@ -247,25 +275,23 @@ export function createToolRenderers(toolName: string) {
             : undefined;
       if (diff) {
         const lines = renderDiff(diff).split("\n");
-        const shown = options.expanded ? lines : lines.slice(0, 12);
-        const remaining = lines.length - shown.length;
-        const extra =
-          remaining > 0
-            ? `\n${theme.fg("muted", `... ${remaining} more lines · Ctrl+O`)}`
-            : "";
-        return new Text(`${shown.join("\n")}${extra}`, 0, 0);
+        if (!options.expanded) {
+          return new SingleLineText(
+            theme.fg("muted", compactToolResult(diff, lines.length)),
+          );
+        }
+        return new Text(lines.join("\n"), 0, 0);
       }
       const lang = languageFromPath(pathFromArgs(context?.args));
       const lines = (
         lang ? highlightCode(text, lang).join("\n") : text
       ).split("\n");
-      const shown = options.expanded ? lines : lines.slice(0, 10);
-      const remaining = lines.length - shown.length;
-      const extra =
-        remaining > 0
-          ? `\n${theme.fg("muted", `... ${remaining} more lines · Ctrl+O`)}`
-          : "";
-      return new Text(`${shown.join("\n")}${extra}`, 0, 0);
+      if (!options.expanded) {
+        return new SingleLineText(
+          theme.fg("muted", compactToolResult(text, lines.length)),
+        );
+      }
+      return new Text(lines.join("\n"), 0, 0);
     },
   };
 }

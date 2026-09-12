@@ -4,6 +4,7 @@ import type {
   PromptInput,
   RuntimeModelRef,
   RuntimeSession,
+  RuntimeThinkingInfo,
   ThinkingLevel,
   BackgroundTask,
   ThebeSessionContext,
@@ -24,6 +25,20 @@ import type { PiSession } from "./pi-session.ts";
 import { lastAssistantText } from "./pi-tools.ts";
 import { DEFAULT_COMPACTION_RESERVE_TOKENS } from "../config/user-config.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
+
+const THINKING_LEVELS = [
+  "off",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+
+function isThinkingLevel(value: string): value is RuntimeThinkingInfo["level"] {
+  return (THINKING_LEVELS as readonly string[]).includes(value);
+}
 
 export function wrapSession(
   session: PiSession,
@@ -153,6 +168,26 @@ export function wrapSession(
     },
     exportSession: () => exportPiSession(session as never),
     messages: () => mapPiMessages(session.messages),
+    getThinkingInfo(): RuntimeThinkingInfo {
+      const available: RuntimeThinkingInfo["availableLevels"] = (
+        session.getAvailableThinkingLevels?.() ?? ["off"]
+      ).filter(isThinkingLevel);
+      const availableLevels: RuntimeThinkingInfo["availableLevels"] = [
+        "off",
+        ...available.filter((level) => level !== "off"),
+      ];
+      const rawLevel = session.thinkingLevel;
+      const level =
+        typeof rawLevel === "string" && isThinkingLevel(rawLevel)
+          ? rawLevel
+          : "off";
+      return {
+        level: availableLevels.includes(level) ? level : "off",
+        availableLevels,
+        supportsThinking:
+          session.supportsThinking?.() ?? availableLevels.length > 1,
+      };
+    },
     async navigateTo(leafId: string): Promise<void> {
       await session.navigateTree(leafId);
     },
@@ -172,6 +207,9 @@ export function wrapSession(
       return mapPiMessages(session.messages)
         .filter((m) => m.role === "user" && m.text)
         .map((m) => ({ entryId: m.id, text: m.text ?? "" }));
+    },
+    async reloadResources(): Promise<void> {
+      await session.reload?.();
     },
     async getContextUsage(): Promise<ThebeSessionContext> {
       const raw = (session as { getContextUsage?: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined }).getContextUsage?.();
@@ -288,4 +326,3 @@ export function wrapSession(
     },
   };
 }
-
