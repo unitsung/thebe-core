@@ -30,6 +30,9 @@ export type ProductSessionMeta = {
   leafId?: string;
   /** Hidden from `GET /v1/session`; listed under parent `/children`. */
   inPlace?: boolean;
+  /** Latest background/manual task summary, when one has been generated. */
+  lastSummary?: string;
+  lastSummaryAt?: string;
 };
 
 const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;

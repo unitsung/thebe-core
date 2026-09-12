@@ -74,7 +74,10 @@ export async function handleAgentCommand(
           }
           case "agents":
           case "agent": {
-            const statuses = await product.sessionStatus();
+            const statuses = (await product.sessionStatus()).filter(
+              (session) =>
+                session.streaming || session.thebeSessionId === host.sessionId,
+            );
             if (statuses.length === 0) {
               host.notice("no active agent sessions");
               break;
@@ -88,7 +91,7 @@ export async function handleAgentCommand(
               const state = s.streaming ? chalk.cyan("streaming") : s.status === "running" ? chalk.yellow("running") : chalk.green("idle");
               return `${currentMarker}${idx + 1}. \`${s.thebeSessionId.slice(0, 8)}\` — **${title}** [${state}] (model: \`${modelStr}\`)`;
             });
-            const md = `### Active Agent Sessions (${statuses.length})\n\n${rows.join("\n")}\n\n*Use \`/resume <id>\` to switch active agent session.*`;
+            const md = `### Active Agents (${statuses.length})\n\n${rows.join("\n")}\n\n*Use \`/resume <id>\` to open a saved conversation.*`;
             host.insertBeforeFooter(host.makeMarkdown(md));
             host.tui.requestRender();
             break;
@@ -100,14 +103,19 @@ export async function handleAgentCommand(
                 host.notice("usage: /thinking off|minimal|low|medium|high|xhigh|max");
                 break;
               }
-              await product.setThinkingLevel(id, arg as ThinkingLevel);
-              host.currentThinking = arg as ThinkingLevel;
+              const requested = arg as ThinkingLevel;
+              const applied = await host.setThinkingLevel(requested);
               host.updateFooter();
               host.updateEditorBorderColor();
-              host.notice(`thinking level set to ${arg}`);
+              host.notice(
+                applied.level === requested
+                  ? `thinking level set to ${applied.level}`
+                  : `thinking level ${requested} unavailable for the current model; using ${applied.level}`,
+              );
               break;
             }
-            const items: SelectItem[] = Array.from(THINKING_LEVELS).map((lvl) => {
+            const available = (await product.getThinkingInfo(id)).availableLevels;
+            const items: SelectItem[] = available.map((lvl) => {
               const isCurrent = lvl === host.currentThinking;
               const marker = isCurrent ? "✓ " : "  ";
               const desc = THINKING_DESCRIPTIONS[lvl] ?? "";
@@ -125,11 +133,15 @@ export async function handleAgentCommand(
               host.getActiveSelectListTheme(),
             );
             if (selected) {
-              await product.setThinkingLevel(id, selected.value as ThinkingLevel);
-              host.currentThinking = selected.value as ThinkingLevel;
+              const requested = selected.value as ThinkingLevel;
+              const applied = await host.setThinkingLevel(requested);
               host.updateFooter();
               host.updateEditorBorderColor();
-              host.notice(`thinking level set to ${selected.value}`);
+              host.notice(
+                applied.level === requested
+                  ? `thinking level set to ${applied.level}`
+                  : `thinking level ${requested} unavailable for the current model; using ${applied.level}`,
+              );
             }
             break;
           }

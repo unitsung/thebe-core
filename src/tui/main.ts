@@ -67,6 +67,12 @@ if (resolvedSessionId && typeof userConfig.autoCompact === "boolean") {
     userConfig.autoCompact,
   );
 }
+if (typeof userConfig.autoSummary === "boolean") {
+  await product.setAutoSummaryEnabled(userConfig.autoSummary);
+}
+if (typeof userConfig.autoSummaryDelayMs === "number") {
+  await product.setAutoSummaryDelayMs(userConfig.autoSummaryDelayMs);
+}
 
 startThebeTui({
   product,

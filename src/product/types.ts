@@ -7,6 +7,34 @@ export type ThebePromptResult = {
   thebeSessionId: string;
 };
 
+export type SubagentRunStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+/**
+ * Control-plane record for an ephemeral subagent invocation.
+ *
+ * This is deliberately not a ProductSessionMeta: a subagent has no resumable
+ * transcript and is never added to the ordinary session store.
+ */
+export type SubagentRun = {
+  runId: string;
+  parentSessionId: string;
+  profileName: string;
+  task: string;
+  status: SubagentRunStatus;
+  turns: number;
+  maxTurns: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  result?: string;
+  error?: string;
+};
+
 /** @deprecated Use ThebePromptResult */
 export type ThebeReply = ThebePromptResult;
 

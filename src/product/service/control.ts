@@ -13,9 +13,18 @@ export function createControlApi(ctx: ProductContext) {
     sessionLog,
     policy,
     baseTools,
+    mcp,
   } = ctx;
 
   return {
+    permissionMode(): import("../../runtime/types.ts").PermissionMode {
+      return ctx.permissionMode();
+    },
+    setPermissionMode(
+      mode: import("../../runtime/types.ts").PermissionMode,
+    ): void {
+      ctx.setPermissionMode(mode);
+    },
     async listModels(query?: { all?: boolean; providerId?: string }) {
       return options.runtime.listModels(query);
     },
@@ -94,6 +103,8 @@ export function createControlApi(ctx: ProductContext) {
     },
     async invokeTool(name: string, args: unknown): Promise<string> {
       const params = (args ?? {}) as Record<string, unknown>;
+      const external = await mcp.invokeTool(name, params);
+      if (external !== undefined) return external;
       if (name === "list_core_events") {
         const sid =
           typeof params.sessionId === "string"

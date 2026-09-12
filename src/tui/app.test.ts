@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { describe, expect, it, vi } from "vitest";
 import {
   Markdown,
   Text,
@@ -19,6 +20,7 @@ import {
   copyToClipboard,
   formatCwd,
   formatTokens,
+  renderStartScreen,
   resolveSlashName,
   SLASH_COMMANDS,
 } from "./app.ts";
@@ -76,6 +78,22 @@ const provider: ContainerInfoProvider = {
 };
 
 describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
+  it("keeps the startup screen compact and action-oriented", () => {
+    const plain = renderStartScreen({
+      version: "0.1.0",
+      model: "opencode/muse-spark-1.3-free",
+      cwd: "/Users/unitsung/Documents/Code/thebe/core",
+      branch: "dev",
+      width: 120,
+    }).replace(/\x1b\[[0-9;]*m/g, "");
+
+    expect(plain.split("\n").length).toBeLessThanOrEqual(10);
+    expect(plain).toContain("/ commands");
+    expect(plain).toContain("Ctrl+O tools");
+    expect(plain).not.toContain("Quick Start:");
+    expect(plain).not.toContain("Try Asking:");
+  });
+
   it("renders markdown with pi-tui's default theme", () => {
     const md = new Markdown(
       "# Status\n\n**25 running** and `nginx`\n\n- one\n- two",
@@ -130,6 +148,76 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
     expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
   });
+
+  it("cancels an open picker when the transcript is cleared", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    const pickerPromise = handleSlash("/model");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(tui.children.some((child) => child instanceof SearchableModelPicker)).toBe(true);
+
+    await handleSlash("/clear");
+    await expect(
+      Promise.race([
+        pickerPromise,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("picker was not cancelled")), 100),
+        ),
+      ]),
+    ).resolves.toBe(true);
+    expect(tui.children.some((child) => child instanceof SearchableModelPicker)).toBe(false);
+  });
+
+  it("does not append a late history load after switching sessions", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const first = await product.createSession({ title: "first" });
+    const second = await product.createSession({ title: "second" });
+
+    fake.queueTurns([{ kind: "text", text: "first-session marker" }]);
+    await product.prompt("first request", { thebeSessionId: first.thebeSessionId });
+    fake.queueTurns([{ kind: "text", text: "second-session marker" }]);
+    await product.prompt("second request", { thebeSessionId: second.thebeSessionId });
+
+    const originalLoadMessages = product.loadMessages.bind(product);
+    let releaseFirstLoad = () => {};
+    const firstLoadGate = new Promise<void>((resolve) => {
+      releaseFirstLoad = resolve;
+    });
+    vi.spyOn(product, "loadMessages").mockImplementation(async (id) => {
+      const messages = await originalLoadMessages(id);
+      if (id === first.thebeSessionId) {
+        await firstLoadGate;
+      }
+      return messages;
+    });
+
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: first.thebeSessionId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    await handleSlash(`/tree ${second.thebeSessionId}`);
+    const visible = () =>
+      tui.children
+        .filter((child) => typeof (child as { render?: unknown }).render === "function")
+        .map((child) => (child as { render: (width: number) => string[] }).render(80).join("\n"))
+        .join("\n");
+    expect(visible()).toContain("second-session marker");
+
+    releaseFirstLoad();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(visible()).not.toContain("first-session marker");
+  });
 });
 
 describe("Thebe TUI product slash commands", () => {
@@ -149,7 +237,7 @@ describe("Thebe TUI product slash commands", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
     expect(helpText).toContain("/compact");
-    expect(helpText).toContain("[prompt]");
+    expect(helpText).not.toContain("[prompt]");
     expect(helpText).toContain("Session");
     expect(helpText).toContain("Agent");
     expect(helpText).toContain("Provider");
@@ -179,6 +267,133 @@ describe("Thebe TUI product slash commands", () => {
     expect(markdown.length).toBeGreaterThanOrEqual(2);
     const reply = markdown.at(-1)!.render(40).join("\n");
     expect(reply).toContain("ok");
+  });
+
+  it("renders assistant Markdown without leaking syntax markers", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: [
+          "### Result",
+          "",
+          "**Done** and `pnpm test`.",
+          "",
+          "- first item",
+          "- second item",
+          "",
+          "```ts",
+          'const literal = "**not bold**";',
+          "```",
+        ].join("\n"),
+      },
+    ]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    editor.onSubmit?.("render markdown");
+    await new Promise((r) => setTimeout(r, 80));
+
+    const reply = tui.children.filter((child) => child instanceof Markdown).at(-1)!;
+    const rendered = reply.render(100).join("\n");
+    const plainRendered = rendered.replace(/\x1b\[[0-9;]*m/g, "");
+    expect(rendered).toContain("Result");
+    expect(rendered).toContain("Done");
+    expect(rendered).toContain("first item");
+    expect(plainRendered).toContain('const literal = "**not bold**";');
+    expect(plainRendered).not.toContain("### Result");
+    expect(plainRendered).not.toContain("**Done**");
+    expect(plainRendered).not.toContain("- first item");
+    expect(plainRendered).not.toContain("```");
+  });
+
+  it("shows the live thinking process in the transcript", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "text",
+        thinking: "I am checking the relevant files first.",
+        text: "done",
+      },
+    ]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    editor.onSubmit?.("inspect");
+    await new Promise((r) => setTimeout(r, 60));
+
+    const transcript = tui.children
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(transcript).toContain("I am checking the relevant files first.");
+  });
+
+  it("shows tool calls and their results in the transcript", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [{ name: "container.list", id: "call_container_list", args: {} }],
+      },
+      { kind: "text", text: "after tool" },
+    ]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    editor.onSubmit?.("list containers");
+    await new Promise((r) => setTimeout(r, 80));
+
+    const transcript = tui.children
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(transcript).toContain("container.list");
+    expect(transcript).toContain("after tool");
+  });
+
+  it("keeps auto-summary as one faint footer line instead of transcript markdown", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+    await new Promise((r) => setTimeout(r, 20));
+
+    const before = tui.children.length;
+    product.emitLog(meta.thebeSessionId, {
+      type: "summary_ready",
+      summary: "已完成界面调整。\n\n重要文件和测试另见完整记录。",
+      generatedAt: new Date().toISOString(),
+    });
+
+    expect(tui.children.length).toBe(before);
+    expect(
+      tui.children
+        .filter((child) => child instanceof Markdown)
+        .map((child) => child.render(80).join("\n"))
+        .join("\n"),
+    ).not.toContain("Auto-summary");
+    const footerLines = tui.children.at(-1)!.render(80);
+    expect(footerLines).toHaveLength(3);
+    expect(footerLines[0]).toContain("已完成界面调整。");
+    expect(footerLines[0]).not.toContain("重要文件");
   });
 
   it("formats tokens and cwd helpers correctly", () => {
@@ -225,7 +440,28 @@ describe("Thebe TUI product slash commands", () => {
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
     const footer = tui.children.at(-1) as { render: (width: number) => string[] };
     const footerText = footer.render(80).join("\n");
-    expect(footerText).toContain("fake-2 • high");
+    expect(footerText).toContain("fake-2 • thinking off");
+  });
+
+  it("switches permission modes from the command menu and persists the choice", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-permissions-"));
+    const previousConfigDir = process.env.THEBE_CONFIG_DIR;
+    process.env.THEBE_CONFIG_DIR = configDir;
+    try {
+      const fake = createFakeRuntime();
+      const product = createThebeProduct({ runtime: fake.runtime, provider });
+      const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+      const { handleSlash } = attachThebeChat(tui, { product });
+
+      await handleSlash("/permissions read-only");
+      expect(product.permissionMode()).toBe("read-only");
+      await handleSlash("/permissions full-access");
+      expect(product.permissionMode()).toBe("full-access");
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
+      else process.env.THEBE_CONFIG_DIR = previousConfigDir;
+      await rm(configDir, { recursive: true, force: true });
+    }
   });
 
   it("handles /copy when no assistant response vs with assistant response", async () => {
@@ -264,10 +500,13 @@ describe("Thebe TUI product slash commands", () => {
         "resume",
         "new",
         "session",
+        "summary",
+        "history",
         "compact",
         "copy",
         "fork",
         "revert",
+        "delete",
       ]),
     );
     expect(byCategory("Agent")).toEqual(
@@ -284,8 +523,8 @@ describe("Thebe TUI product slash commands", () => {
     );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("theme");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("tui");
-    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("messages");
-    expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("delete");
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain("history");
+    expect(SLASH_COMMANDS.map((c) => c.name)).toContain("delete");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("provider");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("custom");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("usage");
@@ -296,6 +535,8 @@ describe("Thebe TUI product slash commands", () => {
     expect(resolveSlashName("exit")).toBe("quit");
     expect(resolveSlashName("sessions")).toBe("resume");
     expect(resolveSlashName("continue")).toBe("resume");
+    expect(resolveSlashName("message")).toBe("history");
+    expect(resolveSlashName("messages")).toBe("history");
     expect(resolveSlashName("session")).toBe("session");
     expect(resolveSlashName("usage")).toBe("session");
     expect(resolveSlashName("status")).toBe("session");
@@ -383,7 +624,7 @@ describe("Thebe TUI product slash commands", () => {
     expect(allText).toContain("resumed session");
   });
 
-  it("handles /export, /compact, /revert, /unrevert, and /messages limit", async () => {
+  it("handles /history, /export, /compact, /revert, and /unrevert", async () => {
     const fake = createFakeRuntime();
     const product = createThebeProduct({ runtime: fake.runtime, provider });
     const meta = await product.createSession({ title: "robust-session" });
@@ -399,7 +640,7 @@ describe("Thebe TUI product slash commands", () => {
         .map((child) => (child as { render: (w: number) => string[] }).render(80).join("\n"))
         .join("\n");
 
-    await handleSlash("/messages");
+    await handleSlash("/history");
     expect(visible()).toContain("no messages in session");
     const tmpExportPath = `/tmp/thebe-test-export-${Date.now()}`;
     await handleSlash(`/export ${tmpExportPath}`);
@@ -575,7 +816,7 @@ describe("Thebe TUI product slash commands", () => {
     expect(footer().trim().split("\n")[1]).toMatch(/• low/);
   });
 
-  it("permission prompt Enter allow/deny resolves that permission", async () => {
+  it("permission prompt defaults to deny and offers exact-request memory", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
@@ -592,9 +833,14 @@ describe("Thebe TUI product slash commands", () => {
     await new Promise((r) => setTimeout(r, 40));
     const list = tui.children.find(
       (c) => c.constructor.name === "SelectList",
-    ) as { handleInput: (data: string) => void } | undefined;
+    ) as { handleInput: (data: string) => void; render: (width: number) => string[] } | undefined;
     expect(list).toBeDefined();
-    list!.handleInput("\x1b[B");
+    const choices = list!.render(80).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    expect(choices).toContain("Deny bash (high risk)");
+    expect(choices).toContain("Allow bash once");
+    expect(choices).toContain("Always allow bash for this session (high risk)");
+    expect(choices).toContain("Allow this exact bash request only");
+    expect(choices).toContain("Allow this conversation");
     list!.handleInput("\r");
     await new Promise((r) => setTimeout(r, 60));
     const allText = tui.children
@@ -602,6 +848,45 @@ describe("Thebe TUI product slash commands", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
     expect(allText).toMatch(/permission .+ denied/);
+  });
+
+  it("permission prompt can remember all commands for a high-risk tool", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "first command done" },
+      { kind: "tools", calls: [{ name: "bash", args: { command: "pwd" } }] },
+      { kind: "text", text: "second command done" },
+    ]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor, isResponding } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    editor.onSubmit?.("run the first command");
+    await new Promise((r) => setTimeout(r, 40));
+    const list = tui.children.find(
+      (c) => c.constructor.name === "SelectList",
+    ) as { handleInput: (data: string) => void } | undefined;
+    expect(list).toBeDefined();
+    // The tool-wide choice is the third item; the first item is selected by default.
+    list!.handleInput("\x1b[B");
+    list!.handleInput("\x1b[B");
+    list!.handleInput("\r");
+    await new Promise((r) => setTimeout(r, 80));
+    expect((await product.getSession(meta.thebeSessionId)).rememberedPermissions).toEqual({
+      bash: "allow",
+    });
+    expect(tui.children.filter((c) => c.constructor.name === "SelectList")).toEqual([]);
+    await vi.waitFor(() => expect(isResponding()).toBe(false));
+
+    editor.onSubmit?.("run the second command");
+    await new Promise((r) => setTimeout(r, 80));
+    expect(product.pendingPermissionIds()).toHaveLength(0);
+    expect(tui.children.filter((c) => c.constructor.name === "SelectList")).toEqual([]);
   });
 
   it("copyToClipboard succeeds via native clipboard or OSC 52", async () => {
@@ -1078,7 +1363,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     expect(editor.borderColor).toBe(initialBorder);
   });
 
-  it("handles /settings opening 10 standard Pi settings items", async () => {
+  it("handles /settings opening the standard settings items", async () => {
     const fake = createFakeRuntime();
     const product = createThebeProduct({ runtime: fake.runtime, provider });
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
@@ -1094,7 +1379,10 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       "theme",
       "thinking",
       "tui",
+      "permissionMode",
       "autoCompact",
+      "autoSummary",
+      "autoSummaryDelay",
       "steeringMode",
       "followUpMode",
       "hideThinking",
@@ -1125,8 +1413,31 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
 
-    expect(allText).toContain("Active Agent Sessions");
+    expect(allText).toContain("Active Agents");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
+  });
+
+  it("does not show every saved conversation in /agents", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const current = await product.createSession({ title: "current" });
+    const oldOne = await product.createSession({ title: "old one" });
+    const oldTwo = await product.createSession({ title: "old two" });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: current.thebeSessionId,
+    });
+
+    await handleSlash("/agents");
+    const allText = tui.children
+      .filter((child) => child instanceof Text || child instanceof Markdown)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+
+    expect(allText).toContain(current.thebeSessionId.slice(0, 8));
+    expect(allText).not.toContain(oldOne.thebeSessionId.slice(0, 8));
+    expect(allText).not.toContain(oldTwo.thebeSessionId.slice(0, 8));
   });
 
   it("handles /new, /export, /fork, /revert, /skills, /mcp, and /subagent", async () => {
@@ -1186,7 +1497,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(allText).toContain("no active subagents");
+    expect(allText).toContain("no subagent runs");
     await handleSlash("/new");
     allText = tui.children
       .filter((child) => child instanceof Text)
@@ -1195,6 +1506,82 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     expect(allText).toContain("new session created");
     expect(tui.children.filter((child) => child instanceof Markdown)).toHaveLength(0);
   });
+
+  it("/fork without an argument opens a picker and switches to the selected branch", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "forkable reply" }]);
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const parent = await product.createSession({ title: "parent" });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { editor, handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: parent.thebeSessionId,
+    });
+
+    editor.onSubmit?.("fork this turn");
+    await new Promise((r) => setTimeout(r, 40));
+    const before = tui.children
+      .filter((child) => child instanceof Markdown)
+      .map((child) => child.render(80).join("\n"))
+      .join("\n");
+    expect(before).toContain("forkable reply");
+
+    const forkPromise = handleSlash("/fork");
+    await new Promise((r) => setTimeout(r, 20));
+    const picker = tui.children.find(
+      (c) => c.constructor.name === "SelectList",
+    ) as { handleInput: (data: string) => void } | undefined;
+    expect(picker).toBeDefined();
+    picker!.handleInput("\r");
+    await forkPromise;
+
+    expect(tui.children.some((c) => c.constructor.name === "SelectList")).toBe(
+      false,
+    );
+    const current = product.lastThebeSessionId();
+    expect(current).toBeDefined();
+    expect(current).not.toBe(parent.thebeSessionId);
+    expect((await product.getSession(current!)).parentThebeSessionId).toBe(
+      parent.thebeSessionId,
+    );
+    expect((await product.loadMessages(current!)).map((message) => message.text)).toEqual([
+      "fork this turn",
+    ]);
+    expect(editor.getText()).toBe("fork this turn");
+  });
+
+  it("keeps MCP test actions out of the menu and confirms session deletion", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider });
+    const meta = await product.createSession({ title: "remove me" });
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      product,
+      sessionId: meta.thebeSessionId,
+    });
+
+    const mcpPromise = handleSlash("/mcp");
+    await vi.waitFor(() => {
+      expect(tui.children.some((child) => child.constructor.name === "SelectList")).toBe(true);
+    });
+    let list = tui.children.find((child) => child.constructor.name === "SelectList") as {
+      handleInput: (data: string) => void;
+      render: (width: number) => string[];
+    };
+    expect(list.render(80).join("\n")).not.toContain("Test MCP tool");
+    list.handleInput("\x1b");
+    await mcpPromise;
+
+    const deletePromise = handleSlash("/delete");
+    await vi.waitFor(() => {
+      expect(tui.children.some((child) => child.constructor.name === "SelectList")).toBe(true);
+    });
+    list = tui.children.find((child) => child.constructor.name === "SelectList") as typeof list;
+    expect(list.render(80).join("\n")).toContain("Delete remove me and transcript");
+    list.handleInput("\x1b[B");
+    list.handleInput("\r");
+    await deletePromise;
+    expect(await product.listSessions()).toHaveLength(0);
+    expect(await fake.runtime.listSessions()).toHaveLength(0);
+  });
 });
-
-

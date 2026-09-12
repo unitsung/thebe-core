@@ -9,6 +9,11 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 import type { ThebeProduct } from "../../product/service.ts";
+import { insertOverlay } from "./index.ts";
+
+type DismissiblePicker = {
+  dismiss?: () => void;
+};
 import type { RuntimeModel, RuntimeProvider } from "../../runtime/types.ts";
 
 function isConfirmKey(data: string): boolean {
@@ -553,8 +558,9 @@ export async function attachSearchableModelPicker(
       onCancel: () => finish(null),
       onRequestRender: () => tui.requestRender(),
     });
+    (picker as unknown as DismissiblePicker).dismiss = () => finish(null);
 
-    tui.addChild(picker);
+    insertOverlay(tui, picker, options.focusBack);
     tui.setFocus(picker);
     tui.requestRender();
   });
@@ -617,8 +623,9 @@ export async function attachSearchableProviderPicker(
       onCancel: () => finish(null),
       onRequestRender: () => tui.requestRender(),
     });
+    (picker as unknown as DismissiblePicker).dismiss = () => finish(null);
 
-    tui.addChild(picker);
+    insertOverlay(tui, picker, options.focusBack);
     tui.setFocus(picker);
     tui.requestRender();
   });

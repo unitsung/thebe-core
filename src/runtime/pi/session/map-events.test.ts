@@ -23,6 +23,21 @@ describe("mapPiEvent", () => {
     ).not.toContain("message_update");
   });
 
+  it("preserves thinking deltas and effective level changes", () => {
+    expect(
+      mapPiEvent({
+        type: "message_update",
+        assistantMessageEvent: {
+          type: "thinking_delta",
+          delta: "inspect the repository",
+        },
+      }),
+    ).toEqual({ type: "thinking_delta", text: "inspect the repository" });
+    expect(
+      mapPiEvent({ type: "thinking_level_changed", level: "high" }),
+    ).toEqual({ type: "thinking_level_changed", level: "high" });
+  });
+
   it("maps compaction_end with token estimates", async () => {
     expect(
       mapPiEvent({

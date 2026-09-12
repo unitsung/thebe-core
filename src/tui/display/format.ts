@@ -23,7 +23,7 @@ export function renderStartScreen(options: StartScreenOptions): string {
   }
 
   const termWidth = options.width ?? (process.stdout?.columns ? process.stdout.columns : 80);
-  const cardWidth = Math.min(Math.max(48, termWidth - 4), 74);
+  const cardWidth = Math.min(Math.max(42, termWidth - 2), 72);
 
   const home = process.env.HOME || process.env.USERPROFILE;
   const cwdDisplay = formatCwdForFooter(options.cwd, home);
@@ -45,44 +45,27 @@ export function renderStartScreen(options: StartScreenOptions): string {
   const botBorder = chalk.dim(`╰${"─".repeat(cardWidth - 2)}╯`);
 
   const cardTitle = `${chalk.bold.cyan("✦ Thebe Agent")} ${chalk.dim(`v${options.version}`)} · ${chalk.green("Ready")}`;
-  const cardDesc = chalk.dim("Autonomous Homelab Ops & Coding Assistant with Pluggable Runtimes");
-  const cardGreeting = chalk.dim("Connected and standby. Ask anything or type / for available commands.");
+  const workspaceLine = `${cwdDisplay} ${branchDisplay}`.trim();
+  const modelLine = options.model
+    ? `${options.model} · Shift+Tab thinking level`
+    : "no model · Shift+Tab thinking level";
 
   const lines = [
     topBorder,
     makeCardLine(cardTitle, cardWidth),
-    makeCardLine(cardDesc, cardWidth),
-    makeCardLine(cardGreeting, cardWidth),
+    makeCardLine(workspaceLine, cardWidth),
+    makeCardLine(modelLine, cardWidth),
     botBorder,
     "",
-    chalk.bold("Environment:"),
-    `  ${chalk.dim("• Workspace :")} ${cwdDisplay} ${branchDisplay}`.trimEnd(),
-    `  ${chalk.dim("• Active LLM:")} ${options.model ? chalk.cyan(options.model) : chalk.dim("none")} ${chalk.dim("(Ctrl+P to switch)")}`,
   ];
 
   if (options.sessionTitle) {
-    lines.push(`  ${chalk.dim("• Session   :")} ${options.sessionTitle}`);
+    lines.push(chalk.dim(`session: ${options.sessionTitle}`));
   }
 
   lines.push(
-    "",
-    chalk.bold("Quick Start:"),
-    `  ${chalk.dim("•")} ${chalk.cyan("Chat & Code")}   : Ask questions, plan refactors, write or debug code`,
-    `  ${chalk.dim("•")} ${chalk.green("Shell / Ops")}   : Prefix ${chalk.green("!")} for direct bash (${chalk.dim("!docker ps")}, ${chalk.dim("!git status")})`,
-    `  ${chalk.dim("•")} ${chalk.yellow("Command Menu")}  : Type ${chalk.yellow("/")} for slash commands (${chalk.dim("/model")}, ${chalk.dim("/session")}, ${chalk.dim("/settings")}, ${chalk.dim("/help")})`,
-    "",
-    chalk.bold("Try Asking:"),
-    `  ${chalk.yellow("→")} ${chalk.dim('"Explore project architecture and summarize key data flow"')}`,
-    `  ${chalk.yellow("→")} ${chalk.dim('"Inspect running docker containers and summarize error logs"')}`,
-    `  ${chalk.yellow("→")} ${chalk.dim('"Delegate a subagent to write tests and verify edge cases"')}`,
-    `  ${chalk.yellow("→")} ${chalk.dim('"Query connected MCP tools to diagnose database or network"')}`,
-    "",
-    chalk.bold("Keyboard Shortcuts:"),
-    `  ${chalk.cyan("Ctrl+P")}    ${chalk.dim("Switch model")}          ${chalk.cyan("Shift+Tab")}  ${chalk.dim("Cycle thinking level")}`,
-    `  ${chalk.cyan("Ctrl+T")}    ${chalk.dim("Toggle thinking UI")}    ${chalk.cyan("Ctrl+O")}     ${chalk.dim("Toggle tool details")}`,
-    `  ${chalk.cyan("Alt+Enter")} ${chalk.dim("Queue follow-up")}       ${chalk.cyan("Esc")}        ${chalk.dim("Interrupt / cancel")}`,
-    "",
-    chalk.dim("💡 Tip: Fold CoT/tools with Ctrl+T & Ctrl+O · Type /help for all commands"),
+    chalk.dim("Ask anything · / commands · ! bash · Ctrl+P model"),
+    chalk.dim("Ctrl+T thinking · Ctrl+O tools · Alt+Enter queue · Esc cancel"),
     "",
   );
 

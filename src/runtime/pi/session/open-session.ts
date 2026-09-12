@@ -149,8 +149,10 @@ export async function openPiSession(
           "thebe://permission-gate",
         ),
       ];
-    } catch {
-      permissionExtension = [];
+    } catch (error) {
+      throw new Error(
+        `failed to install permission gate: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
   const resourceLoader = createExplicitResourceLoader({
@@ -214,7 +216,9 @@ export async function openPiSession(
     agentDir: args.agentDir,
     modelRuntime: args.modelRuntime,
     model: resolvedModel as never,
-    thinkingLevel: "off",
+    // New sessions start with Thebe's explicit default. Existing sessions
+    // must omit this option so Pi can restore their persisted level.
+    thinkingLevel: sessionManager.getBranch().length === 0 ? "off" : undefined,
     tools,
     customTools: piCustomTools,
     resourceLoader,

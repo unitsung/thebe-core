@@ -11,6 +11,23 @@ import type { ThinkingLevel } from "../runtime/types.ts";
 
 const chalk = new Chalk({ level: 3 });
 
+function renderHeading(text: string, color: (value: string) => string): string {
+  const withoutMarker = text.replace(
+    /^(\x1b\[[0-9;]*m)*#{1,6}\s+/,
+    (match) => match.replace(/#{1,6}\s+/, ""),
+  );
+  return color(withoutMarker);
+}
+
+function renderCodeBlockBorder(text: string): string {
+  const language = text.startsWith("```") ? text.slice(3).trim() : "";
+  return chalk.dim(language ? `╭─ ${language} ─` : "╰─");
+}
+
+function renderListBullet(text: string, color: (value: string) => string): string {
+  return color(text.replace(/^[-+*]\s/, "• "));
+}
+
 export const defaultSelectListTheme: SelectListTheme = {
   selectedPrefix: (text: string) => chalk.cyan(text),
   selectedText: (text: string) => {
@@ -23,21 +40,21 @@ export const defaultSelectListTheme: SelectListTheme = {
   },
   description: (text: string) => chalk.dim(text),
   scrollInfo: (text: string) =>
-    chalk.dim(`${text.trim()} · ↑/↓: navigate · Tab: complete · Enter: select · Esc: dismiss`),
+    chalk.dim(`${text.trim()} · ↑↓ move · Enter select · Esc close`),
   noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const defaultMarkdownTheme: MarkdownTheme = {
-  heading: (text: string) => chalk.bold.cyan(text),
+  heading: (text: string) => renderHeading(text, (value) => chalk.bold.cyan(value)),
   link: (text: string) => chalk.blue(text),
   linkUrl: (text: string) => chalk.dim(text),
   code: (text: string) => chalk.yellow(text),
   codeBlock: (text: string) => chalk.green(text),
-  codeBlockBorder: (text: string) => chalk.dim(text),
+  codeBlockBorder: renderCodeBlockBorder,
   quote: (text: string) => chalk.italic(text),
   quoteBorder: (text: string) => chalk.dim(text),
   hr: (text: string) => chalk.dim(text),
-  listBullet: (text: string) => chalk.cyan(text),
+  listBullet: (text: string) => renderListBullet(text, (value) => chalk.cyan(value)),
   bold: (text: string) => chalk.bold(text),
   italic: (text: string) => chalk.italic(text),
   strikethrough: (text: string) => chalk.strikethrough(text),
@@ -56,21 +73,21 @@ export const lightSelectListTheme: SelectListTheme = {
   },
   description: (text: string) => chalk.dim(text),
   scrollInfo: (text: string) =>
-    chalk.dim(`${text.trim()} · ↑/↓: navigate · Tab: complete · Enter: select · Esc: dismiss`),
+    chalk.dim(`${text.trim()} · ↑↓ move · Enter select · Esc close`),
   noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const lightMarkdownTheme: MarkdownTheme = {
-  heading: (text: string) => chalk.bold.blue(text),
+  heading: (text: string) => renderHeading(text, (value) => chalk.bold.blue(value)),
   link: (text: string) => chalk.blue(text),
   linkUrl: (text: string) => chalk.dim(text),
   code: (text: string) => chalk.magenta(text),
   codeBlock: (text: string) => chalk.black(text),
-  codeBlockBorder: (text: string) => chalk.dim(text),
+  codeBlockBorder: renderCodeBlockBorder,
   quote: (text: string) => chalk.italic(text),
   quoteBorder: (text: string) => chalk.dim(text),
   hr: (text: string) => chalk.dim(text),
-  listBullet: (text: string) => chalk.blue(text),
+  listBullet: (text: string) => renderListBullet(text, (value) => chalk.blue(value)),
   bold: (text: string) => chalk.bold(text),
   italic: (text: string) => chalk.italic(text),
   strikethrough: (text: string) => chalk.strikethrough(text),
@@ -147,4 +164,3 @@ export function getTuiTheme(name: ThemeName = "dark") {
 }
 
 export { chalk };
-

@@ -1,6 +1,12 @@
 export { createThebeAgent } from "./agent/index.ts";
 export { createThebeApp } from "./product/app.ts";
 export { createThebeProduct } from "./product/service.ts";
+export type {
+  CreateThebeProductOptions,
+  PermissionMode,
+  SubagentRun,
+  SubagentRunStatus,
+} from "./product/service.ts";
 export { createProductStore } from "./product/store.ts";
 export { createFakeRuntime } from "./runtime/fake-runtime.ts";
 export { createPiCodingAgentRuntime } from "./runtime/pi/pi-coding-agent-runtime.ts";

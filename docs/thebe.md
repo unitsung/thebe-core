@@ -35,6 +35,15 @@
 
 ## 0. 产品定位、分层与迁移决策
 
+### 配置文件
+
+Thebe 的用户配置位于 `~/.thebe/config.json`。TUI 中输入 `/config` 会使用外部编辑器打开它，`/config path` 只显示配置与 Pi agent 文件的位置，常用选项也可以通过 `/settings` 修改。完整说明见 [`configuration.md`](configuration.md)。
+
+编辑器选择与 Pi 一致：配置文件中的 `externalEditor` 优先，其次为 `$VISUAL`、`$EDITOR`，最后使用平台默认值（Windows 为 Notepad，其他平台为 nano）。可用 `THEBE_CONFIG_DIR` 修改配置目录，用 `THEBE_AGENT_DIR` 修改 Pi agent 文件目录；默认 agent 目录为 `~/.thebe/agent`，其中保存 `models.json` 等 Pi runtime 文件。
+
+会话文件、自动总结、删除、权限确认和 subagent 的实现说明见 [`session-summary-security.md`](session-summary-security.md)。
+Codex、OpenCode 与 Pi 的一手资料对照及产品建议见 [`agent-behavior-comparison.md`](agent-behavior-comparison.md)。
+
 ### 0.1 不可变原则
 
 | 原则 | 内容 |
@@ -754,7 +763,7 @@ X-Content-Type-Options: nosniff
 - [x] SSE 是否只在 `session_end`/`error`/`interrupted` 结束，而非 `turn_end`？`/v1/messages` SSE `closeOnTerminal`；`GET /log?follow=true` 保持观察流（idle 5min），不因 `turn_end` 关闭
 - [x] SSE 断线后如何恢复（cursor 补发 或 message 刷新兜底）？`id:` + `?after=` / `Last-Event-ID` 进程内补发；`GET /message` 为跨进程兜底（事件日志不落盘）
 - [x] 普通 `mode: prompt` 在 active run 时是否返回明确冲突状态，而非底层异常裸传？`409` `code: session_running`；已知 session id 时锁在 `openSession` 之前
-- [x] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？session 作用域、无长期 TTL；高危工具（bash/write/edit）的 `allow` 与 `deny` 均按参数哈希记忆；`PATCH { bash: "deny" }` 仍为工具级拒绝；pending TTL 10min；重复提交 404；interrupt 拒绝所有 pending
+- [x] `permission` endpoint 是否支持 `remember`，其作用域/TTL/过期/重复提交如何处理？支持精确请求、工具级和当前对话级三种记忆；高危工具默认按参数哈希记忆；`PATCH { bash: "deny" }` 仍为工具级拒绝；pending TTL 10min；重复提交 404；interrupt 拒绝所有 pending
 - [x] Fork 是否区分 `new_session` 与 `branch_in_place` 两种模式？`branch_in_place` 写 `inPlace` 子映射、隐藏于顶层列表、同 runtime session；仍会分配新的 Thebe session id 供 `/children` 使用
 - [x] `GET /v1/session/:id/message/:messageId` 是否存在，列表是否分页、带 stable ids？`limit`/`after`/`before`，id 来自 runtime
 
@@ -772,7 +781,7 @@ X-Content-Type-Options: nosniff
 
 - [x] `diff` 保持 501 是否返回结构化错误码？`code: feature_not_implemented`
 - [x] 是否需要 `share`、全局 `GET /v1/event`？share 仅为 `{ shared }` metadata，无链接；`GET /v1/event` 与 `/v1/events` 返回进程内事件窗口（非跨 session SSE）。后台任务诚实 501
-- [x] Subagent 并行子会话是否纳入路线图？按 §3.12 不作为 HTTP 核心协议；库 + TUI `/subagent` 存在，spawn 为顺序子会话并剥离保留工具
+- [x] Subagent 是否隔离父上下文并支持后台生命周期？库 + TUI `/subagent` 使用一次性 in-memory child，仅接收显式 task；支持 maxTurns、队列并发上限、list/cancel/result，完成后销毁 child，不进入普通 session 列表
 - [x] Goal mode 是否纳入路线图？按 §3.12 不纳入 HTTP；`src/agent/goal.ts` 库存在且未接线到 HTTP/TUI
 
 ---

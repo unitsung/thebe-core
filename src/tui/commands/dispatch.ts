@@ -18,6 +18,12 @@ export async function dispatchSlash(
   if (!raw.startsWith("/")) {
     return false;
   }
+  // Pi expands explicit skill invocations inside RuntimeSession.prompt().
+  // Let those commands pass through instead of treating `skill:name` as an
+  // unknown Thebe slash command.
+  if (/^\/skill:[^\s]+(?:\s|$)/i.test(raw)) {
+    return false;
+  }
   const body = raw.slice(1).trim();
   const space = body.indexOf(" ");
   const rawName = (space < 0 ? body : body.slice(0, space)).toLowerCase();

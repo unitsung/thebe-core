@@ -93,8 +93,18 @@ export async function discoverSkills(options?: {
   const enabledResources = options?.enabledResources ?? [];
 
   const [projectSkills, globalSkills] = await Promise.all([
-    collectSkillsFromDir(join(cwd, ".thebe", "skills"), "project"),
-    collectSkillsFromDir(join(home, ".thebe", "skills"), "global"),
+    Promise.all(
+      [
+        join(cwd, ".thebe", "skills"),
+        join(cwd, ".pi", "skills"),
+      ].map((dir) => collectSkillsFromDir(dir, "project")),
+    ).then((groups) => groups.flat()),
+    Promise.all(
+      [
+        join(home, ".thebe", "skills"),
+        join(home, ".pi", "agent", "skills"),
+      ].map((dir) => collectSkillsFromDir(dir, "global")),
+    ).then((groups) => groups.flat()),
   ]);
 
   const skillMap = new Map<string, SkillInfo>();

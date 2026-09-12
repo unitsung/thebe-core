@@ -10,6 +10,7 @@ import {
   type EnabledResource,
   type NormalizedEvent,
   type PermissionRequest,
+  type PermissionMode,
   type PromptInput,
   type RuntimeModelRef,
   type RuntimeSession,
@@ -18,10 +19,15 @@ import { createStreamGuard } from "../../stream-guard/index.ts";
 import { createContainerTools } from "../../tools/container-tools.ts";
 import { rememberedDecision } from "../remembered-permissions.ts";
 import { createProductStore, type ProductSessionMeta } from "../store.ts";
+import { createMcpClientRegistry } from "../resources/mcp-client.ts";
 import { wrapCustomTools } from "../wrap-tools.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult, type SessionRunStatus } from "../types.ts";
 
 export const DEFAULT_SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
+/** Generate only after a quiet two-minute idle window following a completed prompt. */
+export const DEFAULT_AUTO_SUMMARY_DELAY_MS = 120 * 1000;
+const MIN_AUTO_SUMMARY_DELAY_MS = 60 * 1000;
+const MAX_AUTO_SUMMARY_DELAY_MS = 15 * 60 * 1000;
 
 export type CreateThebeProductOptions = {
   runtime: AgentRuntime;
@@ -41,6 +47,15 @@ export type CreateThebeProductOptions = {
   builtinTools?: readonly string[];
   enabledResources?: EnabledResource[];
   model?: RuntimeModelRef;
+  autoCompact?: boolean;
+  autoSummary?: boolean;
+  autoSummaryDelayMs?: number;
+  /** How approval-gated tools are handled by default. */
+  permissionMode?: PermissionMode;
+  /** Maximum number of ephemeral subagents that may run at once. */
+  maxSubagentConcurrency?: number;
+  /** Maximum number of concurrent ephemeral subagents for one parent. */
+  maxSubagentsPerParent?: number;
 };
 
 export type SessionLog = {
@@ -70,6 +85,7 @@ const audit = options.auditPath
   ? createAuditLog(options.auditPath, now)
   : undefined;
 const store = createProductStore(options.productStoreDir);
+const mcp = createMcpClientRegistry();
 const memory = new Map<string, ProductSessionMeta>();
 const enabledResources: EnabledResource[] = [
   ...(options.enabledResources ?? []),
@@ -80,7 +96,12 @@ const DEFAULT_SYSTEM_PROMPT =
 const systemPrompt = options.systemPrompt
   ? `${options.systemPrompt}\n\n${DEFAULT_SYSTEM_PROMPT}`
   : DEFAULT_SYSTEM_PROMPT;
-let autoCompactOverride: boolean | undefined;
+let autoCompactOverride = options.autoCompact;
+let autoSummaryOverride = options.autoSummary;
+let autoSummaryDelayOverride = normalizeAutoSummaryDelay(
+  options.autoSummaryDelayMs,
+);
+let permissionModeOverride: PermissionMode = options.permissionMode ?? "ask";
 
 function checkNotQuiesced(): void {
   if (options.runtime.isQuiesced()) {
@@ -102,7 +123,38 @@ const streaming = new Set<string>();
 const abortRequested = new Set<string>();
 const promptLocks = new Set<string>();
 const nonInteractiveRuns = new Set<string>();
+const autoSummaryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const autoSummaryRuns = new Set<string>();
+const subagentParentCancellers = new Set<
+  (parentSessionId: string) => Promise<void>
+>();
 let requestStop: () => void | Promise<void> = () => {};
+
+function normalizeAutoSummaryDelay(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_AUTO_SUMMARY_DELAY_MS;
+  }
+  return Math.min(
+    MAX_AUTO_SUMMARY_DELAY_MS,
+    Math.max(MIN_AUTO_SUMMARY_DELAY_MS, Math.round(value as number)),
+  );
+}
+
+function autoSummaryEnabled(): boolean {
+  return autoSummaryOverride ?? true;
+}
+
+function autoSummaryDelayMs(): number {
+  return autoSummaryDelayOverride;
+}
+
+function cancelAutoSummary(thebeSessionId: string): void {
+  const timer = autoSummaryTimers.get(thebeSessionId);
+  if (timer) {
+    clearTimeout(timer);
+    autoSummaryTimers.delete(thebeSessionId);
+  }
+}
 
 function getActive():
   | { meta: ProductSessionMeta; session: RuntimeSession }
@@ -155,6 +207,133 @@ function appendEvent(
   }
 }
 
+function summaryTranscript(
+  messages: ReturnType<RuntimeSession["messages"]>,
+): string {
+  const rows: string[] = [];
+  let remaining = 60_000;
+  for (const message of [...messages].reverse()) {
+    if (remaining <= 0) break;
+    const role = message.role === "tool"
+      ? `tool:${message.toolName ?? "unknown"}`
+      : message.role;
+    const text = message.text.trim();
+    if (!text) continue;
+    const clipped = text.slice(0, Math.min(text.length, remaining, 6_000));
+    rows.push(`[${role}]\n${clipped}`);
+    remaining -= clipped.length;
+  }
+  return rows.reverse().join("\n\n");
+}
+
+async function generateAutoSummary(thebeSessionId: string): Promise<void> {
+  if (!autoSummaryEnabled() || autoSummaryRuns.has(thebeSessionId)) return;
+  if (streaming.has(thebeSessionId) || promptLocks.has(thebeSessionId)) {
+    scheduleAutoSummary(thebeSessionId);
+    return;
+  }
+  const opened = openedSessions.get(thebeSessionId);
+  if (!opened) return;
+  const messages = opened.session.messages();
+  if (
+    messages.filter((message) => message.role === "user").length === 0 ||
+    messages.filter((message) => message.role === "assistant").length === 0
+  ) {
+    return;
+  }
+  const transcript = summaryTranscript(messages);
+  if (!transcript) return;
+  const activityAtStart = opened.meta.lastActiveAt;
+  const messageCountAtStart = messages.length;
+  autoSummaryRuns.add(thebeSessionId);
+  let summarySession: RuntimeSession | undefined;
+  try {
+    summarySession = await options.runtime.createSession({
+      model: options.model,
+      customTools: [],
+      builtinTools: [],
+      systemPrompt:
+        "You are Thebe's background task summarizer. Do not perform actions or use tools. Summarize only what is evidenced in the transcript. Return concise Markdown in the same language as the user. Include: result, important files or changes, validation/tests, and remaining follow-ups. If there are no follow-ups, say so.",
+      autoCompact: false,
+      inMemory: true,
+    });
+    await summarySession.prompt(
+      `Summarize this completed coding task:\n\n<conversation>\n${transcript}\n</conversation>`,
+    );
+    const summary = summarySession.lastAssistantText().trim();
+    const current = openedSessions.get(thebeSessionId);
+    if (
+      !summary ||
+      !current ||
+      current.meta.lastActiveAt !== activityAtStart ||
+      current.session.messages().length !== messageCountAtStart
+    ) {
+      return;
+    }
+    const generatedAt = now().toISOString();
+    current.meta = {
+      ...current.meta,
+      lastSummary: summary,
+      lastSummaryAt: generatedAt,
+    };
+    await persist(current.meta);
+    appendEvent(thebeSessionId, {
+      type: "summary_ready",
+      summary,
+      generatedAt,
+    });
+  } catch (error) {
+    await audit?.append({
+      method: "summary.auto",
+      parameterHash: hashParameters({}),
+      responseBytes: 0,
+      budgetConsumed: 0,
+      redactionFired: false,
+      sessionId: thebeSessionId,
+      result: "error",
+    }).catch(() => {});
+    void error;
+  } finally {
+    summarySession?.dispose();
+    autoSummaryRuns.delete(thebeSessionId);
+  }
+}
+
+function scheduleAutoSummary(thebeSessionId: string): void {
+  cancelAutoSummary(thebeSessionId);
+  if (!autoSummaryEnabled()) return;
+  const timer = setTimeout(() => {
+    autoSummaryTimers.delete(thebeSessionId);
+    void generateAutoSummary(thebeSessionId);
+  }, autoSummaryDelayMs());
+  timer.unref?.();
+  autoSummaryTimers.set(thebeSessionId, timer);
+}
+
+function setAutoSummaryEnabled(enabled: boolean): void {
+  autoSummaryOverride = enabled;
+  if (!enabled) {
+    for (const sessionId of autoSummaryTimers.keys()) {
+      cancelAutoSummary(sessionId);
+    }
+  }
+}
+
+function setAutoSummaryDelayMs(value: number): void {
+  autoSummaryDelayOverride = normalizeAutoSummaryDelay(value);
+  for (const sessionId of [...autoSummaryTimers.keys()]) {
+    scheduleAutoSummary(sessionId);
+  }
+}
+
+function permissionMode(): PermissionMode {
+  return permissionModeOverride;
+}
+
+function setPermissionMode(mode: PermissionMode): void {
+  permissionModeOverride = mode;
+}
+
 function permissionHandler(explicitSessionId?: string) {
   return {
     async request(request: PermissionRequest): Promise<"allow" | "deny"> {
@@ -166,7 +345,19 @@ function permissionHandler(explicitSessionId?: string) {
           : getActive()?.meta.rememberedPermissions,
         request,
       );
-      if (remembered) {
+      // A specific deny remains authoritative even in full-access mode. This
+      // keeps an explicit safety choice from being silently overridden by a
+      // broad auto-approval setting.
+      if (remembered === "deny") {
+        return "deny";
+      }
+      if (permissionModeOverride === "read-only") {
+        return "deny";
+      }
+      if (permissionModeOverride === "full-access") {
+        return "allow";
+      }
+      if (remembered === "allow") {
         return remembered;
       }
       if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId)) {
@@ -205,10 +396,13 @@ async function lookupRemembered(
   }
 }
 
-function baseTools() {
+function baseTools(
+  toolPolicy = policy,
+  toolCallerId = callerId,
+) {
   return createContainerTools(options.provider, {
-    policy,
-    callerId,
+    policy: toolPolicy,
+    callerId: toolCallerId,
   });
 }
 
@@ -216,6 +410,11 @@ function sessionOptions(
   explicitSessionId?: string,
   sessionBuiltinTools?: readonly string[],
   sessionModel?: RuntimeModelRef,
+  permissionSessionId = explicitSessionId,
+  eventSessionId = explicitSessionId,
+  sessionPolicy = policy,
+  sessionCallerId = callerId,
+  sessionStop?: () => void | Promise<void>,
 ) {
   const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
   const isChatOnly = effectiveBuiltinTools.length === 0;
@@ -223,19 +422,23 @@ function sessionOptions(
     model: sessionModel ?? options.model,
     customTools: isChatOnly
       ? []
-      : wrapCustomTools(baseTools(), {
-          policy,
+      : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId), {
+          policy: sessionPolicy,
           audit,
           toolWatchdogMs: options.toolWatchdogMs,
           sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
           onEvent: (event) => {
-            const sid = explicitSessionId ?? getActive()?.meta.thebeSessionId;
+            const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
             if (sid) {
               appendEvent(sid, event);
             }
           },
           onStop: () => {
-            const sid = explicitSessionId ?? getActive()?.meta.thebeSessionId;
+            if (sessionStop) {
+              void sessionStop();
+              return;
+            }
+            const sid = eventSessionId ?? explicitSessionId ?? getActive()?.meta.thebeSessionId;
             if (sid) {
               void openedSessions.get(sid)?.session.abort();
             }
@@ -243,8 +446,10 @@ function sessionOptions(
         }),
     builtinTools: effectiveBuiltinTools,
     systemPrompt: isChatOnly ? "You are a helpful assistant." : systemPrompt,
-    enabledResources: isChatOnly ? [] : enabledResources.slice(),
-    permissionHandler: permissionHandler(explicitSessionId),
+    // Keep the shared resource list so an idle runtime session can reload
+    // newly enabled skills without having to be recreated.
+    enabledResources: isChatOnly ? [] : enabledResources,
+    permissionHandler: permissionHandler(permissionSessionId),
     toolsRequiringApproval: TOOLS_REQUIRING_APPROVAL,
     autoCompact: autoCompactOverride,
   };
@@ -348,6 +553,7 @@ async function runPrompt(
   try {
   const opened = await openSession(promptOptions.thebeSessionId);
   const sid = opened.meta.thebeSessionId;
+  cancelAutoSummary(sid);
   thebeSessionId = sid;
   if (mode === "prompt") {
     if (!lockId) {
@@ -428,6 +634,7 @@ async function runPrompt(
     appendEvent(sid, event);
     if (
       event.type === "text_delta" ||
+      event.type === "thinking_delta" ||
       event.type === "tool_start" ||
       event.type === "tool_update" ||
       event.type === "tool_end" ||
@@ -463,6 +670,9 @@ async function runPrompt(
       .filter((message) => message.role === "tool")
       .map((message) => message.toolName)
       .filter((name): name is string => Boolean(name));
+    if (mode === "prompt") {
+      scheduleAutoSummary(sid);
+    }
     return {
       text: reply,
       tools,
@@ -542,6 +752,28 @@ function rejectPendingFor(thebeSessionId: string): void {
   }
 }
 
+function rejectPendingPermission(permissionId: string): boolean {
+  const pending = pendingPermissions.get(permissionId);
+  if (!pending) return false;
+  pendingPermissions.delete(permissionId);
+  if (pending.timer) clearTimeout(pending.timer);
+  pending.resolve("deny");
+  return true;
+}
+
+function registerSubagentParentCanceller(
+  canceller: (parentSessionId: string) => Promise<void>,
+): () => void {
+  subagentParentCancellers.add(canceller);
+  return () => subagentParentCancellers.delete(canceller);
+}
+
+async function cancelSubagentsForParent(parentSessionId: string): Promise<void> {
+  await Promise.all(
+    [...subagentParentCancellers].map((canceller) => canceller(parentSessionId)),
+  );
+}
+
 async function reapIdleSessions(idleMs?: number): Promise<number> {
   const timeout =
     idleMs ??
@@ -563,6 +795,7 @@ async function reapIdleSessions(idleMs?: number): Promise<number> {
     }
     opened.session.dispose();
     openedSessions.delete(id);
+    cancelAutoSummary(id);
     logs.delete(id);
     if (lastActiveId === id) {
       lastActiveId = undefined;
@@ -603,6 +836,7 @@ if (idleTimeoutMs > 0) {
     policy,
     audit,
     store,
+    mcp,
     memory,
     enabledResources,
     builtinTools,
@@ -619,6 +853,12 @@ if (idleTimeoutMs > 0) {
     set autoCompactOverride(value: boolean | undefined) {
       autoCompactOverride = value;
     },
+    autoSummaryEnabled,
+    autoSummaryDelayMs,
+    setAutoSummaryEnabled,
+    setAutoSummaryDelayMs,
+    permissionMode,
+    setPermissionMode,
     get active() {
       return getActive();
     },
@@ -634,6 +874,7 @@ if (idleTimeoutMs > 0) {
     checkNotQuiesced,
     sessionLog,
     appendEvent,
+    cancelAutoSummary,
     permissionHandler,
     lookupRemembered,
     baseTools,
@@ -649,6 +890,9 @@ if (idleTimeoutMs > 0) {
     withRunState,
     openedSessions,
     rejectPendingFor,
+    rejectPendingPermission,
+    registerSubagentParentCanceller,
+    cancelSubagentsForParent,
     reapIdleSessions,
     recentEvents,
   };

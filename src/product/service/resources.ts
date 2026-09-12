@@ -1,20 +1,21 @@
-import { randomUUID } from "node:crypto";
 import { RESERVED_TOOLS } from "../../agent/subagent.ts";
 import { hashParameters } from "../../audit/audit-log.ts";
+import { createPolicyEngine } from "../../policy/policy-engine.ts";
 import type { EnabledResource } from "../../runtime/types.ts";
 import {
   discoverSkills,
   discoverSubagentProfiles,
-  listConfiguredMcpServers,
   listCoreMcpTools,
   readSkillDetails,
   type McpToolInfo,
   type SkillInfo,
   type SubagentProfile,
 } from "../resources/index.ts";
-import type { ProductSessionMeta } from "../store.ts";
-import type { SessionRunStatus } from "../types.ts";
+import type { SubagentRun } from "../types.ts";
 import type { ProductContext } from "./context.ts";
+import { createSubagentRunManager } from "./subagent-runs.ts";
+
+const SUBAGENT_WRITE_TOOLS = new Set(["edit", "write"]);
 
 export function createResourceApi(ctx: ProductContext) {
   const {
@@ -24,14 +25,78 @@ export function createResourceApi(ctx: ProductContext) {
     lookup,
     sessionOptions,
     systemPrompt,
-    touchMeta,
-    persist,
-    runPrompt,
-    listMetas,
-    withRunState,
     openSession,
     audit,
+    openedSessions,
+    streaming,
+    mcp,
+    now,
+    rejectPendingPermission,
+    registerSubagentParentCanceller,
   } = ctx;
+
+  const subagentRuns = createSubagentRunManager({
+    now,
+    maxConcurrent: options.maxSubagentConcurrency,
+    maxPerParent: options.maxSubagentsPerParent,
+    createSession: async ({ runId, parentSessionId, profile }) => {
+      // A child receives only its profile and the explicit task. In
+      // particular, it never uses the parent tools, transcript, labels, or
+      // selected context as implicit input.
+      const childTools = (profile.tools ?? []).filter(
+        (name) =>
+          !RESERVED_TOOLS.has(name) && !SUBAGENT_WRITE_TOOLS.has(name),
+      );
+      const childPolicy = createPolicyEngine({
+        now,
+        maxToolCalls: options.maxToolCalls,
+        maxBlocks: options.maxBlocks,
+      });
+      childPolicy.beginRun();
+      let stopChild: (() => Promise<void>) | undefined;
+      const session = await options.runtime.createSession({
+        ...sessionOptions(
+          runId,
+          childTools,
+          profile.model,
+          parentSessionId,
+          undefined,
+          childPolicy,
+          `${ctx.callerId}:subagent:${runId}`,
+          () => stopChild?.(),
+        ),
+        inMemory: true,
+        autoCompact: false,
+        systemPrompt: [
+          systemPrompt,
+          `# One-shot subagent (${profile.name})`,
+          "You receive one explicit task only. Do not assume or reconstruct any parent conversation context.",
+          profile.systemPrompt,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+      });
+      stopChild = () => session.abort();
+      return session;
+    },
+    emitToParent: (parentSessionId, event) => {
+      // Most child events stay private. Permission requests are the one
+      // exception: the parent is the only UI/control plane allowed to answer.
+      if (event.type === "permission_requested") {
+        ctx.appendEvent(parentSessionId, event);
+      }
+    },
+    rejectPendingPermission,
+  });
+  registerSubagentParentCanceller(subagentRuns.cancelForParent);
+
+  async function reloadIdleSessions(): Promise<void> {
+    await Promise.all(
+      [...openedSessions.entries()]
+        .filter(([thebeSessionId]) => !streaming.has(thebeSessionId))
+        .map(([, opened]) => opened.session.reloadResources?.()),
+    );
+  }
 
   return {
     async listSkills(): Promise<SkillInfo[]> {
@@ -75,6 +140,7 @@ export function createResourceApi(ctx: ProductContext) {
         version: "1.0.0",
         source: skill.filePath || `thebe://skills/${skill.name}`,
       });
+      await reloadIdleSessions();
     },
     async disableSkill(name: string): Promise<void> {
       const index = enabledResources.findIndex(
@@ -82,89 +148,65 @@ export function createResourceApi(ctx: ProductContext) {
       );
       if (index >= 0) {
         enabledResources.splice(index, 1);
+        await reloadIdleSessions();
       }
     },
     async listMcpTools(): Promise<McpToolInfo[]> {
-      return listCoreMcpTools();
+      return [...listCoreMcpTools(), ...(await mcp.listTools())];
     },
     async listMcpServers(): Promise<
-      Array<{ name: string; command?: string; url?: string }>
+      Array<{
+        name: string;
+        command?: string;
+        url?: string;
+        status?: string;
+        error?: string;
+        toolCount?: number;
+        disabled?: boolean;
+      }>
     > {
-      const servers = await listConfiguredMcpServers();
-      return servers.map((server) => ({
-        name: server.name,
-        command: server.command,
-        url: server.url,
-      }));
+      return mcp.listServers();
+    },
+    closeMcp(): void {
+      mcp.close();
     },
     async listSubagentProfiles(): Promise<SubagentProfile[]> {
       return discoverSubagentProfiles();
     },
     async spawnSubagent(spawn: {
       profileName: string;
-      taskPrompt?: string;
+      taskPrompt: string;
       parentSessionId: string;
-    }): Promise<ProductSessionMeta> {
+    }): Promise<SubagentRun> {
       checkNotQuiesced();
       const profiles = await discoverSubagentProfiles();
       const profile = profiles.find((item) => item.name === spawn.profileName);
       if (!profile) {
         throw new Error(`unknown subagent profile: ${spawn.profileName}`);
       }
-      const parent = await lookup(spawn.parentSessionId);
-      const previous = ctx.active;
-      const extraPrompt = profile.systemPrompt
-        ? `${systemPrompt}\n\n# Subagent: ${profile.name}\n${profile.systemPrompt}`
-        : systemPrompt;
-      const rawTools = profile.tools ?? parent.builtinTools;
-      const childTools = rawTools?.filter((name) => !RESERVED_TOOLS.has(name));
-      const thebeSessionId = randomUUID();
-      const session = await options.runtime.createSession({
-        ...sessionOptions(thebeSessionId, childTools),
-        systemPrompt: extraPrompt,
-      });
-      const meta = touchMeta({
-        thebeSessionId,
-        runtimeId: options.runtime.runtimeId,
-        runtimeSessionId: session.runtimeSessionId,
-        parentThebeSessionId: parent.thebeSessionId,
-        title: spawn.taskPrompt?.slice(0, 80) || profile.name,
-        labels: {
-          ...(parent.labels ?? {}),
-          role: "subagent",
-          profile: profile.name,
-        },
-        selectedContext: parent.selectedContext,
-        builtinTools: childTools ? [...childTools] : parent.builtinTools,
-      });
-      await persist(meta);
-      ctx.active = { meta, session };
-      if (spawn.taskPrompt) {
-        try {
-          await runPrompt(spawn.taskPrompt, {
-            thebeSessionId: meta.thebeSessionId,
-          });
-        } catch {
-          // Child remains listed even if the first turn fails.
-        }
+      if (!spawn.taskPrompt.trim()) {
+        throw new Error("subagent task cannot be empty");
       }
-      ctx.active = previous ?? ctx.active;
-      return meta;
+      // Lookup is validation only. The returned parent metadata is not passed
+      // into the child, which is what makes inheritance opt-in impossible.
+      await lookup(spawn.parentSessionId);
+      return subagentRuns.spawn({
+        profile,
+        task: spawn.taskPrompt,
+        parentSessionId: spawn.parentSessionId,
+      });
     },
-    async listSubagents(
-      parentSessionId?: string,
-    ): Promise<
-      Array<ProductSessionMeta & { status: SessionRunStatus; streaming: boolean }>
-    > {
-      const rows = await listMetas();
-      return rows
-        .filter((row) =>
-          parentSessionId
-            ? row.parentThebeSessionId === parentSessionId
-            : Boolean(row.parentThebeSessionId) ||
-              row.labels?.role === "subagent",
-        )
-        .map((row) => withRunState(row));
+    listSubagents(parentSessionId?: string): SubagentRun[] {
+      return subagentRuns.list(parentSessionId);
+    },
+    getSubagent(runId: string): SubagentRun | undefined {
+      return subagentRuns.get(runId);
+    },
+    waitSubagent(runId: string): Promise<SubagentRun> {
+      return subagentRuns.wait(runId);
+    },
+    cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun> {
+      return subagentRuns.cancel(runId, parentSessionId);
     },
     async getForkMessages(
       thebeSessionId?: string,

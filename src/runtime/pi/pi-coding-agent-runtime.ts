@@ -1,4 +1,6 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
+import { unlink } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import type { AgentRuntime } from "../types.ts";
 import { PI_RUNTIME_ID } from "../types.ts";
 import { createPiRuntimeAuth } from "./auth/index.ts";
@@ -109,10 +111,39 @@ export async function createPiCodingAgentRuntime(
   return {
     runtimeId: PI_RUNTIME_ID,
     async createSession(create) {
-      const sessionManager = inMemory
+      const sessionManager = (create.inMemory ?? inMemory)
         ? sdk.SessionManager.inMemory(create.cwd ?? cwd)
         : sdk.SessionManager.create(create.cwd ?? cwd, options.sessionDir);
-      return open(create, sessionManager);
+      const session = await open(create, sessionManager);
+      if (create.inMemory) {
+        const dispose = session.dispose.bind(session);
+        session.dispose = () => {
+          dispose();
+          live.delete(session.runtimeSessionId);
+        };
+      }
+      return session;
+    },
+    async deleteSession(runtimeSessionId) {
+      const active = live.get(runtimeSessionId);
+      let sessionPath = active?.sessionManager.getSessionFile?.();
+      if (!sessionPath && !inMemory) {
+        const listed = await sdk.SessionManager.list(cwd, options.sessionDir);
+        sessionPath = listed.find(
+          (row: { id: string; path: string }) => row.id === runtimeSessionId,
+        )?.path;
+      }
+      active?.dispose();
+      live.delete(runtimeSessionId);
+      livenessRegistry.delete(runtimeSessionId);
+      if (!sessionPath || !existsSync(sessionPath)) return;
+
+      const trashArgs = sessionPath.startsWith("-")
+        ? ["--", sessionPath]
+        : [sessionPath];
+      const trashed = spawnSync("trash", trashArgs, { encoding: "utf8" });
+      if (trashed.status === 0 || !existsSync(sessionPath)) return;
+      await unlink(sessionPath);
     },
     async resumeSession(runtimeSessionId, create) {
       const existing = live.get(runtimeSessionId);

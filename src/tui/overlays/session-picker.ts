@@ -11,6 +11,11 @@ import {
 } from "@earendil-works/pi-tui";
 import { formatSessionAge } from "../display/format.ts";
 import type { ThebeProduct } from "../../product/service.ts";
+import { insertOverlay } from "./index.ts";
+
+type DismissiblePicker = {
+  dismiss?: () => void;
+};
 
 export type ProductSessionRow = {
   thebeSessionId: string;
@@ -277,8 +282,9 @@ export async function attachSearchableSessionPicker(
       onCancel: () => cleanup(null),
       onRequestRender: () => tui.requestRender(),
     });
+    (picker as unknown as DismissiblePicker).dismiss = () => cleanup(null);
 
-    tui.addChild(picker);
+    insertOverlay(tui, picker, options.focusBack);
     tui.setFocus(picker);
     tui.requestRender();
   });

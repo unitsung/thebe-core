@@ -100,6 +100,53 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         "diagnose_from_events",
       ]),
     );
+    const inspect = (result.tools ?? []).find(
+      (tool) => tool.name === "container.inspect",
+    ) as { inputSchema?: { required?: string[] } } | undefined;
+    const logs = (result.tools ?? []).find(
+      (tool) => tool.name === "container.logs",
+    ) as { inputSchema?: { required?: string[] } } | undefined;
+    expect(inspect?.inputSchema?.required).toEqual(["id"]);
+    expect(logs?.inputSchema?.required).toEqual(["id"]);
+  });
+
+  it("POST /mcp supports initialize and delegates core event tools", async () => {
+    const { createFakeRuntime } = await import("../runtime/fake-runtime.ts");
+    const { createThebeApp } = await import("../product/app.ts");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      version: "9.9.9",
+    });
+    const initialize = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
+      }),
+    );
+    expect(await json(initialize)).toMatchObject({
+      result: {
+        protocolVersion: "2025-06-18",
+        serverInfo: { name: "thebe-core", version: "9.9.9" },
+      },
+    });
+    const events = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: "list_core_events", arguments: {} },
+        }),
+      }),
+    );
+    const eventBody = await json(events);
+    const text = ((eventBody.result as { content?: Array<{ text?: string }> })
+      .content?.[0]?.text ?? "");
+    expect(JSON.parse(text)).toEqual([]);
   });
 
   it("POST /mcp tools/call rejects names outside the MCP allow-list", async () => {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   CONTAINER_TOOL_DESCRIPTIONS,
   CONTAINER_TOOL_NAMES,
+  CONTAINER_TOOL_SCHEMAS,
 } from "../../tools/container-tools.ts";
 
 export type McpToolInfo = {
@@ -20,8 +21,20 @@ export type McpServerConfig = {
   args?: string[];
   url?: string;
   env?: Record<string, string>;
+  headers?: Record<string, string>;
   disabled?: boolean;
 };
+
+function stringMap(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") result[key] = item;
+  }
+  return result;
+}
 
 const CORE_EVENT_TOOLS: Record<
   string,
@@ -57,7 +70,7 @@ export function listCoreMcpTools(): McpToolInfo[] {
       name,
       description:
         CONTAINER_TOOL_DESCRIPTIONS[name] || `Core container tool ${name}`,
-      inputSchema: { type: "object" },
+      inputSchema: CONTAINER_TOOL_SCHEMAS[name],
       source: "core",
       serverName: "thebe-core",
     });
@@ -82,10 +95,12 @@ export async function listConfiguredMcpServers(options?: {
 }): Promise<McpServerConfig[]> {
   const cwd = options?.cwd ?? process.cwd();
   const home = options?.homeDir ?? homedir();
-  const configs: McpServerConfig[] = [];
+  const configs = new Map<string, McpServerConfig>();
   const candidateFiles = [
-    join(cwd, ".thebe", "mcp.json"),
     join(home, ".thebe", "mcp.json"),
+    join(home, ".config", "mcp.json"),
+    join(cwd, ".thebe", "mcp.json"),
+    join(cwd, ".mcp.json"),
   ];
 
   for (const file of candidateFiles) {
@@ -99,21 +114,24 @@ export async function listConfiguredMcpServers(options?: {
       for (const [name, val] of Object.entries(servers)) {
         if (typeof val === "object" && val !== null) {
           const s = val as Record<string, unknown>;
-          configs.push({
+          const config: McpServerConfig = {
             name,
             command: typeof s.command === "string" ? s.command : undefined,
-            args: Array.isArray(s.args) ? (s.args as string[]) : undefined,
+            args: Array.isArray(s.args)
+              ? s.args.filter((arg): arg is string => typeof arg === "string")
+              : undefined,
             url: typeof s.url === "string" ? s.url : undefined,
-            env:
-              typeof s.env === "object" && s.env !== null
-                ? (s.env as Record<string, string>)
-                : undefined,
+            env: stringMap(s.env),
+            headers: stringMap(s.headers),
             disabled: s.disabled === true,
-          });
+          };
+          // Project configuration intentionally overrides a same-named global
+          // server, matching how skills and most MCP clients resolve scope.
+          configs.set(name, config);
         }
       }
     } catch {}
   }
 
-  return configs;
+  return [...configs.values()];
 }

@@ -19,6 +19,7 @@ import {
 } from "@earendil-works/pi-tui";
 import type {
   NormalizedEvent,
+  RuntimeThinkingInfo,
   ThinkingLevel,
 } from "../runtime/types.ts";
 import {
@@ -34,7 +35,7 @@ import type { ThebeTuiOptions } from "./types.ts";
 import { slashCommandsForAutocomplete } from "./slash.ts";
 import { getGitBranch, renderStartScreen } from "./display/format.ts";
 import { FooterDock } from "./display/footer.ts";
-import { attachSelectList } from "./overlays/index.ts";
+import { attachSelectList, dismissOverlay } from "./overlays/index.ts";
 import { runCustomProviderWizard as runCustomProviderWizardFlow } from "./providers/wizard.ts";
 import { dispatchSlash, type SlashHost } from "./commands/index.ts";
 import { readMarkdownSource, stashMarkdownSource } from "./display/markdown-source.ts";
@@ -55,6 +56,14 @@ export type ChatHandle = {
   isResponding: () => boolean;
   isExecutingBash: () => boolean;
   abortBash: () => void;
+  toggleThinking: () => void;
+  toggleTools: () => void;
+  dispose: () => void;
+  getSessionState: () => {
+    sessionId: string | undefined;
+    title: string | undefined;
+    model: string;
+  };
 };
 
 export function attachThebeChat(
@@ -66,6 +75,11 @@ export function attachThebeChat(
   let sessionTitle = options.title;
   let currentModel = options.model ?? "";
   let currentThinking: ThinkingLevel = "off";
+  let thinkingInfo: RuntimeThinkingInfo = {
+    level: "off",
+    availableLevels: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+    supportsThinking: true,
+  };
   let currentTheme: ThemeName = options.theme ?? "dark";
   try {
     initTheme(currentTheme, false);
@@ -79,18 +93,17 @@ export function attachThebeChat(
 
   const appVersion = options.version ?? "0.1.0";
   const initialWidth = tui.terminal?.columns ?? process.stdout.columns ?? 80;
-  tui.addChild(
-    new Text(
-      renderStartScreen({
-        version: appVersion,
-        model: currentModel,
-        cwd: process.cwd(),
-        branch: cachedBranch,
-        width: initialWidth,
-        sessionTitle,
-      }),
-    ),
+  const startScreen = new Text(
+    renderStartScreen({
+      version: appVersion,
+      model: currentModel,
+      cwd: process.cwd(),
+      branch: cachedBranch,
+      width: initialWidth,
+      sessionTitle,
+    }),
   );
+  tui.addChild(startScreen);
 
   const editor = new Editor(tui, getTuiTheme(currentTheme).editor);
   editor.setAutocompleteProvider(
@@ -107,20 +120,25 @@ export function attachThebeChat(
   let isExecutingBash = false;
   let currentBashAbortController: AbortController | undefined;
   let streamUnsub: (() => void) | undefined;
+  let summaryUnsub: (() => void) | undefined;
+  let thinkingSyncPromise: Promise<void> | undefined;
   let replyMarkdown: Markdown | undefined;
   let working: ElapsedWorking | undefined;
   let thinkingBlock: ThinkingBlock | undefined;
-  let hideThinking = true;
+  let hideThinking = false;
   let toolsExpanded = false;
+  let disposed = false;
+  let historyLoadGeneration = 0;
   const toolComponents = new Map<string, ToolExecutionComponent>();
   let pendingPermissionId: string | undefined;
   void loadThebeConfig().then((cfg) => {
-    hideThinking = cfg.hideThinking ?? true;
+    hideThinking = cfg.hideThinking ?? false;
   });
 
   const children = tui.children;
 
   function updateEditorBorderColor(): void {
+    if (disposed) return;
     if (isBashMode) {
       editor.borderColor = getBashModeBorderColor(currentTheme);
     } else if (isResponding || isExecutingBash) {
@@ -168,6 +186,7 @@ export function attachThebeChat(
   }
 
   function updateFooter(): void {
+    if (disposed) return;
     const width = tui.terminal?.columns ?? process.stdout.columns ?? 80;
     const home = process.env.HOME || process.env.USERPROFILE;
     const isMenuOpen = editor.isShowingAutocomplete?.() ?? false;
@@ -201,6 +220,7 @@ export function attachThebeChat(
   }
 
   function notice(text: string): void {
+    if (disposed) return;
     const width = tui.terminal?.columns ?? process.stdout.columns ?? 80;
     const fitted = text
       .split("\n")
@@ -218,6 +238,7 @@ export function attachThebeChat(
       providerId: selected.providerId,
       modelId: selected.modelId,
     });
+    await syncThinkingLevel(id);
     currentModel = newKey;
     void refreshContextUsage();
     updateFooter();
@@ -226,8 +247,44 @@ export function attachThebeChat(
     );
   }
 
+  async function syncThinkingLevel(
+    thebeSessionId: string | undefined = sessionId,
+  ): Promise<void> {
+    if (disposed || !product || !thebeSessionId) return;
+    try {
+      thinkingInfo = await product.getThinkingInfo(thebeSessionId);
+      if (disposed || thebeSessionId !== sessionId) return;
+      currentThinking = thinkingInfo.level;
+      updateFooter();
+      updateEditorBorderColor();
+    } catch {}
+  }
+
+  async function setThinkingLevel(level: ThinkingLevel): Promise<RuntimeThinkingInfo> {
+    if (!product) {
+      return thinkingInfo;
+    }
+    const id = ensureSession();
+    thinkingInfo = await product.setThinkingLevel(id, level);
+    currentThinking = thinkingInfo.level;
+    updateFooter();
+    updateEditorBorderColor();
+    return thinkingInfo;
+  }
+
   function insertBeforeFooter(component: unknown): void {
     insertChatComponent(component as { render(width: number): string[] });
+  }
+
+  function subscribeToSummary(thebeSessionId?: string): void {
+    summaryUnsub?.();
+    summaryUnsub = undefined;
+    if (!product || !thebeSessionId) return;
+    summaryUnsub = product.subscribeLog(thebeSessionId, (event) => {
+      if (event.type === "summary_ready") {
+        onEvent(event);
+      }
+    });
   }
 
   function ensureSession(): string {
@@ -253,6 +310,7 @@ export function attachThebeChat(
   }
 
   async function applyTheme(name: ThemeName, persist = true): Promise<void> {
+    if (disposed) return;
     currentTheme = name;
     try {
       initTheme(name, false);
@@ -280,21 +338,38 @@ export function attachThebeChat(
   }
 
   function clearMessagesView(): void {
-    const keep = new Set([children[0], footerText, editor]);
-    for (let i = children.length - 1; i >= 0; i--) {
-      if (!keep.has(children[i])) {
-        children.splice(i, 1);
+    historyLoadGeneration += 1;
+    streamUnsub?.();
+    streamUnsub = undefined;
+    currentBashAbortController?.abort();
+
+    const keep = new Set<Component>([startScreen, footerText, editor]);
+    for (const child of [...children]) {
+      if (keep.has(child)) continue;
+      dismissOverlay(child);
+      if (children.includes(child)) {
+        tui.removeChild(child);
       }
     }
+    working?.stop();
+    working = undefined;
+    thinkingBlock = undefined;
+    replyMarkdown = undefined;
+    activeToolName = undefined;
     toolComponents.clear();
+    footerText.setSummary(undefined);
     tui.requestRender();
   }
 
   async function loadAndDisplaySessionHistory(thebeId: string): Promise<void> {
     if (!product) return;
     clearMessagesView();
+    const generation = historyLoadGeneration;
     try {
       const msgs = await product.loadMessages(thebeId);
+      if (disposed || generation !== historyLoadGeneration || thebeId !== sessionId) {
+        return;
+      }
       for (const m of msgs) {
         if (m.role === "user" && m.text) {
           insertBeforeFooter(makeUserMessage(m.text));
@@ -324,6 +399,13 @@ export function attachThebeChat(
           insertBeforeFooter(component);
         }
       }
+      try {
+        const meta = await product.getSession(thebeId);
+        if (disposed || generation !== historyLoadGeneration || thebeId !== sessionId) {
+          return;
+        }
+        footerText.setSummary(meta.lastSummary);
+      } catch {}
       tui.requestRender();
     } catch {}
   }
@@ -367,13 +449,43 @@ export function attachThebeChat(
   async function resolvePermissionInteractively(
     permissionId: string,
     toolName: string,
+    risk?: "high" | "standard",
   ): Promise<void> {
     if (!product) return;
+    // Pi emits the permission event before calling the permission handler.
+    // A remembered decision therefore produces an event even though no
+    // approval is pending. Let the handler settle before opening a modal, or
+    // an already-approved command would still appear to ask for confirmation.
+    // The runtime emits before the async permission lookup finishes, so use
+    // one turn of the event loop rather than only a microtask.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    if (!product.pendingPermissionIds().includes(permissionId)) {
+      if (pendingPermissionId === permissionId) {
+        pendingPermissionId = undefined;
+        updateFooter();
+      }
+      return;
+    }
     const selected = await attachSelectList(
       tui,
       [
-        { label: `Allow ${toolName}`, value: "allow" },
-        { label: `Deny ${toolName}`, value: "deny" },
+        {
+          label: `Deny ${toolName}${risk === "high" ? " (high risk)" : ""}`,
+          value: "deny",
+        },
+        { label: `Allow ${toolName} once`, value: "allow" },
+        {
+          label: `Always allow ${toolName} for this session${risk === "high" ? " (high risk)" : ""}`,
+          value: "remember-tool",
+        },
+        {
+          label: `Allow this exact ${toolName} request only`,
+          value: "remember-request",
+        },
+        {
+          label: "Allow this conversation",
+          value: "remember-conversation",
+        },
       ],
       editor,
       undefined,
@@ -387,13 +499,23 @@ export function attachThebeChat(
       return;
     }
     await product.resolvePermission(id, permissionId, {
-      response: selected.value as "allow" | "deny",
+      response: selected.value === "deny" ? "deny" : "allow",
+      remember:
+        selected.value === "remember-request" ||
+        selected.value === "remember-tool" ||
+        selected.value === "remember-conversation",
+      rememberScope:
+        selected.value === "remember-tool"
+          ? "tool"
+          : selected.value === "remember-conversation"
+            ? "conversation"
+            : "request",
     });
     if (pendingPermissionId === permissionId) {
       pendingPermissionId = undefined;
     }
     notice(
-      `permission ${permissionId} ${selected.value === "allow" ? "allowed" : "denied"}`,
+      `permission ${permissionId} ${selected.value === "deny" ? "denied" : "allowed"}`,
     );
   }
 
@@ -427,6 +549,14 @@ export function attachThebeChat(
     }
     void saveThebeConfig({ hideThinking: hidden });
     tui.requestRender();
+  }
+
+  function toggleThinking(): void {
+    setHideThinking(!hideThinking);
+  }
+
+  function toggleTools(): void {
+    setToolsExpanded(!toolsExpanded);
   }
 
   function beginStream(): void {
@@ -469,7 +599,16 @@ export function attachThebeChat(
   }
 
   function onEvent(event: NormalizedEvent): void {
-    if (event.type === "text_delta") {
+    if (disposed) return;
+    if (event.type === "thinking_level_changed") {
+      currentThinking = event.level;
+      thinkingInfo = {
+        ...thinkingInfo,
+        level: event.level,
+      };
+      updateFooter();
+      updateEditorBorderColor();
+    } else if (event.type === "text_delta") {
       if (thinkingBlock && !thinkingBlock.isFinished()) {
         thinkingBlock.finish();
         working?.setLabel("Working");
@@ -545,7 +684,7 @@ export function attachThebeChat(
       notice(
         `permission requested: ${event.toolName} (${event.risk ?? "standard"}) ${event.argsSummary ?? ""}`,
       );
-      void resolvePermissionInteractively(event.permissionId, event.toolName);
+      void resolvePermissionInteractively(event.permissionId, event.toolName, event.risk);
     } else if (event.type === "interrupted") {
       notice("session interrupted");
     } else if (event.type === "error") {
@@ -574,13 +713,18 @@ export function attachThebeChat(
         );
         void refreshContextUsage();
       }
+    } else if (event.type === "summary_ready") {
+      footerText.setSummary(event.summary);
+      tui.requestRender();
     }
   }
 
   async function refreshContextUsage(): Promise<void> {
-    if (!product || !sessionId) return;
+    const thebeSessionId = sessionId;
+    if (disposed || !product || !thebeSessionId) return;
     try {
-      const usage = await product.getContextUsage(sessionId);
+      const usage = await product.getContextUsage(thebeSessionId);
+      if (disposed || thebeSessionId !== sessionId) return;
       const u = usage.contextUsage;
       contextTokensUsed = u.usedTokens;
       contextWindowTotal = u.maxTokens;
@@ -675,7 +819,14 @@ export function attachThebeChat(
       return sessionId;
     },
     set sessionId(value) {
+      if (sessionId !== value) {
+        streamUnsub?.();
+        streamUnsub = undefined;
+      }
       sessionId = value;
+      footerText.setSummary(undefined);
+      subscribeToSummary(value);
+      thinkingSyncPromise = syncThinkingLevel(value);
     },
     get sessionTitle() {
       return sessionTitle;
@@ -694,6 +845,10 @@ export function attachThebeChat(
     },
     set currentThinking(value) {
       currentThinking = value;
+      thinkingInfo = {
+        ...thinkingInfo,
+        level: value,
+      };
     },
     get currentTheme() {
       return currentTheme;
@@ -723,6 +878,7 @@ export function attachThebeChat(
     updateFooter,
     updateEditorBorderColor,
     setHideThinking,
+    setThinkingLevel,
     applyTheme,
     applyModel,
     insertBeforeFooter,
@@ -731,6 +887,17 @@ export function attachThebeChat(
     runCustomProviderWizard,
     afterProviderLoggedIn,
   };
+
+  function dispose(): void {
+    if (disposed) return;
+    disposed = true;
+    summaryUnsub?.();
+    summaryUnsub = undefined;
+    clearMessagesView();
+  }
+
+  subscribeToSummary(sessionId);
+  thinkingSyncPromise = syncThinkingLevel(sessionId);
 
   async function handleSlash(raw: string): Promise<boolean> {
     return dispatchSlash(host, raw);
@@ -799,15 +966,28 @@ export function attachThebeChat(
       return;
     }
     if (matchesKey(data, "shift+tab")) {
-      const idx = thinkingCycle.indexOf(currentThinking);
-      const next =
-        thinkingCycle[(idx < 0 ? 0 : idx + 1) % thinkingCycle.length]!;
-      currentThinking = next;
-      if (product && sessionId) {
-        void product.setThinkingLevel(sessionId, next).catch(() => {});
-      }
-      updateFooter();
-      updateEditorBorderColor();
+      void (async () => {
+        if (product && sessionId) {
+          await thinkingSyncPromise;
+          const levels =
+            thinkingInfo.availableLevels.length > 0
+              ? thinkingInfo.availableLevels
+              : thinkingCycle;
+          const idx = levels.indexOf(currentThinking);
+          const next =
+            levels[(idx < 0 ? 0 : idx + 1) % levels.length]!;
+          await setThinkingLevel(next);
+        } else {
+          const idx = thinkingCycle.indexOf(currentThinking);
+          currentThinking =
+            thinkingCycle[(idx < 0 ? 0 : idx + 1) % thinkingCycle.length]!;
+          updateFooter();
+          updateEditorBorderColor();
+        }
+      })().catch((error) => {
+        notice(error instanceof Error ? error.message : String(error));
+        thinkingSyncPromise = syncThinkingLevel(sessionId);
+      });
       return;
     }
     if (matchesKey(data, "ctrl+t")) {
@@ -864,6 +1044,14 @@ export function attachThebeChat(
     abortBash: () => {
       currentBashAbortController?.abort();
     },
+    toggleThinking,
+    toggleTools,
+    dispose,
+    getSessionState: () => ({
+      sessionId,
+      title: sessionTitle,
+      model: currentModel,
+    }),
   };
 }
 
@@ -871,24 +1059,42 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
   let mode: TuiMode = options.tuiMode ?? "regular";
   const terminal = new ProcessTerminal();
   let tui: TUI | undefined;
+  let activeChat: ChatHandle | undefined;
+  let activeSessionId = options.sessionId;
+  let activeSessionTitle = options.title;
+  let activeModel = options.model;
 
   const launch = (): TUI => {
     tui = mode === "fullscreen"
       ? new TuiAltScreen(terminal, true)
       : new TuiMainScreen(terminal);
     tui.setClearOnShrink(true);
-    const chat = attachThebeChat(tui, {
+    let chat!: ChatHandle;
+    chat = attachThebeChat(tui, {
       ...options,
+      sessionId: activeSessionId,
+      title: activeSessionTitle,
+      model: activeModel,
       tuiMode: mode,
       onTuiModeChange: async (next) => {
         if (next === mode) return;
+        const current = chat?.getSessionState();
+        activeSessionId = current?.sessionId ?? activeSessionId;
+        activeSessionTitle = current?.title ?? activeSessionTitle;
+        activeModel = current?.model ?? activeModel;
+        chat?.dispose();
+        const previousTui = tui;
         mode = next;
         options.tuiMode = next;
-        tui?.stop();
+        options.sessionId = activeSessionId;
+        options.title = activeSessionTitle;
+        options.model = activeModel;
+        previousTui?.stop({ preserveScreen: true });
         const nextTui = launch();
         nextTui.start();
       },
     });
+    activeChat = chat;
     tui.addInputListener((data) => {
       if (matchesKey(data, "ctrl+c")) {
         tui?.stop();
@@ -906,13 +1112,23 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
         }
         process.exit(0);
       }
+      if (matchesKey(data, "ctrl+t")) {
+        chat.toggleThinking();
+        return { consume: true };
+      }
+      if (matchesKey(data, "ctrl+o")) {
+        chat.toggleTools();
+        return { consume: true };
+      }
       if (matchesKey(data, "escape")) {
         if (chat.isExecutingBash()) {
           chat.abortBash();
           return { consume: true };
         }
         if (chat.isResponding() && options.product) {
-          const id = options.sessionId ?? options.product.lastThebeSessionId();
+          const id = activeChat?.getSessionState().sessionId ??
+            activeSessionId ??
+            options.product.lastThebeSessionId();
           if (id) {
             void options.product.interrupt(id).catch(() => {});
           }

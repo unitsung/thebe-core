@@ -6,7 +6,10 @@ import type { ContainerInfoProvider } from "../providers/index.ts";
 import { createFakeRuntime } from "../runtime/fake-runtime.ts";
 import { createThebeApp } from "./app.ts";
 import { hashParameters } from "../audit/audit-log.ts";
-import { createThebeProduct } from "./service.ts";
+import {
+  createThebeProduct,
+  DEFAULT_AUTO_SUMMARY_DELAY_MS,
+} from "./service.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
 
@@ -26,6 +29,17 @@ function emptyProvider(): ContainerInfoProvider {
 }
 
 describe("Thebe product service (fake runtime)", () => {
+  it("uses a two-minute idle default for automatic summaries", () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+
+    expect(DEFAULT_AUTO_SUMMARY_DELAY_MS).toBe(120_000);
+    expect(product.autoSummaryDelayMs()).toBe(120_000);
+  });
+
   it("asks through Thebe-owned events, not Pi event types", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "pong" }]);
@@ -189,6 +203,19 @@ describe("Thebe product service (fake runtime)", () => {
     expect(fake.compactCalls()).toBe(1);
   });
 
+  it("deletes both the Thebe mapping and the underlying runtime session", async () => {
+    const fake = createFakeRuntime();
+    const product = createThebeProduct({ runtime: fake.runtime, provider: emptyProvider() });
+    const meta = await product.createSession({ title: "delete-me" });
+
+    await product.deleteSession(meta.thebeSessionId);
+
+    await expect(product.getSession(meta.thebeSessionId)).rejects.toThrow();
+    expect(await fake.runtime.listSessions()).not.toContainEqual({
+      runtimeSessionId: meta.runtimeSessionId,
+    });
+  });
+
   it("passes compact instructions and toggles official auto-compact", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "first" }]);
@@ -209,6 +236,33 @@ describe("Thebe product service (fake runtime)", () => {
     const disabled = await product.getContextUsage(meta.thebeSessionId);
     expect(disabled.compaction.enabled).toBe(false);
     expect(disabled.compaction.nearThreshold).toBe(false);
+  });
+
+  it("generates and persists an automatic summary after idle time", async () => {
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeRuntime();
+      fake.queueTurns([{ kind: "text", text: "completed" }]);
+      const product = createThebeProduct({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        autoSummaryDelayMs: 60_000,
+      });
+      const result = await product.send("finish the task");
+      const events: string[] = [];
+      product.subscribeLog(result.thebeSessionId, (event) => {
+        events.push(event.type);
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const meta = await product.getSession(result.thebeSessionId);
+      expect(meta.lastSummary).toBe("ok");
+      expect(meta.lastSummaryAt).toBeDefined();
+      expect(events).toContain("summary_ready");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("records enabled skill identity/version/source in audit and does not auto-load extras", async () => {
@@ -412,6 +466,57 @@ describe("Thebe product service (fake runtime)", () => {
     expect(tool?.text).toContain("denied");
   });
 
+  it("full-access auto-approves approval-gated tools while explicit deny wins", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      permissionMode: "full-access",
+    });
+    const result = await product.send("run bash");
+    expect(result.text).toBe("after");
+    expect(product.permissionMode()).toBe("full-access");
+    expect(product.pendingPermissionIds()).toHaveLength(0);
+
+    const denied = createFakeRuntime();
+    denied.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "denied after" },
+    ]);
+    const guarded = createThebeProduct({
+      runtime: denied.runtime,
+      provider: emptyProvider(),
+      permissionMode: "full-access",
+    });
+    const session = await guarded.createSession();
+    await guarded.patchSession(session.thebeSessionId, {
+      rememberedPermissions: { bash: "deny" },
+    });
+    await guarded.prompt("run bash", { thebeSessionId: session.thebeSessionId });
+    expect(guarded.messages().find((message) => message.role === "tool")?.isError).toBe(true);
+  });
+
+  it("read-only mode denies approval-gated tools without opening a permission prompt", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "read-only" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      permissionMode: "read-only",
+    });
+    const result = await product.send("run bash");
+    expect(result.text).toBe("read-only");
+    expect(product.permissionMode()).toBe("read-only");
+    expect(product.pendingPermissionIds()).toHaveLength(0);
+  });
+
   it("lists skills, mcp tools, subagent profiles, spawn, and fork messages", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-product-features-"));
     const prevCwd = process.cwd();
@@ -452,6 +557,13 @@ describe("Thebe product service (fake runtime)", () => {
       expect(skills.map((skill) => skill.name)).toContain("demo-skill");
       await product.enableSkill("demo-skill");
       expect((await product.getSkill("demo-skill"))?.enabled).toBe(true);
+      expect(fake.snapshot(parent.runtimeSessionId).resourceReloads).toBe(1);
+      expect(fake.snapshot(parent.runtimeSessionId).enabledResources).toEqual([
+        expect.objectContaining({
+          kind: "skill",
+          identity: "demo-skill",
+        }),
+      ]);
       await product.disableSkill("demo-skill");
       expect((await product.getSkill("demo-skill"))?.enabled).toBe(false);
 
@@ -464,16 +576,27 @@ describe("Thebe product service (fake runtime)", () => {
 
       const profiles = await product.listSubagentProfiles();
       expect(profiles.map((profile) => profile.name)).toContain("researcher");
+      expect(profiles.map((profile) => profile.name)).toContain("diagnostics");
       const child = await product.spawnSubagent({
         profileName: "researcher",
         taskPrompt: "do research",
         parentSessionId: parent.thebeSessionId,
       });
-      expect(child.parentThebeSessionId).toBe(parent.thebeSessionId);
+      expect(child.parentSessionId).toBe(parent.thebeSessionId);
+      expect(child.status).toMatch(/queued|running/);
+      const completed = await product.waitSubagent(child.runId);
+      expect(completed.status).toBe("completed");
+      expect(completed.result).toBe("child-ok");
       const listed = await product.listSubagents(parent.thebeSessionId);
       expect(
-        listed.some((row) => row.thebeSessionId === child.thebeSessionId),
+        listed.some(
+          (row) =>
+            row.runId === child.runId &&
+            row.parentSessionId === parent.thebeSessionId,
+        ),
       ).toBe(true);
+      expect(await product.listSessions()).toHaveLength(1);
+      expect(await fake.runtime.listSessions()).toHaveLength(1);
 
       const forks = await product.getForkMessages(parent.thebeSessionId);
       expect(forks.some((turn) => turn.text.includes("parent-turn"))).toBe(
@@ -486,6 +609,135 @@ describe("Thebe product service (fake runtime)", () => {
       } else {
         process.env.HOME = prevHome;
       }
+    }
+  });
+
+  it("cancels one-shot subagents and keeps the parent as the only session", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const parent = await product.createSession({ title: "parent" });
+    const run = await product.spawnSubagent({
+      profileName: "diagnostics",
+      taskPrompt: "inspect the services",
+      parentSessionId: parent.thebeSessionId,
+    });
+
+    await vi.waitFor(() => {
+      expect(product.getSubagent(run.runId)?.status).toBe("running");
+    });
+    await product.cancelSubagent(run.runId, parent.thebeSessionId);
+    await expect(product.waitSubagent(run.runId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    expect(await product.listSessions()).toHaveLength(1);
+    expect(await fake.runtime.listSessions()).toHaveLength(1);
+    expect(product.messages()).toEqual([]);
+  });
+
+  it("queues subagents by concurrency without sharing parent state", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "hang" },
+      { kind: "text", text: "second-result" },
+    ]);
+    const product = createThebeProduct({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      maxSubagentConcurrency: 1,
+      maxSubagentsPerParent: 1,
+    });
+    const parent = await product.createSession({ title: "parent" });
+    const first = await product.spawnSubagent({
+      profileName: "diagnostics",
+      taskPrompt: "first task",
+      parentSessionId: parent.thebeSessionId,
+    });
+    const second = await product.spawnSubagent({
+      profileName: "diagnostics",
+      taskPrompt: "second task",
+      parentSessionId: parent.thebeSessionId,
+    });
+
+    await vi.waitFor(() => {
+      expect(product.getSubagent(first.runId)?.status).toBe("running");
+      expect(product.getSubagent(second.runId)?.status).toBe("queued");
+    });
+    await product.cancelSubagent(first.runId, parent.thebeSessionId);
+    await expect(product.waitSubagent(first.runId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    await expect(product.waitSubagent(second.runId)).resolves.toMatchObject({
+      status: "completed",
+      result: "second-result",
+    });
+    expect(await product.listSessions()).toHaveLength(1);
+  });
+
+  it("does not inherit context and enforces the profile turn limit", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-ephemeral-subagent-"));
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+    process.chdir(dir);
+    process.env.HOME = dir;
+    try {
+      await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".thebe", "agents", "limited.md"),
+        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container.list]\n---\nDo one diagnostic turn.\n",
+      );
+      const fake = createFakeRuntime();
+      fake.queueTurns([
+        { kind: "text", text: "parent-secret" },
+        { kind: "tools", calls: [{ name: "container.list" }] },
+        { kind: "text", text: "must-not-run" },
+      ]);
+      const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+      const runtime = {
+        ...fake.runtime,
+        async createSession(
+          create: Parameters<typeof fake.runtime.createSession>[0],
+        ) {
+          createCalls.push(create);
+          return fake.runtime.createSession(create);
+        },
+      };
+      const product = createThebeProduct({
+        runtime,
+        provider: emptyProvider(),
+      });
+      const parent = await product.createSession({ title: "parent" });
+      await product.prompt("parent task", { thebeSessionId: parent.thebeSessionId });
+      const run = await product.spawnSubagent({
+        profileName: "limited",
+        taskPrompt: "child task only",
+        parentSessionId: parent.thebeSessionId,
+      });
+      const completed = await product.waitSubagent(run.runId);
+
+      expect(completed).toMatchObject({
+        status: "completed",
+        turns: 1,
+        maxTurns: 1,
+      });
+      expect(completed.result).toBe("");
+      expect(completed.error).toContain("turn limit");
+      const childCreate = createCalls.at(-1)!;
+      expect(childCreate.inMemory).toBe(true);
+      expect(childCreate.builtinTools).toEqual(["container.list"]);
+      expect(childCreate.systemPrompt).not.toContain("parent-secret");
+      expect(product.messages().map((message) => message.text)).toEqual([
+        "parent task",
+        "parent-secret",
+      ]);
+      expect(await product.listSessions()).toHaveLength(1);
+    } finally {
+      process.chdir(previousCwd);
+      if (previousHome === undefined) delete process.env.HOME;
+      else process.env.HOME = previousHome;
     }
   });
 });

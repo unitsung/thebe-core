@@ -23,6 +23,12 @@ export function createThebeApp(options: {
   model?: import("../runtime/types.ts").RuntimeModelRef;
   allowedHosts?: string[];
   sessionIdleTimeoutMs?: number;
+  autoCompact?: boolean;
+  autoSummary?: boolean;
+  autoSummaryDelayMs?: number;
+  permissionMode?: import("../runtime/types.ts").PermissionMode;
+  maxSubagentConcurrency?: number;
+  maxSubagentsPerParent?: number;
 }): {
   product: ThebeProduct;
   prompt: ThebeAppPrompt;
@@ -38,6 +44,12 @@ export function createThebeApp(options: {
     callerId: options.callerId,
     model: options.model,
     sessionIdleTimeoutMs: options.sessionIdleTimeoutMs,
+    autoCompact: options.autoCompact,
+    autoSummary: options.autoSummary,
+    autoSummaryDelayMs: options.autoSummaryDelayMs,
+    permissionMode: options.permissionMode,
+    maxSubagentConcurrency: options.maxSubagentConcurrency,
+    maxSubagentsPerParent: options.maxSubagentsPerParent,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await product.prompt(text);

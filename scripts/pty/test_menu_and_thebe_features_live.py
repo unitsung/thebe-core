@@ -112,15 +112,24 @@ def main() -> int:
             after_tab[-300:],
         )
         check(
-            "footer shows model • level on one line",
-            "minimal" in after_tab.lower() and "thinking minimal" not in after_tab.lower(),
+            "footer shows model • effective level on one line",
+            re.search(
+                r"•\s*(off|minimal|low|medium|high|xhigh|max)",
+                after_tab.lower(),
+            )
+            is not None
+            and "thinking minimal" not in after_tab.lower(),
             after_tab[-300:],
         )
         lines = [line for line in after_tab.splitlines() if line.strip()]
         last = "\n".join(lines[-6:]).lower()
         check(
-            "level sits with the model name",
-            "• minimal" in last or "minimal" in last,
+            "effective level sits with the model name",
+            re.search(
+                r"•\s*(off|minimal|low|medium|high|xhigh|max)",
+                last,
+            )
+            is not None,
             last,
         )
 

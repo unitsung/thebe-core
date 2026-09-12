@@ -96,7 +96,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return handleProductApi(request, path, options.product);
     }
     if (request.method === "POST" && path === "/mcp") {
-      return handleMcp(request, options.product);
+      return handleMcp(request, options.product, options.version);
     }
     return json({ ok: false }, 404);
   }

@@ -1,14 +1,19 @@
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { BUILTIN_SUBAGENTS } from "../../agent/subagent.ts";
+import type { RuntimeModelRef } from "../../runtime/types.ts";
 
 export type SubagentProfile = {
   name: string;
   description: string;
   filePath: string;
-  scope: "project" | "global";
-  model?: string;
+  scope: "project" | "global" | "builtin";
+  model?: RuntimeModelRef;
   tools?: string[];
+  maxTurns?: number;
+  /** Retained for profile compatibility; product runs never inherit context. */
+  inheritContext?: boolean;
   systemPrompt: string;
 };
 
@@ -17,6 +22,8 @@ export function parseSubagentFrontmatter(content: string): {
   description?: string;
   model?: string;
   tools?: string[];
+  maxTurns?: number;
+  inheritContext?: boolean;
   body: string;
 } {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
@@ -29,6 +36,8 @@ export function parseSubagentFrontmatter(content: string): {
   let description: string | undefined;
   let model: string | undefined;
   let tools: string[] | undefined;
+  let maxTurns: number | undefined;
+  let inheritContext: boolean | undefined;
 
   for (const line of header.split(/\r?\n/)) {
     const nameMatch = line.match(/^name:\s*(.+)$/i);
@@ -51,9 +60,18 @@ export function parseSubagentFrontmatter(content: string): {
         .map((t) => t.trim().replace(/^["']|["']$/g, ""))
         .filter(Boolean);
     }
+    const maxTurnsMatch = line.match(/^maxTurns:\s*(.+)$/i);
+    if (maxTurnsMatch) {
+      const parsed = Number(maxTurnsMatch[1]?.trim());
+      if (Number.isFinite(parsed)) maxTurns = parsed;
+    }
+    const inheritMatch = line.match(/^inheritContext:\s*(.+)$/i);
+    if (inheritMatch) {
+      inheritContext = inheritMatch[1]?.trim().toLowerCase() === "true";
+    }
   }
 
-  return { name, description, model, tools, body };
+  return { name, description, model, tools, maxTurns, inheritContext, body };
 }
 
 async function collectProfilesFromDir(
@@ -75,8 +93,10 @@ async function collectProfilesFromDir(
             description: parsed.description || `Subagent profile ${fallbackName}`,
             filePath,
             scope,
-            model: parsed.model,
+            model: parseModelRef(parsed.model),
             tools: parsed.tools,
+            maxTurns: parsed.maxTurns,
+            inheritContext: parsed.inheritContext,
             systemPrompt: parsed.body,
           });
         } catch {}
@@ -98,6 +118,19 @@ export async function discoverSubagentProfiles(options?: {
   ]);
 
   const profileMap = new Map<string, SubagentProfile>();
+  for (const profile of Object.values(BUILTIN_SUBAGENTS)) {
+    profileMap.set(profile.name, {
+      name: profile.name,
+      description: profile.description,
+      filePath: "",
+      scope: "builtin",
+      model: profile.model,
+      tools: profile.tools,
+      maxTurns: profile.maxTurns,
+      inheritContext: profile.inheritContext,
+      systemPrompt: profile.systemPrompt,
+    });
+  }
   for (const p of globalProfiles) {
     profileMap.set(p.name, p);
   }
@@ -108,4 +141,14 @@ export async function discoverSubagentProfiles(options?: {
   return Array.from(profileMap.values()).sort((a, b) =>
     a.name.localeCompare(b.name),
   );
+}
+
+function parseModelRef(value?: string): RuntimeModelRef | undefined {
+  if (!value) return undefined;
+  const separator = value.indexOf("/");
+  if (separator <= 0 || separator === value.length - 1) return undefined;
+  return {
+    providerId: value.slice(0, separator),
+    modelId: value.slice(separator + 1),
+  };
 }

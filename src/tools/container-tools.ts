@@ -30,6 +30,17 @@ export const CONTAINER_TOOL_NAMES = [
   "container.status_summary",
 ] as const;
 
+/** Public MCP schemas must match the schemas used by the runtime tools. */
+export const CONTAINER_TOOL_SCHEMAS: Record<
+  (typeof CONTAINER_TOOL_NAMES)[number],
+  Record<string, unknown>
+> = {
+  "container.list": emptyParams,
+  "container.inspect": idParams,
+  "container.logs": logsParams,
+  "container.status_summary": emptyParams,
+};
+
 export const CONTAINER_TOOL_DESCRIPTIONS: Record<
   (typeof CONTAINER_TOOL_NAMES)[number],
   string
