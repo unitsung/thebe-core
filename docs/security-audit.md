@@ -1,7 +1,7 @@
 # Thebe Core 代码安全与工程质量审计报告（修正版）
 
 > 基于 `dev` 分支源码逐文件核实，2026-09-11  
-> 审计范围：`src/http/`、`src/product/`、`src/auth/`、`src/config/env.ts`  
+> 审计范围：`src/delivery/http/`、`src/agent/`、`src/app/`、`src/adapters/`
 > 结论格式：🔴 高优先级问题 · 🟡 中优先级问题 · 🟢 正面实现 · ℹ️ 信息补充
 
 ---
@@ -18,7 +18,7 @@ Thebe Core 的整体设计理念清晰，核心运行时边界、只读工具层
 
 ### 🔴 THEBE_TOKEN 非强制，未设置时鉴权整体跳过
 
-**文件**：`src/product/bootstrap.ts`、`src/product/app.ts`、`src/http/handler.ts`
+**文件**：`src/app/bootstrap.ts`、`src/app/create.ts`、`src/delivery/http/handler.ts`
 
 ```typescript
 // bootstrap.ts L91
@@ -62,7 +62,7 @@ if (!token && process.env.NODE_ENV === "production") {
 
 ### 🔴 默认监听 0.0.0.0，但日志显示 127.0.0.1，存在误导
 
-**文件**：`src/http/serve.ts`、`src/http/listen.ts`
+**文件**：`src/delivery/http/serve.ts`、`src/delivery/http/listen.ts`
 
 ```typescript
 // serve.ts L9–10
@@ -87,7 +87,7 @@ const host = process.env.THEBE_HOST ?? "127.0.0.1";  // 更安全的默认值
 
 ### 🟡 /v1/system/quiesce 无角色隔离，依赖 token 作为唯一防线
 
-**文件**：`src/http/handler.ts`
+**文件**：`src/delivery/http/handler.ts`
 
 ```typescript
 // handler.ts L55–63
@@ -109,7 +109,7 @@ if (request.method === "POST" && path === "/v1/system/quiesce") {
 
 ### 🟡 GET 请求完全绕过 validateRequestSecurity
 
-**文件**：`src/http/security.ts`
+**文件**：`src/delivery/http/security.ts`
 
 ```typescript
 // security.ts L5–7
@@ -126,7 +126,7 @@ if (!isMutating) {
 
 ### 🟡 Origin 缺失时 mutating 请求不做跨域检查
 
-**文件**：`src/http/security.ts`
+**文件**：`src/delivery/http/security.ts`
 
 ```typescript
 // security.ts L19–29
@@ -156,7 +156,7 @@ if (origin && host) {   // ← origin 为空时（curl/iOS 客户端）整段跳
 
 ### 🟡 /mcp 端点 callTool 未校验 name 白名单，任意工具名可被调用
 
-**文件**：`src/http/routes/mcp.ts`
+**文件**：`src/delivery/http/routes/mcp.ts`
 
 ```typescript
 // mcp.ts L42–50
@@ -186,7 +186,7 @@ if (!ALL_TOOL_NAMES.has(name)) {
 
 ### 🟡 /v1/session/:id/export 返回 HTML 缺少 CSP 头
 
-**文件**：`src/http/routes/session.ts`
+**文件**：`src/delivery/http/routes/session-commands.ts`、`session-read.ts`
 
 ```typescript
 // session.ts L189–195
@@ -213,7 +213,7 @@ if (format === "html") {
 
 ### 🟡 permission 端点 response 字段默认 allow，格式错误不拒绝
 
-**文件**：`src/http/routes/session.ts`
+**文件**：`src/delivery/http/routes/session-commands.ts`、`session-read.ts`
 
 ```typescript
 // session.ts L137–143
@@ -252,7 +252,7 @@ if (request.method === "POST" && path === "/v1/devices") {
 
 ### 🟡 sessionLogStream 无连接数限制和空闲超时
 
-**文件**：`src/http/parse.ts`
+**文件**：`src/delivery/http/parsing/`
 
 ```typescript
 // parse.ts sessionLogStream
@@ -281,7 +281,7 @@ const send = (event) => {
 
 ### 🟡 env.ts 向上遍历 8 层目录，路径范围过宽
 
-**文件**：`src/config/env.ts`
+**文件**：`src/app/config/env.ts`
 
 ```typescript
 // env.ts L36
@@ -317,7 +317,7 @@ if (process.env[key] === undefined) {
 
 ### 🟢 Thebe 层不持久化 API Key，生命周期在 runtime 侧
 
-**文件**：`src/auth/credentials.ts`
+**文件**：`src/app/auth.ts`
 
 ```typescript
 export async function applyThebeApiKey(auth, providerId, apiKey) {
@@ -332,7 +332,7 @@ export async function applyThebeApiKey(auth, providerId, apiKey) {
 
 ### 🟡 PUT /v1/auth/:providerId 接受明文 API Key，无 TLS 强制
 
-**文件**：`src/http/routes/product-api.ts`
+**文件**：`src/delivery/http/routes/agent-api.ts`
 
 ```typescript
 // product-api.ts L69–77
@@ -364,7 +364,7 @@ if (request.method === "PUT" && parts[1] === "auth" && parts[2]) {
 
 ## 八、parse.ts 输入验证（正面评价）
 
-**文件**：`src/http/parse.ts`
+**文件**：`src/delivery/http/parsing/`
 
 | 校验项 | 实现 |
 |--------|------|

@@ -1,15 +1,15 @@
+export { createThebeApp } from "./app/create.ts";
 export { createThebeAgent } from "./agent/index.ts";
-export { createThebeApp } from "./product/app.ts";
-export { createThebeProduct } from "./product/service.ts";
 export type {
-  CreateThebeProductOptions,
+  CreateThebeAgentOptions,
   PermissionMode,
   SubagentRun,
   SubagentRunStatus,
-} from "./product/service.ts";
-export { createProductStore } from "./product/store.ts";
-export { createFakeRuntime } from "./runtime/fake-runtime.ts";
-export { createPiCodingAgentRuntime } from "./runtime/pi/pi-coding-agent-runtime.ts";
+} from "./agent/index.ts";
+export { createAgentStore } from "./agent/store.ts";
+export {
+  createPiCodingAgentRuntime,
+} from "./adapters/pi/runtime.ts";
 export {
   PI_BUILTIN_TOOLS,
   PI_RUNTIME_ID,
@@ -18,13 +18,12 @@ export {
   type NormalizedEvent,
   type PromptInput,
   type RuntimeSession,
-} from "./runtime/types.ts";
-export { applyThebeApiKey } from "./auth/credentials.ts";
-export { ArcaneAdapter } from "./adapters/arcane-adapter.ts";
+} from "./agent/runtime/index.ts";
+export { ArcaneAdapter } from "./adapters/arcane/adapter.ts";
 export {
   createThebeHttpHandler,
   listenThebeHttp,
-} from "./http/index.ts";
+} from "./delivery/http/index.ts";
 export {
   ProviderError,
   type ContainerDetail,
@@ -33,4 +32,4 @@ export {
   type ContainerSummary,
   type HostStatusSummary,
   type ProviderErrorCode,
-} from "./providers/index.ts";
+} from "./agent/capabilities/containers.ts";

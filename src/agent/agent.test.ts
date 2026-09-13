@@ -2,9 +2,9 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createThebeAgent } from "./agent.ts";
-import type { ContainerInfoProvider } from "../providers/index.ts";
-import { createFakeRuntime } from "../runtime/fake-runtime.ts";
+import { createThebeAgent } from "./index.ts";
+import type { ContainerInfoProvider } from "./capabilities/containers.ts";
+import { createFakeRuntime } from "../testing/runtime/index.ts";
 
 function emptyProvider(): ContainerInfoProvider {
   return {
@@ -22,14 +22,14 @@ function emptyProvider(): ContainerInfoProvider {
 }
 
 describe("Thebe agent", () => {
-  it("returns the runtime reply through the product layer", async () => {
+  it("returns the runtime reply through the agent layer", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "pong" }]);
     const thebe = createThebeAgent({
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.send("ping")).resolves.toBe("pong");
+    await expect(thebe.send("ping")).resolves.toMatchObject({ text: "pong" });
   });
 
   it("registers Pi built-ins plus the four container tools", () => {
@@ -70,7 +70,7 @@ describe("Thebe agent", () => {
       { kind: "text", text: "inspected" },
     ]);
     const thebe = createThebeAgent({ runtime: fake.runtime, provider });
-    await expect(thebe.send("inspect nginx")).resolves.toBe("inspected");
+    await expect(thebe.send("inspect nginx")).resolves.toMatchObject({ text: "inspected" });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.text).toContain("API_TOKEN=***REDACTED***");
     expect(toolResult?.text).toContain("NODE_ENV=production");
@@ -106,7 +106,7 @@ describe("Thebe agent", () => {
     });
     await thebe.send("inspect nginx");
     const audit = await readFile(auditPath, "utf8");
-    const exported = await thebe.exportLastSession();
+    const exported = await thebe.exportSession();
     const inbound = JSON.stringify(fake.inboundToolResults());
     expect(inbound).not.toContain(CANARY);
     expect(inbound).toContain("***REDACTED***");
@@ -129,7 +129,7 @@ describe("Thebe agent", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.send("start nginx")).resolves.toBe("stopped");
+    await expect(thebe.send("start nginx")).resolves.toMatchObject({ text: "stopped" });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.isError).toBe(true);
     expect(toolResult?.toolName).toBe("container.start");
@@ -195,7 +195,7 @@ describe("Thebe agent", () => {
       maxToolCalls: 1,
     });
     const reply = await thebe.send("list twice");
-    expect(reply).not.toBe("should not run");
+    expect(reply.text).not.toBe("should not run");
     const toolResults = thebe.messages().filter((m) => m.role === "tool");
     expect(toolResults.length).toBe(2);
     expect(JSON.stringify(toolResults)).not.toContain('"terminate"');
