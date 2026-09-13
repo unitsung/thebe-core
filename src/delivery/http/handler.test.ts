@@ -74,8 +74,9 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(docs.status).toBe(200);
     expect(docs.headers.get("content-type")).toContain("text/html");
     const html = await docs.text();
-    expect(html).toContain("SwaggerUIBundle");
     expect(html).toContain("/docs/swagger-ui-bundle.js");
+    expect(html).toContain("/docs/swagger-ui-init.js");
+    expect(html).not.toMatch(/<script>window\.ui=/);
     expect(html).not.toContain("unpkg.com");
 
     const css = await handler().handle(
@@ -83,6 +84,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     );
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
+
+    const init = await handler().handle(
+      new Request("http://127.0.0.1:8787/docs/swagger-ui-init.js"),
+    );
+    expect(init.status).toBe(200);
+    expect(init.headers.get("content-type")).toContain("text/javascript");
+    expect(await init.text()).toContain("window.ui=SwaggerUIBundle");
   });
 
   it("GET /v1/events returns an events array", async () => {
