@@ -392,9 +392,8 @@ describe("thebe spec alignment tests", () => {
           `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task`,
         ),
       );
-      expect(listRes.status).toBe(501);
-      const listData = (await listRes.json()) as { code?: string };
-      expect(listData.code).toBe("feature_not_implemented");
+      expect(listRes.status).toBe(200);
+      expect((await listRes.json()) as { tasks: unknown[] }).toEqual({ tasks: [] });
 
       const stopOne = await app.handler.handle(
         new Request(
@@ -402,7 +401,8 @@ describe("thebe spec alignment tests", () => {
           { method: "POST" },
         ),
       );
-      expect(stopOne.status).toBe(501);
+      expect(stopOne.status).toBe(200);
+      expect(await stopOne.json()).toEqual({ ok: true });
 
       const stopAll = await app.handler.handle(
         new Request(
@@ -410,7 +410,8 @@ describe("thebe spec alignment tests", () => {
           { method: "POST" },
         ),
       );
-      expect(stopAll.status).toBe(501);
+      expect(stopAll.status).toBe(200);
+      expect(await stopAll.json()).toEqual({ ok: true });
     });
 
     it("supports provider testing and API key management", async () => {

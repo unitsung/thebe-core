@@ -1,5 +1,6 @@
 allowBuilds:
   "@google/genai": false
+  '@scarf/scarf': false
   esbuild: false
   protobufjs: false
 minimumReleaseAgeExclude:

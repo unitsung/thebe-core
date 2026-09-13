@@ -56,7 +56,7 @@ export async function handleSessionRead(
     return json(await agent.getContext(id));
   }
   if (method === "GET" && action === "background-task" && !extra) {
-    return notImplemented("background-task tracking is not implemented");
+    return json({ tasks: await agent.listBackgroundTasks(id) });
   }
   if (method === "GET" && action === "children") {
     return json({ sessions: await agent.children(id) });
@@ -65,14 +65,32 @@ export async function handleSessionRead(
     return exportSession(agent, id, url.searchParams.get("format"));
   }
   if (method === "GET" && action === "diff") {
-    return notImplemented("session diff is not implemented");
-  }
-  if (
-    method === "POST" &&
-    action === "background-task" &&
-    (parts[5] === "stop" || extra === "stop-all")
-  ) {
-    return notImplemented("background-task tracking is not implemented");
+    if (!agent.workspacePath) {
+      return notImplemented("workspace diff requires a configured workspace");
+    }
+    const result = await agent.executeBash(
+      id,
+      "git diff --no-ext-diff --no-color -- .",
+      undefined,
+      { excludeFromContext: true },
+    );
+    if (result.cancelled) {
+      return json(
+        { ok: false, code: "diff_cancelled", error: "workspace diff was cancelled" },
+        409,
+      );
+    }
+    if (result.exitCode !== undefined && result.exitCode !== 0) {
+      return json(
+        {
+          ok: false,
+          code: "diff_unavailable",
+          error: result.output.trim() || "workspace is not a git repository",
+        },
+        501,
+      );
+    }
+    return json({ diff: result.output, workspacePath: agent.workspacePath });
   }
   return undefined;
 }

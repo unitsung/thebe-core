@@ -11,6 +11,9 @@ describe("Node packaging", () => {
     expect(config).toContain("rolldownOptions");
     expect(config).toContain("codeSplitting");
     expect(config).toContain('chunkFileNames: "chunks/[name]-[hash].js"');
+    expect(config).toContain("sourcemap: false");
+    expect(config).toContain('minify: "oxc"');
+    expect(config).toContain("reportCompressedSize: false");
     expect(config).not.toContain("experimentalMinChunkSize");
     expect(config).not.toContain("thebe-inline-node-entries");
     expect(config).not.toContain("rollupOptions");

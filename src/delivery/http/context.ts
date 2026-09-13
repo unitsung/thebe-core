@@ -9,6 +9,8 @@ export type ThebeHttpContext = {
   parts: string[];
   version: string;
   agent?: ThebeAgent;
+  /** Process-local device registration state used by the iOS compatibility endpoint. */
+  devices?: Map<string, { platform: string; deviceId?: string; registeredAt: string }>;
 };
 
 export type ThebeHttpRoute = (
@@ -17,7 +19,12 @@ export type ThebeHttpRoute = (
 
 export function createThebeHttpContext(
   request: Request,
-  options: { version: string; agent?: ThebeAgent; path?: string },
+  options: {
+    version: string;
+    agent?: ThebeAgent;
+    path?: string;
+    devices?: Map<string, { platform: string; deviceId?: string; registeredAt: string }>;
+  },
 ): ThebeHttpContext {
   const url = new URL(request.url);
   const path = options.path ?? (url.pathname.replace(/\/$/, "") || "/");
@@ -28,6 +35,7 @@ export function createThebeHttpContext(
     parts: path.split("/").filter(Boolean),
     version: options.version,
     agent: options.agent,
+    devices: options.devices ?? new Map(),
   };
 }
 

@@ -1,5 +1,6 @@
-import { json } from "../json.ts";
-import type { ThebeHttpContext } from "../context.ts";
+import { createHash } from "node:crypto";
+import { json, readJson } from "../json.ts";
+import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { handleCompatibility } from "./compat.ts";
 
 /** Health, event collection, device-registration, and legacy message routes. */
@@ -17,8 +18,24 @@ export async function handleHealthEventsCompatibility(
     return json({ events: agent ? agent.recentEvents() : [] });
   }
   if (request.method === "POST" && path === "/v1/devices") {
-    // TODO: validate and persist device registration
-    return json({ ok: true });
+    const blocked = quiescedWrite(context);
+    if (blocked) return blocked;
+    const body = await readJson(request);
+    const token = typeof body.token === "string" ? body.token.trim() : "";
+    const platform = typeof body.platform === "string" ? body.platform.trim().toLowerCase() : "";
+    if (!token || token.length > 512) {
+      return json({ ok: false, error: "token is required and must be at most 512 characters" }, 400);
+    }
+    if (platform !== "ios") {
+      return json({ ok: false, error: "platform must be 'ios'" }, 400);
+    }
+    const deviceId = typeof body.deviceId === "string" && body.deviceId.trim()
+      ? body.deviceId.trim()
+      : undefined;
+    const registrationKey = createHash("sha256").update(token).digest("hex");
+    const registeredAt = new Date().toISOString();
+    context.devices?.set(registrationKey, { platform, deviceId, registeredAt });
+    return json({ ok: true, registered: true, deviceId, registeredAt });
   }
   if (request.method === "POST" && path === "/v1/messages") {
     return handleCompatibility(context);

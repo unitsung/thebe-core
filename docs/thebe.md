@@ -243,7 +243,7 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 
 | 方法与路径 | 要点 | 状态 |
 |---|---|---|
-| `GET /v1/session` | 列出会话；返回 `id`、`title`、`createdAt`、`lastActiveAt`、状态、selected context、labels；建议支持按 `hostId`/`environmentId` 过滤分组 | 【待确认】基础已报告完成，分组过滤待补 |
+| `GET /v1/session` | 列出会话；返回 `id`、`title`、`createdAt`、`lastActiveAt`、状态、selected context、labels；支持按 `hostId`/`environmentId`/`status` 过滤 | 已实现 |
 | `POST /v1/session` | 创建空 session；可选 title、selected homelab context、初始 model | 【待确认】已报告完成 |
 | `GET /v1/session/:id` | 单个会话元数据与当前状态 | 【待确认】已报告完成 |
 | `PATCH /v1/session/:id` | 改 title、labels、selected context、share metadata | 【待确认】已报告完成 |
@@ -462,7 +462,7 @@ type ThebeProvider = {
 | 方法与路径 | 目的 | 状态 |
 |---|---|---|
 | `GET /v1/session/:id/export?format=jsonl\|html` | 使用 Pi 原生 JSONL/HTML export | 【待确认】需要人工核实是否已用 Pi-native export，而非 Thebe 自实现的导出逻辑 |
-| `GET /v1/session/:id/diff` | 返回会话导致的工作区文件 diff | 【待确认】已报告明确 501（P2 延后） |
+| `GET /v1/session/:id/diff` | 返回配置 workspace 中的 Git 工作区 diff；未配置 workspace 或非 Git 目录返回结构化 501 | 已实现（需 workspace） |
 | `POST /v1/session/:id/share` | 创建分享元数据/链接 | 【建议】P3，非必需 |
 | `DELETE /v1/session/:id/share` | 撤销分享 | 【建议】P3，非必需 |
 
@@ -476,7 +476,45 @@ POST /mcp
 
 若仍是刻意产品接口，须走同一 Thebe custom-tool registration、policy、redaction 与 audit 规则。
 
-### 3.12 明确排除的能力
+### 3.12 OpenAPI / Swagger 文档
+
+HTTP 服务会根据当前版本内置的路由定义生成 OpenAPI 3.0.3 文档：
+
+- `GET /openapi.json`：机器可读的 OpenAPI 文档，可导入 Swagger、Postman 或代码生成器。
+- `GET /docs`（`/swagger` 同义）：Swagger UI 页面，自动读取 `/openapi.json`。
+
+文档随服务版本返回，包含 `X-Thebe-Token` API key 鉴权说明、请求路径参数、常见错误状态和 SSE 日志端点。Swagger UI 的静态资源由 `swagger-ui-dist` 依赖随服务本地托管；无外网环境也可以直接打开 `/docs`。文档页和 `/openapi.json` 本身不要求 token，Swagger UI 的 “Authorize” 用于在 Try it out 请求中发送 `X-Thebe-Token`。
+
+直接运行 `pnpm start` 即可启动 HTTP 服务（命令会先自动构建）；文档与 API 共用同一个端口，直接打开 `http://<Core 地址>:8787/docs`（或 `/openapi.json`）。项目没有单独的文档服务或额外端口。
+
+### 3.12.1 UI 连接 Core
+
+在 iPhone 的 Thebe 设置 → Thebe Core 中填写 Core 地址后，可直接点击“打开 API 文档”。地址必须是手机能访问的地址：手机上的 `127.0.0.1`/`localhost` 指向手机本身，不是运行 Core 的电脑。若 Core 与 UI 不在同一台机器，请按下面方式监听并允许电脑的局域网地址：
+
+最简单的局域网启动方式是在 `core` 目录执行：
+
+```bash
+pnpm start:lan
+```
+
+这个命令会自动构建并启动 Core，自动选择本机的非回环 IPv4 地址，默认监听 `0.0.0.0:8787`，把该地址加入 Host 白名单，并生成一个会复用的 `THEBE_TOKEN`。终端会直接打印 Core 地址、API 文档地址和 UI 口令；把 `Thebe Core LAN` 地址和 `UI token` 分别填入 UI 的 Core 地址和共享口令即可。若电脑有多个网卡，可指定要展示的地址：
+
+```bash
+THEBE_LAN_IP=192.168.1.10 pnpm start:lan
+```
+
+需要手动控制监听地址、白名单或口令时，仍可使用下面的完整写法：
+
+```bash
+THEBE_HOST=0.0.0.0 \
+THEBE_ALLOWED_HOSTS=192.168.1.10 \
+THEBE_TOKEN=change-me \
+pnpm start
+```
+
+然后在 UI 填 `http://192.168.1.10:8787`，并在“共享口令”中填同一个 `THEBE_TOKEN`。`GET /v1/health` 是只读探活，Host 白名单和 token 不匹配时，真正创建 session 或发送 prompt 会分别返回 `403` 或 `401`；UI 会直接显示 Core 返回的状态和原因。
+
+### 3.13 明确排除的能力
 
 - **文件浏览类接口**（`find`/`file`/`symbol` 等 IDE 风格搜索）：不符合 Thebe homelab agent（非 IDE）的产品定位，明确排除。
 - **Goal mode**（设定目标 + 独立 reviewer 自动多轮迭代）：已纳入 TUI；Goal child 为一次性、无父上下文的 worker/reviewer，完成必须有独立证据。
@@ -783,8 +821,8 @@ X-Content-Type-Options: nosniff
 
 ### 9.4 P2：产品决策待定
 
-- [x] `diff` 保持 501 是否返回结构化错误码？`code: feature_not_implemented`
-- [x] 是否需要 `share`、全局 `GET /v1/event`？share 仅为 `{ shared }` metadata，无链接；`GET /v1/event` 与 `/v1/events` 返回进程内事件窗口（非跨 session SSE）。后台任务诚实 501
+- [x] `diff` 在无 workspace / 非 Git 目录时返回结构化错误码；配置 workspace 后通过 runtime 的受限 bash 执行 `git diff --no-ext-diff --no-color -- .`
+- [x] 是否需要 `share`、全局 `GET /v1/event`？share 仅为 `{ shared }` metadata，无链接；`GET /v1/event` 与 `/v1/events` 返回进程内事件窗口（非跨 session SSE）。后台任务端点已接通 runtime 的列出、单项停止与全部停止能力
 - [x] Subagent 是否隔离父上下文并支持后台生命周期？库 + TUI `/subagent` 使用一次性 in-memory child，仅接收显式 task；支持 maxTurns、队列并发上限、list/cancel/result、实时事件和详情 overlay，完成后销毁 child，不进入普通 session 列表
 - [x] Goal mode 是否纳入路线图？不纳入 HTTP；TUI `/goal <objective>` 通过 Product subagent manager 启动独立 worker 与 reviewer，支持 status/pause/resume/stop/clear、独立证据核验、后台执行、父会话不中断输出和完成后结论回传。实现位于 `src/product/goals/` 与 `src/product/service/goals.ts`。
 

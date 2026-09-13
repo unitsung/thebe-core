@@ -5,6 +5,9 @@
   "type": "module",
   "description": "Headless homelab agent on a replaceable coding-agent runtime.",
   "license": "Apache-2.0",
+  "scarfSettings": {
+    "enabled": false
+  },
   "engines": {
     "node": ">=22.19.0",
     "pnpm": ">=10"
@@ -15,7 +18,9 @@
   },
   "scripts": {
     "build": "vite build",
-    "start": "node dist/serve.js",
+    "start": "pnpm build && node dist/serve.js",
+    "start:lan": "pnpm build && node scripts/start-lan.mjs",
+    "docs": "pnpm start",
     "tui": "vite build && node dist/tui.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -23,8 +28,9 @@
     "cli": "vite build && node dist/cli.js"
   },
   "devDependencies": {
+    "@apidevtools/swagger-parser": "13.0.0",
     "@earendil-works/pi-ai": "0.85.1",
-    "@types/node": "^22.20.2",
+    "@types/node": "22.20.2",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "5.0.0"
@@ -33,7 +39,8 @@
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@earendil-works/pi-server": "0.85.1",
     "@earendil-works/pi-tui": "0.85.1",
-    "chalk": "6.0.0"
+    "chalk": "6.0.0",
+    "swagger-ui-dist": "5.32.15"
   },
   "bin": {
     "thebe": "./dist/cli.js"
