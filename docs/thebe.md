@@ -23,7 +23,7 @@
 2. Pi 安全责任边界【官方，最高优先级】
 3. 完整 HTTP API 参考
 4. Runtime 抽象接口定义
-5. ProductStore 数据所有权与审计
+5. AgentStore 数据所有权与审计
 6. UI 端到端交互合同
 7. 源码级实现细节参考【源码】
 8. 产品参考项
@@ -57,9 +57,13 @@ Codex、OpenCode 与 Pi 的一手资料对照及产品建议见 [`agent-behavior
 
 | 层 | 拥有 |
 |---|---|
-| Product（HTTP、TUI、iOS 协议、audit、Arcane、`container.*`、PolicyEngine、ProductStore） | session 身份映射、homelab context、redaction、custom tools、客户端事件协议 |
-| `AgentRuntime` / `RuntimeSession` / `NormalizedEvent` | Thebe 自有边界。Pi 类型不得越过此线 |
-| `PiCodingAgentRuntime`（`src/runtime/pi`） | 经 `createAgentSession`：loop、transcript、fork、compaction、JSONL/HTML export、providers、OAuth、内置 coding tools |
+| Agent Core（`src/agent`） | session、goal、subagent、runtime Interface、安全策略、工具、扩展与能力接口 |
+| `AgentRuntime` / `RuntimeSession` / `NormalizedEvent`（`src/agent/runtime`） | Agent 自有 Interface；具体 Adapter 只能向内实现该接口 |
+| Extensions（`src/agent/extensions`） | Skills、MCP 的 Agent-owned Interface 与启停生命周期 |
+| Capabilities（`src/agent/capabilities`） | homelab 领域契约，目前为 containers |
+| `PiCodingAgentRuntime`（`src/adapters/pi`） | 经 `createAgentSession`：loop、transcript、fork、compaction、JSONL/HTML export、providers、OAuth、内置 coding tools |
+| Delivery（`src/delivery/cli`、`http`、`tui`） | 输入输出与展示，不拥有 Agent 状态或外部 Adapter |
+| Adapters（`src/adapters`） | Pi、MCP、Arcane 的具体外部实现，由 `src/app` 注入 Agent |
 
 | 职责 | 归属 |
 |---|---|
@@ -76,7 +80,7 @@ Codex、OpenCode 与 Pi 的一手资料对照及产品建议见 [`agent-behavior
 | 审计关联、产品元数据、报告与分享 | Thebe |
 | custom-tool 输出脱敏 | Thebe |
 
-共享工厂是 `createThebeApp`。HTTP `/v1/session`、`/v1/messages`、`/mcp` 与 TUI 都走同一 product service、custom-tool wrap 与 session mapping。
+共享工厂是 `createThebeApp`。HTTP `/v1/session`、`/v1/messages`、`/mcp` 与 TUI 都走同一 Agent Interface、custom-tool wrap 与 session mapping。
 
 Skills / extensions：**禁止因磁盘上存在而自动加载**。Thebe 显式传入 resource loader，启用时把 identity / version / source 写入 audit。
 
@@ -96,8 +100,8 @@ Skills / extensions：**禁止因磁盘上存在而自动加载**。Thebe 显式
 
 | 已删除 | 替代 |
 |---|---|
-| `src/agent-adapter`（`createAgentAdapter`、`AgentHarness`、`thebeConvertToLlm`） | `src/runtime/pi` 经 `createAgentSession` |
-| `src/run-store`（Thebe transcript / token ledger） | Pi session manager；ProductStore 只做映射元数据 |
+| `src/agent-adapter`（`createAgentAdapter`、`AgentHarness`、`thebeConvertToLlm`） | `src/adapters/pi` 经 `createAgentSession` |
+| `src/run-store`（Thebe transcript / token ledger） | Pi session manager；AgentStore 只做映射元数据 |
 | `src/session-export`（`exportRunJsonl` / `exportRunHtml`） | Pi 原生 JSONL/HTML，仅在 Pi wrapper 内调用 |
 | 产品依赖 `pi-agent-core` / `pi-ai` | 由 `pi-coding-agent` 拥有。`pi-ai` 仅作 **devDependency**（wrapper 测试里的 `fauxProvider`） |
 | Pi-hook 上的 policy（`before_tool` / `after_tool` / `transform_context`） | 产品层 `src/product/wrap-tools.ts` |
@@ -115,7 +119,7 @@ Skills / extensions：**禁止因磁盘上存在而自动加载**。Thebe 显式
 2. **PiCodingAgentRuntime**：围绕 `createAgentSession` 做 create/resume/list/fork/compact/export，映射 Pi 事件，保留 abort 语义。
 3. **混合工具面**：同一 session 同时开 Pi 内置工具与 Thebe `container.*`；不得删 ContainerInfoProvider / ArcaneAdapter 及契约测试；网络搜索只能显式注册，禁止扩展市场或自动发现。
 4. **去掉重复所有权**：删除 Thebe 自建 transcript、branch 持久化、compaction、本地 export、`convertToLlm`、Pi-hook policy。
-5. **ProductStore 只存 Thebe 元数据**，禁止存 Pi transcript / branch / compaction / OAuth refresh token。
+5. **AgentStore 只存 Thebe 元数据**，禁止存 Pi transcript / branch / compaction / OAuth refresh token。
 6. **所有入口同路**：HTTP、iOS、TUI、`/mcp` 不得绕过 custom-tool 注册、redaction、身份映射。
 7. **Skills 显式启用**，磁盘存在不等于加载。
 
@@ -138,7 +142,7 @@ Thebe 不使用 `ask` 作为主抽象，因为它暗示"一问一答"，与实�
 
 | 旧名称/位置 | 目标名称 | 状态 |
 |---|---|---|
-| `ThebeProduct.ask()` | `ThebeProduct.prompt()` | 已报告完成；`send()` 保留为兼容别名 |
+| `ThebeProduct.ask()` | `ThebeAgent.prompt()` | 已完成；`send()` 保留为兼容别名 |
 | `ThebeAskResult` | `ThebePromptResult` | 已报告完成 |
 | `POST /v1/ask` | `POST /v1/session/:id/prompt` | 已报告完成为 Core 主路径 |
 | `ThebeAskFn` / `handleAsk()` | `ThebePromptFn` / `handlePrompt()` | 应与主路径同步，需人工核实是否全部改名 |
@@ -150,7 +154,7 @@ Thebe 不使用 `ask` 作为主抽象，因为它暗示"一问一答"，与实�
 执行 AI 报告 iOS 继续使用 `POST /v1/messages`。这必须是主路径的**薄适配层**，不能成为第二套协议。需要人工核实：
 
 1. 是否真的被已发布 iOS 客户端使用。
-2. 是否与主路径共用同一个 `ThebeProduct.prompt()`、同一个 session mapping。
+2. 是否与主路径共用同一个 `ThebeAgent.prompt()`、同一个 session mapping。
 3. 是否完整支持 `files[]`、`mode`、权限事件、SSE。
 4. 若为过渡方案，是否有明确的退出计划。
 
@@ -298,7 +302,7 @@ POST /v1/messages   （iOS 兼容入口，须为薄适配层）
 | `GET /v1/session/:id/message` | 【待确认】已报告完成 message 能力，须确认分页实现 |
 | `GET /v1/session/:id/message/:messageId` | 【建议】读取单条消息及其 parts/tool calls/附件引用 |
 
-注意：Thebe ProductStore 不得变成第二份 transcript，消息历史应来自 runtime/Pi 原生 session，Thebe 仅保存映射与产品元数据 [file:45]。
+注意：Thebe AgentStore 不得变成第二份 transcript，消息历史应来自 runtime/Pi 原生 session，Thebe 仅保存映射与 Agent 元数据 [file:45]。
 
 ### 3.5 Event / Log：SSE 流式观察
 
@@ -475,8 +479,8 @@ POST /mcp
 ### 3.12 明确排除的能力
 
 - **文件浏览类接口**（`find`/`file`/`symbol` 等 IDE 风格搜索）：不符合 Thebe homelab agent（非 IDE）的产品定位，明确排除。
-- **Goal mode**（设定目标 + 独立 review model 自动多轮迭代）：记录为长期可能性，当前不纳入实施范围。
-- **Subagent 并行子会话**：建议维持"观察"状态，暂不实施，具体数据模型参考第 8.3 节备用。
+- **Goal mode**（设定目标 + 独立 reviewer 自动多轮迭代）：已纳入 TUI；Goal child 为一次性、无父上下文的 worker/reviewer，完成必须有独立证据。
+- **Subagent 并行子会话**：已实施为可观察的 ephemeral child；任务状态、实时事件、详情 overlay 和取消由 Product 管理。
 
 ---
 
@@ -584,9 +588,9 @@ THEBE_SESSION_IDLE_TIMEOUT_MS   环境变量，默认参考 600000（10 分钟�
 
 ---
 
-## 5. ProductStore 数据所有权与审计
+## 5. AgentStore 数据所有权与审计
 
-### 5.1 ProductStore 应保存
+### 5.1 AgentStore 应保存
 
 ```ts
 type ThebeSessionRecord = {
@@ -610,7 +614,7 @@ type ThebeSessionRecord = {
 
 【待确认】执行 AI 报告 `title`、`createdAt`、`lastActiveAt`、`delete()` 已补齐，需人工核实是否有 `updatedAt`、owner/device/context 字段，以及 delete 的级联规则。
 
-### 5.2 ProductStore 不得保存
+### 5.2 AgentStore 不得保存
 
 Pi transcript/messages、Pi branch graph/topology、Pi compaction history/state、Pi OAuth refresh token/credential data、为方便 UI 另存的一整套 raw event log [file:45]。
 
@@ -727,13 +731,13 @@ X-Content-Type-Options: nosniff
 - **Model 测试**：`POST /provider/:id/test`，主动发起最小化请求验证配置真的可用，而非仅依赖静态认证状态字段。
 - Git worktree 切换与会话分组（同一仓库不同 worktree 下的会话保持分组）——对 Thebe 无直接对应场景，仅供架构参考。
 
-### 8.3 Subagent 数据模型（若未来决定实施）
+### 8.3 Subagent 数据模型（当前实现）
 
 - **配置优先级链**：`project > global > workspace > builtin`。
-- **存储格式**：Markdown + YAML frontmatter；frontmatter 存 tools/model/turns 等元数据，正文是 system prompt。
+- **存储格式**：Markdown + YAML frontmatter；frontmatter 存 tools/model/turns 等元数据，正文是 system prompt。Goal 的两个内置角色额外定义在 `src/product/resources/subagent-profiles.ts`。
 - **路径安全**：project-level profile 只允许位于 cwd 或明确允许的根目录内，防止路径穿越。
 - **运行时约束字段**：`maxTurns`（迭代次数上限）、`inheritContext`（能否访问父 session 历史）、`runInBackground`（是否后台运行）。
-- **纯内存态**：不进入正式的 session history/resume 列表，可嵌套。
+- **纯内存态**：不进入正式的 session history/resume 列表；child 只接收父会话明确下发的 task，禁止通过保留控制工具递归派生。
 
 ### 8.4 下游扩展的 UI 挂钩模式
 
@@ -781,8 +785,8 @@ X-Content-Type-Options: nosniff
 
 - [x] `diff` 保持 501 是否返回结构化错误码？`code: feature_not_implemented`
 - [x] 是否需要 `share`、全局 `GET /v1/event`？share 仅为 `{ shared }` metadata，无链接；`GET /v1/event` 与 `/v1/events` 返回进程内事件窗口（非跨 session SSE）。后台任务诚实 501
-- [x] Subagent 是否隔离父上下文并支持后台生命周期？库 + TUI `/subagent` 使用一次性 in-memory child，仅接收显式 task；支持 maxTurns、队列并发上限、list/cancel/result，完成后销毁 child，不进入普通 session 列表
-- [x] Goal mode 是否纳入路线图？按 §3.12 不纳入 HTTP；`src/agent/goal.ts` 库存在且未接线到 HTTP/TUI
+- [x] Subagent 是否隔离父上下文并支持后台生命周期？库 + TUI `/subagent` 使用一次性 in-memory child，仅接收显式 task；支持 maxTurns、队列并发上限、list/cancel/result、实时事件和详情 overlay，完成后销毁 child，不进入普通 session 列表
+- [x] Goal mode 是否纳入路线图？不纳入 HTTP；TUI `/goal <objective>` 通过 Product subagent manager 启动独立 worker 与 reviewer，支持 status/pause/resume/stop/clear、独立证据核验、后台执行、父会话不中断输出和完成后结论回传。实现位于 `src/product/goals/` 与 `src/product/service/goals.ts`。
 
 ---
 
@@ -799,10 +803,10 @@ X-Content-Type-Options: nosniff
 9. 工具调用超过看门狗阈值被自动中止（若实现该功能）。
 10. `quiesce` 后新 prompt/fork/resume 被拒绝，读请求正常，in-flight 运行正常结束。
 11. provider/model list 不含 Pi raw types；未认证模型不被错误标记为可用。
-12. API-key 与 OAuth 一条真实 provider 流程可用，secret 不进入 response、logs、audit、ProductStore。
+12. API-key 与 OAuth 一条真实 provider 流程可用，secret 不进入 response、logs、audit、AgentStore。
 13. 从特定 message fork，验证 `new_session` 与 `branch_in_place` 两种模式行为符合预期，fork 后继续对话不修改 parent。
 14. compact 后 session 可继续；export 的 JSONL、HTML 是 Pi-native 且包含预期对话/tool activity。
-15. process restart 后 resume session；ProductStore 只含 metadata/runtime refs，不含 transcript、branch graph、compaction、OAuth data。
+15. process restart 后 resume session；AgentStore 只含 metadata/runtime refs，不含 transcript、branch graph、compaction、OAuth data。
 16. custom tool 输出含 canary secret 时，Pi history、SSE、audit、JSONL/HTML export 均不包含该 secret。
 17. **安全验证**：确认非交互模式下 `defaultProjectTrust` 配置生效（若配置为 always，验证受信资源被正确加载）。
 18. **安全验证**：确认 bash 工具执行时不泄漏 Thebe 服务自身的敏感环境变量。
@@ -829,11 +833,11 @@ X-Content-Type-Options: nosniff
 
 | 组 | 核验 |
 |---|---|
-| A. Runtime 边界 | `src/runtime/pi` 之外零 Pi 类型 import；fake runtime 能跑完整测试 |
+| A. Runtime 边界 | Runtime Interface 归 `src/agent/runtime`；`src/adapters/pi` 之外零 Pi 类型 import；fake runtime 位于 `src/testing/runtime` |
 | B. Pi 原生 session | 进程重启可 resume；list/resume；fork 不改 parent；compact 后可继续；JSONL/HTML 内容正确 |
 | C. Provider 凭证 | 一条 API-key、一条 OAuth 走 Pi 原生流；Thebe 无自建 OAuth refresh |
 | D. 混合工具面 | 内置工具与 `container.*` 同会话共存；Arcane 测试不弱化；canary secret 证明 redaction |
-| E. 产品层与审计 | HTTP 与 TUI 同 service/mapping；ProductStore 无 Pi 副本；audit 可追溯且不复制全文 |
+| E. Agent 与审计 | HTTP 与 TUI 同 Agent Interface/mapping；AgentStore 无 Pi 副本；audit 可追溯且不复制全文 |
 | F. 迁移清理 | 生产代码不在 Pi wrapper 外构造裸 `Agent`/`AgentHarness`；旧实现真正删除；Pi 版本钉死且 lockfile 提交 |
 | G. 端到端 | 自动化 + 一次人工：建 session → 内置工具探文件 → custom 查容器 → 改文件 → bash → fork → compact → 双格式 export → 重启 resume → canary 不泄漏 |
 

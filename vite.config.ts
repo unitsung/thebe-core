@@ -12,9 +12,9 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         index: resolve(import.meta.dirname, "src/index.ts"),
-        serve: resolve(import.meta.dirname, "src/http/serve.ts"),
-        tui: resolve(import.meta.dirname, "src/tui/main.ts"),
-        cli: resolve(import.meta.dirname, "src/cli/main.ts"),
+        serve: resolve(import.meta.dirname, "src/delivery/http/serve.ts"),
+        tui: resolve(import.meta.dirname, "src/delivery/tui/main.ts"),
+        cli: resolve(import.meta.dirname, "src/delivery/cli/main.ts"),
       },
       preserveEntrySignatures: "allow-extension",
       output: {
@@ -23,17 +23,17 @@ export default defineConfig({
         chunkFileNames: "chunks/[name]-[hash].js",
         codeSplitting: {
           groups: [
-            { name: "env", test: /[/\\]src[/\\]config[/\\]env\.ts$/, priority: 40 },
-            { name: "http", test: /[/\\]src[/\\]http[/\\](?!serve\.ts$)/, priority: 30 },
+            { name: "env", test: /[/\\]src[/\\]app[/\\]config[/\\]env\.ts$/, priority: 40 },
+            { name: "http", test: /[/\\]src[/\\]delivery[/\\]http[/\\](?!serve\.ts$)/, priority: 30 },
             {
               name: "arcane",
-              test: /[/\\]src[/\\]adapters[/\\]/,
+              test: /[/\\]src[/\\]adapters[/\\]arcane[/\\]/,
               priority: 30,
             },
-            { name: "tui-app", test: /[/\\]src[/\\]tui[/\\](?!main\.ts$)/, priority: 25 },
+            { name: "tui-app", test: /[/\\]src[/\\]delivery[/\\]tui[/\\](?!main\.ts$)/, priority: 25 },
             {
               name: "core",
-              test: /[/\\]src[/\\](agent|product|runtime|tools|policy|providers|stream-guard|audit|auth|config)[/\\]/,
+              test: /[/\\]src[/\\](agent|app|adapters)[/\\]/,
               priority: 20,
             },
           ],
