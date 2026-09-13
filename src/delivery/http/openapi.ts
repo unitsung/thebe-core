@@ -180,11 +180,13 @@ export function swaggerUiHtml(version: string): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${title}</title><link rel="stylesheet" href="/docs/swagger-ui.css"></head>
 <body><div id="swagger-ui"></div><script src="/docs/swagger-ui-bundle.js"></script>
-<script>window.ui=SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',deepLinking:true,persistAuthorization:true})</script></body></html>`;
+<script src="/docs/swagger-ui-init.js"></script></body></html>`;
 }
 
 const require = createRequire(import.meta.url);
 const swaggerUiDirectory = dirname(require.resolve("swagger-ui-dist/package.json"));
+const swaggerUiInitScript =
+  "window.ui=SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',deepLinking:true,persistAuthorization:true});";
 const swaggerAssets: Record<string, { file: string; contentType: string }> = {
   "/docs/swagger-ui.css": { file: "swagger-ui.css", contentType: "text/css; charset=utf-8" },
   "/docs/swagger-ui-bundle.js": { file: "swagger-ui-bundle.js", contentType: "text/javascript; charset=utf-8" },
@@ -195,6 +197,15 @@ const swaggerAssets: Record<string, { file: string; contentType: string }> = {
 
 /** Serve only the known Swagger UI assets; arbitrary filesystem paths are never accepted. */
 export function swaggerUiAsset(path: string): Response | undefined {
+  if (path === "/docs/swagger-ui-init.js") {
+    return new Response(swaggerUiInitScript, {
+      headers: {
+        "content-type": "text/javascript; charset=utf-8",
+        "cache-control": "public, max-age=86400, immutable",
+        "x-content-type-options": "nosniff",
+      },
+    });
+  }
   const asset = swaggerAssets[path];
   if (!asset) return undefined;
   return new Response(readFileSync(join(swaggerUiDirectory, asset.file)), {
