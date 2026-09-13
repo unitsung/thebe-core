@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import SwaggerParser from "@apidevtools/swagger-parser";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 import {
   resetSessionLogStreamsForTests,
   sessionLogStream,
 } from "./protocol/sse.ts";
+import type { OpenApiDocument } from "./openapi.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -52,6 +54,37 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await expect(json(res)).resolves.toEqual({ ok: true, version: "0.1.0" });
   });
 
+  it("serves generated OpenAPI JSON and Swagger UI", async () => {
+    const spec = await handler().handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    expect(spec.status).toBe(200);
+    expect(spec.headers.get("cache-control")).toBe("no-cache");
+    const body = (await spec.json()) as OpenApiDocument;
+    expect(body.openapi).toBe("3.0.3");
+    expect(body.info.version).toBe("0.1.0");
+    expect(body.paths["/v1/session/{id}/prompt"]).toBeDefined();
+    expect(body.paths["/v1/session/{id}/background-task/stop-all"]).toBeDefined();
+    const parserInput = body as unknown as Parameters<typeof SwaggerParser.validate>[0];
+    await expect(SwaggerParser.validate(parserInput)).resolves.toBeDefined();
+
+    const docs = await handler().handle(
+      new Request("http://127.0.0.1:8787/docs"),
+    );
+    expect(docs.status).toBe(200);
+    expect(docs.headers.get("content-type")).toContain("text/html");
+    const html = await docs.text();
+    expect(html).toContain("SwaggerUIBundle");
+    expect(html).toContain("/docs/swagger-ui-bundle.js");
+    expect(html).not.toContain("unpkg.com");
+
+    const css = await handler().handle(
+      new Request("http://127.0.0.1:8787/docs/swagger-ui.css"),
+    );
+    expect(css.status).toBe(200);
+    expect(css.headers.get("content-type")).toContain("text/css");
+  });
+
   it("GET /v1/events returns an events array", async () => {
     const res = await handler().handle(
       new Request("http://127.0.0.1:8787/v1/events"),
@@ -71,6 +104,25 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     );
     expect(res.status).toBeGreaterThanOrEqual(200);
     expect(res.status).toBeLessThan(300);
+  });
+
+  it("POST /v1/devices validates platform and token", async () => {
+    const missingToken = await handler().handle(
+      new Request("http://127.0.0.1:8787/v1/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ platform: "ios" }),
+      }),
+    );
+    expect(missingToken.status).toBe(400);
+    const wrongPlatform = await handler().handle(
+      new Request("http://127.0.0.1:8787/v1/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: "token", platform: "android" }),
+      }),
+    );
+    expect(wrongPlatform.status).toBe(400);
   });
 
   it("POST /mcp tools/list includes the four container tools", async () => {
@@ -233,6 +285,22 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("keeps documentation readable while protecting API calls with the shared token", async () => {
+    const app = handler({ token: "secret" });
+    const docs = await app.handle(
+      new Request("http://127.0.0.1:8787/docs"),
+    );
+    const spec = await app.handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const health = await app.handle(
+      new Request("http://127.0.0.1:8787/v1/health"),
+    );
+    expect(docs.status).toBe(200);
+    expect(spec.status).toBe(200);
+    expect(health.status).toBe(401);
   });
 
   it("POST /v1/messages is a compatibility adapter delegating to prompt", async () => {
@@ -653,6 +721,28 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(diff.status).toBe(501);
     await expect(diff.json()).resolves.toMatchObject({
       code: "feature_not_implemented",
+    });
+  });
+
+  it("returns a workspace diff when a workspace is configured", async () => {
+    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      version: "0.1.0",
+      workspacePath: "/tmp/thebe-http-workspace",
+    });
+    const created = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+    );
+    const { thebeSessionId } = (await created.json()) as { thebeSessionId: string };
+    const diff = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${thebeSessionId}/diff`),
+    );
+    expect(diff.status).toBe(200);
+    await expect(diff.json()).resolves.toMatchObject({
+      workspacePath: "/tmp/thebe-http-workspace",
     });
   });
 

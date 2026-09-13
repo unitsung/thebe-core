@@ -29,7 +29,10 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       if (!security.ok) {
         return json({ ok: false, error: security.reason }, 403);
       }
-      if (token) {
+      // Documentation is intentionally readable without the shared token so
+      // the iOS "Open API docs" link can launch Safari. Swagger UI still asks
+      // for X-Thebe-Token through its Authorize control when trying requests.
+      if (token && !isDocumentationRequest(request)) {
         const received = request.headers.get("X-Thebe-Token") ?? "";
         if (received !== token) {
           return json({ ok: false }, 401);
@@ -38,4 +41,19 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       return router.handle(request);
     },
   };
+}
+
+function isDocumentationRequest(request: Request): boolean {
+  let pathname: string;
+  try {
+    pathname = new URL(request.url).pathname;
+  } catch {
+    return false;
+  }
+  return (
+    pathname === "/openapi.json" ||
+    pathname === "/docs" ||
+    pathname === "/swagger" ||
+    pathname.startsWith("/docs/")
+  );
 }

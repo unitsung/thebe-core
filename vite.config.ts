@@ -6,7 +6,9 @@ export default defineConfig({
   build: {
     ssr: true,
     target: "node22",
-    sourcemap: true,
+    sourcemap: false,
+    minify: "oxc",
+    reportCompressedSize: false,
     outDir: "dist",
     emptyOutDir: true,
     rolldownOptions: {
@@ -44,7 +46,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
     server: {
       deps: {
         external: [/^@earendil-works\/pi-coding-agent/],

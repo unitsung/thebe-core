@@ -1,4 +1,4 @@
-import type { ThebeHttpContext } from "../context.ts";
+import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { asObject, asStringMap, json, readJson } from "../json.ts";
 import { promptBodyError } from "../parsing/errors.ts";
 import { parseThinkingLevel } from "../parsing/query.ts";
@@ -20,6 +20,13 @@ export async function handleSessionCommands(
   const id = parts[2];
   const action = parts[3];
   const extra = parts[4];
+
+  // During maintenance, reads remain available and the two controls needed
+  // to finish an in-flight run (interrupt and permission) remain usable.
+  if (method !== "GET" && action !== "interrupt" && action !== "permission") {
+    const blocked = quiescedWrite(context);
+    if (blocked) return blocked;
+  }
 
   if (method === "POST" && parts.length === 2) {
     return createSession(request, agent);
@@ -55,6 +62,16 @@ export async function handleSessionCommands(
     const parsed = await readPromptBody(request);
     if (!parsed.ok) {
       return promptBodyError(parsed);
+    }
+    if (parsed.mode === "prompt" && agent.isBusy(id)) {
+      return json(
+        {
+          ok: false,
+          error: "session is streaming; use steer or followUp",
+          code: "session_running",
+        },
+        409,
+      );
     }
     const result = await agent.prompt(
       { text: parsed.text, files: parsed.files },
@@ -97,8 +114,21 @@ export async function handleSessionCommands(
     return json({ ok: true });
   }
   if (method === "POST" && action === "tool-call" && parts[5] === "stop") {
-    await agent.stopToolCall(id, extra ?? "");
+    if (!extra) {
+      return json({ ok: false, error: "toolCallId is required" }, 400);
+    }
+    await agent.stopToolCall(id, extra);
     return json({ ok: true });
+  }
+  if (method === "POST" && action === "background-task") {
+    if (extra === "stop-all" && parts.length === 5) {
+      await agent.stopAllBackgroundTasks(id);
+      return json({ ok: true });
+    }
+    if (extra && parts[5] === "stop" && parts.length === 6) {
+      await agent.stopBackgroundTask(id, extra);
+      return json({ ok: true });
+    }
   }
   if (method === "POST" && action === "fork") {
     const body = await readJson(request);

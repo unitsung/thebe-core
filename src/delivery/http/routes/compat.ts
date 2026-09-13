@@ -1,4 +1,4 @@
-import { agentUnavailable, type ThebeHttpContext } from "../context.ts";
+import { agentUnavailable, quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { json } from "../json.ts";
 import { agentError, promptBodyError } from "../parsing/errors.ts";
 import { readPromptBody } from "../parsing/prompt.ts";
@@ -12,6 +12,8 @@ export async function handleCompatibility(
   if (!agent) {
     return agentUnavailable();
   }
+  const blocked = quiescedWrite(context);
+  if (blocked) return blocked;
   try {
     const parsed = await readPromptBody(request);
     if (!parsed.ok) {

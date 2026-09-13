@@ -29,6 +29,7 @@ const { server, url, bind } = await listenThebeHttp(app, {
   port: listen.port,
 });
 console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);
+console.log(`THEBE_DOCS ${url}/docs`);
 
 let shuttingDown = false;
 const shutdown = (signal: string) => {
