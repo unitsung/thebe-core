@@ -2,7 +2,7 @@
 
 本文是仓库里**唯一**的产品/API/架构规格。原先分散的 `architecture.md`、ADR、migration-note、spec-history、以及两份 API 总结，已全部并入此文件，不再需要对照其他 docs 阅读。
 
-核心约束：Thebe 是构建在可替换 coding-agent runtime 上的 homelab 产品，不是 agent 框架。Pi 负责通用 agent loop、原生 session、branch/compaction、provider/credential 与内置 coding tools。HTTP、TUI、iOS 都必须走同一 Thebe product service 与同一 runtime-session mapping，且不得泄漏 Pi 类型、事件、存储或 DTO。
+核心约束：Thebe 是构建在可替换 agent runtime 上的 **homelab 自然语言控制面**，不是 agent 框架，也不是单一的诊断/修复工具。用户可以通过统一能力查找 NAS 文件和媒体、提交下载、查看和管理 Docker、设置定时任务、整理媒体，以及进行诊断和受控修复。Pi 负责通用 agent loop、原生 session、branch/compaction、provider/credential 与内置 coding tools；插件 / MCP 负责第三方服务能力。HTTP、TUI、iOS 都必须走同一 Thebe product service 与同一 runtime-session mapping，且不得泄漏 Pi 类型、事件、存储或 DTO。
 
 **可信度标注**：
 
@@ -35,6 +35,21 @@
 
 ## 0. 产品定位、分层与迁移决策
 
+### 0.0 Homelab capability plane
+
+Thebe 的产品单位不是“一个聊天回复”或“一个 MCP server”，而是一个可发现、可解释、可授权的 `HomelabCapability`。典型能力包括：
+
+- 资源：搜索 NAS 文件、图片、音乐、电影和动漫；
+- 媒体：查询 Jellyfin / Emby / Navidrome，发现 MoviePilot 资源；
+- 下载：提交和查看 CloudSaver、qBittorrent、aria2 任务；
+- 运行：查看 Docker / 容器 / 服务状态、日志、队列和健康；
+- 整理：调用 AutoSymlink、LitePan 等工具完成 STRM、NFO、媒体库刷新；
+- 自动化：创建、暂停、复用和查看定时任务与长任务。
+
+这些能力可以由内置适配器或外部插件 / MCP server 提供。Core 负责能力发现、上下文、跨服务任务编排、策略与审批、规范化事件/产物、审计和移动端交付；不把每个第三方 API 复制进核心。
+
+写任务（下载、转存、删除、重启、修改计划）统一经过“意图 → 计划 → 确认 → 执行 → 进度 → 复检 → 审计”。只读查询可以快速返回；能力提供者必须返回稳定 schema、服务实例、健康/错误和幂等信息。
+
 ### 配置文件
 
 Thebe 的用户配置位于 `~/.thebe/config.json`。TUI 中输入 `/config` 会使用外部编辑器打开它，`/config path` 只显示配置与 Pi agent 文件的位置，常用选项也可以通过 `/settings` 修改。完整说明见 [`configuration.md`](configuration.md)。
@@ -60,10 +75,10 @@ Codex、OpenCode 与 Pi 的一手资料对照及产品建议见 [`agent-behavior
 | Agent Core（`src/agent`） | session、goal、subagent、runtime Interface、安全策略、工具、扩展与能力接口 |
 | `AgentRuntime` / `RuntimeSession` / `NormalizedEvent`（`src/agent/runtime`） | Agent 自有 Interface；具体 Adapter 只能向内实现该接口 |
 | Extensions（`src/agent/extensions`） | Skills、MCP 的 Agent-owned Interface 与启停生命周期 |
-| Capabilities（`src/agent/capabilities`） | homelab 领域契约，目前为 containers |
+| Capabilities（`src/agent/capabilities`） | homelab 领域契约；内置为 containers，外部服务经 MCP / integration plugin 接入 |
 | `PiCodingAgentRuntime`（`src/adapters/pi`） | 经 `createAgentSession`：loop、transcript、fork、compaction、JSONL/HTML export、providers、OAuth、内置 coding tools |
 | Delivery（`src/delivery/cli`、`http`、`tui`） | 输入输出与展示，不拥有 Agent 状态或外部 Adapter |
-| Adapters（`src/adapters`） | Pi、MCP、Arcane 的具体外部实现，由 `src/app` 注入 Agent |
+| Adapters（`src/adapters`） | Pi、MCP、Arcane 以及其他 integration plugin 的具体外部实现，由 `src/app` 注入 Agent |
 
 | 职责 | 归属 |
 |---|---|
@@ -74,9 +89,9 @@ Codex、OpenCode 与 Pi 的一手资料对照及产品建议见 [`agent-behavior
 | 内置 bash/read/write/edit/grep/find/ls | Pi |
 | Thebe session ↔ runtime session 映射 | Thebe |
 | HTTP/iOS/TUI、客户端事件协议 | Thebe |
-| homelab 语义、host/environment/service 上下文 | Thebe |
+| homelab 语义、host/environment/service 上下文、capability discovery | Thebe |
 | Arcane 集成、分页与 WebSocket 日志 | Thebe |
-| `container.*` 自定义工具 | Thebe |
+| 内置 `container.*` 自定义工具与 capability contract | Thebe |
 | 审计关联、产品元数据、报告与分享 | Thebe |
 | custom-tool 输出脱敏 | Thebe |
 
@@ -117,7 +132,7 @@ Skills / extensions：**禁止因磁盘上存在而自动加载**。Thebe 显式
 
 1. **运行时边界**：`AgentRuntime` / `RuntimeSession` / normalized events 取代旧 Adapter；客户端只收规范化事件。
 2. **PiCodingAgentRuntime**：围绕 `createAgentSession` 做 create/resume/list/fork/compact/export，映射 Pi 事件，保留 abort 语义。
-3. **混合工具面**：同一 session 同时开 Pi 内置工具与 Thebe `container.*`；不得删 ContainerInfoProvider / ArcaneAdapter 及契约测试；网络搜索只能显式注册，禁止扩展市场或自动发现。
+3. **混合能力面**：同一 session 同时开 Pi 内置工具、Thebe 内置 capability 与显式启用的 integration plugin/MCP；不得删 ContainerInfoProvider / ArcaneAdapter 及契约测试；插件必须显式注册和信任，禁止未审查代码的自动发现/执行。
 4. **去掉重复所有权**：删除 Thebe 自建 transcript、branch 持久化、compaction、本地 export、`convertToLlm`、Pi-hook policy。
 5. **AgentStore 只存 Thebe 元数据**，禁止存 Pi transcript / branch / compaction / OAuth refresh token。
 6. **所有入口同路**：HTTP、iOS、TUI、`/mcp` 不得绕过 custom-tool 注册、redaction、身份映射。
