@@ -1,6 +1,6 @@
 # Thebe Core
 
-The homelab Agent. A replaceable coding-agent runtime owns the loop; this repo does not write one. v0 is four read-only container tools through Arcane plus Pi built-in coding tools.
+The homelab Agent and capability plane. A replaceable agent runtime owns the reasoning loop; this repo does not write a second one. Core turns user intent into discoverable homelab capabilities, normalized events, safe operations, and auditable task results. Service-specific behavior belongs in built-in adapters or external plugins/MCP integrations.
 
 ## Language
 
@@ -17,8 +17,16 @@ First `AgentRuntime` implementation. Embeds `@earendil-works/pi-coding-agent` vi
 _Avoid_: depending on Pi types outside `src/adapters/pi`, wrapping the Pi CLI
 
 **MCP Integration**:
-Optional external-tool Adapter in `src/adapters/mcp`. The Agent owns the MCP extension Interface in `src/agent/extensions/mcp`; HTTP and TUI expose it through `src/delivery`.
-_Avoid_: putting Agent runtime, HTTP routes, TUI commands, or business state inside the MCP Adapter
+External capability Adapter in `src/adapters/mcp`. It discovers and invokes configured command- or URL-based MCP servers; the Agent owns the stable MCP extension Interface in `src/agent/extensions/mcp`, and HTTP/TUI expose it through `src/delivery`.
+_Avoid_: putting Agent runtime, HTTP routes, TUI commands, or homelab business state inside the MCP Adapter; treating server names as the product API
+
+**HomelabCapability**:
+User-facing unit of work exposed by an integration, such as file search, media search, download submission, container inspection, service health, or task scheduling. A capability carries a stable name, input/output schema, target service instance, health/error state, and permission level.
+_Avoid_: exposing raw vendor endpoints as the only client contract, or requiring the UI to know which MCP server implements a capability
+
+**IntegrationPlugin**:
+The service-specific boundary that supplies one or more `HomelabCapability` implementations. A plugin may be a built-in adapter or an external MCP server; it owns credentials, vendor API details, and idempotency while Core owns discovery, policy, task orchestration, normalized events, and audit.
+_Avoid_: putting a new agent loop in each plugin, hard-coding every third-party service into Core, or auto-enabling untrusted code
 
 **RuntimeSession**:
 One runtime-backed conversation. Create, resume, list, fork (including at a message), compact, export, steer, follow-up, model selection, and revert are runtime facilities.
@@ -42,11 +50,11 @@ _Avoid_: a homegrown renderer, a Thebe-written web chat
 
 **Serve**:
 Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). iOS compatibility: `/v1/health`, `/v1/event(s)`, `/v1/devices`, `/v1/messages` (JSON auto-denies approvals; SSE with `Accept: text/event-stream`), `/mcp`. Default bind `127.0.0.1:8787`; logs print both the local URL and `bind=host:port`. Host allowlist always includes loopback; `THEBE_HOST=0.0.0.0` still requires `THEBE_ALLOWED_HOSTS` for LAN Host headers. `NODE_ENV=production` requires `THEBE_TOKEN` (`X-Thebe-Token`). `POST /v1/system/quiesce` is admin-equivalent (token is the only gate) and blocks mutating writes except interrupt/permission. Credential PUT/POST is plaintext HTTP; production should sit behind Tailscale or an HTTPS reverse proxy. SIGTERM/SIGINT drain via `agent.quiesce()` then `server.close`. HTTP body cap 10MB. Default session idle reap is 30 minutes (`THEBE_SESSION_IDLE_TIMEOUT_MS=0` disables).
-_Avoid_: a second agent loop, MCP servers as a product, pairing/APNs as v0 features
+_Avoid_: a second agent loop, an MCP marketplace as the product, pairing/APNs as v0 features, or exposing raw plugin internals as the client contract
 
 **Tool Layer**:
-Thebe custom capability surface. v0 registers `container.list` / `container.inspect` / `container.logs` / `container.status_summary`. Redaction is internal and runs before results enter runtime history.
-_Avoid_: a second allow-list in config or flags, treating redaction as its own module
+Thebe custom capability surface. Built-in v0 capabilities include `container.list` / `container.inspect` / `container.logs` / `container.status_summary`; external integrations can add file, media, download, scheduling, and service-specific capabilities through MCP. Redaction is internal and runs before results enter runtime history.
+_Avoid_: a second allow-list in config or flags, treating redaction as its own module, or making the built-in container set the product boundary
 
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
@@ -57,8 +65,8 @@ The Agent-owned capability declaration in `src/agent/capabilities/containers.ts`
 _Avoid_: tool code importing a panel SDK or HTTP client
 
 **Arcane**:
-The only container panel. Thebe Core does not talk to docker.sock. Only ArcaneAdapter; no Dockge, no multi-panel.
-_Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager
+The default container capability provider. Thebe Core does not talk to docker.sock. ArcaneAdapter owns the built-in container surface; other service categories should normally arrive through their integration plugin/MCP boundary.
+_Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core into a vendor-by-vendor service implementation
 
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.
