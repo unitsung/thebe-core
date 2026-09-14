@@ -1,4 +1,5 @@
 import { agentUnavailable, type ThebeHttpContext } from "../context.ts";
+import { json } from "../json.ts";
 import { agentError } from "../parsing/errors.ts";
 import { handleProviderModelAuth } from "./provider.ts";
 import { handleSessionCommands } from "./session-commands.ts";
@@ -11,6 +12,9 @@ export async function handleAgentRoutes(
     return agentUnavailable();
   }
   try {
+    if (context.request.method === "GET" && context.path === "/v1/capabilities") {
+      return json({ capabilities: await context.agent.listCapabilities() });
+    }
     const sessionRead = await handleSessionRead(context);
     if (sessionRead) {
       return sessionRead;

@@ -93,6 +93,37 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(await init.text()).toContain("window.ui=SwaggerUIBundle");
   });
 
+  it("GET /v1/capabilities exposes the homelab capability contract", async () => {
+    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      version: "0.1.0",
+    });
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities"),
+    );
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    const capabilities = body.capabilities as Array<Record<string, unknown>>;
+    expect(capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "container.list",
+          category: "containers",
+          permission: "read",
+          service: "arcane",
+        }),
+        expect.objectContaining({
+          id: "list_core_events",
+          category: "diagnostics",
+          permission: "read",
+        }),
+      ]),
+    );
+  });
+
   it("GET /v1/events returns an events array", async () => {
     const res = await handler().handle(
       new Request("http://127.0.0.1:8787/v1/events"),

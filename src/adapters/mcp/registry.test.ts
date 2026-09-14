@@ -27,7 +27,13 @@ describe("external MCP client registry", () => {
       join(cwd, ".thebe", "mcp.json"),
       JSON.stringify({
         mcpServers: {
-          notes: { command: process.execPath, args: ["-e", serverScript] },
+          notes: {
+            command: process.execPath,
+            args: ["-e", serverScript],
+            service: "qbittorrent",
+            category: "downloads",
+            permission: "confirm",
+          },
         },
       }),
     );
@@ -44,6 +50,9 @@ describe("external MCP client registry", () => {
           name: "mcp:notes/echo",
           source: "external",
           serverName: "notes",
+          service: "qbittorrent",
+          category: "downloads",
+          permission: "confirm",
         }),
       ]);
       await expect(

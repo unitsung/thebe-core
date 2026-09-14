@@ -4,18 +4,47 @@ import {
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
 
-export type McpToolInfo = {
+export const HOMELAB_CAPABILITY_CATEGORIES = [
+  "files",
+  "media",
+  "downloads",
+  "containers",
+  "automation",
+  "diagnostics",
+  "other",
+] as const;
+
+export type HomelabCapabilityCategory =
+  (typeof HOMELAB_CAPABILITY_CATEGORIES)[number];
+
+export type HomelabCapabilityPermission = "read" | "confirm" | "admin";
+
+/**
+ * Stable metadata shared by native UI, agent prompts, and external plugins.
+ * The MCP tool name remains the invocation id for backwards compatibility.
+ */
+export type HomelabCapability = {
+  id: string;
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  category: HomelabCapabilityCategory;
+  permission: HomelabCapabilityPermission;
+  service?: string;
   source: "core" | "external";
   serverName?: string;
 };
+
+/** MCP-compatible alias retained for existing callers and clients. */
+export type McpToolInfo = HomelabCapability;
 
 export type McpServerInfo = {
   name: string;
   command?: string;
   url?: string;
+  service?: string;
+  category?: HomelabCapabilityCategory;
+  permission?: HomelabCapabilityPermission;
   status?: string;
   error?: string;
   toolCount?: number;
@@ -70,10 +99,14 @@ export function listCoreMcpTools(): McpToolInfo[] {
 
   for (const name of CONTAINER_TOOL_NAMES) {
     tools.push({
+      id: name,
       name,
       description:
         CONTAINER_TOOL_DESCRIPTIONS[name] || `Core container tool ${name}`,
       inputSchema: CONTAINER_TOOL_SCHEMAS[name],
+      category: "containers",
+      permission: "read",
+      service: "arcane",
       source: "core",
       serverName: "thebe-core",
     });
@@ -81,9 +114,13 @@ export function listCoreMcpTools(): McpToolInfo[] {
 
   for (const [name, meta] of Object.entries(CORE_EVENT_TOOLS)) {
     tools.push({
+      id: name,
       name,
       description: meta.description,
       inputSchema: meta.schema,
+      category: "diagnostics",
+      permission: "read",
+      service: "thebe-core",
       source: "core",
       serverName: "thebe-core",
     });

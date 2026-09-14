@@ -1,7 +1,12 @@
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { EnabledResource } from "../runtime/index.ts";
 import type { AgentContext } from "../internal/context.ts";
-import { listCoreMcpTools, type McpServerInfo, type McpToolInfo } from "./mcp.ts";
+import {
+  listCoreMcpTools,
+  type HomelabCapability,
+  type McpServerInfo,
+  type McpToolInfo,
+} from "./mcp.ts";
 import { discoverSkills, readSkillDetails, type SkillInfo } from "./skills.ts";
 
 /** Skills and MCP extensions exposed through the stable Agent Interface. */
@@ -15,6 +20,10 @@ export function createExtensionApi(ctx: AgentContext) {
         .map(([, opened]) => opened.session.reloadResources?.()),
     );
   }
+
+  const listCapabilities = async (): Promise<HomelabCapability[]> => (
+    [...listCoreMcpTools(), ...(await ctx.mcp.listTools())]
+  );
 
   return {
     async listSkills(): Promise<SkillInfo[]> {
@@ -57,9 +66,8 @@ export function createExtensionApi(ctx: AgentContext) {
       enabledResources.splice(index, 1);
       await reloadIdleSessions();
     },
-    async listMcpTools(): Promise<McpToolInfo[]> {
-      return [...listCoreMcpTools(), ...(await ctx.mcp.listTools())];
-    },
+    listCapabilities,
+    async listMcpTools(): Promise<McpToolInfo[]> { return listCapabilities(); },
     async listMcpServers(): Promise<McpServerInfo[]> {
       return ctx.mcp.listServers();
     },

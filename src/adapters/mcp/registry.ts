@@ -1,6 +1,10 @@
 import { listConfiguredMcpServers, type McpServerConfig } from "./config.ts";
 import { McpTransport } from "./transport.ts";
-import type { McpToolInfo } from "../../agent/extensions/mcp.ts";
+import type {
+  HomelabCapabilityCategory,
+  HomelabCapabilityPermission,
+  McpToolInfo,
+} from "../../agent/extensions/mcp.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const activeRegistryCleanups = new Set<() => void>();
@@ -58,6 +62,24 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function inferCategory(name: string, description: string): HomelabCapabilityCategory {
+  const value = `${name} ${description}`.toLowerCase();
+  if (/(file|folder|directory|nas|openlist|storage)/.test(value)) return "files";
+  if (/(movie|music|anime|media|jellyfin|emby|navidrome|radarr|sonarr|lidarr)/.test(value)) return "media";
+  if (/(download|torrent|aria2|qbittorrent|queue|cloudsaver)/.test(value)) return "downloads";
+  if (/(container|docker|portainer|arcane)/.test(value)) return "containers";
+  if (/(schedule|cron|task|automation|job)/.test(value)) return "automation";
+  if (/(health|status|inspect|log|diagnos|monitor|uptime)/.test(value)) return "diagnostics";
+  return "other";
+}
+
+function inferPermission(name: string, description: string): HomelabCapabilityPermission {
+  const value = `${name} ${description}`.toLowerCase();
+  if (/(delete|remove|destroy|admin|credential|permission|shutdown)/.test(value)) return "admin";
+  if (/(create|update|write|save|submit|download|move|copy|rename|restart|start|stop|pause|resume|schedule|run)/.test(value)) return "confirm";
+  return "read";
+}
+
 async function loadStateTools(state: ServerState): Promise<ExternalBinding[]> {
   if (state.config.disabled) {
     state.status = "disabled";
@@ -71,13 +93,21 @@ async function loadStateTools(state: ServerState): Promise<ExternalBinding[]> {
   state.bindings = rawTools.map((raw) => ({
     qualifiedName: qualifiedName(state.config.name, raw.name),
     originalName: raw.name,
-    tool: {
-      name: qualifiedName(state.config.name, raw.name),
-      description: raw.description ?? `Tool ${raw.name} from ${state.config.name}`,
-      inputSchema: asRecord(raw.inputSchema) ?? { type: "object" },
-      source: "external",
-      serverName: state.config.name,
-    },
+    tool: (() => {
+      const name = qualifiedName(state.config.name, raw.name);
+      const description = raw.description ?? `Tool ${raw.name} from ${state.config.name}`;
+      return {
+        id: name,
+        name,
+        description,
+        inputSchema: asRecord(raw.inputSchema) ?? { type: "object" },
+        category: state.config.category ?? inferCategory(raw.name, description),
+        permission: state.config.permission ?? inferPermission(raw.name, description),
+        service: state.config.service ?? state.config.name,
+        source: "external" as const,
+        serverName: state.config.name,
+      };
+    })(),
   }));
   state.status = "ready";
   state.error = undefined;
