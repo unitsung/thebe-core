@@ -20,7 +20,12 @@ import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { AgentSessionMeta } from "./store.ts";
 import type { GoalEvent } from "./goals/runner.ts";
 import type { SkillInfo } from "./extensions/skills.ts";
-import type { McpRegistry, McpServerInfo, McpToolInfo } from "./extensions/mcp.ts";
+import type {
+  HomelabCapability,
+  McpRegistry,
+  McpServerInfo,
+  McpToolInfo,
+} from "./extensions/mcp.ts";
 import type { SubagentProfile } from "./subagents/catalog.ts";
 import type {
   GoalRun,
@@ -129,6 +134,7 @@ export interface ThebeAgent {
   getSkill(name: string): Promise<SkillInfo | undefined>;
   enableSkill(name: string): Promise<void>;
   disableSkill(name: string): Promise<void>;
+  listCapabilities(): Promise<HomelabCapability[]>;
   listMcpTools(): Promise<McpToolInfo[]>;
   listMcpServers(): Promise<McpServerInfo[]>;
   closeMcp(): void;

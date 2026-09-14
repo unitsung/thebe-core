@@ -2,6 +2,11 @@ export { createThebeApp } from "./app/create.ts";
 export { createThebeAgent } from "./agent/index.ts";
 export type {
   CreateThebeAgentOptions,
+  HomelabCapability,
+  HomelabCapabilityCategory,
+  HomelabCapabilityPermission,
+  McpServerInfo,
+  McpToolInfo,
   PermissionMode,
   SubagentRun,
   SubagentRunStatus,

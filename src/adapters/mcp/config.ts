@@ -1,6 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type {
+  HomelabCapabilityCategory,
+  HomelabCapabilityPermission,
+} from "../../agent/extensions/mcp.ts";
 
 export type McpServerConfig = {
   name: string;
@@ -10,6 +14,9 @@ export type McpServerConfig = {
   env?: Record<string, string>;
   headers?: Record<string, string>;
   disabled?: boolean;
+  service?: string;
+  category?: HomelabCapabilityCategory;
+  permission?: HomelabCapabilityPermission;
 };
 
 function stringMap(value: unknown): Record<string, string> | undefined {
@@ -57,6 +64,9 @@ export async function listConfiguredMcpServers(options?: {
             env: stringMap(s.env),
             headers: stringMap(s.headers),
             disabled: s.disabled === true,
+            service: typeof s.service === "string" ? s.service : undefined,
+            category: isCapabilityCategory(s.category) ? s.category : undefined,
+            permission: isCapabilityPermission(s.permission) ? s.permission : undefined,
           };
           // Project configuration intentionally overrides a same-named global
           // server, matching how skills and most MCP clients resolve scope.
@@ -69,4 +79,12 @@ export async function listConfiguredMcpServers(options?: {
   }
 
   return [...configs.values()];
+}
+
+function isCapabilityCategory(value: unknown): value is HomelabCapabilityCategory {
+  return ["files", "media", "downloads", "containers", "automation", "diagnostics", "other"].includes(value as string);
+}
+
+function isCapabilityPermission(value: unknown): value is HomelabCapabilityPermission {
+  return value === "read" || value === "confirm" || value === "admin";
 }

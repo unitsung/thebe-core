@@ -67,6 +67,7 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/session") ||
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
-    path.startsWith("/v1/auth")
+    path.startsWith("/v1/auth") ||
+    path === "/v1/capabilities"
   );
 }

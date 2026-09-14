@@ -1,5 +1,12 @@
 export { createThebeAgent } from "./create.ts";
 export type { ThebeAgent } from "./interface.ts";
+export type {
+  HomelabCapability,
+  HomelabCapabilityCategory,
+  HomelabCapabilityPermission,
+  McpServerInfo,
+  McpToolInfo,
+} from "./extensions/mcp.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
 export {
   DEFAULT_AUTO_SUMMARY_DELAY_MS,

@@ -247,6 +247,7 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 | 方法与路径 | 目的 | 状态 |
 |---|---|---|
 | `GET /v1/health` | 服务存活、版本、当前 runtime engine | 【待确认】应保留 |
+| `GET /v1/capabilities` | 列出内置与外部插件/MCP 的 homelab capability（分类、服务、权限、schema） | 已实现 |
 | `GET /v1/event` | 可选的跨 session 全局事件流（dashboard / 多 session UI） | 【建议】待产品决定 |
 | `GET /v1/session/status` | 批量返回 session 执行状态（idle/running/awaiting_permission/interrupted） | 【待确认】已报告完成 |
 | `GET /v1/agent/running` 或 `GET /v1/session?status=running` | 全局正在执行的 session 横切视图 | 【建议】参考产品设计，二选一实现即可，不必两者都做 |
@@ -490,6 +491,23 @@ POST /mcp
 ```
 
 若仍是刻意产品接口，须走同一 Thebe custom-tool registration、policy、redaction 与 audit 规则。
+
+外部 MCP server 从 `~/.thebe/mcp.json`、`~/.config/mcp.json` 或 workspace `.thebe/mcp.json` 读取。服务可附加 capability 元数据：
+
+```json
+{
+  "mcpServers": {
+    "qbittorrent": {
+      "url": "http://127.0.0.1:8080/mcp",
+      "service": "qbittorrent",
+      "category": "downloads",
+      "permission": "confirm"
+    }
+  }
+}
+```
+
+未声明的工具会安全地归类为 `other` / `read`；能力目录不会因为未知插件描述而默认放开写操作。
 
 ### 3.12 OpenAPI / Swagger 文档
 
