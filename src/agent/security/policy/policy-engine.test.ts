@@ -27,6 +27,19 @@ describe("PolicyEngine decide (§4 pure)", () => {
     expect(d.allow).toBe(false);
   });
 
+  it("rejects container.restart because approval is required", () => {
+    const d = decide({
+      toolName: "container.restart",
+      runState: createPolicyRunState(),
+      maxToolCalls: 50,
+      maxBlocks: 3,
+    });
+    expect(d).toEqual({
+      allow: false,
+      reason: "container.restart requires on-device approval",
+    });
+  });
+
   it("blocks everything once deny/violation latch is set", () => {
     expect(
       decide({

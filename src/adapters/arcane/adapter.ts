@@ -112,6 +112,13 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     return frames.join("\n");
   }
 
+  async restartContainer(id: string): Promise<void> {
+    await this.requestJson(
+      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}/restart`,
+      { method: "POST" },
+    );
+  }
+
   async getStatusSummary(): Promise<HostStatusSummary> {
     const body = await this.requestJson(
       `/api/environments/${this.environmentId}/containers/counts`,
@@ -132,10 +139,14 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     };
   }
 
-  private async requestJson(path: string): Promise<Json> {
+  private async requestJson(
+    path: string,
+    init: { method?: string } = {},
+  ): Promise<Json> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: init.method ?? "GET",
         headers: {
           Accept: "application/json",
           "X-Api-Key": this.apiKey,
