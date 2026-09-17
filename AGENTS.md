@@ -6,6 +6,8 @@ Build and maintain Thebe Core: a terminal-first coding and homelab agent whose c
 
 `CONTEXT.md` is the authoritative vocabulary and architecture reference. Read it before changing an unfamiliar subsystem. Read the relevant document in `docs/` before changing configuration, sessions, summaries, security, MCP, skills, or subagents.
 
+For the current implementation order and App-facing runtime/API work, read **`docs/CORE-ITERATION-PLAN.md`** before starting a new product capability.
+
 ## Working loop
 
 1. Inspect the relevant module, its callers, and the current worktree before editing.
