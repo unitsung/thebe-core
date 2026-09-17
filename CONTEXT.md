@@ -56,6 +56,18 @@ _Avoid_: a second agent loop, an MCP marketplace as the product, pairing/APNs as
 Thebe custom capability surface. Built-in v0 capabilities include `container.list` / `container.inspect` / `container.logs` / `container.status_summary`; external integrations can add file, media, download, scheduling, and service-specific capabilities through MCP. Redaction is internal and runs before results enter runtime history.
 _Avoid_: a second allow-list in config or flags, treating redaction as its own module, or making the built-in container set the product boundary
 
+**DiagnosisRun**:
+Product-facing read-only diagnosis (`POST /v1/diagnosis`). The App sends a typed `ResourceRef`; Core gathers bounded observations from container capabilities, optionally reasons, and returns `resource`, `observations`, `diagnosis`, `recommendations`, `runId`, and `actionId`. Observed facts come from tools/providers only. Write recommendations carry `actionId` but are not executed here.
+_Avoid_: exposing raw MCP `tools/call` as the App contract, dumping inspect/logs/agent state to the client, or concatenating display names into prompts
+
+**ActionReceipt**:
+Product object for an approved write. Slice 02 is only `container.restart`: on-device approval → deterministic provider restart → programmatic verification (`state==running`, Emby health when applicable) → receipt. Metadata `effect=write`, `risk=disruptive`, `approval=required` lives in `CONTAINER_CAPABILITY_METADATA`. The LLM cannot approve, execute, or grade verification.
+_Avoid_: attaching `container.restart` to the chat tool loop, auto-executing from diagnosis, or letting the App call raw MCP for writes
+
+**ActivityRecord**:
+Minimal persisted snapshot of an ActionReceipt (`GET /v1/activity`). Stored under the AgentStore directory in an `activity/` subdirectory so session metadata JSON is not mixed. Not a Goal, Run, or event log. Same idempotency key maps to one record. 0 tokens.
+_Avoid_: treating this as a full Activity product, dumping raw events, or calling the model to summarize the list
+
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
 _Avoid_: reimplementing filesystem/bash tools in Thebe

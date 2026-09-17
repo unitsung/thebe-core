@@ -1,5 +1,9 @@
 import { createControlApi } from "./control/service.ts";
 import { createPromptApi } from "./conversations/service.ts";
+import { join } from "node:path";
+import { createActionApi } from "./action/service.ts";
+import { createActivityStore } from "./activity/store.ts";
+import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
 import { createAgentContext } from "./internal/context.ts";
 import type { CreateThebeAgentOptions, ThebeAgent } from "./interface.ts";
@@ -18,14 +22,39 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
     goals.restoreGoal(meta.goalRun);
   };
+  const sessions = createSessionApi(ctx, restoreSessionState);
+  const prompts = createPromptApi(ctx);
+  const diagnosis = createDiagnosisApi({
+    now: ctx.now,
+    policy: ctx.policy,
+    audit: ctx.audit,
+    baseTools: ctx.baseTools,
+    createSession: sessions.createSession,
+    prompt: prompts.prompt,
+  });
+  const activityStore = createActivityStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "activity")
+      : undefined,
+    now: ctx.now,
+  });
+  const actions = createActionApi({
+    now: ctx.now,
+    provider: options.provider,
+    audit: ctx.audit,
+    getDiagnosis: diagnosis.getDiagnosis,
+    activityStore,
+  });
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
-    ...createPromptApi(ctx),
-    ...createSessionApi(ctx, restoreSessionState),
+    ...prompts,
+    ...sessions,
     ...goals,
     ...extensions,
     ...subagents,
     ...createControlApi(ctx),
+    ...diagnosis,
+    ...actions,
   };
 }

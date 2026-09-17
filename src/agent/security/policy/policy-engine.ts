@@ -27,6 +27,12 @@ export function decide(input: {
   maxToolCalls: number;
   maxBlocks: number;
 }): { allow: true } | { allow: false; reason: string } {
+  if (input.toolName === "container.restart") {
+    return {
+      allow: false,
+      reason: "container.restart requires on-device approval",
+    };
+  }
   if (
     !(CONTAINER_TOOL_NAMES as readonly string[]).includes(input.toolName)
   ) {
@@ -73,6 +79,9 @@ export function createPolicyEngine(options: {
       name: string,
       callerId: string,
     ): { ok: true; budgetConsumed: number } | { ok: false; reason: string } {
+      if (name === "container.restart") {
+        return { ok: false, reason: "container.restart requires on-device approval" };
+      }
       if (
         !(CONTAINER_TOOL_NAMES as readonly string[]).includes(name)
       ) {

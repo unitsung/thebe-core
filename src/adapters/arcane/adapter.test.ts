@@ -45,6 +45,23 @@ describe("ArcaneAdapter", () => {
     expect(starts).toEqual([0, 10, 20]);
   });
 
+  it("restarts a container with POST", async () => {
+    const seen: string[] = [];
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async (input, init) => {
+        seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+        return jsonResponse(200, { success: true, data: {} });
+      },
+    });
+    await adapter.restartContainer("abc123");
+    expect(seen).toEqual([
+      "POST https://arcane.internal:3552/api/environments/0/containers/abc123/restart",
+    ]);
+  });
+
   it("lists containers with X-Api-Key and maps summaries", async () => {
     const seen: { url: string; key: string | null }[] = [];
     const adapter = new ArcaneAdapter({

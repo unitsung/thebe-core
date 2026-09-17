@@ -35,6 +35,12 @@ import type {
   ThebePromptOptions,
   ThebePromptResult,
 } from "./types.ts";
+import type {
+  DiagnosisRequest,
+  DiagnosisResult,
+} from "./diagnosis/types.ts";
+import type { ActionReceipt, ActionRequest } from "./action/types.ts";
+import type { ActivityRecord } from "./activity/types.ts";
 
 export type ThebeSession = AgentSessionMeta & {
   status: SessionRunStatus;
@@ -169,6 +175,13 @@ export interface ThebeAgent {
   listProviders(query?: { all?: boolean }): Promise<RuntimeProvider[]>;
   exportSession(thebeSessionId?: string): Promise<RuntimeExport>;
   invokeTool(name: string, args: unknown): Promise<string>;
+  diagnose(request: DiagnosisRequest): Promise<DiagnosisResult>;
+  getDiagnosis(runId: string): Promise<DiagnosisResult | undefined>;
+  explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;
+  executeApprovedAction(request: ActionRequest): Promise<ActionReceipt>;
+  getReceipt(receiptId: string): Promise<ActionReceipt | undefined>;
+  listActivity(): Promise<ActivityRecord[]>;
+  getActivity(id: string): Promise<ActivityRecord | undefined>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;

@@ -6,6 +6,9 @@ import {
 import { handleHealthEventsCompatibility } from "./routes/health.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAgentRoutes } from "./routes/agent-api.ts";
+import { handleActionRoutes } from "./routes/action.ts";
+import { handleActivityRoutes } from "./routes/activity.ts";
+import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
 import { createOpenApiDocument, swaggerUiAsset, swaggerUiHtml } from "./openapi.ts";
 
@@ -51,6 +54,18 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
         return systemResponse;
       }
 
+      const diagnosisResponse = await handleDiagnosisRoutes(context);
+      if (diagnosisResponse) {
+        return diagnosisResponse;
+      }
+      const actionResponse = await handleActionRoutes(context);
+      if (actionResponse) {
+        return actionResponse;
+      }
+      const activityResponse = await handleActivityRoutes(context);
+      if (activityResponse) {
+        return activityResponse;
+      }
       if (isAgentRoute(context.path)) {
         return (await handleAgentRoutes(context)) ?? json({ ok: false }, 404);
       }

@@ -102,6 +102,12 @@ export function createControlApi(ctx: AgentContext) {
       return opened.session.exportSession();
     },
     async invokeTool(name: string, args: unknown): Promise<string> {
+      if (name === "container.restart") {
+        throw httpError(
+          403,
+          "container.restart requires on-device approval; use POST /v1/action",
+        );
+      }
       const params = (args ?? {}) as Record<string, unknown>;
       const external = await mcp.invokeTool(name, params);
       if (external !== undefined) return external;

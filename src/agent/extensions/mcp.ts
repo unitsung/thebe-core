@@ -1,4 +1,7 @@
 import {
+  CONTAINER_CAPABILITY_METADATA,
+  CONTAINER_RESTART_ACTION_ID,
+  CONTAINER_RESTART_SCHEMA,
   CONTAINER_TOOL_DESCRIPTIONS,
   CONTAINER_TOOL_NAMES,
   CONTAINER_TOOL_SCHEMAS,
@@ -30,6 +33,9 @@ export type HomelabCapability = {
   inputSchema: Record<string, unknown>;
   category: HomelabCapabilityCategory;
   permission: HomelabCapabilityPermission;
+  effect?: "read" | "write";
+  risk?: "low" | "disruptive";
+  approval?: "none" | "required";
   service?: string;
   source: "core" | "external";
   serverName?: string;
@@ -98,6 +104,7 @@ export function listCoreMcpTools(): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
 
   for (const name of CONTAINER_TOOL_NAMES) {
+    const meta = CONTAINER_CAPABILITY_METADATA[name];
     tools.push({
       id: name,
       name,
@@ -105,12 +112,30 @@ export function listCoreMcpTools(): McpToolInfo[] {
         CONTAINER_TOOL_DESCRIPTIONS[name] || `Core container tool ${name}`,
       inputSchema: CONTAINER_TOOL_SCHEMAS[name],
       category: "containers",
-      permission: "read",
+      permission: meta.permission,
+      effect: meta.effect,
+      risk: meta.risk,
+      approval: meta.approval,
       service: "arcane",
       source: "core",
       serverName: "thebe-core",
     });
   }
+  const restartMeta = CONTAINER_CAPABILITY_METADATA[CONTAINER_RESTART_ACTION_ID];
+  tools.push({
+    id: CONTAINER_RESTART_ACTION_ID,
+    name: CONTAINER_RESTART_ACTION_ID,
+    description: CONTAINER_TOOL_DESCRIPTIONS[CONTAINER_RESTART_ACTION_ID],
+    inputSchema: CONTAINER_RESTART_SCHEMA,
+    category: "containers",
+    permission: restartMeta.permission,
+    effect: restartMeta.effect,
+    risk: restartMeta.risk,
+    approval: restartMeta.approval,
+    service: "arcane",
+    source: "core",
+    serverName: "thebe-core",
+  });
 
   for (const [name, meta] of Object.entries(CORE_EVENT_TOOLS)) {
     tools.push({
