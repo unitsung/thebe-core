@@ -4,6 +4,8 @@ import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
+import type { JudgmentModel } from "../agent/judgment/interface.ts";
+import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 
 export type ThebeAppPrompt = (
   text: string,
@@ -32,6 +34,8 @@ export function createThebeApp(options: {
   maxSubagentsPerParent?: number;
   workspacePath?: string;
   outputDirectory?: string;
+  judgment?: JudgmentModel;
+  judgmentSites?: JudgmentEnabledSites;
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -56,6 +60,8 @@ export function createThebeApp(options: {
     workspacePath: options.workspacePath,
     outputDirectory: options.outputDirectory,
     mcp: createMcpClientRegistry({ cwd: options.workspacePath }),
+    judgment: options.judgment,
+    judgmentSites: options.judgmentSites,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);

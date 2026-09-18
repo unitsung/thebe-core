@@ -41,7 +41,13 @@ export function createGoalApi(
     error: run.error,
   });
 
+  const MAX_GOAL_EVENTS = 50;
+
   function broadcast(run: ManagedGoal, event: GoalEvent): void {
+    run.events.push({ event, at: ctx.now().toISOString() });
+    if (run.events.length > MAX_GOAL_EVENTS) {
+      run.events.splice(0, run.events.length - MAX_GOAL_EVENTS);
+    }
     for (const listener of run.listeners) listener(event);
   }
 
@@ -207,6 +213,7 @@ export function createGoalApi(
       }),
       resolveFinished,
       listeners: new Set(),
+      events: [],
     };
     return run;
   }
@@ -244,6 +251,31 @@ export function createGoalApi(
     getGoal(thebeSessionId: string): GoalRun | undefined {
       const run = runs.get(thebeSessionId);
       return run ? snapshot(run) : undefined;
+    },
+
+    async listGoals(): Promise<GoalRun[]> {
+      const metas = await ctx.listMetas();
+      const seen = new Set<string>();
+      const out: GoalRun[] = [];
+      for (const [id, run] of runs) {
+        out.push(snapshot(run));
+        seen.add(id);
+      }
+      for (const meta of metas) {
+        if (!meta.goalRun || seen.has(meta.thebeSessionId)) continue;
+        restoreGoal(meta.goalRun);
+        const live = runs.get(meta.thebeSessionId);
+        if (live) {
+          out.push(snapshot(live));
+          seen.add(meta.thebeSessionId);
+        }
+      }
+      return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    },
+
+    goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }> {
+      const run = runs.get(thebeSessionId);
+      return run ? run.events.map((row) => ({ event: row.event, at: row.at })) : [];
     },
 
     restoreGoal,

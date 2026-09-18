@@ -1,9 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { ActionReceipt } from "../action/types.ts";
+import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
+import type { DiagnosisResult } from "../diagnosis/types.ts";
 import {
+  activityApprovalFromDiagnosis,
   activityFromReceipt,
+  assignActivityGroups,
+  hasRestartRecommendation,
   idempotencyIndexKey,
+  isPendingApproval,
+  type ActivityGroup,
   type ActivityRecord,
 } from "./types.ts";
 
@@ -13,9 +21,12 @@ const ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 export type ActivityStore = {
   upsertFromReceipt(receipt: ActionReceipt): Promise<ActivityRecord>;
+  upsertFromDiagnosis(result: DiagnosisResult): Promise<ActivityRecord | undefined>;
+  findPendingForDiagnosis(diagnosisRunId: string): Promise<ActivityRecord | undefined>;
+  removePending(id: string): Promise<boolean>;
   get(id: string): Promise<ActivityRecord | undefined>;
   getByIdempotency(key: string): Promise<ActivityRecord | undefined>;
-  list(): Promise<ActivityRecord[]>;
+  list(group?: ActivityGroup): Promise<ActivityRecord[]>;
 };
 
 export function createActivityStore(options: {
@@ -58,6 +69,20 @@ export function createActivityStore(options: {
     await prune();
   }
 
+  async function drop(id: string): Promise<void> {
+    const existing = memory.get(id);
+    if (existing) {
+      memory.delete(id);
+      byIdempotency.delete(idempotencyIndexKey(existing));
+    }
+    if (!options.dir) return;
+    try {
+      await unlink(join(options.dir, `${id}.json`));
+    } catch {
+      // Missing file is already gone.
+    }
+  }
+
   async function prune(): Promise<void> {
     if (memory.size <= maxItems) return;
     const ordered = [...memory.values()].sort((a, b) =>
@@ -65,15 +90,15 @@ export function createActivityStore(options: {
     );
     const extra = ordered.slice(0, Math.max(0, ordered.length - maxItems));
     for (const item of extra) {
-      memory.delete(item.id);
-      byIdempotency.delete(idempotencyIndexKey(item));
-      if (!options.dir) continue;
-      try {
-        await unlink(join(options.dir, `${item.id}.json`));
-      } catch {
-        // Missing file is already gone.
-      }
+      await drop(item.id);
     }
+  }
+
+  function pendingForDiagnosis(diagnosisRunId: string): ActivityRecord | undefined {
+    return [...memory.values()].find((item) => {
+      if (!isPendingApproval(item)) return false;
+      return item.diagnosisRunId === diagnosisRunId || item.id === diagnosisRunId;
+    });
   }
 
   return {
@@ -87,31 +112,93 @@ export function createActivityStore(options: {
       const existingId = byIdempotency.get(key);
       if (existingId) {
         const existing = memory.get(existingId);
-        if (existing) return existing;
+        if (existing && existing.action) return grouped(existing);
       }
+      const prior =
+        (receipt.diagnosisRunId ? pendingForDiagnosis(receipt.diagnosisRunId) : undefined) ??
+        memory.get(receipt.receiptId);
       const stamp = options.now().toISOString();
-      const record = activityFromReceipt(receipt, { createdAt: stamp, updatedAt: stamp });
+      const aligned: ActionReceipt = {
+        ...receipt,
+        receiptId: prior?.id ?? receipt.receiptId,
+      };
+      if (prior) {
+        byIdempotency.delete(idempotencyIndexKey(prior));
+      }
+      const record = activityFromReceipt(
+        aligned,
+        { createdAt: prior?.createdAt ?? stamp, updatedAt: stamp },
+        prior,
+      );
       memory.set(record.id, record);
       byIdempotency.set(key, record.id);
       await persist(record);
-      return record;
+      return grouped(record);
+    },
+    async upsertFromDiagnosis(result: DiagnosisResult): Promise<ActivityRecord | undefined> {
+      await ensureLoaded();
+      if (!hasRestartRecommendation(result)) {
+        return undefined;
+      }
+      for (const item of [...memory.values()]) {
+        if (
+          isPendingApproval(item) &&
+          item.resource.id === result.resource.id &&
+          item.actionId === CONTAINER_RESTART_ACTION_ID
+        ) {
+          await drop(item.id);
+        }
+      }
+      const stamp = options.now().toISOString();
+      const record = activityApprovalFromDiagnosis(result, {
+        createdAt: stamp,
+        updatedAt: stamp,
+      }, randomUUID());
+      memory.set(record.id, record);
+      byIdempotency.set(idempotencyIndexKey(record), record.id);
+      await persist(record);
+      return grouped(record);
+    },
+    async findPendingForDiagnosis(diagnosisRunId: string): Promise<ActivityRecord | undefined> {
+      await ensureLoaded();
+      const record = pendingForDiagnosis(diagnosisRunId);
+      return record ? grouped(record) : undefined;
+    },
+    async removePending(id: string): Promise<boolean> {
+      await ensureLoaded();
+      const record = memory.get(id) ?? [...memory.values()].find(
+        (item) => isPendingApproval(item) && item.diagnosisRunId === id,
+      );
+      if (!record || !isPendingApproval(record)) return false;
+      await drop(record.id);
+      return true;
     },
     async get(id: string): Promise<ActivityRecord | undefined> {
       await ensureLoaded();
-      return memory.get(id);
+      const record = memory.get(id);
+      if (!record) return undefined;
+      return grouped(record);
     },
     async getByIdempotency(key: string): Promise<ActivityRecord | undefined> {
       await ensureLoaded();
       const id = byIdempotency.get(key);
-      return id ? memory.get(id) : undefined;
+      const record = id ? memory.get(id) : undefined;
+      return record ? grouped(record) : undefined;
     },
-    async list(): Promise<ActivityRecord[]> {
+    async list(group?: ActivityGroup): Promise<ActivityRecord[]> {
       await ensureLoaded();
-      return [...memory.values()].sort((a, b) =>
-        a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+      const rows = assignActivityGroups(
+        [...memory.values()].sort((a, b) =>
+          a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0,
+        ),
       );
+      return group ? rows.filter((item) => item.group === group) : rows;
     },
   };
+
+  function grouped(record: ActivityRecord): ActivityRecord {
+    return assignActivityGroups([...memory.values()]).find((item) => item.id === record.id) ?? record;
+  }
 }
 
 async function readFileSafe(path: string): Promise<ActivityRecord | undefined> {
@@ -124,8 +211,16 @@ async function readFileSafe(path: string): Promise<ActivityRecord | undefined> {
   try {
     const parsed = JSON.parse(text) as Partial<ActivityRecord>;
     if (typeof parsed.id !== "string" || !ID_RE.test(parsed.id)) return undefined;
-    if (parsed.kind !== "container.restart") return undefined;
-    if (typeof parsed.receiptId !== "string") return undefined;
+    if (parsed.kind !== "container.restart" && parsed.kind !== "container.diagnose") {
+      return undefined;
+    }
+    if (
+      parsed.kind === "container.restart" &&
+      parsed.status !== "pending" &&
+      typeof parsed.receiptId !== "string"
+    ) {
+      return undefined;
+    }
     if (typeof parsed.idempotencyKey !== "string") return undefined;
     if (!parsed.resource || typeof parsed.resource !== "object") return undefined;
     if (typeof parsed.status !== "string") return undefined;

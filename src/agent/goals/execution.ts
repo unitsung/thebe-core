@@ -26,12 +26,18 @@ export type GoalSubagentApi = {
   cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun>;
 };
 
+export type BufferedGoalEvent = {
+  event: GoalEvent;
+  at: string;
+};
+
 export type ManagedGoal = GoalRun & {
   stopRequested: boolean;
   pauseRequested: boolean;
   finished: Promise<GoalRun>;
   resolveFinished: (result: GoalRun) => void;
   listeners: Set<(event: GoalEvent) => void>;
+  events: BufferedGoalEvent[];
   lastReviewResult?: GoalReviewResult;
 };
 

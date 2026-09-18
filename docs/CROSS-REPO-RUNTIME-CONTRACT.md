@@ -20,6 +20,8 @@ The following HTTP product objects are implemented on `dev` and are the current 
 - **Diagnosis (read-only):** `POST /v1/diagnosis`, `GET /v1/diagnosis/:runId`, `POST /v1/diagnosis/:runId/why`. App sends typed `ResourceRef`. Observations come from container tools after redaction/truncation. Diagnosis never executes writes.
 - **Approved restart:** `container.restart` metadata is code (`effect=write`, `risk=disruptive`, `approval=required`). `POST /v1/action` requires on-device `approval.approved`. Core then restarts deterministically and verifies `state==running` (Emby health when applicable). Returns `ActionReceipt`.
 - **Minimal Activity:** `GET /v1/activity` / `GET /v1/activity/:id` persist ActionReceipt snapshots under `{agentStoreDir}/activity`. Not a Goal/Run product. Same idempotency key maps to one record. List/display use 0 tokens.
+- **Activity v1 groups:** Diagnosis runs persist as `container.diagnose`. `GET /v1/activity?group=needs_approval|running|recent` (and a `group` field on each record). A diagnosis with an unexecuted `container.restart` recommendation is `needs_approval` until a restart receipt with that `diagnosisRunId` exists. Running is empty while diagnosis/restart stay synchronous. 0 tokens.
+- **Product Goal HTTP:** `POST/GET /v1/goals`, `GET /v1/goals/{id}`, `POST /v1/goals/{id}/pause|resume|stop`, `GET /v1/goals/{id}/log` (JSON or SSE). Identity is the parent `thebeSessionId` (`id` === `sessionId`); no separate Goal id and no `GET /v1/goals/{id}/runs`. Runtime `pausing` collapses to product `running`. Session-scoped aliases: `/v1/session/{id}/goal*`. Responses are `ProductGoal` / `ProductGoalEvent`, not Pi/MCP internals. Swift Goal Store is out of scope for this slice.
 
 The App must not call raw MCP `tools/call` for these workflows.
 
@@ -387,6 +389,8 @@ Existing session-scoped permission resolution can remain internally compatible d
 
 ### P0 — Goals/Runs
 
+Shipped (identity is `thebeSessionId`; session-scoped aliases under `/v1/session/{id}/goal*`):
+
 ```text
 POST /v1/goals
 GET  /v1/goals
@@ -394,6 +398,12 @@ GET  /v1/goals/{id}
 POST /v1/goals/{id}/pause
 POST /v1/goals/{id}/resume
 POST /v1/goals/{id}/stop
+GET  /v1/goals/{id}/log
+```
+
+Not shipped in this slice (do not add a second Goal id to paper over them):
+
+```text
 GET  /v1/goals/{id}/runs
 GET  /v1/runs/{id}
 ```

@@ -169,15 +169,7 @@ function recommendationsFor(code: string, mediaHint: boolean): Recommendation[] 
     },
   ];
   if (code === "container_exited" || code === "container_dead" || code === "container_unhealthy") {
-    recs.push({
-      id: "rec-restart",
-      title: "Restart this container",
-      detail:
-        "Write action. Requires on-device approval. Thebe will not restart until you confirm.",
-      kind: "write",
-      requiresApproval: true,
-      actionId: "container.restart",
-    });
+    recs.push(restartWriteRecommendation());
   }
   if (mediaHint) {
     recs.push({
@@ -190,6 +182,18 @@ function recommendationsFor(code: string, mediaHint: boolean): Recommendation[] 
     });
   }
   return recs;
+}
+
+export function restartWriteRecommendation(): Recommendation {
+  return {
+    id: "rec-restart",
+    title: "Restart this container",
+    detail:
+      "Write action. Requires on-device approval. Thebe will not restart until you confirm.",
+    kind: "write",
+    requiresApproval: true,
+    actionId: "container.restart",
+  };
 }
 
 function isMediaServerName(name: string): boolean {

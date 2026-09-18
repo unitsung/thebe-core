@@ -255,6 +255,11 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 | `GET /v1/action/:receiptId` | 读取执行回执 | 已实现 |
 | `GET /v1/activity` | 列出持久化的最小 ActivityRecord（ActionReceipt 快照，非 Goal/Run） | 已实现（Vertical Slice 03） |
 | `GET /v1/activity/:id` | 读取单条 Activity | 已实现 |
+| `POST /v1/goals` | 创建 session 并启动 ProductGoal；`id`/`sessionId` 均为 `thebeSessionId` | 已实现 |
+| `GET /v1/goals` | 列出持久化 Goal（新进程可从 AgentStore 恢复） | 已实现 |
+| `GET /v1/goals/:id` | 读取单个 ProductGoal；与 `GET /v1/session/:id/goal` 返回同一对象 | 已实现 |
+| `POST /v1/goals/:id/pause` `resume` `stop` | 控制 Goal；非 running 时 pause 返回 409 `invalid_transition` | 已实现 |
+| `GET /v1/goals/:id/log` | JSON 产品事件，或 `Accept: text/event-stream` / `follow=true` 的 SSE | 已实现 |
 | `GET /v1/event` | 可选的跨 session 全局事件流（dashboard / 多 session UI） | 【建议】待产品决定 |
 | `GET /v1/session/status` | 批量返回 session 执行状态（idle/running/awaiting_permission/interrupted） | 【待确认】已报告完成 |
 | `GET /v1/agent/running` 或 `GET /v1/session?status=running` | 全局正在执行的 session 横切视图 | 【建议】参考产品设计，二选一实现即可，不必两者都做 |

@@ -68,16 +68,16 @@ describe("GET /v1/activity", () => {
     const listed = await json(
       await first.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
     );
-    const activities = listed.activities as Array<Record<string, unknown>>;
-    expect(activities).toHaveLength(1);
-    expect(activities[0]).toEqual(
+    const items = listed.items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(1);
+    expect(items[0]).toEqual(
       expect.objectContaining({
+        type: "receipt",
         id: created.receiptId,
-        kind: "container.restart",
-        status: "succeeded",
-        receiptId: created.receiptId,
+        group: "recent",
       }),
     );
+    expect((items[0]?.receipt as Record<string, unknown>).status).toBe("succeeded");
 
     const one = await first.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/activity/${created.receiptId}`),
@@ -92,15 +92,15 @@ describe("GET /v1/activity", () => {
     const after = await json(
       await restarted.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
     );
-    expect((after.activities as unknown[]).length).toBe(1);
-    expect((after.activities as Array<Record<string, unknown>>)[0]?.id).toBe(created.receiptId);
+    expect((after.items as unknown[]).length).toBe(1);
+    expect((after.items as Array<Record<string, unknown>>)[0]?.id).toBe(created.receiptId);
 
     const dup = await json(await postAction(restarted.handler));
     expect(dup.receiptId).toBe(created.receiptId);
     const listedAgain = await json(
       await restarted.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
     );
-    expect((listedAgain.activities as unknown[]).length).toBe(1);
+    expect((listedAgain.items as unknown[]).length).toBe(1);
   });
 
   it("records rejected actions", async () => {
@@ -122,7 +122,10 @@ describe("GET /v1/activity", () => {
     const listed = await json(
       await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
     );
-    expect((listed.activities as Array<Record<string, unknown>>)[0]?.status).toBe("rejected");
+    expect(
+      ((listed.items as Array<Record<string, unknown>>)[0]?.receipt as Record<string, unknown>)
+        ?.status,
+    ).toBe("rejected");
   });
 
   it("returns 503 when the agent is not wired", async () => {
@@ -139,6 +142,82 @@ describe("GET /v1/activity", () => {
     });
     const res = await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity"));
     expect(res.status).toBe(200);
-    expect(await json(res)).toEqual({ activities: [] });
+    expect(await json(res)).toEqual({ items: [] });
+  });
+
+  it("mints one approval from diagnosis and mutates it into a receipt", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const diagnosed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/diagnosis", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          }),
+        }),
+      ),
+    );
+    expect(diagnosed.runId).toEqual(expect.any(String));
+    expect(diagnosed.approvalId).toEqual(expect.any(String));
+    expect(diagnosed.approvalId).not.toBe(diagnosed.runId);
+    const pending = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?group=needs_approval"),
+      ),
+    );
+    const pendingRows = pending.items as Array<Record<string, unknown>>;
+    expect(pendingRows).toHaveLength(1);
+    expect(pendingRows[0]?.type).toBe("approval");
+    expect(pendingRows[0]?.id).toBe(diagnosed.approvalId);
+    expect(
+      (pendingRows[0]?.approval as Record<string, unknown>).diagnosisRunId,
+    ).toBe(diagnosed.runId);
+
+    await postAction(app.handler, { diagnosisRunId: diagnosed.runId, idempotencyKey: "from-diag" });
+    const after = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?group=needs_approval"),
+      ),
+    );
+    expect(after.items).toEqual([]);
+    const recent = await json(
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity?group=recent")),
+    );
+    const recentRows = recent.items as Array<Record<string, unknown>>;
+    expect(recentRows).toHaveLength(1);
+    expect(recentRows[0]?.type).toBe("receipt");
+    expect(recentRows[0]?.id).toBe(diagnosed.approvalId);
+  });
+
+  it("denies a pending approval and removes it from activity", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const diagnosed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/diagnosis", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          }),
+        }),
+      ),
+    );
+    const denied = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${diagnosed.approvalId}/deny`, {
+        method: "POST",
+      }),
+    );
+    expect(denied.status).toBe(200);
+    const listed = await json(
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
+    );
+    expect(listed.items).toEqual([]);
   });
 });

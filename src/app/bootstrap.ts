@@ -14,6 +14,8 @@ import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts"
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
+import { createJevAdapter } from "../adapters/jev/adapter.ts";
+import { readJudgmentGate } from "../agent/judgment/gate.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -130,6 +132,18 @@ export async function bootstrapThebe(
     process.env.THEBE_AGENT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
 
+  const judgmentGate = readJudgmentGate();
+  const judgment =
+    judgmentGate.adapter === "jev"
+      ? createJevAdapter({
+          apiKey: judgmentGate.apiKey,
+          baseUrl: judgmentGate.baseUrl,
+          model: judgmentGate.model,
+        })
+      : undefined;
+  const judgmentSites =
+    judgmentGate.adapter === "jev" ? judgmentGate.sites : undefined;
+
   const idleRaw = process.env.THEBE_SESSION_IDLE_TIMEOUT_MS;
   const idleParsed =
     idleRaw === undefined || idleRaw.trim() === ""
@@ -155,6 +169,8 @@ export async function bootstrapThebe(
     allowedHosts: options?.allowedHosts,
     sessionIdleTimeoutMs:
       Number.isFinite(idleParsed) && idleParsed > 0 ? idleParsed : 0,
+    judgment,
+    judgmentSites,
   });
 
   return {

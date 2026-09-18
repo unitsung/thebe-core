@@ -24,6 +24,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   };
   const sessions = createSessionApi(ctx, restoreSessionState);
   const prompts = createPromptApi(ctx);
+  const activityStore = createActivityStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "activity")
+      : undefined,
+    now: ctx.now,
+  });
   const diagnosis = createDiagnosisApi({
     now: ctx.now,
     policy: ctx.policy,
@@ -31,12 +37,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     baseTools: ctx.baseTools,
     createSession: sessions.createSession,
     prompt: prompts.prompt,
-  });
-  const activityStore = createActivityStore({
-    dir: options.agentStoreDir
-      ? join(options.agentStoreDir, "activity")
-      : undefined,
-    now: ctx.now,
+    activityStore,
+    judgment: ctx.judgment,
   });
   const actions = createActionApi({
     now: ctx.now,

@@ -10,7 +10,7 @@ import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { DiagnosisResult } from "../diagnosis/types.ts";
 import { verifyRestart, type ProbeHealth } from "./verify.ts";
 import type { ActivityStore } from "../activity/store.ts";
-import type { ActivityRecord } from "../activity/types.ts";
+import type { ActivityGroup, ActivityRecord } from "../activity/types.ts";
 import { idempotencyIndexKey } from "../activity/types.ts";
 import type {
   ActionReceipt,
@@ -24,8 +24,9 @@ const MAX_RECEIPTS = 32;
 export type ActionApi = {
   executeApprovedAction(request: ActionRequest): Promise<ActionReceipt>;
   getReceipt(receiptId: string): Promise<ActionReceipt | undefined>;
-  listActivity(): Promise<ActivityRecord[]>;
+  listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
+  denyActivity(id: string): Promise<boolean>;
 };
 
 export function createActionApi(options: {
@@ -58,11 +59,14 @@ export function createActionApi(options: {
       const persisted = await options.activityStore?.get(receiptId);
       return persisted ? receiptFromActivity(persisted) : undefined;
     },
-    async listActivity() {
-      return options.activityStore?.list() ?? [];
+    async listActivity(group?: ActivityGroup) {
+      return options.activityStore?.list(group) ?? [];
     },
     async getActivity(id: string) {
       return options.activityStore?.get(id);
+    },
+    async denyActivity(id: string) {
+      return options.activityStore?.removePending(id) ?? false;
     },
     async executeApprovedAction(request: ActionRequest): Promise<ActionReceipt> {
       const finishedAt = options.now().toISOString();
@@ -96,9 +100,15 @@ export function createActionApi(options: {
         capability,
       };
 
+      const receiptId =
+        (request.diagnosisRunId
+          ? (await options.activityStore?.findPendingForDiagnosis(request.diagnosisRunId))?.id
+          : undefined) ?? randomUUID();
+
       if (request.actionId && request.actionId !== CONTAINER_RESTART_ACTION_ID) {
         return await remember(
           receipt({
+            receiptId,
             resource,
             diagnosisRunId: request.diagnosisRunId,
             approval,
@@ -116,6 +126,7 @@ export function createActionApi(options: {
       if (capability.approval === "required" && !approval.approved) {
         return await remember(
           receipt({
+            receiptId,
             resource,
             diagnosisRunId: request.diagnosisRunId,
             approval,
@@ -133,6 +144,7 @@ export function createActionApi(options: {
       if (typeof options.provider.restartContainer !== "function") {
         return await remember(
           receipt({
+            receiptId,
             resource,
             diagnosisRunId: request.diagnosisRunId,
             approval,
@@ -166,6 +178,7 @@ export function createActionApi(options: {
           summary: error instanceof Error ? error.message : String(error),
         };
         const failed = receipt({
+          receiptId,
           resource,
           diagnosisRunId: request.diagnosisRunId,
           approval,
@@ -204,6 +217,7 @@ export function createActionApi(options: {
       }
 
       const done = receipt({
+        receiptId,
         resource,
         diagnosisRunId: request.diagnosisRunId,
         approval,
@@ -219,6 +233,7 @@ export function createActionApi(options: {
 }
 
 function receipt(input: {
+  receiptId?: string;
   resource: ActionReceipt["resource"];
   diagnosisRunId?: string;
   approval: ApprovalRecord;
@@ -229,7 +244,7 @@ function receipt(input: {
   error?: string;
 }): ActionReceipt {
   return {
-    receiptId: randomUUID(),
+    receiptId: input.receiptId ?? randomUUID(),
     actionId: CONTAINER_RESTART_ACTION_ID,
     resource: input.resource,
     diagnosisRunId: input.diagnosisRunId,
@@ -250,9 +265,12 @@ function idempotencyKey(receipt: ActionReceipt): string {
 }
 
 function receiptFromActivity(activity: ActivityRecord): ActionReceipt {
+  if (!activity.receiptId || !activity.approval || !activity.action || !activity.verification) {
+    throw new Error("activity is not a restart receipt");
+  }
   return {
     receiptId: activity.receiptId,
-    actionId: activity.actionId,
+    actionId: CONTAINER_RESTART_ACTION_ID,
     resource: activity.resource,
     diagnosisRunId: activity.diagnosisRunId,
     approval: activity.approval,

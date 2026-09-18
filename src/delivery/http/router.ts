@@ -9,6 +9,7 @@ import { handleAgentRoutes } from "./routes/agent-api.ts";
 import { handleActionRoutes } from "./routes/action.ts";
 import { handleActivityRoutes } from "./routes/activity.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
+import { handleGoalRoutes } from "./routes/goal.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
 import { createOpenApiDocument, swaggerUiAsset, swaggerUiHtml } from "./openapi.ts";
 
@@ -66,6 +67,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (activityResponse) {
         return activityResponse;
       }
+      const goalResponse = await handleGoalRoutes(context);
+      if (goalResponse) {
+        return goalResponse;
+      }
       if (isAgentRoute(context.path)) {
         return (await handleAgentRoutes(context)) ?? json({ ok: false }, 404);
       }
@@ -83,6 +88,7 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
     path.startsWith("/v1/auth") ||
-    path === "/v1/capabilities"
+    path === "/v1/capabilities" ||
+    path.startsWith("/v1/goals")
   );
 }

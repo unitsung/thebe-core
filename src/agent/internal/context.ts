@@ -18,6 +18,7 @@ import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
+import { createJudgmentApi } from "../judgment/service.ts";
 import {
   createAutoSummary,
   DEFAULT_AUTO_SUMMARY_DELAY_MS,
@@ -67,6 +68,10 @@ export function createAgentContext(options: CreateThebeAgentOptions) {
     : undefined;
   const store = createAgentStore(options.agentStoreDir);
   const mcp = options.mcp ?? createEmptyMcpRegistry();
+  const judgment = createJudgmentApi({
+    model: options.judgment,
+    sites: options.judgmentSites ?? "all",
+  });
   const enabledResources: EnabledResource[] = [...(options.enabledResources ?? [])];
   const builtinTools = options.builtinTools ?? PI_BUILTIN_TOOLS;
   const systemPrompt = buildSystemPrompt(options.systemPrompt, workspacePath, outputDirectory);
@@ -305,6 +310,7 @@ export function createAgentContext(options: CreateThebeAgentOptions) {
     audit,
     store,
     mcp,
+    judgment,
     enabledResources,
     workspacePath,
     outputDirectory,

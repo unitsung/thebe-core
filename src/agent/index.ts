@@ -8,6 +8,17 @@ export type {
   McpToolInfo,
 } from "./extensions/mcp.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
+export type { JudgmentModel } from "./judgment/interface.ts";
+export type { JudgmentApi } from "./judgment/service.ts";
+export type {
+  JudgmentEnabledSites,
+  JudgmentGate,
+  JudgmentSite,
+  JudgmentTrace,
+} from "./judgment/types.ts";
+export { JUDGMENT_SITES } from "./judgment/sites.ts";
+export { createJudgmentApi } from "./judgment/service.ts";
+export { readJudgmentGate } from "./judgment/gate.ts";
 export type {
   DiagnosisRequest,
   DiagnosisResult,
@@ -19,7 +30,9 @@ export type {
   ActionRequest,
   VerificationResult,
 } from "./action/types.ts";
-export type { ActivityRecord, ActivityStatus } from "./activity/types.ts";
+export type { ActivityGroup, ActivityRecord, ActivityStatus } from "./activity/types.ts";
+export type { ActivityFeedItem, ActivityFeedType } from "./activity/feed.ts";
+export { toActivityFeed } from "./activity/feed.ts";
 export {
   DEFAULT_AUTO_SUMMARY_DELAY_MS,
 } from "./internal/auto-summary.ts";
@@ -54,3 +67,18 @@ export type {
 } from "./runtime/interface.ts";
 export type { PermissionMode } from "./runtime/interface.ts";
 export type { GoalEvent } from "./goals/runner.ts";
+export type {
+  ProductError,
+  ProductGoal,
+  ProductGoalControls,
+  ProductGoalEvent,
+  ProductGoalStatus,
+  ProductRun,
+} from "./goals/product.ts";
+export {
+  goalControls,
+  isTerminalGoalStatus,
+  mapGoalStatus,
+  toProductGoal,
+  toProductGoalEvent,
+} from "./goals/product.ts";

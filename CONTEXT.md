@@ -49,7 +49,7 @@ _Avoid_: naming this Ask, a second agent loop, a parallel Thebe CLI suite
 _Avoid_: a homegrown renderer, a Thebe-written web chat
 
 **Serve**:
-Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). iOS compatibility: `/v1/health`, `/v1/event(s)`, `/v1/devices`, `/v1/messages` (JSON auto-denies approvals; SSE with `Accept: text/event-stream`), `/mcp`. Default bind `127.0.0.1:8787`; logs print both the local URL and `bind=host:port`. Host allowlist always includes loopback; `THEBE_HOST=0.0.0.0` still requires `THEBE_ALLOWED_HOSTS` for LAN Host headers. `NODE_ENV=production` requires `THEBE_TOKEN` (`X-Thebe-Token`). `POST /v1/system/quiesce` is admin-equivalent (token is the only gate) and blocks mutating writes except interrupt/permission. Credential PUT/POST is plaintext HTTP; production should sit behind Tailscale or an HTTPS reverse proxy. SIGTERM/SIGINT drain via `agent.quiesce()` then `server.close`. HTTP body cap 10MB. Default session idle reap is 30 minutes (`THEBE_SESSION_IDLE_TIMEOUT_MS=0` disables).
+Thin HTTP listener. Session API is `/v1/session` (create, prompt, messages, log SSE, interrupt, permission). Product Goal API is `/v1/goals` (create, list, get, pause/resume/stop, log JSON/SSE) with session-scoped aliases under `/v1/session/{id}/goal`. iOS compatibility: `/v1/health`, `/v1/event(s)`, `/v1/devices`, `/v1/messages` (JSON auto-denies approvals; SSE with `Accept: text/event-stream`), `/mcp`. Default bind `127.0.0.1:8787`; logs print both the local URL and `bind=host:port`. Host allowlist always includes loopback; `THEBE_HOST=0.0.0.0` still requires `THEBE_ALLOWED_HOSTS` for LAN Host headers. `NODE_ENV=production` requires `THEBE_TOKEN` (`X-Thebe-Token`). `POST /v1/system/quiesce` is admin-equivalent (token is the only gate) and blocks mutating writes except interrupt/permission. Credential PUT/POST is plaintext HTTP; production should sit behind Tailscale or an HTTPS reverse proxy. SIGTERM/SIGINT drain via `agent.quiesce()` then `server.close`. HTTP body cap 10MB. Default session idle reap is 30 minutes (`THEBE_SESSION_IDLE_TIMEOUT_MS=0` disables).
 _Avoid_: a second agent loop, an MCP marketplace as the product, pairing/APNs as v0 features, or exposing raw plugin internals as the client contract
 
 **Tool Layer**:
@@ -57,16 +57,20 @@ Thebe custom capability surface. Built-in v0 capabilities include `container.lis
 _Avoid_: a second allow-list in config or flags, treating redaction as its own module, or making the built-in container set the product boundary
 
 **DiagnosisRun**:
-Product-facing read-only diagnosis (`POST /v1/diagnosis`). The App sends a typed `ResourceRef`; Core gathers bounded observations from container capabilities, optionally reasons, and returns `resource`, `observations`, `diagnosis`, `recommendations`, `runId`, and `actionId`. Observed facts come from tools/providers only. Write recommendations carry `actionId` but are not executed here.
+Product-facing read-only diagnosis (`POST /v1/diagnosis`). The App sends a typed `ResourceRef`; Core gathers bounded observations from container capabilities, optionally reasons, and returns `resource`, `observations`, `diagnosis`, `recommendations`, `runId`, and `actionId`. Observed facts come from tools/providers only. Write recommendations carry `actionId` but are not executed here. One optional Judgment Site may confirm a write recommendation; diagnosis does not own the Judgment Model.
 _Avoid_: exposing raw MCP `tools/call` as the App contract, dumping inspect/logs/agent state to the client, or concatenating display names into prompts
 
 **ActionReceipt**:
-Product object for an approved write. Slice 02 is only `container.restart`: on-device approval → deterministic provider restart → programmatic verification (`state==running`, Emby health when applicable) → receipt. Metadata `effect=write`, `risk=disruptive`, `approval=required` lives in `CONTAINER_CAPABILITY_METADATA`. The LLM cannot approve, execute, or grade verification.
+Product object for an approved write. Slice 02 is only `container.restart`: on-device approval → deterministic provider restart → programmatic verification (`state==running`, Emby health when applicable) → receipt. Metadata `effect=write`, `risk=disruptive`, `approval=required` lives in `CONTAINER_CAPABILITY_METADATA`. Neither the chat model nor a Judgment Model can approve, execute, or grade verification.
 _Avoid_: attaching `container.restart` to the chat tool loop, auto-executing from diagnosis, or letting the App call raw MCP for writes
 
 **ActivityRecord**:
-Minimal persisted snapshot of an ActionReceipt (`GET /v1/activity`). Stored under the AgentStore directory in an `activity/` subdirectory so session metadata JSON is not mixed. Not a Goal, Run, or event log. Same idempotency key maps to one record. 0 tokens.
-_Avoid_: treating this as a full Activity product, dumping raw events, or calling the model to summarize the list
+Persistence for a pending Approval or a completed Receipt (`GET /v1/activity` returns a typed workspace feed). A diagnosis that recommends restart mints one Approval id; execute mutates that id into a Receipt. Diagnosis without a write recommendation is not stored. `POST /v1/activity/{id}/deny` removes a pending Approval. Stored under the AgentStore directory in an `activity/` subdirectory. `GET /v1/activity` interleaves ProductGoals. Same idempotency key maps to one record. 0 tokens.
+_Avoid_: treating this as a full Activity product, naming it the user-facing Activity workspace, dumping raw events, calling the model to summarize the list, or persisting Diagnosis as a sibling row
+
+**ProductGoal**:
+Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `GET /v1/goals/{id}/log` (JSON or SSE). Session-scoped aliases under `/v1/session/{id}/goal`. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
+_Avoid_: a second Goal id scheme, `GET /v1/goals/{id}/runs`, exposing Pi/MCP/subagent internals, or treating ActivityRecord as a Goal
 
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
@@ -82,7 +86,23 @@ _Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core int
 
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.
-_Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field
+_Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field, replacing PolicyEngine with a Judgment Model
+
+**Judgment Model**:
+Agent-owned Interface for typed, calibrated judgments over a supplied state. Any Core caller may `ask` a named Site. It answers Noul, Choice, and Score questions; it does not write prose, code, or explanations. Deterministic observation and PolicyEngine stay first. The chat model may still write narrative.
+_Avoid_: Decision Model, Decision Engine, System One, classifier as the Core noun, mixing this with 服务商 / Ask Thebe, using PolicyEngine.decide for these questions, treating this as a diagnosis-only feature
+
+**Judgment Site**:
+A named place that may call `judgment.ask`. Every Site has a traditional path. The catalog is inventory; a caller opts in by asking. Diagnosis is one Site among others, not the owner.
+_Avoid_: hook, 口子, feature flag as the domain noun, treating PolicyEngine, Approval, execute, or verification as Sites
+
+**Judgment Gate**:
+Core opt-in for a Judgment Model and, separately, which Sites may call it. Default off. Off, missing credentials, a Site that is not enabled, or a failed call uses that Site's traditional path. On does not move Approval, execute, or verification onto the model.
+_Avoid_: a per-服务商 toggle, forcing every Site on when the adapter is on, silently swapping results without a Site id
+
+**Jev**:
+First Judgment Model Adapter (TypeSafe hosted API). Vendor name only.
+_Avoid_: Jev as a product object, a chat provider, or a Core glossary synonym for Judgment Model
 
 **StreamGuard**:
 Per-Run application timeouts over normalized events: TTFB + idle timers plus an abort watchdog.

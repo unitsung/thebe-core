@@ -1,3 +1,5 @@
+import type { JudgmentTrace } from "../judgment/types.ts";
+
 export const DIAGNOSIS_ACTION_ID = "container.diagnose" as const;
 
 export type ResourceKind = "container";
@@ -70,6 +72,8 @@ export type TechnicalEvidence = {
   observedAt: string;
 };
 
+export type DiagnosisJudgment = JudgmentTrace;
+
 export type ToolTranscriptEntry = {
   tool: string;
   summary: string;
@@ -93,9 +97,11 @@ export type DiagnosisResult = {
   technicalDetails: {
     evidence: TechnicalEvidence[];
     toolTranscript: ToolTranscriptEntry[];
+    judgment?: DiagnosisJudgment;
   };
   error?: string;
   sessionId?: string;
+  approvalId?: string;
 };
 
 export type DiagnosisRequest = {

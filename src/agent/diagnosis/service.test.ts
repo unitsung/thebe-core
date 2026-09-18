@@ -112,4 +112,124 @@ describe("container diagnosis service", () => {
     expect(result.diagnosis.code).not.toBe("invented");
     expect(result.observations.every((item) => item.source.startsWith("container."))).toBe(true);
   });
+
+  it("keeps the traditional restart recommendation when no Judgment Model is configured", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: embyProvider(),
+    });
+    const result = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    });
+    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
+    expect(result.technicalDetails.judgment).toBeUndefined();
+  });
+
+  it("does not let a low Noul veto a high-confidence deterministic restart", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: embyProvider(),
+      judgment: {
+        adapterId: "jev",
+        judge: async () => ({
+          adapter: "jev",
+          model: "jev-test",
+          answers: { restart_supported: { type: "noul", noul: 0.05 } },
+        }),
+      },
+    });
+    const result = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    });
+    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
+    expect(result.technicalDetails.judgment).toEqual(
+      expect.objectContaining({
+        siteId: "diagnosis.write_recommendation",
+        used: true,
+        path: "judgment",
+      }),
+    );
+  });
+
+  it("adds a restart recommendation when Judgment Noul is high and rules did not", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "not-json" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: {
+        listContainers: async () => [],
+        inspectContainer: async (id: string) => ({
+          id,
+          name: "misc",
+          image: "example/app:1",
+          state: "created",
+          config: { env: [], cmd: [], labels: {} },
+        }),
+        getContainerLogs: async () => "waiting",
+        getStatusSummary: async () => {
+          throw new Error("summary skipped");
+        },
+      },
+      judgment: {
+        adapterId: "jev",
+        judge: async () => ({
+          adapter: "jev",
+          model: "jev-test",
+          answers: { restart_supported: { type: "noul", noul: 0.93 } },
+        }),
+      },
+    });
+    const result = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-misc", name: "misc", provider: "arcane" },
+    });
+    expect(result.diagnosis.code).toBe("unknown_degraded");
+    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
+  });
+
+  it("skips diagnosis when that Site is not enabled", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: embyProvider(),
+      judgment: {
+        adapterId: "jev",
+        judge: async () => {
+          throw new Error("should not be called");
+        },
+      },
+      judgmentSites: ["home.attention"],
+    });
+    const result = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    });
+    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
+    expect(result.technicalDetails.judgment).toBeUndefined();
+  });
+
+  it("falls back to the traditional path when Judgment fails", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: embyProvider(),
+      judgment: {
+        adapterId: "jev",
+        judge: async () => {
+          throw new Error("Jev HTTP 503");
+        },
+      },
+    });
+    const result = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    });
+    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
+    expect(result.technicalDetails.judgment).toEqual(
+      expect.objectContaining({
+        used: false,
+        path: "traditional",
+        error: "Jev HTTP 503",
+      }),
+    );
+  });
 });

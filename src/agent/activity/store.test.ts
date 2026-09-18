@@ -73,7 +73,7 @@ describe("activity store", () => {
     const listed = await reloaded.list();
     expect(listed).toHaveLength(1);
     expect(listed[0]?.receiptId).toBe("rcpt-1");
-    expect(listed[0]?.approval.capability.approval).toBe("required");
+    expect(listed[0]?.approval?.capability.approval).toBe("required");
     await expect(reloaded.get("rcpt-1")).resolves.toEqual(listed[0]);
   });
 
@@ -136,5 +136,122 @@ describe("activity store", () => {
       }),
     );
     expect(record.status).toBe("verification_failed");
+  });
+
+  it("mints one pending approval from a restart diagnosis and mutates it into the receipt", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-activity-"));
+    const store = createActivityStore({
+      dir,
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
+    const pending = await store.upsertFromDiagnosis({
+      runId: "run-diag",
+      actionId: "container.diagnose",
+      status: "completed",
+      resource: {
+        kind: "container",
+        id: "ctr-emby",
+        name: "emby",
+        provider: "arcane",
+      },
+      observations: [],
+      diagnosis: {
+        code: "container_exited",
+        title: "Container is not running",
+        summary: "exited",
+        confidence: "high",
+        tokenUsed: false,
+      },
+      recommendations: [
+        {
+          id: "rec-restart",
+          title: "Restart this container",
+          detail: "needs approval",
+          kind: "write",
+          requiresApproval: true,
+          actionId: "container.restart",
+        },
+      ],
+      technicalDetails: { evidence: [], toolTranscript: [] },
+    });
+    expect(pending?.status).toBe("pending");
+    expect(pending?.id).not.toBe("run-diag");
+    expect(pending?.diagnosisRunId).toBe("run-diag");
+    expect(await store.list("needs_approval")).toHaveLength(1);
+
+    const mutated = await store.upsertFromReceipt(
+      receipt({
+        receiptId: "rcpt-after",
+        diagnosisRunId: "run-diag",
+        idempotencyKey: "after",
+      }),
+    );
+    expect(mutated.id).toBe(pending?.id);
+    expect(await store.list("needs_approval")).toEqual([]);
+    expect((await store.list("recent")).map((item) => item.id)).toEqual([pending?.id]);
+    expect(await store.list("running")).toEqual([]);
+  });
+
+  it("does not persist a diagnosis with no write recommendation", async () => {
+    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const saved = await store.upsertFromDiagnosis({
+      runId: "run-ok",
+      actionId: "container.diagnose",
+      status: "completed",
+      resource: {
+        kind: "container",
+        id: "ctr-emby",
+        name: "emby",
+        provider: "arcane",
+      },
+      observations: [],
+      diagnosis: {
+        code: "container_running",
+        title: "Container is running",
+        summary: "running",
+        confidence: "high",
+        tokenUsed: false,
+      },
+      recommendations: [],
+      technicalDetails: { evidence: [], toolTranscript: [] },
+    });
+    expect(saved).toBeUndefined();
+    expect(await store.list()).toEqual([]);
+  });
+
+  it("removes a pending approval on deny", async () => {
+    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const pending = await store.upsertFromDiagnosis({
+      runId: "run-diag",
+      actionId: "container.diagnose",
+      status: "completed",
+      resource: {
+        kind: "container",
+        id: "ctr-emby",
+        name: "emby",
+        provider: "arcane",
+      },
+      observations: [],
+      diagnosis: {
+        code: "container_exited",
+        title: "Container is not running",
+        summary: "exited",
+        confidence: "high",
+        tokenUsed: false,
+      },
+      recommendations: [
+        {
+          id: "rec-restart",
+          title: "Restart this container",
+          detail: "needs approval",
+          kind: "write",
+          requiresApproval: true,
+          actionId: "container.restart",
+        },
+      ],
+      technicalDetails: { evidence: [], toolTranscript: [] },
+    });
+    expect(await store.removePending(pending?.id ?? "")).toBe(true);
+    expect(await store.list()).toEqual([]);
   });
 });

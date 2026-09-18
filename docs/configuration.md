@@ -100,4 +100,27 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 
+## Judgment Model（默认关闭）
+
+Judgment Model 不是聊天模型服务商，也不绑死在诊断上。默认所有 Site 走各自的传统路径。
+
+```bash
+export THEBE_JUDGMENT_MODEL=off
+```
+
+要启用第一款 Adapter（Jev）时：
+
+```bash
+export THEBE_JUDGMENT_MODEL=jev
+export THEBE_TYPESAFE_API_KEY=...
+# optional: which Sites may call it. Default all catalog Sites.
+# export THEBE_JUDGMENT_SITES=all
+# export THEBE_JUDGMENT_SITES=home.attention,intent.capability
+# export THEBE_JUDGMENT_SITES=none
+export THEBE_TYPESAFE_BASE_URL=https://api.typesafe.ai/v1/systemone
+export THEBE_JEV_MODEL=jev-latest
+```
+
+未设置、值不是 `jev`、缺少 API key、Site 未启用、或调用失败时，该 Site 回退传统路径。打开后会把该 Site 的 `state` 发到 TypeSafe。这一刀没有 App Settings 开关。
+
 配置文件可能包含 provider 地址等运行信息；Pi agent 目录还可能包含认证数据。不要将这些文件提交到 Git 或公开分享。

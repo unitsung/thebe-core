@@ -7,6 +7,7 @@ import { wrapCustomTools } from "../tools/wrapped-tool.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { ThebePromptResult } from "../types.ts";
+import type { ActivityStore } from "../activity/store.ts";
 import { deterministicDiagnosis } from "./deterministic.ts";
 import {
   asContainerDetail,
@@ -16,6 +17,12 @@ import {
   extractObservations,
   parseToolPayload,
 } from "./observations.ts";
+import type { JudgmentApi } from "../judgment/service.ts";
+import { DIAGNOSIS_WRITE_RECOMMENDATION_SITE } from "../judgment/sites.ts";
+import {
+  applyWriteRecommendationJudgment,
+  judgeWriteRecommendation,
+} from "./write-judgment.ts";
 import {
   DIAGNOSIS_ACTION_ID,
   type DiagnosisRequest,
@@ -50,14 +57,20 @@ export function createDiagnosisApi(options: {
     input: string,
     options?: { thebeSessionId?: string; nonInteractive?: boolean },
   ) => Promise<ThebePromptResult>;
+  activityStore?: ActivityStore;
+  judgment?: JudgmentApi;
 }): DiagnosisApi {
   const runs = new Map<string, DiagnosisResult>();
 
-  function remember(result: DiagnosisResult): DiagnosisResult {
+  async function remember(result: DiagnosisResult): Promise<DiagnosisResult> {
     runs.set(result.runId, result);
     if (runs.size > MAX_RUNS) {
       const oldest = runs.keys().next().value;
       if (oldest) runs.delete(oldest);
+    }
+    const persisted = await options.activityStore?.upsertFromDiagnosis(result);
+    if (persisted) {
+      return { ...result, approvalId: persisted.id };
     }
     return result;
   }
@@ -127,6 +140,13 @@ export function createDiagnosisApi(options: {
     let recommendations = baseline.recommendations;
     let sessionId: string | undefined;
 
+    const judgment = await judgeWriteRecommendation({
+      judgment: options.judgment,
+      resource,
+      observations: collected.observations,
+      diagnosis: baseline.diagnosis,
+    });
+
     const hasProviderFacts = collected.observations.some((item) => item.kind !== "error");
     const shouldAskModel =
       hasProviderFacts &&
@@ -154,6 +174,12 @@ export function createDiagnosisApi(options: {
       }
     }
 
+    recommendations = applyWriteRecommendationJudgment({
+      code: baseline.diagnosis.code,
+      recommendations,
+      trace: judgment,
+    });
+
     const result: DiagnosisResult = {
       runId,
       actionId: DIAGNOSIS_ACTION_ID,
@@ -165,6 +191,9 @@ export function createDiagnosisApi(options: {
       technicalDetails: {
         evidence: collected.evidence,
         toolTranscript: collected.toolTranscript,
+        ...(options.judgment?.enabled(DIAGNOSIS_WRITE_RECOMMENDATION_SITE)
+          ? { judgment }
+          : {}),
       },
       sessionId,
     };

@@ -40,7 +40,9 @@ import type {
   DiagnosisResult,
 } from "./diagnosis/types.ts";
 import type { ActionReceipt, ActionRequest } from "./action/types.ts";
-import type { ActivityRecord } from "./activity/types.ts";
+import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
+import type { JudgmentModel } from "./judgment/interface.ts";
+import type { JudgmentEnabledSites } from "./judgment/types.ts";
 
 export type ThebeSession = AgentSessionMeta & {
   status: SessionRunStatus;
@@ -90,6 +92,10 @@ export type CreateThebeAgentOptions = {
   outputDirectory?: string;
   /** External MCP capability supplied by the composition root. */
   mcp?: McpRegistry;
+  /** Optional Judgment Model. Absent means the Judgment Gate is off. */
+  judgment?: JudgmentModel;
+  /** Which catalog Sites may call the model. Default all when a model is present. */
+  judgmentSites?: JudgmentEnabledSites;
 };
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
@@ -159,6 +165,8 @@ export interface ThebeAgent {
 
   startGoal(input: { thebeSessionId: string; goal: string; criteria?: string[]; maxIterations?: number }): Promise<GoalRun>;
   getGoal(thebeSessionId: string): GoalRun | undefined;
+  listGoals(): Promise<GoalRun[]>;
+  goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }>;
   restoreGoal(run: GoalRun | undefined): void;
   subscribeGoal(thebeSessionId: string, listener: (event: GoalEvent) => void): () => void;
   waitGoal(thebeSessionId: string): Promise<GoalRun>;
@@ -180,8 +188,9 @@ export interface ThebeAgent {
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;
   executeApprovedAction(request: ActionRequest): Promise<ActionReceipt>;
   getReceipt(receiptId: string): Promise<ActionReceipt | undefined>;
-  listActivity(): Promise<ActivityRecord[]>;
+  listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
+  denyActivity(id: string): Promise<boolean>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;
