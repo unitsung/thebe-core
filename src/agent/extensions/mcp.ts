@@ -6,6 +6,11 @@ import {
   CONTAINER_TOOL_NAMES,
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
+import {
+  MEDIA_READ_DESCRIPTIONS,
+  MEDIA_READ_SCHEMAS,
+  MEDIA_READ_TOOL_NAMES,
+} from "../capabilities/media.ts";
 
 export const HOMELAB_CAPABILITY_CATEGORIES = [
   "files",
@@ -146,6 +151,28 @@ export function listCoreMcpTools(): McpToolInfo[] {
       category: "diagnostics",
       permission: "read",
       service: "thebe-core",
+      source: "core",
+      serverName: "thebe-core",
+    });
+  }
+
+  for (const name of MEDIA_READ_TOOL_NAMES) {
+    const service = name.startsWith("emby.")
+      ? "emby"
+      : name.startsWith("jellyfin.")
+        ? "jellyfin"
+        : "immich";
+    tools.push({
+      id: name,
+      name,
+      description: MEDIA_READ_DESCRIPTIONS[name],
+      inputSchema: MEDIA_READ_SCHEMAS[name],
+      category: "media",
+      permission: "read",
+      effect: "read",
+      risk: "low",
+      approval: "none",
+      service,
       source: "core",
       serverName: "thebe-core",
     });
