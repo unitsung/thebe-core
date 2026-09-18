@@ -25,6 +25,9 @@ export {
   type RuntimeSession,
 } from "./agent/runtime/index.ts";
 export { ArcaneAdapter } from "./adapters/arcane/adapter.ts";
+export { EmbyAdapter } from "./adapters/emby/adapter.ts";
+export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
+export { ImmichAdapter } from "./adapters/immich/adapter.ts";
 export {
   createThebeHttpHandler,
   listenThebeHttp,
