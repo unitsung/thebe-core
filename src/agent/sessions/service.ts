@@ -9,6 +9,10 @@ import type {
 import { httpError, type SessionRunStatus } from "../types.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { AgentContext } from "../internal/context.ts";
+import {
+  toProductPendingPermission,
+  type ProductPendingPermission,
+} from "../security/pending-permission.ts";
 
 export function createSessionApi(
   ctx: AgentContext,
@@ -324,6 +328,27 @@ export function createSessionApi(
     },
     pendingPermissionIds(): string[] {
       return [...pendingPermissions.keys()];
+    },
+    listPendingPermissions(): ProductPendingPermission[] {
+      return [...pendingPermissions.values()].map(toProductPendingPermission);
+    },
+    getPendingPermission(id: string): ProductPendingPermission | undefined {
+      const pending = pendingPermissions.get(id);
+      return pending ? toProductPendingPermission(pending) : undefined;
+    },
+    async resolvePendingPermission(
+      id: string,
+      decision: {
+        response: "allow" | "deny";
+        remember?: boolean;
+        rememberScope?: PermissionRememberScope;
+      },
+    ): Promise<void> {
+      const pending = pendingPermissions.get(id);
+      if (!pending?.thebeSessionId) {
+        throw httpError(404, `unknown permission: ${id}`);
+      }
+      await resolvePermission(pending.thebeSessionId, id, decision);
     },
     async setModel(
       thebeSessionId: string,

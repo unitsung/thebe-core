@@ -1,9 +1,13 @@
 import type { ThebeHttpContext } from "../context.ts";
 import { CONTAINER_TOOL_NAMES } from "../../../agent/capabilities/containers.ts";
-import { listCoreMcpTools } from "../../../agent/extensions/mcp.ts";
+import {
+  DIAGNOSE_FROM_EVENTS_TOOL,
+  LIST_CORE_EVENTS_TOOL,
+  listCoreMcpTools,
+} from "../../../agent/extensions/mcp.ts";
 import { asObject, json, readJson } from "../json.ts";
 
-const MCP_EVENT_TOOLS = ["list_core_events", "diagnose_from_events"] as const;
+const MCP_EVENT_TOOLS = [LIST_CORE_EVENTS_TOOL, DIAGNOSE_FROM_EVENTS_TOOL] as const;
 
 const ALIASES: Record<string, (typeof CONTAINER_TOOL_NAMES)[number]> = {
   containers_summary: "container.status_summary",

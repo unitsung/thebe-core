@@ -48,6 +48,12 @@ export interface PhotoLibraryProvider {
   getStatistics(): Promise<PhotoStatistics>;
 }
 
+export const MEDIA_PROVIDER_IDS = {
+  emby: "emby",
+  jellyfin: "jellyfin",
+  immich: "immich",
+} as const;
+
 export const EMBY_TOOL_NAMES = [
   "emby.libraries",
   "emby.recent",
@@ -77,7 +83,7 @@ export const MEDIA_READ_SCHEMAS: Record<
   Record<string, unknown>
 > = Object.fromEntries(
   MEDIA_READ_TOOL_NAMES.map((name) => [name, { type: "object", properties: {} }]),
-) as Record<(typeof MEDIA_READ_TOOL_NAMES)[number], Record<string, unknown>>;
+) as unknown as Record<(typeof MEDIA_READ_TOOL_NAMES)[number], Record<string, unknown>>;
 
 export const MEDIA_READ_DESCRIPTIONS: Record<
   (typeof MEDIA_READ_TOOL_NAMES)[number],

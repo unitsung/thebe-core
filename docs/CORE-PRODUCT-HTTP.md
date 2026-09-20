@@ -1,0 +1,43 @@
+# Core product HTTP — shipped vs leftover
+
+Date: 2026-09-18.
+
+This slice productized remaining P0+P1 Agent surfaces as HTTP. Delivery still only calls `ThebeAgent`. Raw `/mcp` is unchanged.
+
+## Shipped
+
+| Surface | HTTP | Notes |
+| --- | --- | --- |
+| Capability discovery | `GET /v1/capabilities` | Product metadata: category, provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. |
+| Capability invoke | `POST /v1/capabilities/{id}/invoke` | Through `ThebeAgent.invokeCapability` → policy/tools. Direct `{ type: result }` or background `{ type: run, runId }`. `container.restart` and `approval=required` return 403; use `POST /v1/action`. |
+| Capability run | `GET /v1/capabilities/runs/{runId}` | In-memory background invoke status. |
+| Workers | `GET/POST /v1/subagents`, `GET /v1/subagents/profiles`, `GET /v1/subagents/{runId}`, `POST .../cancel`, `GET .../log` | Product object is `ProductWorker` mapped from `SubagentRun`. No parent transcript. |
+| Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
+| Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
+| MCP inventory | `GET /v1/extensions/mcp/servers`, `GET /v1/extensions/mcp/tools` | External tools only. Raw `/mcp` stays for integrations. |
+| Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. |
+| Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
+
+OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`.
+
+## Explicit non-ships (leftover)
+
+These are **not** deferred accidentally. They are out of this slice:
+
+- **App clients / iOS UI** for any of the above.
+- **P2** `GET /v1/audit`, artifacts, auto-summary / auto-compact settings dump (`GET /v1/settings/agent`).
+- **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
+- **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
+- **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).
+- **Skill file editing**.
+- **Chat-tool `/v1/approvals` collection.** Diagnose-restart Approval/Receipt stays on `GET /v1/activity`. Runtime tool confirmations are `/v1/permissions`. `CORE-ITERATION-PLAN.md` P0.4 suggested `/v1/approvals`; that name was rejected so it does not compete with Activity (ADR 0011 / 0013).
+- Workers HTTP uses plural `/v1/subagents` (plan examples also allowed `/v1/subagent`).
+- Session-scoped background-task HTTP is unchanged and is not a Worker product.
+- Media/Emby/Immich **App** connections. Core already has media read capabilities and adapters.
+
+## How to tell the two approval objects apart
+
+| Object | HTTP | Origin |
+| --- | --- | --- |
+| Activity Approval / Receipt | `GET /v1/activity`, `POST /v1/action`, `POST /v1/activity/{id}/deny` | Diagnose-restart; one id mutates Approval → Receipt |
+| Runtime pending permission | `GET /v1/permissions`, session permission resolve | In-prompt tool confirmation (`bash` / `write` / `edit`, …); redacted args; TTL |

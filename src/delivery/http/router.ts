@@ -8,10 +8,18 @@ import { handleMcp } from "./routes/mcp.ts";
 import { handleAgentRoutes } from "./routes/agent-api.ts";
 import { handleActionRoutes } from "./routes/action.ts";
 import { handleActivityRoutes } from "./routes/activity.ts";
+import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
 import { handleGoalRoutes } from "./routes/goal.ts";
+import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
+import { handlePermissionRoutes } from "./routes/permission.ts";
+import { handleResourceRoutes } from "./routes/resources.ts";
+import { handleSettingsRoutes } from "./routes/settings.ts";
+import { handleSkillRoutes } from "./routes/skills.ts";
+import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
 import { createOpenApiDocument, swaggerUiAsset, swaggerUiHtml } from "./openapi.ts";
+import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
 
 export type ThebeHttpRouterOptions = {
   version: string;
@@ -67,6 +75,34 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (activityResponse) {
         return activityResponse;
       }
+      const capabilityResponse = await handleCapabilityRoutes(context);
+      if (capabilityResponse) {
+        return capabilityResponse;
+      }
+      const subagentResponse = await handleSubagentRoutes(context);
+      if (subagentResponse) {
+        return subagentResponse;
+      }
+      const permissionResponse = await handlePermissionRoutes(context);
+      if (permissionResponse) {
+        return permissionResponse;
+      }
+      const skillResponse = await handleSkillRoutes(context);
+      if (skillResponse) {
+        return skillResponse;
+      }
+      const mcpProductResponse = await handleMcpProductRoutes(context);
+      if (mcpProductResponse) {
+        return mcpProductResponse;
+      }
+      const resourceResponse = await handleResourceRoutes(context);
+      if (resourceResponse) {
+        return resourceResponse;
+      }
+      const settingsResponse = await handleSettingsRoutes(context);
+      if (settingsResponse) {
+        return settingsResponse;
+      }
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {
         return goalResponse;
@@ -88,7 +124,7 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
     path.startsWith("/v1/auth") ||
-    path === "/v1/capabilities" ||
+    path === PRODUCT_HTTP_PATH.capabilities ||
     path.startsWith("/v1/goals")
   );
 }

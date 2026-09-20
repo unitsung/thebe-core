@@ -165,16 +165,24 @@ export type RuntimeProvider = {
 };
 
 export type PermissionDecision = {
-  response: "allow" | "deny";
+  response: PermissionResponse;
   remember?: boolean;
   /** Whether a remembered decision applies to one request, tool, or conversation. */
   rememberScope?: PermissionRememberScope;
 };
 
-export type PermissionRememberScope = "request" | "tool" | "conversation";
+export const PERMISSION_REMEMBER_SCOPES = ["request", "tool", "conversation"] as const;
+export type PermissionRememberScope = (typeof PERMISSION_REMEMBER_SCOPES)[number];
 
+export const PERMISSION_MODES = ["ask", "read-only", "full-access"] as const;
 /** Approval policy for tools that the runtime marks as requiring confirmation. */
-export type PermissionMode = "ask" | "read-only" | "full-access";
+export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+export const PERMISSION_RESPONSES = ["allow", "deny"] as const;
+export type PermissionResponse = (typeof PERMISSION_RESPONSES)[number];
+
+export const ENABLED_RESOURCE_KINDS = ["skill", "extension", "prompt"] as const;
+export type EnabledResourceKind = (typeof ENABLED_RESOURCE_KINDS)[number];
 
 export type PermissionRequest = {
   permissionId: string;
@@ -228,7 +236,7 @@ export type EnabledResource = {
   identity: string;
   version: string;
   source: string;
-  kind: "skill" | "extension" | "prompt";
+  kind: EnabledResourceKind;
 };
 
 export const PI_BUILTIN_TOOLS = [

@@ -94,4 +94,19 @@ describe("JellyfinAdapter", () => {
       "http://jellyfin.internal:8096/Sessions",
     ]);
   });
+
+  it("strips /api suffix from configured baseUrl", async () => {
+    let requestedUrl = "";
+    const adapter = new JellyfinAdapter({
+      baseUrl: "http://jellyfin.internal:8096/api/",
+      apiKey: "jf-key",
+      userId: USER_ID,
+      fetch: async (input) => {
+        requestedUrl = String(input);
+        return jsonResponse(200, []);
+      },
+    });
+    await adapter.listSessions();
+    expect(requestedUrl).toBe("http://jellyfin.internal:8096/Sessions");
+  });
 });

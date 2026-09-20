@@ -34,7 +34,9 @@ export type ActivityFeedItem =
       goal: ProductGoal;
     };
 
-export function goalActivityGroup(status: ProductGoalStatus): ActivityGroup {
+export function goalActivityGroup(
+  status: ProductGoalStatus,
+): Exclude<ActivityGroup, "needs_approval"> {
   if (status === "queued" || status === "running" || status === "paused") {
     return "running";
   }

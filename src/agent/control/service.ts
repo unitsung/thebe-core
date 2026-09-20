@@ -1,8 +1,32 @@
+import { randomUUID } from "node:crypto";
+import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
+import {
+  DIAGNOSE_FROM_EVENTS_TOOL,
+  LIST_CORE_EVENTS_TOOL,
+  listCoreMcpTools,
+  withProductMetadata,
+} from "../extensions/mcp.ts";
+import {
+  CAPABILITY_INVOKE_MODE_BACKGROUND,
+  CAPABILITY_INVOKE_MODE_DIRECT,
+  CAPABILITY_INVOKE_TYPE_RESULT,
+  CAPABILITY_INVOKE_TYPE_RUN,
+  CAPABILITY_RUN_STATUS_FAILED,
+  CAPABILITY_RUN_STATUS_RUNNING,
+  CAPABILITY_RUN_STATUS_SUCCEEDED,
+  parseCapabilityResult,
+  type CapabilityInvokeInput,
+  type CapabilityInvokeResult,
+  type CapabilityRun,
+} from "../capabilities/invoke.ts";
+
+const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
+  `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 
 export function createControlApi(ctx: AgentContext) {
   const {
@@ -15,6 +39,51 @@ export function createControlApi(ctx: AgentContext) {
     baseTools,
     mcp,
   } = ctx;
+  const capabilityRuns = new Map<string, CapabilityRun>();
+
+  async function invokeTool(name: string, args: unknown): Promise<string> {
+    if (name === CONTAINER_RESTART_ACTION_ID) {
+      throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
+    }
+    const params = (args ?? {}) as Record<string, unknown>;
+    const external = await mcp.invokeTool(name, params);
+    if (external !== undefined) return external;
+    if (name === LIST_CORE_EVENTS_TOOL) {
+      const sid =
+        typeof params.sessionId === "string"
+          ? params.sessionId
+          : ctx.active?.meta.thebeSessionId;
+      const events = sid ? sessionLog(sid).events : lastEvents;
+      const limit =
+        typeof params.limit === "number" && params.limit > 0
+          ? params.limit
+          : 50;
+      return JSON.stringify(events.slice(-limit), null, 2);
+    }
+    if (name === DIAGNOSE_FROM_EVENTS_TOOL) {
+      const events = lastEvents;
+      const errors = events.filter(
+        (event) => event.type === "error" || event.type === "interrupted",
+      );
+      return JSON.stringify(
+        {
+          category: params.category ?? "all",
+          totalEvents: events.length,
+          errors: errors.length,
+          lastError: errors.at(-1) ?? null,
+        },
+        null,
+        2,
+      );
+    }
+    const tools = wrapCustomTools(baseTools(), { policy, audit });
+    const tool = tools.find((item) => item.name === name);
+    if (!tool) {
+      throw new Error(`unknown tool: ${name}`);
+    }
+    const result = await tool.execute("mcp", args ?? {});
+    return result.content.map((block) => block.text).join("\n");
+  }
 
   return {
     permissionMode(): import("../runtime/interface.ts").PermissionMode {
@@ -101,51 +170,65 @@ export function createControlApi(ctx: AgentContext) {
       const opened = await openSession(thebeSessionId);
       return opened.session.exportSession();
     },
-    async invokeTool(name: string, args: unknown): Promise<string> {
-      if (name === "container.restart") {
-        throw httpError(
-          403,
-          "container.restart requires on-device approval; use POST /v1/action",
-        );
+    invokeTool,
+    async invokeCapability(
+      id: string,
+      input: CapabilityInvokeInput = {},
+    ): Promise<CapabilityInvokeResult> {
+      const capabilities = [
+        ...listCoreMcpTools(),
+        ...(await mcp.listTools()),
+      ].map(withProductMetadata);
+      const capability = capabilities.find(
+        (item) => item.id === id || item.name === id,
+      );
+      if (!capability) {
+        throw httpError(404, `unknown capability: ${id}`);
       }
-      const params = (args ?? {}) as Record<string, unknown>;
-      const external = await mcp.invokeTool(name, params);
-      if (external !== undefined) return external;
-      if (name === "list_core_events") {
-        const sid =
-          typeof params.sessionId === "string"
-            ? params.sessionId
-            : ctx.active?.meta.thebeSessionId;
-        const events = sid ? sessionLog(sid).events : lastEvents;
-        const limit =
-          typeof params.limit === "number" && params.limit > 0
-            ? params.limit
-            : 50;
-        return JSON.stringify(events.slice(-limit), null, 2);
+      if (capability.approval === "required" || capability.id === CONTAINER_RESTART_ACTION_ID) {
+        throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
       }
-      if (name === "diagnose_from_events") {
-        const events = lastEvents;
-        const errors = events.filter(
-          (event) => event.type === "error" || event.type === "interrupted",
-        );
-        return JSON.stringify(
-          {
-            category: params.category ?? "all",
-            totalEvents: events.length,
-            errors: errors.length,
-            lastError: errors.at(-1) ?? null,
-          },
-          null,
-          2,
-        );
+      const mode = input.mode ?? CAPABILITY_INVOKE_MODE_DIRECT;
+      const args = input.arguments ?? {};
+      void input.resource;
+      if (mode === CAPABILITY_INVOKE_MODE_BACKGROUND) {
+        if (!capability.background) {
+          throw httpError(
+            400,
+            "capability does not support background execution",
+            "invalid_body",
+          );
+        }
+        const runId = randomUUID();
+        const run: CapabilityRun = {
+          runId,
+          capabilityId: capability.id,
+          status: CAPABILITY_RUN_STATUS_RUNNING,
+          createdAt: new Date().toISOString(),
+        };
+        capabilityRuns.set(runId, run);
+        void invokeTool(capability.id, args)
+          .then((text) => {
+            const current = capabilityRuns.get(runId);
+            if (!current) return;
+            current.status = CAPABILITY_RUN_STATUS_SUCCEEDED;
+            current.result = parseCapabilityResult(text);
+            current.finishedAt = new Date().toISOString();
+          })
+          .catch((error) => {
+            const current = capabilityRuns.get(runId);
+            if (!current) return;
+            current.status = CAPABILITY_RUN_STATUS_FAILED;
+            current.error = error instanceof Error ? error.message : String(error);
+            current.finishedAt = new Date().toISOString();
+          });
+        return { type: CAPABILITY_INVOKE_TYPE_RUN, runId };
       }
-      const tools = wrapCustomTools(baseTools(), { policy, audit });
-      const tool = tools.find((item) => item.name === name);
-      if (!tool) {
-        throw new Error(`unknown tool: ${name}`);
-      }
-      const result = await tool.execute("mcp", args ?? {});
-      return result.content.map((block) => block.text).join("\n");
+      const text = await invokeTool(capability.id, args);
+      return { type: CAPABILITY_INVOKE_TYPE_RESULT, result: parseCapabilityResult(text) };
+    },
+    getCapabilityRun(runId: string): CapabilityRun | undefined {
+      return capabilityRuns.get(runId);
     },
     async getContext(thebeSessionId: string): Promise<ThebeSessionContext> {
       const opened = await openSession(thebeSessionId);

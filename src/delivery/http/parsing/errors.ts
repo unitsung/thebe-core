@@ -1,5 +1,15 @@
 import { json } from "../json.ts";
 
+export const INVALID_BODY = "invalid_body";
+
+export function invalidBody(error: string): Response {
+  return json({ ok: false, error, code: INVALID_BODY }, 400);
+}
+
+export function notFound(error: string): Response {
+  return json({ ok: false, error }, 404);
+}
+
 export function promptBodyError(result: { error: string; status?: number }): Response {
   return json({ error: result.error }, result.status ?? 400);
 }

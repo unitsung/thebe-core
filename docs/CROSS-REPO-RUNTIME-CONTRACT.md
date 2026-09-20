@@ -22,6 +22,12 @@ The following HTTP product objects are implemented on `dev` and are the current 
 - **Minimal Activity:** `GET /v1/activity` / `GET /v1/activity/:id` persist ActionReceipt snapshots under `{agentStoreDir}/activity`. Not a Goal/Run product. Same idempotency key maps to one record. List/display use 0 tokens.
 - **Activity v1 groups:** Diagnosis runs persist as `container.diagnose`. `GET /v1/activity?group=needs_approval|running|recent` (and a `group` field on each record). A diagnosis with an unexecuted `container.restart` recommendation is `needs_approval` until a restart receipt with that `diagnosisRunId` exists. Running is empty while diagnosis/restart stay synchronous. 0 tokens.
 - **Product Goal HTTP:** `POST/GET /v1/goals`, `GET /v1/goals/{id}`, `POST /v1/goals/{id}/pause|resume|stop`, `GET /v1/goals/{id}/log` (JSON or SSE). Identity is the parent `thebeSessionId` (`id` === `sessionId`); no separate Goal id and no `GET /v1/goals/{id}/runs`. Runtime `pausing` collapses to product `running`. Session-scoped aliases: `/v1/session/{id}/goal*`. Responses are `ProductGoal` / `ProductGoalEvent`, not Pi/MCP internals. Swift Goal Store is out of scope for this slice.
+- **Capability product HTTP:** `GET /v1/capabilities` includes `resourceKinds` / `execution` / `background`. `POST /v1/capabilities/{id}/invoke` goes through `ThebeAgent` (direct result or background run id). Writes that require on-device approval (`container.restart`) stay on `POST /v1/action`.
+- **Worker HTTP:** `/v1/subagents` (profiles, spawn, list, get, cancel, log). Product JSON is `ProductWorker` from `SubagentRun`; clients do not read the parent transcript.
+- **Runtime pending permissions:** `GET /v1/permissions` / `{id}` / `POST .../resolve`. Redacted input. Distinct from Activity diagnose-restart Approvals. Session permission resolve remains.
+- **Skills / MCP inventory / enabled resources / permission mode:** `GET/PATCH /v1/skills/{name}`; `GET /v1/extensions/mcp/servers|tools` (raw `/mcp` remains); `GET/PUT/DELETE /v1/resources/enabled/{id}`; `GET/PATCH /v1/settings/permissions`.
+
+Leftover (not this slice): App clients, `GET /v1/audit`, artifacts, auto-summary settings dump, Goal `/runs` identity rewrite, replacing `/mcp`, a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`.
 
 The App must not call raw MCP `tools/call` for these workflows.
 

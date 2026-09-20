@@ -18,6 +18,17 @@ export type JellyfinAdapterOptions = {
 
 type Json = Record<string, unknown>;
 
+function cleanBaseUrl(raw: string): string {
+  let value = raw.trim().replace(/\/+$/, "");
+  for (const suffix of ["/api/v2.0", "/api/v2", "/api"]) {
+    if (value.toLowerCase().endsWith(suffix)) {
+      value = value.slice(0, -suffix.length);
+      break;
+    }
+  }
+  return value.replace(/\/+$/, "");
+}
+
 export class JellyfinAdapter implements MediaLibraryProvider {
   // Official: Authorization: MediaBrowser Token="…". No /emby prefix (removed in 12.0).
   // Same MediaBrowser JSON as Emby for Views, Items/Latest, Sessions.
@@ -27,7 +38,7 @@ export class JellyfinAdapter implements MediaLibraryProvider {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: JellyfinAdapterOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/$/, "");
+    this.baseUrl = cleanBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey;
     this.userId = options.userId;
     this.fetchImpl = options.fetch ?? fetch;

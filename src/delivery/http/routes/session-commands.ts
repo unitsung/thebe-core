@@ -1,7 +1,11 @@
+import {
+  PERMISSION_REMEMBER_SCOPES,
+  PERMISSION_RESPONSES,
+} from "../../../agent/runtime/interface.ts";
 import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { asObject, asStringMap, json, readJson } from "../json.ts";
 import { promptBodyError } from "../parsing/errors.ts";
-import { parseThinkingLevel } from "../parsing/query.ts";
+import { asMember, parseThinkingLevel } from "../parsing/query.ts";
 import { readPromptBody } from "../parsing/prompt.ts";
 
 type Agent = NonNullable<ThebeHttpContext["agent"]>;
@@ -89,12 +93,7 @@ export async function handleSessionCommands(
   }
   if (method === "POST" && action === "permission" && extra) {
     const body = await readJson(request);
-    const response =
-      body.response === "deny"
-        ? "deny"
-        : body.response === "allow"
-          ? "allow"
-          : null;
+    const response = asMember(body.response, PERMISSION_RESPONSES);
     if (!response) {
       return json(
         { ok: false, error: "response must be 'allow' or 'deny'" },
@@ -104,12 +103,8 @@ export async function handleSessionCommands(
     await agent.resolvePermission(id, extra, {
       response,
       remember: Boolean(body.remember),
-      rememberScope:
-        body.rememberScope === "tool"
-          ? "tool"
-          : body.rememberScope === "conversation"
-            ? "conversation"
-            : "request",
+      rememberScope: asMember(body.rememberScope, PERMISSION_REMEMBER_SCOPES) ??
+        PERMISSION_REMEMBER_SCOPES[0],
     });
     return json({ ok: true });
   }

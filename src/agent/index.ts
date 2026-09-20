@@ -3,10 +3,24 @@ export type { ThebeAgent } from "./interface.ts";
 export type {
   HomelabCapability,
   HomelabCapabilityCategory,
+  HomelabCapabilityExecution,
   HomelabCapabilityPermission,
   McpServerInfo,
   McpToolInfo,
 } from "./extensions/mcp.ts";
+export { withProductMetadata } from "./extensions/mcp.ts";
+export type {
+  CapabilityInvokeInput,
+  CapabilityInvokeMode,
+  CapabilityInvokeResult,
+  CapabilityRun,
+  CapabilityRunStatus,
+} from "./capabilities/invoke.ts";
+export type { ProductPendingPermission } from "./security/pending-permission.ts";
+export type { ProductSkill } from "./extensions/product.ts";
+export { toProductSkill, toProductCapability } from "./extensions/product.ts";
+export type { ProductWorker, ProductSubagentProfile } from "./subagents/product.ts";
+export { toProductWorker, toProductSubagentProfile } from "./subagents/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
 export type { JudgmentModel } from "./judgment/interface.ts";
 export type { JudgmentApi } from "./judgment/service.ts";

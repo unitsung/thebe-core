@@ -8,6 +8,7 @@ const PERMISSION_TTL_MS = 10 * 60 * 1000;
 export type PendingPermission = {
   request: PermissionRequest;
   thebeSessionId?: string;
+  requestedAt: string;
   resolve: (decision: "allow" | "deny") => void;
   timer?: ReturnType<typeof setTimeout>;
 };
@@ -84,6 +85,7 @@ export function createPermissionControl(input: {
           pendingPermissions.set(request.permissionId, {
             request,
             thebeSessionId,
+            requestedAt: new Date().toISOString(),
             resolve,
             timer,
           });

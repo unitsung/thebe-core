@@ -1,10 +1,18 @@
 import type { ThinkingLevel } from "../../../agent/index.ts";
 
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const satisfies readonly ThinkingLevel[];
+
+export function asMember<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T | undefined {
+  return typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : undefined;
+}
 
 export function parseThinkingLevel(value: unknown): ThinkingLevel | undefined {
-  return typeof value === "string" && (THINKING_LEVELS as string[]).includes(value)
-    ? value as ThinkingLevel : undefined;
+  return asMember(value, THINKING_LEVELS);
 }
 
 const MAX_MESSAGE_LIMIT = 500;

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "./product-paths.ts";
 
 /**
  * The HTTP contract is kept next to the router and exposed at runtime so
@@ -29,6 +30,9 @@ type Operation = {
   response?: number;
   responseContentType?: string;
   requestBody?: Record<string, unknown>;
+  requestSchema?: string;
+  responseSchema?: string;
+  extraStatuses?: Array<{ status: number; description: string; schema?: string }>;
   parameters?: Array<Record<string, unknown>>;
 };
 
@@ -57,7 +61,28 @@ const operations: Operation[] = [
   { method: "post", path: "/v1/system/unquiesce", summary: "Leave maintenance mode", tag: "system" },
   { method: "post", path: "/v1/system/reap", summary: "Reap idle sessions", tag: "system" },
   { method: "get", path: "/v1/agent/running", summary: "List running sessions", tag: "system" },
-  { method: "get", path: "/v1/capabilities", summary: "List homelab capabilities", tag: "capabilities" },
+  { method: "get", path: PRODUCT_HTTP_PATH.capabilities, summary: "List homelab capabilities", tag: "capabilities", responseSchema: "CapabilityList" },
+  { method: "post", path: `${PRODUCT_HTTP_PATH.capabilities}/{id}/${PRODUCT_HTTP_SEGMENT.invoke}`, summary: "Invoke a capability through ThebeAgent", tag: "capabilities", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "CapabilityInvokeRequest", responseSchema: "CapabilityInvokeResult", extraStatuses: [{ status: 202, description: "Background run started", schema: "CapabilityInvokeResult" }, { status: 403, description: "Write requires POST /v1/action" }] },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}`, summary: "Read a background capability run", tag: "capabilities", parameters: [idParameter("runId")], responseSchema: "CapabilityRun" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/${PRODUCT_HTTP_SEGMENT.profiles}`, summary: "List subagent profiles", tag: "workers", responseSchema: "SubagentProfileList" },
+  { method: "get", path: PRODUCT_HTTP_PATH.subagents, summary: "List subagent runs", tag: "workers", parameters: [queryParameter("parentSessionId")], responseSchema: "WorkerList" },
+  { method: "post", path: PRODUCT_HTTP_PATH.subagents, summary: "Spawn a subagent worker", tag: "workers", response: 201, requestBody: { required: true }, requestSchema: "SpawnWorkerRequest", responseSchema: "ProductWorker" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}`, summary: "Inspect one subagent run", tag: "workers", parameters: [idParameter("runId")], responseSchema: "ProductWorker" },
+  { method: "post", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.cancel}`, summary: "Cancel a subagent run", tag: "workers", parameters: [idParameter("runId")], responseSchema: "ProductWorker" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.log}`, summary: "Read worker activity without the parent transcript", tag: "workers", parameters: [idParameter("runId")], responseSchema: "WorkerLog" },
+  { method: "get", path: PRODUCT_HTTP_PATH.permissions, summary: "List runtime pending permissions (not Activity Approvals)", tag: "permissions", responseSchema: "PendingPermissionList" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.permissions}/{id}`, summary: "Read one pending permission with redacted input", tag: "permissions", parameters: [idParameter()], responseSchema: "PendingPermission" },
+  { method: "post", path: `${PRODUCT_HTTP_PATH.permissions}/{id}/${PRODUCT_HTTP_SEGMENT.resolve}`, summary: "Approve or deny a pending permission", tag: "permissions", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "PermissionResolution", responseSchema: "Ok" },
+  { method: "get", path: PRODUCT_HTTP_PATH.skills, summary: "List skills", tag: "skills", responseSchema: "SkillList" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Get skill metadata", tag: "skills", parameters: [idParameter("name")], responseSchema: "Skill" },
+  { method: "patch", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Enable or disable a skill", tag: "skills", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "SkillPatch", responseSchema: "Skill" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`, summary: "List MCP servers", tag: "extensions", responseSchema: "McpServerList" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.tools}`, summary: "List external MCP tools", tag: "extensions", responseSchema: "McpToolList" },
+  { method: "get", path: PRODUCT_HTTP_PATH.enabledResources, summary: "List enabled Agent resources", tag: "resources", responseSchema: "EnabledResourceList" },
+  { method: "put", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Put an enabled resource", tag: "resources", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "EnabledResourceWrite", responseSchema: "EnabledResource" },
+  { method: "delete", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Remove an enabled resource", tag: "resources", parameters: [idParameter()], responseSchema: "Ok" },
+  { method: "get", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Read permission mode", tag: "settings", responseSchema: "PermissionModeSettings" },
+  { method: "patch", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Set permission mode", tag: "settings", requestBody: { required: true }, requestSchema: "PermissionModeSettings", responseSchema: "PermissionModeSettings" },
   { method: "post", path: "/v1/diagnosis", summary: "Run a read-only container diagnosis", tag: "diagnosis", requestBody: { required: true } },
   { method: "get", path: "/v1/diagnosis/{runId}", summary: "Read a diagnosis run", tag: "diagnosis", parameters: [idParameter("runId")] },
   { method: "post", path: "/v1/diagnosis/{runId}/why", summary: "Ask why a diagnosis was reached", tag: "diagnosis", parameters: [idParameter("runId")], requestBody: { required: false } },
@@ -117,33 +142,52 @@ const operations: Operation[] = [
   { method: "post", path: "/mcp", summary: "MCP JSON-RPC endpoint", tag: "mcp", requestBody: { required: true } },
 ];
 
+function schemaRef(name?: string): Record<string, unknown> {
+  return name ? { $ref: `#/components/schemas/${name}` } : jsonSchema;
+}
+
 export function createOpenApiDocument(version: string): OpenApiDocument {
   const paths: OpenApiDocument["paths"] = {};
   for (const operation of operations) {
     const path = (paths[operation.path] ??= {});
+    const successStatus = String(operation.response ?? 200);
+    const responses: Record<string, unknown> = {
+      [successStatus]: {
+        description: operation.response === 501 ? "Feature is not available" : "Successful response",
+        content: {
+          [operation.responseContentType ?? "application/json"]: {
+            schema: operation.responseContentType === "text/event-stream"
+              ? { type: "string" }
+              : schemaRef(operation.responseSchema),
+          },
+        },
+      },
+      "400": { description: "Invalid request" },
+      "401": { description: "Missing or invalid token" },
+      "404": { description: "Resource not found" },
+      "409": { description: "Session is busy" },
+      "503": { description: "Service unavailable or quiesced" },
+    };
+    for (const extra of operation.extraStatuses ?? []) {
+      responses[String(extra.status)] = {
+        description: extra.description,
+        ...(extra.schema
+          ? { content: { "application/json": { schema: schemaRef(extra.schema) } } }
+          : {}),
+      };
+    }
     path[operation.method] = {
       summary: operation.summary,
       operationId: `${operation.method}_${operation.path.replaceAll(/[{}\/]/g, "_").replaceAll(/_+/g, "_")}`,
       tags: [operation.tag],
       parameters: operation.parameters,
       requestBody: operation.requestBody
-        ? { ...operation.requestBody, content: { "application/json": { schema: jsonSchema } } }
+        ? {
+            ...operation.requestBody,
+            content: { "application/json": { schema: schemaRef(operation.requestSchema) } },
+          }
         : undefined,
-      responses: {
-        [String(operation.response ?? 200)]: {
-          description: operation.response === 501 ? "Feature is not available" : "Successful response",
-          content: {
-            [operation.responseContentType ?? "application/json"]: {
-              schema: operation.responseContentType === "text/event-stream" ? { type: "string" } : jsonSchema,
-            },
-          },
-        },
-        "400": { description: "Invalid request" },
-        "401": { description: "Missing or invalid token" },
-        "404": { description: "Resource not found" },
-        "409": { description: "Session is busy" },
-        "503": { description: "Service unavailable or quiesced" },
-      },
+      responses,
     };
   }
   return {
@@ -165,7 +209,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "prompt", description: "Prompt execution and approvals" },
       { name: "models", description: "Model selection" },
       { name: "providers", description: "Provider discovery and authentication" },
-      { name: "capabilities", description: "Homelab capability and plugin discovery" },
+      { name: "capabilities", description: "Homelab capability discovery and Agent-mediated invoke" },
+      { name: "workers", description: "Subagent runs presented as Workers; no parent transcript" },
+      { name: "permissions", description: "Runtime pending tool permissions. Distinct from Activity diagnose-restart Approvals." },
+      { name: "skills", description: "Skill list/get/enable; no skill-file editing" },
+      { name: "extensions", description: "Product MCP inventory; raw /mcp remains for integrations" },
+      { name: "resources", description: "Enabled Agent resources/context, not a Resource database" },
+      { name: "settings", description: "Runtime behavior settings consumed by the App" },
       { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
       { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
       { name: "activity", description: "Minimal persisted ActionReceipt records; not a Goal/Run system" },
@@ -182,6 +232,262 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         Error: {
           type: "object",
           properties: { ok: { type: "boolean" }, error: { type: "string" }, code: { type: "string" } },
+        },
+        Ok: {
+          type: "object",
+          properties: { ok: { type: "boolean" } },
+        },
+        HomelabCapability: {
+          type: "object",
+          required: ["id", "name", "description", "inputSchema", "category", "permission", "source"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            description: { type: "string" },
+            inputSchema: { type: "object", additionalProperties: true },
+            category: { type: "string", enum: ["files", "media", "downloads", "containers", "automation", "diagnostics", "other"] },
+            permission: { type: "string", enum: ["read", "confirm", "admin"] },
+            effect: { type: "string", enum: ["read", "write"] },
+            risk: { type: "string", enum: ["low", "disruptive"] },
+            approval: { type: "string", enum: ["none", "required"] },
+            service: { type: "string" },
+            source: { type: "string", enum: ["core", "external"] },
+            serverName: { type: "string" },
+            resourceKinds: { type: "array", items: { type: "string" } },
+            execution: { type: "string", enum: ["direct", "agent", "goal", "either"] },
+            background: { type: "boolean" },
+            destructive: { type: "boolean" },
+            outputKind: { type: "string" },
+          },
+        },
+        CapabilityList: {
+          type: "object",
+          required: ["capabilities"],
+          properties: {
+            capabilities: { type: "array", items: { $ref: "#/components/schemas/HomelabCapability" } },
+          },
+        },
+        CapabilityInvokeRequest: {
+          type: "object",
+          properties: {
+            arguments: { type: "object", additionalProperties: true },
+            mode: { type: "string", enum: ["direct", "background"] },
+            resource: { type: "object", additionalProperties: true },
+          },
+        },
+        CapabilityInvokeResult: {
+          type: "object",
+          required: ["type"],
+          properties: {
+            type: { type: "string", enum: ["result", "run"] },
+            result: { description: "Direct invoke payload", nullable: true },
+            runId: { type: "string" },
+          },
+        },
+        CapabilityRun: {
+          type: "object",
+          required: ["runId", "capabilityId", "status", "createdAt"],
+          properties: {
+            runId: { type: "string" },
+            capabilityId: { type: "string" },
+            status: { type: "string", enum: ["queued", "running", "succeeded", "failed"] },
+            createdAt: { type: "string" },
+            finishedAt: { type: "string" },
+            result: { description: "Direct invoke payload", nullable: true },
+            error: { type: "string" },
+          },
+        },
+        ProductWorker: {
+          type: "object",
+          required: ["runId", "parentSessionId", "profileName", "task", "status"],
+          properties: {
+            runId: { type: "string" },
+            parentSessionId: { type: "string" },
+            profileName: { type: "string" },
+            task: { type: "string" },
+            status: { type: "string", enum: ["queued", "running", "completed", "failed", "cancelled"] },
+            turns: { type: "integer" },
+            maxTurns: { type: "integer" },
+            createdAt: { type: "string" },
+            startedAt: { type: "string" },
+            finishedAt: { type: "string" },
+            responseText: { type: "string" },
+            activity: { type: "array", items: { type: "object", additionalProperties: true } },
+            result: { type: "string" },
+            error: { type: "string" },
+          },
+        },
+        ProductSubagentProfile: {
+          type: "object",
+          required: ["name", "description", "scope"],
+          properties: {
+            name: { type: "string" },
+            description: { type: "string" },
+            scope: { type: "string", enum: ["project", "global", "builtin"] },
+            tools: { type: "array", items: { type: "string" } },
+            maxTurns: { type: "integer" },
+          },
+        },
+        SubagentProfileList: {
+          type: "object",
+          required: ["profiles"],
+          properties: {
+            profiles: { type: "array", items: { $ref: "#/components/schemas/ProductSubagentProfile" } },
+          },
+        },
+        WorkerList: {
+          type: "object",
+          required: ["subagents"],
+          properties: {
+            subagents: { type: "array", items: { $ref: "#/components/schemas/ProductWorker" } },
+          },
+        },
+        WorkerLog: {
+          type: "object",
+          required: ["activity"],
+          properties: {
+            activity: { type: "array", items: { type: "object", additionalProperties: true } },
+          },
+        },
+        SpawnWorkerRequest: {
+          type: "object",
+          required: ["profileName", "parentSessionId"],
+          properties: {
+            profileName: { type: "string" },
+            task: { type: "string" },
+            taskPrompt: { type: "string" },
+            parentSessionId: { type: "string" },
+          },
+        },
+        PendingPermission: {
+          type: "object",
+          required: ["id", "sessionId", "toolName", "title", "requestedAt", "rememberScopes"],
+          properties: {
+            id: { type: "string" },
+            sessionId: { type: "string" },
+            toolName: { type: "string" },
+            title: { type: "string" },
+            reason: { type: "string" },
+            input: { description: "Redacted tool arguments", nullable: true },
+            argsSummary: { type: "string" },
+            requestedAt: { type: "string" },
+            rememberScopes: { type: "array", items: { type: "string", enum: ["request", "tool", "conversation"] } },
+            risk: { type: "string", enum: ["high", "standard"] },
+          },
+        },
+        PendingPermissionList: {
+          type: "object",
+          required: ["permissions"],
+          properties: {
+            permissions: { type: "array", items: { $ref: "#/components/schemas/PendingPermission" } },
+          },
+        },
+        PermissionResolution: {
+          type: "object",
+          required: ["response"],
+          properties: {
+            response: { type: "string", enum: ["allow", "deny"] },
+            remember: { type: "boolean" },
+            rememberScope: { type: "string", enum: ["request", "tool", "conversation"] },
+          },
+        },
+        Skill: {
+          type: "object",
+          required: ["name", "description", "scope", "enabled"],
+          properties: {
+            name: { type: "string" },
+            description: { type: "string" },
+            scope: { type: "string", enum: ["project", "global", "builtin"] },
+            enabled: { type: "boolean" },
+          },
+        },
+        SkillList: {
+          type: "object",
+          required: ["skills"],
+          properties: {
+            skills: { type: "array", items: { $ref: "#/components/schemas/Skill" } },
+          },
+        },
+        SkillPatch: {
+          type: "object",
+          required: ["enabled"],
+          properties: { enabled: { type: "boolean" } },
+        },
+        McpServer: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string" },
+            command: { type: "string" },
+            url: { type: "string" },
+            service: { type: "string" },
+            status: { type: "string" },
+            error: { type: "string" },
+            toolCount: { type: "integer" },
+            disabled: { type: "boolean" },
+          },
+        },
+        McpTool: {
+          type: "object",
+          description: "External MCP tool. Same shape as HomelabCapability with source=external.",
+          required: ["id", "name", "source"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            description: { type: "string" },
+            source: { type: "string", enum: ["external"] },
+            serverName: { type: "string" },
+            category: { type: "string" },
+            permission: { type: "string" },
+            inputSchema: { type: "object", additionalProperties: true },
+          },
+        },
+        McpServerList: {
+          type: "object",
+          required: ["servers"],
+          properties: {
+            servers: { type: "array", items: { $ref: "#/components/schemas/McpServer" } },
+          },
+        },
+        McpToolList: {
+          type: "object",
+          required: ["tools"],
+          properties: {
+            tools: { type: "array", items: { $ref: "#/components/schemas/McpTool" } },
+          },
+        },
+        EnabledResource: {
+          type: "object",
+          required: ["identity", "version", "source", "kind"],
+          properties: {
+            identity: { type: "string" },
+            version: { type: "string" },
+            source: { type: "string" },
+            kind: { type: "string", enum: ["skill", "extension", "prompt"] },
+          },
+        },
+        EnabledResourceWrite: {
+          type: "object",
+          required: ["kind", "version", "source"],
+          properties: {
+            kind: { type: "string", enum: ["skill", "extension", "prompt"] },
+            version: { type: "string" },
+            source: { type: "string" },
+          },
+        },
+        EnabledResourceList: {
+          type: "object",
+          required: ["resources"],
+          properties: {
+            resources: { type: "array", items: { $ref: "#/components/schemas/EnabledResource" } },
+          },
+        },
+        PermissionModeSettings: {
+          type: "object",
+          required: ["mode"],
+          properties: {
+            mode: { type: "string", enum: ["ask", "read-only", "full-access"] },
+          },
         },
         ProductGoal: {
           type: "object",

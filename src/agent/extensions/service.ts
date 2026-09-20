@@ -3,6 +3,7 @@ import type { EnabledResource } from "../runtime/index.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
   listCoreMcpTools,
+  withProductMetadata,
   type HomelabCapability,
   type McpServerInfo,
   type McpToolInfo,
@@ -22,8 +23,30 @@ export function createExtensionApi(ctx: AgentContext) {
   }
 
   const listCapabilities = async (): Promise<HomelabCapability[]> => (
-    [...listCoreMcpTools(), ...(await ctx.mcp.listTools())]
+    [...listCoreMcpTools(), ...(await ctx.mcp.listTools())].map(withProductMetadata)
   );
+
+  async function putEnabledResource(resource: EnabledResource): Promise<EnabledResource> {
+    const index = enabledResources.findIndex(
+      (item) => item.identity === resource.identity,
+    );
+    if (index >= 0) {
+      enabledResources[index] = resource;
+    } else {
+      enabledResources.push(resource);
+    }
+    await audit?.append({
+      method: "resource.enable",
+      parameterHash: hashParameters(resource),
+      responseBytes: 0,
+      budgetConsumed: 0,
+      redactionFired: false,
+      identity: resource.identity,
+      version: resource.version,
+      source: resource.source,
+    });
+    return resource;
+  }
 
   return {
     async listSkills(): Promise<SkillInfo[]> {
@@ -75,17 +98,16 @@ export function createExtensionApi(ctx: AgentContext) {
       ctx.mcp.close();
     },
     async enableResource(resource: EnabledResource): Promise<void> {
-      enabledResources.push(resource);
-      await audit?.append({
-        method: "resource.enable",
-        parameterHash: hashParameters(resource),
-        responseBytes: 0,
-        budgetConsumed: 0,
-        redactionFired: false,
-        identity: resource.identity,
-        version: resource.version,
-        source: resource.source,
-      });
+      await putEnabledResource(resource);
+    },
+    putEnabledResource,
+    async removeEnabledResource(identity: string): Promise<boolean> {
+      const index = enabledResources.findIndex(
+        (item) => item.identity === identity,
+      );
+      if (index < 0) return false;
+      enabledResources.splice(index, 1);
+      return true;
     },
     enabledResources(): EnabledResource[] {
       return enabledResources.slice();

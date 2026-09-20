@@ -26,6 +26,12 @@ import type {
   McpServerInfo,
   McpToolInfo,
 } from "./extensions/mcp.ts";
+import type {
+  CapabilityInvokeInput,
+  CapabilityInvokeResult,
+  CapabilityRun,
+} from "./capabilities/invoke.ts";
+import type { ProductPendingPermission } from "./security/pending-permission.ts";
 import type { SubagentProfile } from "./subagents/catalog.ts";
 import type {
   GoalRun,
@@ -138,6 +144,9 @@ export interface ThebeAgent {
   unrevert(thebeSessionId?: string): Promise<void>;
   resolvePermission(thebeSessionId: string, permissionId: string, decision: PermissionResolution): Promise<void>;
   pendingPermissionIds(): string[];
+  listPendingPermissions(): ProductPendingPermission[];
+  getPendingPermission(id: string): ProductPendingPermission | undefined;
+  resolvePendingPermission(id: string, decision: PermissionResolution): Promise<void>;
   setModel(thebeSessionId: string, model: RuntimeModelRef): Promise<void>;
   setThinkingLevel(thebeSessionId: string, level: import("./runtime/interface.ts").ThinkingLevel): Promise<RuntimeThinkingInfo>;
   getThinkingInfo(thebeSessionId: string): Promise<RuntimeThinkingInfo>;
@@ -161,6 +170,8 @@ export interface ThebeAgent {
   cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun>;
   getForkMessages(thebeSessionId?: string): Promise<Array<{ entryId: string; text: string }>>;
   enableResource(resource: EnabledResource): Promise<void>;
+  putEnabledResource(resource: EnabledResource): Promise<EnabledResource>;
+  removeEnabledResource(identity: string): Promise<boolean>;
   enabledResources(): EnabledResource[];
 
   startGoal(input: { thebeSessionId: string; goal: string; criteria?: string[]; maxIterations?: number }): Promise<GoalRun>;
@@ -183,6 +194,8 @@ export interface ThebeAgent {
   listProviders(query?: { all?: boolean }): Promise<RuntimeProvider[]>;
   exportSession(thebeSessionId?: string): Promise<RuntimeExport>;
   invokeTool(name: string, args: unknown): Promise<string>;
+  invokeCapability(id: string, input?: CapabilityInvokeInput): Promise<CapabilityInvokeResult>;
+  getCapabilityRun(runId: string): CapabilityRun | undefined;
   diagnose(request: DiagnosisRequest): Promise<DiagnosisResult>;
   getDiagnosis(runId: string): Promise<DiagnosisResult | undefined>;
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;

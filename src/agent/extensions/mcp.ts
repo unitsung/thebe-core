@@ -7,6 +7,9 @@ import {
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
 import {
+  EMBY_TOOL_NAMES,
+  JELLYFIN_TOOL_NAMES,
+  MEDIA_PROVIDER_IDS,
   MEDIA_READ_DESCRIPTIONS,
   MEDIA_READ_SCHEMAS,
   MEDIA_READ_TOOL_NAMES,
@@ -25,7 +28,36 @@ export const HOMELAB_CAPABILITY_CATEGORIES = [
 export type HomelabCapabilityCategory =
   (typeof HOMELAB_CAPABILITY_CATEGORIES)[number];
 
-export type HomelabCapabilityPermission = "read" | "confirm" | "admin";
+export const HOMELAB_CAPABILITY_PERMISSIONS = ["read", "confirm", "admin"] as const;
+export type HomelabCapabilityPermission =
+  (typeof HOMELAB_CAPABILITY_PERMISSIONS)[number];
+
+export const HOMELAB_CAPABILITY_EXECUTIONS = ["direct", "agent", "goal", "either"] as const;
+export type HomelabCapabilityExecution =
+  (typeof HOMELAB_CAPABILITY_EXECUTIONS)[number];
+export const DEFAULT_CAPABILITY_EXECUTION =
+  "direct" satisfies HomelabCapabilityExecution;
+
+export const HOMELAB_CAPABILITY_SOURCES = ["core", "external"] as const;
+export type HomelabCapabilitySource = (typeof HOMELAB_CAPABILITY_SOURCES)[number];
+export const CORE_CAPABILITY_SOURCE = HOMELAB_CAPABILITY_SOURCES[0];
+export const EXTERNAL_CAPABILITY_SOURCE = HOMELAB_CAPABILITY_SOURCES[1];
+
+export const CORE_CAPABILITY_SERVER = "thebe-core";
+export const CORE_CONTAINER_SERVICE = "arcane";
+export const DEFAULT_CAPABILITY_OUTPUT_KIND = "json";
+
+export const HOMELAB_RESOURCE_KINDS = {
+  container: "container",
+  mediaLibrary: "media_library",
+  mediaItem: "media_item",
+  playbackSession: "playback_session",
+  photo: "photo",
+  album: "album",
+} as const;
+
+export const LIST_CORE_EVENTS_TOOL = "list_core_events";
+export const DIAGNOSE_FROM_EVENTS_TOOL = "diagnose_from_events";
 
 /**
  * Stable metadata shared by native UI, agent prompts, and external plugins.
@@ -42,8 +74,13 @@ export type HomelabCapability = {
   risk?: "low" | "disruptive";
   approval?: "none" | "required";
   service?: string;
-  source: "core" | "external";
+  source: HomelabCapabilitySource;
   serverName?: string;
+  resourceKinds?: string[];
+  execution?: HomelabCapabilityExecution;
+  background?: boolean;
+  destructive?: boolean;
+  outputKind?: string;
 };
 
 /** MCP-compatible alias retained for existing callers and clients. */
@@ -80,10 +117,10 @@ export function createEmptyMcpRegistry(): McpRegistry {
 }
 
 const CORE_EVENT_TOOLS: Record<
-  string,
+  typeof LIST_CORE_EVENTS_TOOL | typeof DIAGNOSE_FROM_EVENTS_TOOL,
   { description: string; schema: Record<string, unknown> }
 > = {
-  list_core_events: {
+  [LIST_CORE_EVENTS_TOOL]: {
     description: "List recent events from the core event log",
     schema: {
       type: "object",
@@ -94,7 +131,7 @@ const CORE_EVENT_TOOLS: Record<
       },
     },
   },
-  diagnose_from_events: {
+  [DIAGNOSE_FROM_EVENTS_TOOL]: {
     description: "Diagnose issues from recorded core events",
     schema: {
       type: "object",
@@ -105,12 +142,51 @@ const CORE_EVENT_TOOLS: Record<
   },
 };
 
+export function withProductMetadata(capability: HomelabCapability): HomelabCapability {
+  return {
+    ...capability,
+    resourceKinds: capability.resourceKinds ?? defaultResourceKinds(capability),
+    execution: capability.execution ?? DEFAULT_CAPABILITY_EXECUTION,
+    background: capability.background ?? capability.category === "diagnostics",
+    destructive:
+      capability.destructive ??
+      (capability.effect === "write" || capability.approval === "required"),
+    outputKind: capability.outputKind ?? DEFAULT_CAPABILITY_OUTPUT_KIND,
+  };
+}
+
+const MEDIA_RESOURCE_KINDS: Record<(typeof MEDIA_READ_TOOL_NAMES)[number], string[]> = {
+  "emby.libraries": [HOMELAB_RESOURCE_KINDS.mediaLibrary],
+  "emby.recent": [HOMELAB_RESOURCE_KINDS.mediaItem],
+  "emby.sessions": [HOMELAB_RESOURCE_KINDS.playbackSession],
+  "jellyfin.libraries": [HOMELAB_RESOURCE_KINDS.mediaLibrary],
+  "jellyfin.recent": [HOMELAB_RESOURCE_KINDS.mediaItem],
+  "jellyfin.sessions": [HOMELAB_RESOURCE_KINDS.playbackSession],
+  "immich.assets": [HOMELAB_RESOURCE_KINDS.photo],
+  "immich.albums": [HOMELAB_RESOURCE_KINDS.album],
+  "immich.statistics": [HOMELAB_RESOURCE_KINDS.photo],
+};
+
+function defaultResourceKinds(capability: HomelabCapability): string[] {
+  if (capability.category === "containers") return [HOMELAB_RESOURCE_KINDS.container];
+  const mediaKinds = MEDIA_RESOURCE_KINDS[capability.id as (typeof MEDIA_READ_TOOL_NAMES)[number]];
+  if (mediaKinds) return mediaKinds;
+  if (capability.category === "media") return [HOMELAB_RESOURCE_KINDS.mediaLibrary];
+  return [];
+}
+
+function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): string {
+  if ((EMBY_TOOL_NAMES as readonly string[]).includes(name)) return MEDIA_PROVIDER_IDS.emby;
+  if ((JELLYFIN_TOOL_NAMES as readonly string[]).includes(name)) return MEDIA_PROVIDER_IDS.jellyfin;
+  return MEDIA_PROVIDER_IDS.immich;
+}
+
 export function listCoreMcpTools(): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
 
   for (const name of CONTAINER_TOOL_NAMES) {
     const meta = CONTAINER_CAPABILITY_METADATA[name];
-    tools.push({
+    tools.push(withProductMetadata({
       id: name,
       name,
       description:
@@ -121,13 +197,13 @@ export function listCoreMcpTools(): McpToolInfo[] {
       effect: meta.effect,
       risk: meta.risk,
       approval: meta.approval,
-      service: "arcane",
-      source: "core",
-      serverName: "thebe-core",
-    });
+      service: CORE_CONTAINER_SERVICE,
+      source: CORE_CAPABILITY_SOURCE,
+      serverName: CORE_CAPABILITY_SERVER,
+    }));
   }
   const restartMeta = CONTAINER_CAPABILITY_METADATA[CONTAINER_RESTART_ACTION_ID];
-  tools.push({
+  tools.push(withProductMetadata({
     id: CONTAINER_RESTART_ACTION_ID,
     name: CONTAINER_RESTART_ACTION_ID,
     description: CONTAINER_TOOL_DESCRIPTIONS[CONTAINER_RESTART_ACTION_ID],
@@ -137,32 +213,30 @@ export function listCoreMcpTools(): McpToolInfo[] {
     effect: restartMeta.effect,
     risk: restartMeta.risk,
     approval: restartMeta.approval,
-    service: "arcane",
-    source: "core",
-    serverName: "thebe-core",
-  });
+    service: CORE_CONTAINER_SERVICE,
+    source: CORE_CAPABILITY_SOURCE,
+    serverName: CORE_CAPABILITY_SERVER,
+    destructive: true,
+    background: false,
+  }));
 
   for (const [name, meta] of Object.entries(CORE_EVENT_TOOLS)) {
-    tools.push({
+    tools.push(withProductMetadata({
       id: name,
       name,
       description: meta.description,
       inputSchema: meta.schema,
       category: "diagnostics",
       permission: "read",
-      service: "thebe-core",
-      source: "core",
-      serverName: "thebe-core",
-    });
+      service: CORE_CAPABILITY_SERVER,
+      source: CORE_CAPABILITY_SOURCE,
+      serverName: CORE_CAPABILITY_SERVER,
+      background: true,
+    }));
   }
 
   for (const name of MEDIA_READ_TOOL_NAMES) {
-    const service = name.startsWith("emby.")
-      ? "emby"
-      : name.startsWith("jellyfin.")
-        ? "jellyfin"
-        : "immich";
-    tools.push({
+    tools.push(withProductMetadata({
       id: name,
       name,
       description: MEDIA_READ_DESCRIPTIONS[name],
@@ -172,10 +246,10 @@ export function listCoreMcpTools(): McpToolInfo[] {
       effect: "read",
       risk: "low",
       approval: "none",
-      service,
-      source: "core",
-      serverName: "thebe-core",
-    });
+      service: mediaServiceForTool(name),
+      source: CORE_CAPABILITY_SOURCE,
+      serverName: CORE_CAPABILITY_SERVER,
+    }));
   }
 
   return tools;
