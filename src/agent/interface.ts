@@ -177,7 +177,7 @@ export interface ThebeAgent {
   closeMcp(): void;
   listSubagentProfiles(): Promise<SubagentProfile[]>;
   spawnSubagent(input: { profileName: string; taskPrompt: string; parentSessionId: string }): Promise<SubagentRun>;
-  listSubagents(parentSessionId?: string): SubagentRun[];
+  listSubagents(parentSessionId?: string): Promise<SubagentRun[]>;
   restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void;
   getSubagent(runId: string): SubagentRun | undefined;
   subscribeSubagent(runId: string, listener: (update: SubagentUpdate) => void): () => void;

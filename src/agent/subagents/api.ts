@@ -23,7 +23,7 @@ export function createSubagentApi(ctx: AgentContext) {
   } = ctx;
   const subagentPersistence = new Map<string, Promise<void>>();
 
-  async function persistTerminalSubagent(run: SubagentRun): Promise<void> {
+  async function persistSubagentSnapshot(run: SubagentRun): Promise<void> {
     const previous = subagentPersistence.get(run.parentSessionId) ?? Promise.resolve();
     const current = previous.then(async () => {
       try {
@@ -85,7 +85,8 @@ export function createSubagentApi(ctx: AgentContext) {
       if (event.type === "permission_requested") ctx.appendEvent(parentSessionId, event);
     },
     rejectPendingPermission,
-    onTerminal: persistTerminalSubagent,
+    onSnapshot: persistSubagentSnapshot,
+    onTerminal: persistSubagentSnapshot,
   });
   registerSubagentParentCanceller(subagentRuns.cancelForParent);
 
@@ -104,13 +105,24 @@ export function createSubagentApi(ctx: AgentContext) {
       if (!profile) throw new Error(`unknown subagent profile: ${spawn.profileName}`);
       if (!spawn.taskPrompt.trim()) throw new Error("subagent task cannot be empty");
       await lookup(spawn.parentSessionId);
-      return subagentRuns.spawn({ profile, task: spawn.taskPrompt, parentSessionId: spawn.parentSessionId });
+      const run = subagentRuns.spawn({ profile, task: spawn.taskPrompt, parentSessionId: spawn.parentSessionId });
+      void persistSubagentSnapshot(run);
+      return run;
     },
-    listSubagents(parentSessionId?: string): SubagentRun[] {
+    async listSubagents(parentSessionId?: string): Promise<SubagentRun[]> {
+      const metas = await ctx.listMetas();
+      const recovered: SubagentRun[] = [];
+      for (const meta of metas) {
+        recovered.push(...subagentRuns.restore(meta.subagentRuns ?? []));
+      }
+      await Promise.all(recovered.map(persistSubagentSnapshot));
       return subagentRuns.list(parentSessionId);
     },
     restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void {
-      subagentRuns.restore(restoredRuns.filter((run) => run.parentSessionId === parentSessionId));
+      const recovered = subagentRuns.restore(
+        restoredRuns.filter((run) => run.parentSessionId === parentSessionId),
+      );
+      void Promise.all(recovered.map(persistSubagentSnapshot));
     },
     getSubagent(runId: string): SubagentRun | undefined {
       return subagentRuns.get(runId);

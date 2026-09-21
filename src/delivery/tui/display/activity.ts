@@ -22,7 +22,7 @@ export const activityGlyph = {
 
 export function subagentStatusGlyph(status: SubagentRunStatus): string {
   if (status === "completed") return activityGlyph.result;
-  if (status === "failed") return activityGlyph.error;
+  if (status === "failed" || status === "interrupted") return activityGlyph.error;
   if (status === "cancelled") return activityGlyph.cancelled;
   if (status === "queued") return activityGlyph.queued;
   return activityGlyph.running;

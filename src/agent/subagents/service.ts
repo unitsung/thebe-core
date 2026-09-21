@@ -25,6 +25,8 @@ import {
 const DEFAULT_MAX_TURNS = 5;
 const MAX_ALLOWED_TURNS = 50;
 const MAX_RETAINED_RUNS = 100;
+export const SUBAGENT_RUN_INTERRUPTED_ERROR =
+  "Subagent run interrupted when Core restarted.";
 
 type MutableRun = SubagentExecutionRun;
 export type { SubagentSessionFactory } from "./execution.ts";
@@ -46,6 +48,7 @@ export function createSubagentRunManager(options: {
   createSession: SubagentSessionFactory;
   emitToParent?: (parentSessionId: string, event: NormalizedEvent) => void;
   rejectPendingPermission?: (permissionId: string) => boolean;
+  onSnapshot?: (run: SubagentRun) => void | Promise<void>;
   onTerminal?: (run: SubagentRun) => void | Promise<void>;
 }) {
   const now = options.now ?? (() => new Date());
@@ -96,7 +99,10 @@ export function createSubagentRunManager(options: {
 
   function terminal(status: SubagentRunStatus): boolean {
     return (
-      status === "completed" || status === "failed" || status === "cancelled"
+      status === "completed" ||
+      status === "failed" ||
+      status === "cancelled" ||
+      status === "interrupted"
     );
   }
 
@@ -182,6 +188,7 @@ export function createSubagentRunManager(options: {
         recordEvent: recordRunEvent,
         notify,
         finish,
+        onSnapshot: (child) => options.onSnapshot?.(snapshot(child)),
         onFinished: () => {
           activeCount -= 1;
           decrementParent(run.parentSessionId);
@@ -337,29 +344,49 @@ export function createSubagentRunManager(options: {
     cancel: cancelRun,
     cancelForParent,
 
-    /** Rehydrate terminal child records without creating a runtime session. */
-    restore(restoredRuns: SubagentRun[]): void {
+    /** Rehydrate child records without creating a runtime session. */
+    restore(restoredRuns: SubagentRun[]): SubagentRun[] {
+      const recovered: SubagentRun[] = [];
       for (const record of restoredRuns) {
-        if (runs.has(record.runId) || !terminal(record.status)) continue;
-        const activity = record.activity?.map((entry) => {
+        if (runs.has(record.runId) || (!terminal(record.status) && !active(record.status))) continue;
+        const recoveryAt = active(record.status) ? now().toISOString() : undefined;
+        const activity = (record.activity ?? []).map((entry) => {
           const restored = { ...entry };
           migrateLegacyToolDetail(restored);
           return restored;
         });
-        const nextActivityId = Math.max(
+        let nextActivityId = Math.max(
           0,
-          ...(activity ?? []).map((entry) => entry.id),
+          ...activity.map((entry) => entry.id),
         ) + 1;
+        const recoveredRecord: SubagentRun = active(record.status)
+          ? {
+              ...record,
+              status: "interrupted",
+              finishedAt: recoveryAt,
+              error: SUBAGENT_RUN_INTERRUPTED_ERROR,
+            }
+          : record;
+        if (recoveryAt) {
+          activity.push({
+            id: nextActivityId++,
+            at: recoveryAt,
+            kind: "status",
+            title: "interrupted",
+          });
+        }
         const restored: MutableRun = {
-          ...record,
+          ...recoveredRecord,
           activity,
           cancelRequested: false,
-          profile: restoredProfile(record),
+          profile: restoredProfile(recoveredRecord),
           nextActivityId,
         };
         runs.set(restored.runId, restored);
+        if (recoveryAt) recovered.push(snapshot(restored));
       }
       trimHistory();
+      return recovered;
     },
 
     limits: {
@@ -373,6 +400,10 @@ export function createSubagentRunManager(options: {
 function normalizeTurns(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_TURNS;
   return Math.max(1, Math.min(MAX_ALLOWED_TURNS, Math.floor(value as number)));
+}
+
+function active(status: SubagentRunStatus): boolean {
+  return status === "queued" || status === "running";
 }
 
 function restoredProfile(run: SubagentRun): SubagentProfile {

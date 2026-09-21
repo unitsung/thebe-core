@@ -365,7 +365,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     });
 
     expect(tui.children.at(-1)?.render(120).join("\n")).toContain("Tasks");
-    expect(agent.listSubagents(goalSession.thebeSessionId).map((run) => run.result)).toEqual([
+    expect(
+      (await agent.listSubagents(goalSession.thebeSessionId)).map((run) => run.result),
+    ).toEqual([
       "worker checkpoint result",
       "VERDICT: pass\nEVIDENCE: child artifact verified\nREMAINING: none",
     ]);

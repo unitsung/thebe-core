@@ -36,7 +36,7 @@ export type AgentSessionMeta = {
   lastSummaryAt?: string;
   /** Bounded Goal control-plane state for restoring the Tasks view. */
   goalRun?: GoalRun;
-  /** Completed ephemeral child runs retained for later inspection. */
+  /** Bounded child-run snapshots retained for later inspection and recovery. */
   subagentRuns?: SubagentRun[];
 };
 

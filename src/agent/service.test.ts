@@ -200,8 +200,10 @@ describe("Thebe agent service (fake runtime)", () => {
       finalReport: expect.stringContaining("VERDICT: pass"),
     });
     expect(agent.messages()).toEqual([]);
-    expect(agent.listSubagents(session.thebeSessionId)).toHaveLength(2);
-    expect(agent.listSubagents(session.thebeSessionId).map((run) => run.profileName)).toEqual([
+    await expect(agent.listSubagents(session.thebeSessionId)).resolves.toHaveLength(2);
+    expect(
+      (await agent.listSubagents(session.thebeSessionId)).map((run) => run.profileName),
+    ).toEqual([
       "goal-worker",
       "goal-reviewer",
     ]);
@@ -241,7 +243,9 @@ describe("Thebe agent service (fake runtime)", () => {
       status: "completed",
       finalReport: expect.stringContaining("persisted child evidence"),
     });
-    expect(resumedProduct.listSubagents(session.thebeSessionId).map((run) => run.result)).toEqual([
+    expect(
+      (await resumedProduct.listSubagents(session.thebeSessionId)).map((run) => run.result),
+    ).toEqual([
       "persisted worker result",
       "VERDICT: pass\nEVIDENCE: persisted child evidence\nREMAINING: none",
     ]);
@@ -279,7 +283,7 @@ describe("Thebe agent service (fake runtime)", () => {
       status: "completed",
       iteration: 2,
     });
-    expect(agent.listSubagents(session.thebeSessionId)).toHaveLength(3);
+    await expect(agent.listSubagents(session.thebeSessionId)).resolves.toHaveLength(3);
   });
 
   it("registers Pi built-ins together with container tools", () => {

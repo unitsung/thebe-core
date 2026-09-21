@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
@@ -118,6 +121,164 @@ describe("subagent/worker product HTTP", () => {
     expect(cancelled.status).toBe(200);
     const after = await json(cancelled);
     expect(after.status).toBe("cancelled");
+  });
+
+  it("lists persisted terminal workers after a Core restart without opening the parent session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-worker-http-"));
+    const firstFake = createFakeRuntime();
+    firstFake.queueTurns([{ kind: "text", text: "persisted worker result" }]);
+    const first = createThebeApp({
+      runtime: firstFake.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const created = await json(
+      await first.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(created.thebeSessionId);
+    const spawned = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/subagents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profileName: "diagnostics",
+          task: "persist this worker",
+          parentSessionId,
+        }),
+      }),
+    );
+    expect(spawned.status).toBe(201);
+    const worker = await json(spawned);
+    await first.agent.waitSubagent(String(worker.runId));
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const listed = await json(
+      await restarted.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/subagents"),
+      ),
+    );
+    const workers = listed.subagents as Array<Record<string, unknown>>;
+    expect(workers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId: worker.runId,
+          parentSessionId,
+          status: "completed",
+          result: "persisted worker result",
+        }),
+      ]),
+    );
+  });
+
+  it("marks a persisted active worker interrupted after a Core restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-worker-recovery-http-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const created = await json(
+      await first.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(created.thebeSessionId);
+    const spawned = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/subagents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profileName: "diagnostics",
+          task: "recover this active worker",
+          parentSessionId,
+        }),
+      }),
+    );
+    const worker = await json(spawned);
+    const runId = String(worker.runId);
+    await vi.waitFor(() => {
+      expect(first.agent.getSubagent(runId)?.status).toBe("running");
+    });
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const listed = await json(
+      await restarted.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/subagents"),
+      ),
+    );
+    const workers = listed.subagents as Array<Record<string, unknown>>;
+    expect(workers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          runId,
+          status: "interrupted",
+          error: "Subagent run interrupted when Core restarted.",
+          finishedAt: expect.any(String),
+        }),
+      ]),
+    );
+
+    await first.agent.cancelSubagent(runId, parentSessionId);
+  });
+
+  it("reads a persisted worker by id after a Core restart without listing first", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-worker-detail-http-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "worker detail result" }]);
+    const first = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const created = await json(
+      await first.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(created.thebeSessionId);
+    const spawned = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/subagents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profileName: "diagnostics",
+          task: "persist this worker detail",
+          parentSessionId,
+        }),
+      }),
+    );
+    const worker = await json(spawned);
+    const runId = String(worker.runId);
+    await first.agent.waitSubagent(runId);
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const detail = await restarted.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`),
+    );
+    expect(detail.status).toBe(200);
+    await expect(detail.json()).resolves.toEqual(
+      expect.objectContaining({
+        runId,
+        status: "completed",
+        result: "worker detail result",
+      }),
+    );
   });
 
   it("returns 404 for an unknown worker", async () => {

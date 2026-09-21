@@ -7,6 +7,8 @@ import { json, readJson } from "../json.ts";
 import { agentError, invalidBody, notFound } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
 
+type Agent = NonNullable<ThebeHttpContext["agent"]>;
+
 export async function handleSubagentRoutes(
   context: ThebeHttpContext,
 ): Promise<Response | undefined> {
@@ -22,7 +24,7 @@ export async function handleSubagentRoutes(
     }
     if (request.method === "GET" && parts.length === 2) {
       const parentSessionId = url.searchParams.get("parentSessionId") ?? undefined;
-      const subagents = agent.listSubagents(parentSessionId).map(toProductWorker);
+      const subagents = (await agent.listSubagents(parentSessionId)).map(toProductWorker);
       return json({ subagents });
     }
     if (request.method === "POST" && parts.length === 2) {
@@ -45,18 +47,20 @@ export async function handleSubagentRoutes(
     const runId = parts[2];
     if (!runId || parts.length < 3) return undefined;
     if (request.method === "GET" && parts.length === 3) {
-      const run = agent.getSubagent(runId);
+      const run = await loadSubagent(agent, runId);
       if (!run) return notFound("subagent not found");
       return json(toProductWorker(run));
     }
     if (request.method === "GET" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.log) {
-      const run = agent.getSubagent(runId);
+      const run = await loadSubagent(agent, runId);
       if (!run) return notFound("subagent not found");
       return json({ activity: run.activity ?? [] });
     }
     if (request.method === "POST" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.cancel) {
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
+      const loaded = await loadSubagent(agent, runId);
+      if (!loaded) return notFound("subagent not found");
       await agent.cancelSubagent(runId);
       const run = await agent.waitSubagent(runId);
       return json(toProductWorker(run));
@@ -65,4 +69,11 @@ export async function handleSubagentRoutes(
   } catch (error) {
     return agentError(error);
   }
+}
+
+async function loadSubagent(agent: Agent, runId: string) {
+  const live = agent.getSubagent(runId);
+  if (live) return live;
+  await agent.listSubagents();
+  return agent.getSubagent(runId);
 }

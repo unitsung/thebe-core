@@ -42,6 +42,8 @@ export function createGoalApi(
   });
 
   const MAX_GOAL_EVENTS = 50;
+  const RECOVERY_MESSAGE =
+    "Goal recovered as paused after Core restart; resume it to continue.";
 
   function broadcast(run: ManagedGoal, event: GoalEvent): void {
     run.events.push({ event, at: ctx.now().toISOString() });
@@ -151,6 +153,16 @@ export function createGoalApi(
     run.error = interrupted
       ? "The previous Goal process ended before its active checkpoint completed."
       : persisted.error;
+    if (interrupted) {
+      run.events.push({
+        event: {
+          type: "goal_status",
+          status: "paused",
+          message: RECOVERY_MESSAGE,
+        },
+        at: ctx.now().toISOString(),
+      });
+    }
     runs.set(run.thebeSessionId, run);
     if (run.status !== "running" && run.status !== "pausing") {
       run.resolveFinished(snapshot(run));

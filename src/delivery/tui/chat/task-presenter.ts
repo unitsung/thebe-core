@@ -24,17 +24,36 @@ export class TaskPresenter {
   private goalUnsub: (() => void) | undefined;
   private taskPaneClose: (() => void) | undefined;
   private childDetailClose: (() => void) | undefined;
+  private readonly runsBySession = new Map<string, SubagentRun[]>();
 
   constructor(private readonly deps: TaskPresenterDeps) {}
 
-  refreshTaskDock(): void {
-    const { agent, state, footerText, tui } = this.deps;
+  async refreshTaskDock(): Promise<void> {
+    const { agent, state } = this.deps;
     if (!agent || !state.sessionId) {
-      footerText.setTaskStatus(undefined);
+      this.deps.footerText.setTaskStatus(undefined);
       return;
     }
-    const goal = agent.getGoal(state.sessionId) ?? state.currentGoalRun;
-    const runs = agent.listSubagents(state.sessionId);
+    const sessionId = state.sessionId;
+    const goal = agent.getGoal(sessionId) ?? state.currentGoalRun;
+    this.renderTaskDock(sessionId, goal, this.runsBySession.get(sessionId) ?? []);
+    let runs: SubagentRun[];
+    try {
+      runs = await agent.listSubagents(sessionId);
+    } catch {
+      return;
+    }
+    if (state.sessionId !== sessionId) return;
+    this.runsBySession.set(sessionId, runs);
+    this.renderTaskDock(sessionId, agent.getGoal(sessionId) ?? state.currentGoalRun, runs);
+  }
+
+  private renderTaskDock(
+    _sessionId: string,
+    goal: GoalRun | undefined,
+    runs: SubagentRun[],
+  ): void {
+    const { footerText, tui } = this.deps;
     if (!goal && runs.length === 0) {
       footerText.setTaskStatus(undefined);
       tui.requestRender();
@@ -47,7 +66,9 @@ export class TaskPresenter {
       latest ? `${latest.profileName} ${latest.status} ${latest.turns}/${latest.maxTurns}` : undefined,
       `${runs.length} child${runs.length === 1 ? "" : "ren"}`,
     ].filter(Boolean);
-    footerText.setTaskStatus(parts.join(" · "), () => this.openTaskPane());
+    footerText.setTaskStatus(parts.join(" · "), () => {
+      void this.openTaskPane();
+    });
     tui.requestRender();
   }
 
@@ -55,11 +76,13 @@ export class TaskPresenter {
     this.subagentUnsub?.();
     this.subagentUnsub = undefined;
     if (!this.deps.agent || !thebeSessionId) {
-      this.refreshTaskDock();
+      void this.refreshTaskDock();
       return;
     }
-    this.subagentUnsub = this.deps.agent.subscribeSubagents(thebeSessionId, () => this.refreshTaskDock());
-    this.refreshTaskDock();
+    this.subagentUnsub = this.deps.agent.subscribeSubagents(thebeSessionId, () => {
+      void this.refreshTaskDock();
+    });
+    void this.refreshTaskDock();
   }
 
   watchGoal(thebeSessionId: string): void {
@@ -79,14 +102,14 @@ export class TaskPresenter {
 
   updateGoalStatus(run: GoalRun, _event?: GoalEvent): void {
     this.deps.state.currentGoalRun = run;
-    this.refreshTaskDock();
+    void this.refreshTaskDock();
   }
 
   clearGoalStatus(): void {
     this.goalUnsub?.();
     this.goalUnsub = undefined;
     this.deps.state.currentGoalRun = undefined;
-    this.refreshTaskDock();
+    void this.refreshTaskDock();
   }
 
   showGoalConclusion(run: GoalRun, targetSessionId: string): void {
@@ -115,7 +138,7 @@ export class TaskPresenter {
     tui.requestRender();
   }
 
-  openTaskPane(): void {
+  async openTaskPane(): Promise<void> {
     if (this.taskPaneClose) {
       this.taskPaneClose();
       this.taskPaneClose = undefined;
@@ -124,18 +147,29 @@ export class TaskPresenter {
     const { agent, state, notice, tui } = this.deps;
     const id = state.sessionId ?? agent?.lastThebeSessionId();
     if (!agent || !id) return notice("no Goal or subagent tasks yet");
-    const runs = agent.listSubagents(id);
+    let runs: SubagentRun[];
+    try {
+      runs = await agent.listSubagents(id);
+    } catch {
+      return notice("no Goal or subagent tasks yet");
+    }
+    if (state.sessionId && state.sessionId !== id) return;
     if (!agent.getGoal(id) && runs.length === 0) return notice("no Goal or subagent tasks yet");
     this.taskPaneClose = showTaskPane(tui, agent, id, () => {
       this.taskPaneClose = undefined;
-    }, (run) => this.openSubagentDetail(run));
+    }, (run) => this.openSubagentDetail(run), runs);
   }
 
-  openLatestSubagent(): void {
+  async openLatestSubagent(): Promise<void> {
     const { agent, state, notice } = this.deps;
     const id = state.sessionId ?? agent?.lastThebeSessionId();
     if (!agent || !id) return notice("no subagent runs yet");
-    const runs = agent.listSubagents(id);
+    let runs: SubagentRun[];
+    try {
+      runs = await agent.listSubagents(id);
+    } catch {
+      return notice("no subagent runs yet");
+    }
     const run = runs.find((item) => item.status === "running" || item.status === "queued") ?? runs.at(-1);
     if (!run) return notice("no subagent runs yet");
     this.openSubagentDetail(run);

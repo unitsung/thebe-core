@@ -349,7 +349,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             parentSessionId: { type: "string" },
             profileName: { type: "string" },
             task: { type: "string" },
-            status: { type: "string", enum: ["queued", "running", "completed", "failed", "cancelled"] },
+            status: { type: "string", enum: ["queued", "running", "completed", "failed", "cancelled", "interrupted"] },
             turns: { type: "integer" },
             maxTurns: { type: "integer" },
             createdAt: { type: "string" },

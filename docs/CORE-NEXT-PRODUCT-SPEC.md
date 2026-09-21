@@ -245,7 +245,8 @@ Implementation order should be:
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
 3. 🟡 Artifact model/store and the initial operation-receipt producer;
-4. capability/Goal/Worker recovery normalization;
+4. 🟡 capability/Goal/Worker recovery normalization (Worker snapshots recover
+   as `interrupted`; active Goal recovery is recorded as a paused history event);
 5. unified Activity read model and OpenAPI/client contract hardening.
 
 The current capability-run store is the reference for atomic bounded snapshots,

@@ -25,6 +25,7 @@ export type SubagentExecutionDeps = {
   appendActivity: (run: SubagentExecutionRun, activity: Parameters<typeof appendActivity>[1], merge?: boolean) => void;
   recordEvent: (run: SubagentExecutionRun, event: NormalizedEvent) => void;
   notify: (run: SubagentExecutionRun, event?: NormalizedEvent) => void;
+  onSnapshot?: (run: SubagentExecutionRun) => void | Promise<void>;
   finish: (run: SubagentExecutionRun) => Promise<void>;
   onFinished: (run: SubagentExecutionRun) => void;
 };
@@ -43,6 +44,7 @@ export async function executeSubagentRun(
     run.status = "running";
     run.startedAt = deps.now().toISOString();
     deps.appendActivity(run, { kind: "status", title: "running" });
+    await deps.onSnapshot?.(run);
     deps.notify(run);
     session = await deps.createSession({ runId: run.runId, parentSessionId: run.parentSessionId, profile: run.profile });
     deps.sessions.set(run.runId, session);

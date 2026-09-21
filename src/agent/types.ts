@@ -12,7 +12,8 @@ export type SubagentRunStatus =
   | "running"
   | "completed"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "interrupted";
 
 export type SubagentUpdate = {
   run: SubagentRun;

@@ -229,11 +229,13 @@ export function showTaskPane(
   parentSessionId: string,
   onDismiss?: () => void,
   onOpenRun?: (run: SubagentRun) => void,
+  initialRuns: SubagentRun[] = [],
 ): () => void {
   let close = (): void => {};
   let closed = false;
   const readGoal = () => agent.getGoal(parentSessionId);
-  const readRuns = () => agent.listSubagents(parentSessionId);
+  let runs = initialRuns;
+  const readRuns = () => runs;
   const pane = new TaskPaneOverlay({
     goal: readGoal(),
     runs: readRuns(),
@@ -249,12 +251,22 @@ export function showTaskPane(
     maxHeight: "100%",
     anchor: "center",
   });
-  const refresh = (): void => {
+  const refresh = async (): Promise<void> => {
+    try {
+      runs = await agent.listSubagents(parentSessionId);
+    } catch {
+      return;
+    }
+    if (closed) return;
     pane.update(readGoal(), readRuns());
     tui.requestRender();
   };
-  const unsubscribeRuns = agent.subscribeSubagents(parentSessionId, refresh);
-  const unsubscribeGoal = agent.subscribeGoal(parentSessionId, refresh);
+  const unsubscribeRuns = agent.subscribeSubagents(parentSessionId, () => {
+    void refresh();
+  });
+  const unsubscribeGoal = agent.subscribeGoal(parentSessionId, () => {
+    void refresh();
+  });
   close = () => {
     if (closed) return;
     closed = true;
@@ -264,6 +276,7 @@ export function showTaskPane(
     onDismiss?.();
     tui.requestRender();
   };
+  void refresh();
   tui.requestRender();
   return close;
 }
@@ -277,7 +290,7 @@ function sortRuns(runs: SubagentRun[]): SubagentRun[] {
 }
 
 function isTerminal(run: SubagentRun): boolean {
-  return run.status === "completed" || run.status === "failed" || run.status === "cancelled";
+  return run.status === "completed" || run.status === "failed" || run.status === "cancelled" || run.status === "interrupted";
 }
 
 function listWindowStart(selected: number, total: number, size: number): number {
@@ -302,14 +315,14 @@ function goalProgressLabel(goal: GoalRun | undefined): string {
 }
 
 function statusStyle(status: SubagentRun["status"]): (text: string) => string {
-  if (status === "failed") return chalk.red;
+  if (status === "failed" || status === "interrupted") return chalk.red;
   if (status === "completed") return chalk.green;
   return chalk.dim;
 }
 
 function waitingGlyph(status: SubagentRun["status"]): string {
   if (status === "queued") return activityGlyph.queued;
-  if (status === "failed") return activityGlyph.error;
+  if (status === "failed" || status === "interrupted") return activityGlyph.error;
   if (status === "cancelled") return activityGlyph.cancelled;
   return activityGlyph.running;
 }

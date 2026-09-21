@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
@@ -108,6 +108,62 @@ describe("Goal HTTP", () => {
       await restarted.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${created.id}`)),
     );
     expect(fetched.id).toBe(created.id);
+  });
+
+  it("records explicit paused recovery in the Goal log after a Core restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-recovery-http-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const created = await json(
+      await first.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "Recover this active objective" }),
+        }),
+      ),
+    );
+    const id = String(created.id);
+    await vi.waitFor(() => {
+      expect(first.agent.getGoal(id)?.activeSubagent?.status).toBe("running");
+    });
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const recovered = await json(
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}`),
+      ),
+    );
+    expect(recovered.status).toBe("paused");
+    expect(recovered.phase).toBe("paused");
+
+    const log = await json(
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`),
+      ),
+    );
+    const events = log.events as Array<Record<string, unknown>>;
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "goal_status",
+          status: "paused",
+          phase: "paused",
+          message: expect.stringContaining("Core restart"),
+        }),
+      ]),
+    );
+
+    await first.agent.stopGoal(id);
   });
 
   it("GET /v1/session/{id}/goal matches GET /v1/goals/{id}", async () => {

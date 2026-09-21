@@ -3,7 +3,7 @@ import { attachPromptInput, attachSelectList } from "../overlays/index.ts";
 import type { SlashHost } from "./context.ts";
 
 async function showRuns(host: SlashHost, agent: ThebeAgent, parentSessionId: string | undefined): Promise<void> {
-  const runs = agent.listSubagents(parentSessionId);
+  const runs = await agent.listSubagents(parentSessionId);
   if (runs.length === 0) {
     host.notice("no subagent runs");
     return;

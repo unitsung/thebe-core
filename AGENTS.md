@@ -8,6 +8,8 @@ Build and maintain Thebe Core: a terminal-first coding and homelab agent whose c
 
 For the current implementation order and App-facing runtime/API work, read **`docs/CORE-ITERATION-PLAN.md`** before starting a new product capability. After the 2026-09-18 product HTTP slice, read **`docs/CORE-PRODUCT-HTTP.md`** for shipped routes versus leftover P2/App/non-ships.
 
+Always use Context7 when library/API documentation, code generation, setup, or configuration steps are needed; do not wait for an explicit request.
+
 ## Working loop
 
 1. Inspect the relevant module, its callers, and the current worktree before editing.
