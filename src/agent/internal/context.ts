@@ -36,8 +36,34 @@ import {
   createWorkspaceAccessPolicy,
   WORKSPACE_READ_TOOLS,
 } from "../security/workspace-policy.ts";
+import {
+  DEFAULT_AGENT_AUTO_COMPACT,
+  DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
+  DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
+  normalizeAgentAutoSummaryDelay,
+  normalizeAgentSubagentLimit,
+  type AgentSettingKey,
+  type AgentSettingSource,
+  type AgentSettings,
+  type AgentSettingsPatch,
+} from "../settings/product.ts";
 
-export function createAgentContext(options: CreateThebeAgentOptions) {
+export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
+  const storedSettings = inputOptions.settingsStore?.load() ?? {};
+  const options: CreateThebeAgentOptions = {
+    ...inputOptions,
+    autoCompact: inputOptions.autoCompact ?? storedSettings.autoCompact,
+    autoSummary: inputOptions.autoSummary ?? storedSettings.autoSummary,
+    autoSummaryDelayMs:
+      inputOptions.autoSummaryDelayMs ?? storedSettings.autoSummaryDelayMs,
+    permissionMode: inputOptions.permissionMode ?? storedSettings.permissionMode,
+    maxSubagentConcurrency:
+      inputOptions.maxSubagentConcurrency ?? storedSettings.maxSubagentConcurrency,
+    maxSubagentsPerParent:
+      inputOptions.maxSubagentsPerParent ?? storedSettings.maxSubagentsPerParent,
+    workspacePath: inputOptions.workspacePath ?? storedSettings.workspacePath,
+    outputDirectory: inputOptions.outputDirectory ?? storedSettings.outputDirectory,
+  };
   const now = options.now ?? (() => new Date());
   const callerId = options.callerId ?? "default";
   const workspacePath = (() => {
@@ -52,6 +78,44 @@ export function createAgentContext(options: CreateThebeAgentOptions) {
         ? join(workspacePath, ".thebe", "outputs")
         : undefined;
   })();
+  const settingSources: Record<AgentSettingKey, AgentSettingSource> = {
+    autoCompact:
+      inputOptions.autoCompact !== undefined || storedSettings.autoCompact !== undefined
+        ? "configured"
+        : "default",
+    autoSummary:
+      inputOptions.autoSummary !== undefined || storedSettings.autoSummary !== undefined
+        ? "configured"
+        : "default",
+    autoSummaryDelayMs:
+      inputOptions.autoSummaryDelayMs !== undefined || storedSettings.autoSummaryDelayMs !== undefined
+        ? "configured"
+        : "default",
+    permissionMode:
+      inputOptions.permissionMode !== undefined || storedSettings.permissionMode !== undefined
+        ? "configured"
+        : "default",
+    maxSubagentConcurrency:
+      inputOptions.maxSubagentConcurrency !== undefined || storedSettings.maxSubagentConcurrency !== undefined
+        ? "configured"
+        : "default",
+    maxSubagentsPerParent:
+      inputOptions.maxSubagentsPerParent !== undefined || storedSettings.maxSubagentsPerParent !== undefined
+        ? "configured"
+        : "default",
+    workspacePath: inputOptions.workspacePath || storedSettings.workspacePath
+      ? "configured"
+      : process.env.THEBE_WORKSPACE_DIR?.trim()
+        ? "environment"
+        : "default",
+    outputDirectory: inputOptions.outputDirectory || storedSettings.outputDirectory
+      ? "configured"
+      : process.env.THEBE_OUTPUT_DIR?.trim()
+        ? "environment"
+        : workspacePath
+          ? "derived"
+          : "default",
+  };
   const workspaceAccess = workspacePath
     ? createWorkspaceAccessPolicy(workspacePath)
     : {
@@ -124,6 +188,88 @@ export function createAgentContext(options: CreateThebeAgentOptions) {
   });
 
   let autoCompactOverride = options.autoCompact;
+
+  function getAgentSettings(): AgentSettings {
+    const maxSubagentConcurrency = normalizeAgentSubagentLimit(
+      options.maxSubagentConcurrency,
+      DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
+    );
+    const maxSubagentsPerParent = Math.min(
+      maxSubagentConcurrency,
+      normalizeAgentSubagentLimit(
+        options.maxSubagentsPerParent,
+        DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
+      ),
+    );
+    return {
+      autoCompact: autoCompactOverride ?? DEFAULT_AGENT_AUTO_COMPACT,
+      autoSummary: autoSummary.enabled(),
+      autoSummaryDelayMs: normalizeAgentAutoSummaryDelay(autoSummary.delayMs()),
+      permissionMode: permissions.permissionMode(),
+      maxSubagentConcurrency,
+      maxSubagentsPerParent,
+      workspacePath,
+      outputDirectory,
+      sources: { ...settingSources },
+      persistence: { enabled: Boolean(options.settingsStore) },
+      mutable: ["autoCompact", "autoSummary", "autoSummaryDelayMs"],
+    };
+  }
+
+  async function updateAgentSettings(
+    patch: AgentSettingsPatch,
+  ): Promise<AgentSettings> {
+    checkNotQuiesced();
+    const normalizedPatch: AgentSettingsPatch = {
+      ...(patch.autoCompact !== undefined
+        ? { autoCompact: patch.autoCompact }
+        : {}),
+      ...(patch.autoSummary !== undefined
+        ? { autoSummary: patch.autoSummary }
+        : {}),
+      ...(patch.autoSummaryDelayMs !== undefined
+        ? { autoSummaryDelayMs: normalizeAgentAutoSummaryDelay(patch.autoSummaryDelayMs) }
+        : {}),
+    };
+    await options.settingsStore?.save(normalizedPatch);
+    if (normalizedPatch.autoCompact !== undefined) {
+      autoCompactOverride = normalizedPatch.autoCompact;
+      settingSources.autoCompact = "configured";
+    }
+    if (normalizedPatch.autoSummary !== undefined) {
+      setAutoSummaryEnabled(normalizedPatch.autoSummary);
+    }
+    if (normalizedPatch.autoSummaryDelayMs !== undefined) {
+      setAutoSummaryDelayMs(normalizedPatch.autoSummaryDelayMs);
+    }
+    return getAgentSettings();
+  }
+
+  async function updatePermissionMode(
+    value: import("../runtime/interface.ts").PermissionMode,
+  ): Promise<import("../runtime/interface.ts").PermissionMode> {
+    checkNotQuiesced();
+    await options.settingsStore?.save({ permissionMode: value });
+    setPermissionMode(value);
+    return permissions.permissionMode();
+  }
+
+  function setPermissionMode(
+    value: import("../runtime/interface.ts").PermissionMode,
+  ): void {
+    permissions.setPermissionMode(value);
+    settingSources.permissionMode = "configured";
+  }
+
+  function setAutoSummaryEnabled(value: boolean): void {
+    autoSummary.setEnabled(value);
+    settingSources.autoSummary = "configured";
+  }
+
+  function setAutoSummaryDelayMs(value: number): void {
+    autoSummary.setDelayMs(value);
+    settingSources.autoSummaryDelayMs = "configured";
+  }
 
   function checkNotQuiesced(): void {
     if (options.runtime.isQuiesced()) {
@@ -320,12 +466,19 @@ export function createAgentContext(options: CreateThebeAgentOptions) {
     ...eventLog,
     ...state,
     ...permissions,
+    setPermissionMode,
     get autoCompactOverride() { return autoCompactOverride; },
-    set autoCompactOverride(value: boolean | undefined) { autoCompactOverride = value; },
+    set autoCompactOverride(value: boolean | undefined) {
+      autoCompactOverride = value;
+      if (value !== undefined) settingSources.autoCompact = "configured";
+    },
     autoSummaryEnabled: autoSummary.enabled,
     autoSummaryDelayMs: autoSummary.delayMs,
-    setAutoSummaryEnabled: autoSummary.setEnabled,
-    setAutoSummaryDelayMs: autoSummary.setDelayMs,
+    setAutoSummaryEnabled,
+    setAutoSummaryDelayMs,
+    getAgentSettings,
+    updateAgentSettings,
+    updatePermissionMode,
     cancelAutoSummary: autoSummary.cancel,
     openSession: registry.openSession,
     reapIdleSessions: registry.reapIdleSessions,

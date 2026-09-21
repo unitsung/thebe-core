@@ -86,6 +86,15 @@ export type {
   ThinkingLevel,
 } from "./runtime/interface.ts";
 export type { PermissionMode } from "./runtime/interface.ts";
+export type {
+  AgentSettingKey,
+  AgentSettingSource,
+  AgentSettings,
+  AgentSettingsPatch,
+  AgentSettingsStore,
+  AgentSettingsValues,
+} from "./settings/product.ts";
+export { createJsonAgentSettingsStore } from "./settings/store.ts";
 export type { GoalEvent } from "./goals/runner.ts";
 export type {
   ProductError,

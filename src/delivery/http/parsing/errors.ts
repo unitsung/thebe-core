@@ -6,6 +6,10 @@ export function invalidBody(error: string): Response {
   return json({ ok: false, error, code: INVALID_BODY }, 400);
 }
 
+export function restartRequired(error: string): Response {
+  return json({ ok: false, error, code: "restart_required" }, 409);
+}
+
 export function notFound(error: string): Response {
   return json({ ok: false, error }, 404);
 }

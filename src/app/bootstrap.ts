@@ -6,7 +6,6 @@ import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { createThebeApp } from "./create.ts";
 import {
-  DEFAULT_AUTO_SUMMARY_DELAY_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
 } from "../agent/index.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
@@ -16,6 +15,7 @@ import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
 import { createJevAdapter } from "../adapters/jev/adapter.ts";
 import { readJudgmentGate } from "../agent/judgment/gate.ts";
+import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -159,8 +159,7 @@ export async function bootstrapThebe(
     model: defaultModel,
     autoCompact: userConfig.autoCompact,
     autoSummary: userConfig.autoSummary,
-    autoSummaryDelayMs:
-      userConfig.autoSummaryDelayMs ?? DEFAULT_AUTO_SUMMARY_DELAY_MS,
+    autoSummaryDelayMs: userConfig.autoSummaryDelayMs,
     permissionMode: userConfig.permissionMode,
     maxSubagentConcurrency: userConfig.maxSubagentConcurrency,
     maxSubagentsPerParent: userConfig.maxSubagentsPerParent,
@@ -171,6 +170,7 @@ export async function bootstrapThebe(
       Number.isFinite(idleParsed) && idleParsed > 0 ? idleParsed : 0,
     judgment,
     judgmentSites,
+    settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
   });
 
   return {

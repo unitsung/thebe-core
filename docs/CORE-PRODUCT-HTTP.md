@@ -17,16 +17,17 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | MCP inventory | `GET /v1/extensions/mcp/servers`, `GET /v1/extensions/mcp/tools` | External tools only. Raw `/mcp` stays for integrations. |
 | Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
+| Agent settings | `GET/PATCH /v1/settings/agent` | Effective auto-compact/summary settings, bounded delay, permission mode, concurrency limits, and guarded paths. Mutable fields are auto-compact/summary/delay; concurrency changes report `409 restart_required`. Each value includes a `sources` entry and the response reports `persistence.enabled`. |
 | Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 
-OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`, `AuditRecord`, `AuditList`.
+OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`.
 
 ## Explicit non-ships (leftover)
 
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for any of the above.
-- **P2** artifacts, auto-summary / auto-compact settings dump (`GET /v1/settings/agent`), and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
+- **P2** artifacts and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 - **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).

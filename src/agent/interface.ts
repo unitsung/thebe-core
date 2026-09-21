@@ -50,6 +50,11 @@ import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
 import type { JudgmentModel } from "./judgment/interface.ts";
 import type { JudgmentEnabledSites } from "./judgment/types.ts";
+import type {
+  AgentSettings,
+  AgentSettingsPatch,
+  AgentSettingsStore,
+} from "./settings/product.ts";
 
 export type ThebeSession = AgentSessionMeta & {
   status: SessionRunStatus;
@@ -103,6 +108,8 @@ export type CreateThebeAgentOptions = {
   judgment?: JudgmentModel;
   /** Which catalog Sites may call the model. Default all when a model is present. */
   judgmentSites?: JudgmentEnabledSites;
+  /** Optional persistence boundary for product-facing Agent settings. */
+  settingsStore?: AgentSettingsStore;
 };
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
@@ -189,6 +196,9 @@ export interface ThebeAgent {
 
   permissionMode(): PermissionMode;
   setPermissionMode(mode: PermissionMode): void;
+  updatePermissionMode(mode: PermissionMode): Promise<PermissionMode>;
+  getAgentSettings(): AgentSettings;
+  updateAgentSettings(patch: AgentSettingsPatch): Promise<AgentSettings>;
   listModels(query?: { all?: boolean; providerId?: string }): Promise<RuntimeModel[]>;
   testModel(model: RuntimeModelRef, query?: { timeoutMs?: number }): Promise<{ providerId: string; modelId: string; text: string; latencyMs: number }>;
   listAvailableModels(query?: { providerId?: string }): Promise<RuntimeModel[]>;

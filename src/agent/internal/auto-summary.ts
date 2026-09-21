@@ -1,16 +1,19 @@
 import { createAuditLog, hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { AgentRuntime, RuntimeModelRef, RuntimeSession } from "../runtime/index.ts";
 import type { OpenedSession } from "./session-state.ts";
+import {
+  DEFAULT_AGENT_AUTO_SUMMARY_DELAY_MS,
+  MAX_AGENT_AUTO_SUMMARY_DELAY_MS,
+  MIN_AGENT_AUTO_SUMMARY_DELAY_MS,
+} from "../settings/product.ts";
 
-export const DEFAULT_AUTO_SUMMARY_DELAY_MS = 120 * 1000;
-const MIN_AUTO_SUMMARY_DELAY_MS = 60 * 1000;
-const MAX_AUTO_SUMMARY_DELAY_MS = 15 * 60 * 1000;
+export const DEFAULT_AUTO_SUMMARY_DELAY_MS = DEFAULT_AGENT_AUTO_SUMMARY_DELAY_MS;
 
 function normalizeDelay(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_AUTO_SUMMARY_DELAY_MS;
   return Math.min(
-    MAX_AUTO_SUMMARY_DELAY_MS,
-    Math.max(MIN_AUTO_SUMMARY_DELAY_MS, Math.round(value as number)),
+    MAX_AGENT_AUTO_SUMMARY_DELAY_MS,
+    Math.max(MIN_AGENT_AUTO_SUMMARY_DELAY_MS, Math.round(value as number)),
   );
 }
 

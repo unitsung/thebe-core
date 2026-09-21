@@ -1,11 +1,18 @@
 export { createThebeApp } from "./app/create.ts";
 export { createThebeAgent } from "./agent/index.ts";
+export { createJsonAgentSettingsStore } from "./agent/index.ts";
 export type {
   CreateThebeAgentOptions,
   AuditPage,
   AuditQuery,
   AuditRecord,
   AuditResult,
+  AgentSettingKey,
+  AgentSettingSource,
+  AgentSettings,
+  AgentSettingsPatch,
+  AgentSettingsStore,
+  AgentSettingsValues,
   HomelabCapability,
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,

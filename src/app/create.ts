@@ -6,6 +6,7 @@ import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
 import type { JudgmentModel } from "../agent/judgment/interface.ts";
 import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
+import type { AgentSettingsStore } from "../agent/settings/product.ts";
 
 export type ThebeAppPrompt = (
   text: string,
@@ -36,6 +37,7 @@ export function createThebeApp(options: {
   outputDirectory?: string;
   judgment?: JudgmentModel;
   judgmentSites?: JudgmentEnabledSites;
+  settingsStore?: AgentSettingsStore;
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -62,6 +64,7 @@ export function createThebeApp(options: {
     mcp: createMcpClientRegistry({ cwd: options.workspacePath }),
     judgment: options.judgment,
     judgmentSites: options.judgmentSites,
+    settingsStore: options.settingsStore,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);

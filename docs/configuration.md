@@ -24,6 +24,14 @@ Pi Adapter 使用的 agent 文件默认位于：
 
 手动修改后，需要重新启动 Thebe 才能确保所有设置生效。
 
+Serve 也提供 `GET/PATCH /v1/settings/agent`。它返回运行中的有效
+Agent 设置以及每个字段的来源（`configured`、`default`、`environment` 或
+`derived`）。HTTP 只允许修改 `autoCompact`、`autoSummary` 和
+`autoSummaryDelayMs`；摘要延迟会限制在 60 秒到 15 分钟。并发上限、工作区
+和输出目录属于启动或授权边界：并发修改返回 `409 restart_required`，路径只读。
+权限模式继续使用 `GET/PATCH /v1/settings/permissions`，两类设置都会写入
+同一个 `config.json`。
+
 ## 外部编辑器
 
 编辑器选择遵循 Pi 的规则，优先级从高到低为：

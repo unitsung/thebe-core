@@ -1,8 +1,15 @@
 # Core durable product contract
 
-Status: ready for implementation
+Status: in progress — Agent settings slice implemented; Artifacts and unified read model remain
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
+
+The Agent settings slice is now available through `ThebeAgent.getAgentSettings()` /
+`updateAgentSettings()` and `GET/PATCH /v1/settings/agent`. It persists the
+mutable values through the existing Thebe config boundary, keeps permission
+mode on `/v1/settings/permissions`, and reports concurrency changes as
+restart-required. Artifacts and the unified durable Activity read model remain
+future slices.
 
 This spec turns the remaining Core product-contract work into one executable
 backlog. The highest seam is `ThebeAgent` and its product HTTP delivery; the

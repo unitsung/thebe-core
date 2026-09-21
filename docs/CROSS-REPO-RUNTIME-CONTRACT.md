@@ -25,10 +25,10 @@ The following HTTP product objects are implemented on `dev` and are the current 
 - **Capability product HTTP:** `GET /v1/capabilities` includes `resourceKinds` / `execution` / `background`. `POST /v1/capabilities/{id}/invoke` goes through `ThebeAgent` (direct result or background run id). Background run snapshots persist under `{agentStoreDir}/capability-runs`, are listable at `GET /v1/capabilities/runs`, and terminal runs restore after Core recreation; queued/running runs from an older instance recover as interrupted failures. Writes that require on-device approval (`container.restart`) stay on `POST /v1/action`.
 - **Worker HTTP:** `/v1/subagents` (profiles, spawn, list, get, cancel, log). Product JSON is `ProductWorker` from `SubagentRun`; clients do not read the parent transcript.
 - **Runtime pending permissions:** `GET /v1/permissions` / `{id}` / `POST .../resolve`. Redacted input. Distinct from Activity diagnose-restart Approvals. Session permission resolve remains.
-- **Skills / MCP inventory / enabled resources / permission mode:** `GET/PATCH /v1/skills/{name}`; `GET /v1/extensions/mcp/servers|tools` (raw `/mcp` remains); `GET/PUT/DELETE /v1/resources/enabled/{id}`; `GET/PATCH /v1/settings/permissions`.
+- **Skills / MCP inventory / enabled resources / permission mode / Agent settings:** `GET/PATCH /v1/skills/{name}`; `GET /v1/extensions/mcp/servers|tools` (raw `/mcp` remains); `GET/PUT/DELETE /v1/resources/enabled/{id}`; `GET/PATCH /v1/settings/permissions`; `GET/PATCH /v1/settings/agent` (only auto-compact/summary/delay are mutable; concurrency changes report `restart_required`).
 - **Audit log:** `GET /v1/audit` returns bounded, newest-first, redacted audit records with optional `sessionId`, `method`, `result`, and cursor filters. It never returns raw tool parameters.
 
-Leftover (not this slice): App clients, artifacts, auto-summary settings dump, Goal `/runs` identity rewrite, replacing `/mcp`, a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`; the next durable Core implementation spec is [issue #4](https://github.com/unitsung/thebe-core/issues/4).
+Leftover (not this slice): App clients, artifacts, Goal `/runs` identity rewrite, replacing `/mcp`, a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`; the next durable Core implementation spec is [issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
 The App must not call raw MCP `tools/call` for these workflows.
 

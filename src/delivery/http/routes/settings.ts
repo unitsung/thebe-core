@@ -1,19 +1,76 @@
 import { PERMISSION_MODES } from "../../../agent/runtime/interface.ts";
+import type { AgentSettingsPatch } from "../../../agent/settings/product.ts";
 import { agentUnavailable, quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { json, readJson } from "../json.ts";
-import { agentError, invalidBody } from "../parsing/errors.ts";
+import { agentError, invalidBody, restartRequired } from "../parsing/errors.ts";
 import { asMember } from "../parsing/query.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
 
 export async function handleSettingsRoutes(
   context: ThebeHttpContext,
 ): Promise<Response | undefined> {
-  if (!context.path.startsWith(PRODUCT_HTTP_PATH.permissionSettings)) {
+  const isAgentSettings = context.path === PRODUCT_HTTP_PATH.agentSettings;
+  const isPermissionSettings = context.path.startsWith(PRODUCT_HTTP_PATH.permissionSettings);
+  if (!isAgentSettings && !isPermissionSettings) {
     return undefined;
   }
   if (!context.agent) return agentUnavailable();
   const { request, agent } = context;
   try {
+    if (isAgentSettings) {
+      if (request.method === "GET") return json(agent.getAgentSettings());
+      if (request.method === "PATCH") {
+        const blocked = quiescedWrite(context);
+        if (blocked) return blocked;
+        const body = await readJson(request);
+        const patch: AgentSettingsPatch = {};
+        const mutableKeys = new Set([
+          "autoCompact",
+          "autoSummary",
+          "autoSummaryDelayMs",
+        ]);
+        if (Object.prototype.hasOwnProperty.call(body, "maxSubagentConcurrency")) {
+          if (typeof body.maxSubagentConcurrency !== "number" || !Number.isFinite(body.maxSubagentConcurrency)) {
+            return invalidBody("maxSubagentConcurrency must be a finite number");
+          }
+          return restartRequired("maxSubagentConcurrency requires a Core restart");
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "maxSubagentsPerParent")) {
+          if (typeof body.maxSubagentsPerParent !== "number" || !Number.isFinite(body.maxSubagentsPerParent)) {
+            return invalidBody("maxSubagentsPerParent must be a finite number");
+          }
+          return restartRequired("maxSubagentsPerParent requires a Core restart");
+        }
+        for (const key of Object.keys(body)) {
+          if (!mutableKeys.has(key)) {
+            return invalidBody(`${key} cannot be updated through /v1/settings/agent`);
+          }
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "autoCompact")) {
+          if (typeof body.autoCompact !== "boolean") {
+            return invalidBody("autoCompact must be a boolean");
+          }
+          patch.autoCompact = body.autoCompact;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "autoSummary")) {
+          if (typeof body.autoSummary !== "boolean") {
+            return invalidBody("autoSummary must be a boolean");
+          }
+          patch.autoSummary = body.autoSummary;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "autoSummaryDelayMs")) {
+          if (typeof body.autoSummaryDelayMs !== "number" || !Number.isFinite(body.autoSummaryDelayMs)) {
+            return invalidBody("autoSummaryDelayMs must be a finite number");
+          }
+          patch.autoSummaryDelayMs = body.autoSummaryDelayMs;
+        }
+        if (Object.keys(patch).length === 0) {
+          return invalidBody("at least one Agent setting is required");
+        }
+        return json(await agent.updateAgentSettings(patch));
+      }
+      return undefined;
+    }
     if (request.method === "GET") {
       return json({ mode: agent.permissionMode() });
     }
@@ -25,7 +82,7 @@ export async function handleSettingsRoutes(
       if (!mode) {
         return invalidBody(`mode must be ${PERMISSION_MODES.join(", ")}`);
       }
-      agent.setPermissionMode(mode);
+      await agent.updatePermissionMode(mode);
       return json({ mode: agent.permissionMode() });
     }
     return undefined;

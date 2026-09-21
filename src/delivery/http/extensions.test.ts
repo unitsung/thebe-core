@@ -239,6 +239,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/resources/enabled",
       "/v1/resources/enabled/{id}",
       "/v1/settings/permissions",
+      "/v1/settings/agent",
     ];
     for (const path of paths) {
       expect(body.paths[path], path).toBeDefined();
@@ -257,6 +258,8 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "McpTool",
       "EnabledResource",
       "PermissionModeSettings",
+      "AgentSettings",
+      "AgentSettingsPatch",
     ]) {
       expect(schemas[name], name).toBeDefined();
       expect(schemas[name]?.type).toBe("object");

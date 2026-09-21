@@ -16,11 +16,14 @@ import type {
   SubagentRunStatus,
   SubagentUpdate,
 } from "../types.ts";
+import {
+  DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
+  DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
+  normalizeAgentSubagentLimit,
+} from "../settings/product.ts";
 
 const DEFAULT_MAX_TURNS = 5;
 const MAX_ALLOWED_TURNS = 50;
-const DEFAULT_MAX_CONCURRENT = 3;
-const DEFAULT_MAX_PER_PARENT = 2;
 const MAX_RETAINED_RUNS = 100;
 
 type MutableRun = SubagentExecutionRun;
@@ -46,13 +49,16 @@ export function createSubagentRunManager(options: {
   onTerminal?: (run: SubagentRun) => void | Promise<void>;
 }) {
   const now = options.now ?? (() => new Date());
-  const maxConcurrent = normalizeLimit(
+  const maxConcurrent = normalizeAgentSubagentLimit(
     options.maxConcurrent,
-    DEFAULT_MAX_CONCURRENT,
+    DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
   );
   const maxPerParent = Math.min(
     maxConcurrent,
-    normalizeLimit(options.maxPerParent, DEFAULT_MAX_PER_PARENT),
+    normalizeAgentSubagentLimit(
+      options.maxPerParent,
+      DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
+    ),
   );
   const runs = new Map<string, MutableRun>();
   const sessions = new Map<string, RuntimeSession>();
@@ -362,11 +368,6 @@ export function createSubagentRunManager(options: {
       maxTurns: MAX_ALLOWED_TURNS,
     },
   };
-}
-
-function normalizeLimit(value: number | undefined, fallback: number): number {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.max(1, Math.min(16, Math.floor(value as number)));
 }
 
 function normalizeTurns(value: number | undefined): number {

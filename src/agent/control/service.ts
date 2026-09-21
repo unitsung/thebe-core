@@ -133,6 +133,17 @@ export function createControlApi(ctx: AgentContext) {
     ): void {
       ctx.setPermissionMode(mode);
     },
+    updatePermissionMode(
+      mode: import("../runtime/interface.ts").PermissionMode,
+    ) {
+      return ctx.updatePermissionMode(mode);
+    },
+    getAgentSettings() {
+      return ctx.getAgentSettings();
+    },
+    updateAgentSettings(patch: import("../settings/product.ts").AgentSettingsPatch) {
+      return ctx.updateAgentSettings(patch);
+    },
     async listModels(query?: { all?: boolean; providerId?: string }) {
       return options.runtime.listModels(query);
     },
