@@ -55,6 +55,120 @@ async function piWithFaux(sessionDir?: string) {
 }
 
 describe("PiCodingAgentRuntime sessions", () => {
+  it("tracks and stops detached bash background tasks", async () => {
+    const { faux, runtime } = await piWithFaux();
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("bash", { command: "sleep 60 >/dev/null 2>&1 &" }, { id: "call_bg" }),
+      ]),
+      fauxAssistantMessage("started"),
+    ]);
+    const agent = createThebeAgent({
+      runtime,
+      provider: emptyProvider(),
+      permissionMode: "full-access",
+    });
+    const session = await agent.createSession();
+
+    await expect(agent.send("start a background task", session.thebeSessionId)).resolves.toMatchObject({
+      text: "started",
+    });
+
+    const tasks = await agent.listBackgroundTasks(session.thebeSessionId);
+    expect(tasks).toEqual([
+      expect.objectContaining({
+        id: expect.any(String),
+        name: "sleep 60 >/dev/null 2>&1 &",
+        pid: expect.any(Number),
+        status: "running",
+        startedAt: expect.any(String),
+        updatedAt: expect.any(String),
+      }),
+    ]);
+
+    await agent.stopBackgroundTask(session.thebeSessionId, tasks[0]!.id);
+    await expect(agent.listBackgroundTasks(session.thebeSessionId)).resolves.toEqual([
+      expect.objectContaining({
+        id: tasks[0]!.id,
+        status: "stopped",
+        finishedAt: expect.any(String),
+      }),
+    ]);
+  });
+
+  it("recovers detached bash background tasks after runtime recreation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-pi-background-recovery-"));
+    const first = await piWithFaux(dir);
+    first.faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("bash", { command: "sleep 60 >/dev/null 2>&1 &" }, { id: "call_bg_recovery" }),
+      ]),
+      fauxAssistantMessage("started"),
+    ]);
+    const firstAgent = createThebeAgent({
+      runtime: first.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: join(dir, "meta"),
+      permissionMode: "full-access",
+    });
+    const session = await firstAgent.createSession();
+    let taskId: string | undefined;
+    try {
+      await firstAgent.send("start a background task", session.thebeSessionId);
+      const started = await firstAgent.listBackgroundTasks(session.thebeSessionId);
+      taskId = started[0]?.id;
+      expect(taskId).toEqual(expect.any(String));
+
+      const second = await piWithFaux(dir);
+      const resumed = createThebeAgent({
+        runtime: second.runtime,
+        provider: emptyProvider(),
+        agentStoreDir: join(dir, "meta"),
+        permissionMode: "full-access",
+      });
+
+      await expect(resumed.listBackgroundTasks(session.thebeSessionId)).resolves.toEqual([
+        expect.objectContaining({
+          id: taskId,
+          name: "sleep 60 >/dev/null 2>&1 &",
+          status: "running",
+          pid: expect.any(Number),
+        }),
+      ]);
+      await resumed.stopBackgroundTask(session.thebeSessionId, taskId!);
+    } finally {
+      if (taskId) await firstAgent.stopBackgroundTask(session.thebeSessionId, taskId);
+    }
+  });
+
+  it("tracks detached bash from the direct execution seam", async () => {
+    const { runtime } = await piWithFaux();
+    const agent = createThebeAgent({
+      runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession();
+    let taskId: string | undefined;
+    try {
+      await agent.executeBash(
+        session.thebeSessionId,
+        "sleep 60 >/dev/null 2>&1 &",
+      );
+      const tasks = await agent.listBackgroundTasks(session.thebeSessionId);
+      taskId = tasks[0]?.id;
+      expect(tasks).toEqual([
+        expect.objectContaining({
+          id: expect.any(String),
+          name: "sleep 60 >/dev/null 2>&1 &",
+          pid: expect.any(Number),
+          status: "running",
+        }),
+      ]);
+    } finally {
+      if (taskId) await agent.stopBackgroundTask(session.thebeSessionId, taskId);
+    }
+  });
+
   it("exposes Pi native content and filename search without bash", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "thebe-pi-search-tools-"));
     await writeFile(join(workspace, "needle.txt"), "needle in workspace\n", "utf8");

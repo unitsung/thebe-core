@@ -190,6 +190,44 @@ describe("capability product HTTP", () => {
     expect(["queued", "running", "succeeded", "failed"]).toContain(run.status);
   });
 
+  it("links a bounded report Artifact from a completed background run", async () => {
+    const created = app();
+    const started = await created.handler.handle(
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/diagnose_from_events/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "background",
+            arguments: { category: "all" },
+            resource: { kind: "container", id: "ctr-emby" },
+          }),
+        },
+      ),
+    );
+    const startedBody = await json(started);
+    const run = await fetchRun(created.handler, String(startedBody.runId));
+
+    expect(run.status).toBe("succeeded");
+    expect(run.artifactId).toEqual(expect.any(String));
+    const artifact = await json(
+      await created.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts/${String(run.artifactId)}`,
+        ),
+      ),
+    );
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        artifactId: run.artifactId,
+        kind: "report",
+        runId: run.runId,
+        resource: { kind: "container", id: "ctr-emby" },
+      }),
+    );
+  });
+
   it("persists terminal runs and restores them through a new Agent instance", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-capability-runs-"));
     const first = app({ agentStoreDir: dir });

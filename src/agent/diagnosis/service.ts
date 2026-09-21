@@ -8,6 +8,7 @@ import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { ThebePromptResult } from "../types.ts";
 import type { ActivityStore } from "../activity/store.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
 import { deterministicDiagnosis } from "./deterministic.ts";
 import {
   asContainerDetail,
@@ -58,21 +59,35 @@ export function createDiagnosisApi(options: {
     options?: { thebeSessionId?: string; nonInteractive?: boolean },
   ) => Promise<ThebePromptResult>;
   activityStore?: ActivityStore;
+  artifactStore?: ArtifactStore;
   judgment?: JudgmentApi;
 }): DiagnosisApi {
   const runs = new Map<string, DiagnosisResult>();
 
   async function remember(result: DiagnosisResult): Promise<DiagnosisResult> {
-    runs.set(result.runId, result);
+    let stored = result;
+    if (options.artifactStore && !result.artifactId) {
+      const artifact = await options.artifactStore.create({
+        kind: "diagnosis",
+        title: `Diagnosis: ${result.resource.name ?? result.resource.id}`,
+        runId: result.runId,
+        sessionId: result.sessionId,
+        resource: { kind: result.resource.kind, id: result.resource.id },
+        contentType: "application/json",
+        content: JSON.stringify(diagnosisArtifactPayload(result)),
+      });
+      stored = { ...result, artifactId: artifact.artifactId };
+    }
+    runs.set(stored.runId, stored);
     if (runs.size > MAX_RUNS) {
       const oldest = runs.keys().next().value;
       if (oldest) runs.delete(oldest);
     }
-    const persisted = await options.activityStore?.upsertFromDiagnosis(result);
+    const persisted = await options.activityStore?.upsertFromDiagnosis(stored);
     if (persisted) {
-      return { ...result, approvalId: persisted.id };
+      return { ...stored, approvalId: persisted.id };
     }
-    return result;
+    return stored;
   }
 
   async function collect(resource: ResourceRef, observedAt: string) {
@@ -257,6 +272,21 @@ export function createDiagnosisApi(options: {
         });
       }
     },
+  };
+}
+
+function diagnosisArtifactPayload(result: DiagnosisResult): Record<string, unknown> {
+  return {
+    version: 1,
+    runId: result.runId,
+    actionId: result.actionId,
+    status: result.status,
+    resource: result.resource,
+    observations: result.observations,
+    diagnosis: result.diagnosis,
+    recommendations: result.recommendations,
+    evidence: result.technicalDetails.evidence,
+    ...(result.error ? { error: result.error } : {}),
   };
 }
 

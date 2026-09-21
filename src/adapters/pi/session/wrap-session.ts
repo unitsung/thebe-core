@@ -25,6 +25,10 @@ import type { PiSession } from "./pi-session.ts";
 import { lastAssistantText } from "./pi-tools.ts";
 import { DEFAULT_COMPACTION_RESERVE_TOKENS } from "../config/user-config.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
+import type {
+  BackgroundTaskRegistry,
+  BashOperations,
+} from "./background-tasks.ts";
 
 const THINKING_LEVELS = [
   "off",
@@ -47,6 +51,8 @@ export function wrapSession(
   resolveModelRef: (providerId: string, modelId: string) => PiModelShape | undefined,
   refreshModels?: () => Promise<void>,
   toolControllers?: Map<string, AbortController>,
+  backgroundTasks?: BackgroundTaskRegistry,
+  bashOperations?: BashOperations,
 ): RuntimeSession {
   const listeners =
     existingListeners ?? new Set<(event: NormalizedEvent) => void>();
@@ -267,10 +273,21 @@ export function wrapSession(
         : true;
     },
     async listBackgroundTasks(): Promise<BackgroundTask[]> {
-      return [];
+      if (backgroundTasks) return backgroundTasks.list();
+      const native = session as unknown as {
+        listBackgroundTasks?: () => Promise<BackgroundTask[]>;
+      };
+      return native.listBackgroundTasks?.() ?? [];
     },
-    async stopBackgroundTask(_taskId: string): Promise<void> {
-      // no-op
+    async stopBackgroundTask(taskId: string): Promise<void> {
+      if (backgroundTasks) {
+        await backgroundTasks.stop(taskId);
+        return;
+      }
+      const native = session as unknown as {
+        stopBackgroundTask?: (taskId: string) => Promise<void>;
+      };
+      await native.stopBackgroundTask?.(taskId);
     },
     async setModel(model: RuntimeModelRef): Promise<void> {
       let resolved = resolveModelRef(model.providerId, model.modelId);
@@ -313,11 +330,17 @@ export function wrapSession(
         executeBash?: (
           command: string,
           onChunk?: (chunk: string) => void,
-          options?: { excludeFromContext?: boolean },
+          options?: {
+            excludeFromContext?: boolean;
+            operations?: BashOperations;
+          },
         ) => Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
       };
       if (typeof raw.executeBash === "function") {
-        return raw.executeBash(command, onChunk, options);
+        const executeOptions = bashOperations
+          ? { ...(options ?? {}), operations: bashOperations }
+          : options;
+        return raw.executeBash(command, onChunk, executeOptions);
       }
       return { exitCode: 0, cancelled: false, output: "" };
     },

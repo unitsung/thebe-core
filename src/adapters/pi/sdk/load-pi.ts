@@ -40,6 +40,8 @@ export async function loadPiSdk() {
   return {
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,
     createBashTool: bash.createBashTool as typeof bash.createBashTool,
+    createLocalBashOperations:
+      bash.createLocalBashOperations as typeof bash.createLocalBashOperations,
     defineTool: extensions.defineTool as typeof extensions.defineTool,
     createExtensionRuntime:
       extensions.createExtensionRuntime as typeof extensions.createExtensionRuntime,

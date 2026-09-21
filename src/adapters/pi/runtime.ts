@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { unlink } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { join } from "node:path";
 import type { AgentRuntime } from "../../agent/runtime/interface.ts";
 import { PI_RUNTIME_ID } from "../../agent/runtime/interface.ts";
 import { createPiRuntimeAuth } from "./auth/oauth.ts";
@@ -16,6 +17,10 @@ import { loadPiSdk, type PiSdk } from "./sdk/load-pi.ts";
 import { openPiSession, toolControllersFor } from "./session/open-session.ts";
 import { wrapSession as wrapPiSession } from "./session/wrap-session.ts";
 import type { PiSession } from "./session/pi-session.ts";
+import {
+  createBackgroundTaskRegistry,
+  type BackgroundTaskRegistry,
+} from "./session/background-tasks.ts";
 
 export { sanitizeBashEnv } from "../../agent/security/process-env.ts";
 
@@ -74,9 +79,25 @@ export async function createPiCodingAgentRuntime(
   }
 
   const live = new Map<string, PiSession>();
+  const backgroundTasks = new Map<string, BackgroundTaskRegistry>();
+  const backgroundTaskDir = options.sessionDir
+    ? join(options.sessionDir, "background-tasks")
+    : undefined;
   let quiesced = false;
   const livenessRegistry = new Map<string, () => boolean>();
   const auth = createPiRuntimeAuth(modelRuntime);
+
+  function backgroundTasksFor(runtimeSessionId: string): BackgroundTaskRegistry {
+    let registry = backgroundTasks.get(runtimeSessionId);
+    if (!registry) {
+      registry = createBackgroundTaskRegistry({
+        dir: backgroundTaskDir,
+        sessionId: runtimeSessionId,
+      });
+      backgroundTasks.set(runtimeSessionId, registry);
+    }
+    return registry;
+  }
 
   async function availableKeys(providerId?: string): Promise<Set<string>> {
     try {
@@ -102,6 +123,7 @@ export async function createPiCodingAgentRuntime(
       defaultModel: options.model,
       resolveModelRef,
       live,
+      backgroundTasks: backgroundTasksFor(sessionManager.getSessionId()),
     });
   }
 
@@ -154,6 +176,8 @@ export async function createPiCodingAgentRuntime(
             await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
           },
           toolControllersFor(existing),
+          backgroundTasksFor(runtimeSessionId),
+          backgroundTasksFor(runtimeSessionId).wrap(sdk.createLocalBashOperations()),
         );
       }
       let info: { id: string; path: string } | undefined;
@@ -240,6 +264,8 @@ export async function createPiCodingAgentRuntime(
             await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
           },
           toolControllersFor(session),
+          backgroundTasksFor(session.sessionId),
+          backgroundTasksFor(session.sessionId).wrap(sdk.createLocalBashOperations()),
         );
       if (fork?.mode === "branch_in_place") {
         if (parent) {

@@ -308,6 +308,8 @@ export type BackgroundTask = {
   port?: number;
   status: "running" | "stopped" | "failed";
   startedAt?: string;
+  finishedAt?: string;
+  updatedAt?: string;
 };
 
 export type RuntimeSessionSummary = {

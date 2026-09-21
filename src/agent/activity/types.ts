@@ -121,6 +121,7 @@ export function activityApprovalFromDiagnosis(
     createdAt: timestamps.createdAt,
     updatedAt: timestamps.updatedAt,
     diagnosisRunId: result.runId,
+    artifactId: result.artifactId,
     idempotencyKey: `approve:${CONTAINER_RESTART_ACTION_ID}:${result.resource.id}:${result.runId}`,
     approval: {
       required: true,
@@ -166,6 +167,7 @@ export function activityFromDiagnosis(
     createdAt: timestamps.createdAt,
     updatedAt: timestamps.updatedAt,
     diagnosisRunId: result.runId,
+    artifactId: result.artifactId,
     idempotencyKey: `diagnose:${result.resource.id}:${result.runId}`,
     diagnosis: {
       code: result.diagnosis.code,

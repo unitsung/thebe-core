@@ -24,6 +24,7 @@ export type CapabilityRun = {
   runId: string;
   capabilityId: string;
   status: CapabilityRunStatus;
+  artifactId?: string;
   createdAt: string;
   updatedAt?: string;
   finishedAt?: string;

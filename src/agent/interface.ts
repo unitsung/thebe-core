@@ -54,6 +54,7 @@ import type {
   ArtifactQuery,
 } from "./artifacts/types.ts";
 import type { ArtifactStore } from "./artifacts/store.ts";
+import type { ProductBackgroundTask } from "./background-tasks/product.ts";
 import type { JudgmentModel } from "./judgment/interface.ts";
 import type { JudgmentEnabledSites } from "./judgment/types.ts";
 import type {
@@ -232,6 +233,7 @@ export interface ThebeAgent {
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;
   listBackgroundTasks(thebeSessionId: string): Promise<BackgroundTask[]>;
+  listAllBackgroundTasks(): Promise<ProductBackgroundTask[]>;
   stopBackgroundTask(thebeSessionId: string, taskId: string): Promise<void>;
   stopAllBackgroundTasks(thebeSessionId: string): Promise<void>;
   executeBash(thebeSessionId: string, command: string, onChunk?: (chunk: string) => void, options?: { excludeFromContext?: boolean }): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;

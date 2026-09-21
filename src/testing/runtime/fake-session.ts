@@ -458,10 +458,15 @@ export function createFakeSession(
       };
     },
     async listBackgroundTasks(): Promise<BackgroundTask[]> {
-      return [];
+      return state.backgroundTasks.map((task) => ({ ...task }));
     },
-    async stopBackgroundTask(_taskId: string): Promise<void> {
-      // no-op
+    async stopBackgroundTask(taskId: string): Promise<void> {
+      const task = state.backgroundTasks.find((item) => item.id === taskId);
+      if (task) {
+        task.status = "stopped";
+        task.finishedAt ??= new Date().toISOString();
+        task.updatedAt ??= task.finishedAt;
+      }
     },
     async revert(): Promise<void> {
       if (state.reverted) {

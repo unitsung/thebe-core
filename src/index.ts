@@ -28,6 +28,11 @@ export type {
   ArtifactQuery,
   ArtifactResourceRef,
   ArtifactStore,
+  ProductBackgroundTask,
+  ActivityFeedItem,
+  ActivityFeedFilters,
+  ActivityFeedPage,
+  ActivityFeedType,
 } from "./agent/index.ts";
 export {
   ARTIFACT_KINDS,

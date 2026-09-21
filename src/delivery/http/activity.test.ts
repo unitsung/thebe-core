@@ -55,6 +55,163 @@ async function postAction(
 }
 
 describe("GET /v1/activity", () => {
+  it("includes completed workers as typed Activity items", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "worker result" }]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+    });
+    const session = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(session.thebeSessionId);
+    const spawned = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/subagents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profileName: "diagnostics",
+            task: "inspect health",
+            parentSessionId,
+          }),
+        }),
+      ),
+    );
+    const runId = String(spawned.runId);
+    await app.agent.waitSubagent(runId);
+
+    const listed = await json(
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
+    );
+    expect(listed.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "worker",
+          id: runId,
+          group: "recent",
+          updatedAt: expect.any(String),
+          worker: expect.objectContaining({
+            runId,
+            parentSessionId,
+            task: "inspect health",
+            status: "completed",
+          }),
+        }),
+      ]),
+    );
+  });
+
+  it("includes runtime background tasks as session-linked Activity items", async () => {
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+    });
+    const session = await app.agent.createSession({ title: "task owner" });
+    fake.snapshot(session.runtimeSessionId).backgroundTasks = [
+      {
+        id: "task-1",
+        name: "dev server",
+        pid: 4242,
+        port: 3000,
+        status: "running",
+        startedAt: "2026-09-21T00:00:01.000Z",
+      },
+    ];
+
+    const activity = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?source=background_task"),
+      ),
+    );
+    const activityId = `${session.thebeSessionId}:task-1`;
+    expect(activity.items).toEqual([
+      expect.objectContaining({
+        type: "background_task",
+        id: activityId,
+        group: "running",
+        task: expect.objectContaining({
+          id: "task-1",
+          sessionId: session.thebeSessionId,
+          name: "dev server",
+          status: "running",
+          startedAt: "2026-09-21T00:00:01.000Z",
+          updatedAt: "2026-09-21T00:00:01.000Z",
+        }),
+      }),
+    ]);
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${encodeURIComponent(activityId)}`),
+    );
+    expect(detail.status).toBe(200);
+    expect(await json(detail)).toEqual(
+      expect.objectContaining({ type: "background_task", id: activityId }),
+    );
+  });
+
+  it("reads a worker Activity detail without the parent transcript", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "parent answer" },
+      { kind: "text", text: "worker result" },
+    ]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+    });
+    const session = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(session.thebeSessionId);
+    await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${parentSessionId}/prompt`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "parent-secret-transcript" }),
+      }),
+    );
+    const spawned = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/subagents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profileName: "diagnostics",
+            task: "inspect health",
+            parentSessionId,
+          }),
+        }),
+      ),
+    );
+    const runId = String(spawned.runId);
+    await app.agent.waitSubagent(runId);
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${runId}`),
+    );
+    expect(detail.status).toBe(200);
+    const body = await json(detail);
+    expect(body).toEqual(
+      expect.objectContaining({
+        type: "worker",
+        id: runId,
+        worker: expect.objectContaining({
+          runId,
+          parentSessionId,
+          status: "completed",
+        }),
+      }),
+    );
+    expect(JSON.stringify(body)).not.toContain("parent transcript");
+  });
+
   it("includes completed capability runs as typed Activity items", async () => {
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -160,6 +317,124 @@ describe("GET /v1/activity", () => {
     );
   });
 
+  it("documents worker items in the Activity OpenAPI contract", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    expect(document.components.schemas).toEqual(
+      expect.objectContaining({
+        ActivityItem: expect.objectContaining({
+          oneOf: expect.arrayContaining([
+            { $ref: "#/components/schemas/ActivityWorkerItem" },
+          ]),
+        }),
+        ActivityWorkerItem: expect.objectContaining({
+          properties: expect.objectContaining({
+            worker: { $ref: "#/components/schemas/ProductWorker" },
+          }),
+        }),
+      }),
+    );
+  });
+
+  it("documents background-task items in the Activity OpenAPI contract", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    const activityGet = document.paths["/v1/activity"]?.get;
+    expect(activityGet?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "source",
+          schema: expect.objectContaining({
+            enum: expect.arrayContaining(["background_task"]),
+          }),
+        }),
+      ]),
+    );
+    expect(document.components.schemas).toEqual(
+      expect.objectContaining({
+        ActivityItem: expect.objectContaining({
+          oneOf: expect.arrayContaining([
+            { $ref: "#/components/schemas/ActivityBackgroundTaskItem" },
+          ]),
+        }),
+        ActivityBackgroundTaskItem: expect.objectContaining({
+          properties: expect.objectContaining({
+            task: { $ref: "#/components/schemas/ProductBackgroundTask" },
+          }),
+        }),
+        ProductBackgroundTask: expect.any(Object),
+      }),
+    );
+  });
+
+  it("documents the Diagnosis Artifact link in OpenAPI", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    expect(document.paths["/v1/diagnosis"]?.post?.responses).toEqual(
+      expect.objectContaining({
+        "200": expect.objectContaining({
+          content: expect.objectContaining({
+            "application/json": expect.objectContaining({
+              schema: { $ref: "#/components/schemas/DiagnosisResult" },
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(document.components.schemas.DiagnosisResult).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({ artifactId: { type: "string" } }),
+      }),
+    );
+  });
+
+  it("documents Activity pagination in the OpenAPI contract", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    const activityGet = document.paths["/v1/activity"]?.get;
+    expect(activityGet?.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "group", in: "query" }),
+        expect.objectContaining({ name: "limit", in: "query" }),
+        expect.objectContaining({ name: "cursor", in: "query" }),
+        expect.objectContaining({ name: "source", in: "query" }),
+        expect.objectContaining({ name: "status", in: "query" }),
+        expect.objectContaining({ name: "updatedAfter", in: "query" }),
+        expect.objectContaining({ name: "updatedBefore", in: "query" }),
+      ]),
+    );
+    expect(document.components.schemas.ActivityList).toEqual(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          nextCursor: { type: "string" },
+        }),
+      }),
+    );
+  });
+
   it("lists persisted records and reloads them from disk after a new app", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-agent-store-"));
     const first = createThebeApp({
@@ -250,6 +525,190 @@ describe("GET /v1/activity", () => {
     expect(await json(res)).toEqual({ items: [] });
   });
 
+  it("pages the unified Activity feed with a stable cursor", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const first = await json(await postAction(app.handler, { idempotencyKey: "page-1" }));
+    const second = await json(await postAction(app.handler, { idempotencyKey: "page-2" }));
+    const third = await json(await postAction(app.handler, { idempotencyKey: "page-3" }));
+    const receiptIds = [String(first.receiptId), String(second.receiptId), String(third.receiptId)];
+
+    const firstPage = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?limit=2"),
+      ),
+    );
+    const firstItems = firstPage.items as Array<Record<string, unknown>>;
+    expect(firstItems).toHaveLength(2);
+    expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+    const secondPage = await json(
+      await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/activity?limit=2&cursor=${encodeURIComponent(String(firstPage.nextCursor))}`,
+        ),
+      ),
+    );
+    const secondItems = secondPage.items as Array<Record<string, unknown>>;
+    expect(secondItems).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeUndefined();
+    expect(
+      [...firstItems, ...secondItems].map((item) => String(item.id)).sort(),
+    ).toEqual(receiptIds.sort());
+  });
+
+  it("rejects invalid Activity pagination inputs", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const invalidLimit = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?limit=0"),
+    );
+    expect(invalidLimit.status).toBe(400);
+    expect(await json(invalidLimit)).toEqual({
+      ok: false,
+      error: "limit must be a positive integer",
+      code: "invalid_body",
+    });
+
+    const invalidCursor = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?cursor=not-a-cursor"),
+    );
+    expect(invalidCursor.status).toBe(400);
+    expect(await json(invalidCursor)).toEqual({
+      ok: false,
+      error: "cursor is invalid",
+      code: "invalid_body",
+    });
+  });
+
+  it("rejects invalid Activity filter inputs", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const invalidSource = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?source=timeline"),
+    );
+    expect(invalidSource.status).toBe(400);
+    expect(await json(invalidSource)).toEqual({
+      ok: false,
+      error: "source is invalid",
+      code: "invalid_body",
+    });
+
+    const emptyStatus = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?status="),
+    );
+    expect(emptyStatus.status).toBe(400);
+    expect(await json(emptyStatus)).toEqual({
+      ok: false,
+      error: "status must not be empty",
+      code: "invalid_body",
+    });
+
+    const invalidTime = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?updatedAfter=not-a-time"),
+    );
+    expect(invalidTime.status).toBe(400);
+    expect(await json(invalidTime)).toEqual({
+      ok: false,
+      error: "updatedAfter must be an ISO-8601 timestamp",
+      code: "invalid_body",
+    });
+  });
+
+  it("filters Activity by source before pagination", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/diagnosis", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+        }),
+      }),
+    );
+    await postAction(app.handler, {
+      idempotencyKey: "source-receipt",
+      resource: { kind: "container", id: "ctr-other", name: "other", provider: "arcane" },
+    });
+
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?source=approval&limit=1"),
+    );
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    expect(body.items).toEqual([
+      expect.objectContaining({ type: "approval", group: "needs_approval" }),
+    ]);
+    expect(body.nextCursor).toBeUndefined();
+  });
+
+  it("filters Activity by source status", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    await postAction(app.handler, { idempotencyKey: "status-succeeded" });
+    await postAction(app.handler, {
+      idempotencyKey: "status-rejected",
+      approval: { approved: false, client: "ios" },
+    });
+
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?status=rejected"),
+    );
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    expect(body.items).toEqual([
+      expect.objectContaining({
+        type: "receipt",
+        receipt: expect.objectContaining({ status: "rejected" }),
+      }),
+    ]);
+  });
+
+  it("filters Activity by updatedAt time boundaries", async () => {
+    let current = "2026-09-21T00:00:01.000Z";
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      now: () => new Date(current),
+    });
+    const first = await json(await postAction(app.handler, { idempotencyKey: "time-first" }));
+    current = "2026-09-21T00:00:03.000Z";
+    const second = await json(await postAction(app.handler, { idempotencyKey: "time-second" }));
+
+    const after = await json(
+      await app.handler.handle(
+        new Request(
+          "http://127.0.0.1:8787/v1/activity?updatedAfter=2026-09-21T00:00:02.000Z",
+        ),
+      ),
+    );
+    expect(after.items).toEqual([
+      expect.objectContaining({ id: second.receiptId }),
+    ]);
+
+    const before = await json(
+      await app.handler.handle(
+        new Request(
+          "http://127.0.0.1:8787/v1/activity?updatedBefore=2026-09-21T00:00:02.000Z",
+        ),
+      ),
+    );
+    expect(before.items).toEqual([
+      expect.objectContaining({ id: first.receiptId }),
+    ]);
+  });
+
   it("mints one approval from diagnosis and mutates it into a receipt", async () => {
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -296,6 +755,59 @@ describe("GET /v1/activity", () => {
     expect(recentRows).toHaveLength(1);
     expect(recentRows[0]?.type).toBe("receipt");
     expect(recentRows[0]?.id).toBe(diagnosed.approvalId);
+  });
+
+  it("links a bounded diagnosis Artifact from the diagnosis and Activity contracts", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const diagnosed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/diagnosis", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          }),
+        }),
+      ),
+    );
+    const artifactId = String(diagnosed.artifactId);
+    expect(diagnosed.artifactId).toEqual(expect.any(String));
+
+    const metadata = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
+      ),
+    );
+    expect(metadata).toEqual(
+      expect.objectContaining({
+        artifactId,
+        kind: "diagnosis",
+        runId: diagnosed.runId,
+        resource: { kind: "container", id: "ctr-emby" },
+      }),
+    );
+
+    const content = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
+      ),
+    );
+    expect(String(content.content)).toContain(String(diagnosed.runId));
+    expect(String(content.content)).not.toContain("toolTranscript");
+
+    const activity = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?group=needs_approval"),
+      ),
+    );
+    expect(activity.items).toEqual([
+      expect.objectContaining({
+        approval: expect.objectContaining({ artifactId }),
+      }),
+    ]);
   });
 
   it("denies a pending approval and removes it from activity", async () => {

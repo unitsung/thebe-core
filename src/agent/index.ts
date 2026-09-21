@@ -27,6 +27,8 @@ export type { ProductSkill } from "./extensions/product.ts";
 export { toProductSkill, toProductCapability } from "./extensions/product.ts";
 export type { ProductWorker, ProductSubagentProfile } from "./subagents/product.ts";
 export { toProductWorker, toProductSubagentProfile } from "./subagents/product.ts";
+export type { ProductBackgroundTask } from "./background-tasks/product.ts";
+export { toProductBackgroundTask } from "./background-tasks/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
 export type { JudgmentModel } from "./judgment/interface.ts";
 export type { JudgmentApi } from "./judgment/service.ts";
@@ -66,8 +68,14 @@ export {
 } from "./artifacts/store.ts";
 export type { ArtifactStore } from "./artifacts/store.ts";
 export type { ActivityGroup, ActivityRecord, ActivityStatus } from "./activity/types.ts";
-export type { ActivityFeedItem, ActivityFeedType } from "./activity/feed.ts";
-export { toActivityFeed } from "./activity/feed.ts";
+export type {
+  ActivityCursor,
+  ActivityFeedFilters,
+  ActivityFeedItem,
+  ActivityFeedPage,
+  ActivityFeedType,
+} from "./activity/feed.ts";
+export { ACTIVITY_FEED_TYPES, toActivityFeed } from "./activity/feed.ts";
 export {
   DEFAULT_AUTO_SUMMARY_DELAY_MS,
 } from "./internal/auto-summary.ts";

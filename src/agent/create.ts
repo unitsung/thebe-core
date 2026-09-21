@@ -45,6 +45,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     createSession: sessions.createSession,
     prompt: prompts.prompt,
     activityStore,
+    artifactStore,
     judgment: ctx.judgment,
   });
   const actions = createActionApi({
@@ -63,7 +64,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...goals,
     ...extensions,
     ...subagents,
-    ...createControlApi(ctx),
+    ...createControlApi(ctx, artifactStore),
     ...diagnosis,
     ...actions,
     async listArtifacts(query) {

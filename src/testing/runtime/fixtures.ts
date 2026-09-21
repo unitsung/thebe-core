@@ -6,6 +6,7 @@ import type {
   RuntimeModelRef,
   RuntimeProvider,
   ThinkingLevel,
+  BackgroundTask,
 } from "../../agent/runtime/interface.ts";
 
 export type FakeQueuedTurn =
@@ -39,6 +40,7 @@ export type FakeSessionState = {
   toolAborts: Map<string, AbortController>;
   probeReply?: string;
   resourceReloads: number;
+  backgroundTasks: BackgroundTask[];
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [

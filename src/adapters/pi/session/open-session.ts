@@ -16,6 +16,8 @@ import type { PiSession } from "./pi-session.ts";
 import { toPiTool } from "./pi-tools.ts";
 import { wrapSession as wrapPiSession } from "./wrap-session.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
+import type { BackgroundTaskRegistry } from "./background-tasks.ts";
+import type { BashOperations } from "./background-tasks.ts";
 
 const sessionToolControllers = new WeakMap<object, Map<string, AbortController>>();
 
@@ -79,9 +81,10 @@ export async function openPiSession(
       modelId: string,
     ) => PiModelShape | undefined;
     live: Map<string, PiSession>;
+    backgroundTasks: BackgroundTaskRegistry;
   },
 ): Promise<RuntimeSession> {
-  const { create, sessionManager, cwd, live } = args;
+  const { create, sessionManager, cwd, live, backgroundTasks } = args;
   const tools = [
     ...(create.builtinTools ?? PI_BUILTIN_TOOLS),
     ...create.customTools.map((tool) => tool.name),
@@ -187,7 +190,9 @@ export async function openPiSession(
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
+  const bashOperations = backgroundTasks.wrap(sdk.createLocalBashOperations());
   const sanitizedBash = sdk.createBashTool(create.cwd ?? cwd, {
+    operations: bashOperations,
     spawnHook: (ctx: {
       command: string;
       cwd: string;
@@ -252,5 +257,7 @@ export async function openPiSession(
       await args.modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
     },
     controllers,
+    backgroundTasks,
+    bashOperations,
   );
 }

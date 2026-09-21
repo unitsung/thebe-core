@@ -1,6 +1,6 @@
 # Core durable product contract
 
-Status: in progress — Agent settings, enabled-resource durability, initial Artifact slice, and Capability Run Activity items implemented; broader unified read model remains
+Status: in progress — Agent settings, enabled-resource durability, operation-receipt/Diagnosis Artifacts, and Capability Run/Worker Activity items implemented; broader unified read model remains
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -9,10 +9,14 @@ The Agent settings slice is now available through `ThebeAgent.getAgentSettings()
 mutable values through the existing Thebe config boundary, keeps permission
 mode on `/v1/settings/permissions`, and reports concurrency changes as
 restart-required. Enabled resource selections now use that same boundary and
-survive Agent recreation. Core now stores bounded, redacted operation-receipt
-Artifacts with metadata/content HTTP reads. Activity now includes durable
-Capability Run items; additional producers, cursorable aggregation, and the
-remaining Worker/background-task read model remain future slices.
+survive Agent recreation. Core now stores bounded, redacted operation-receipt,
+Diagnosis, and background Capability Run report Artifacts with metadata/content
+HTTP reads. Activity now includes durable
+Capability Run, Worker, and Core-owned Background Task items; cursorable
+aggregation and source/status/time filters are now available. Pi detached Bash
+jobs are registered at the adapter seam and their bounded snapshots survive
+runtime recreation; provider-native task sources remain optional future
+producers.
 
 This spec turns the remaining Core product-contract work into one executable
 backlog. The highest seam is `ThebeAgent` and its product HTTP delivery; the
@@ -29,9 +33,12 @@ inspect and trust those objects:
 - capability run snapshots now survive Core recreation, but other long-lived
   objects still have uneven recovery and observation semantics;
 - results are still mostly embedded in runs, transcripts, or Activity records;
-  the initial Artifact contract only has an operation-receipt producer;
-- Activity is a partial diagnosis/restart/Goal feed rather than a stable read
-  model for capability runs, Workers, and background tasks;
+  the Artifact contract has operation-receipt, Diagnosis, and background
+  Capability Run producers, while additional result producers remain;
+- Activity now includes capability runs, Workers, and Core-owned detached Bash
+  tasks with bounded cursor pagination plus source/status/time filters; it
+  remains a partial diagnosis/restart/Goal feed until additional producers are
+  covered;
 - enabled resources and permission mode now persist through the configuration
   boundary, while capability results and broader read-model recovery remain
   incomplete.
@@ -245,10 +252,15 @@ Implementation order should be:
 
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
-3. 🟡 Artifact model/store and the initial operation-receipt producer;
+3. 🟡 Artifact model/store with operation-receipt, Diagnosis, and background
+   Capability Run producers;
 4. 🟡 capability/Goal/Worker recovery normalization (Worker snapshots recover
    as `interrupted`; active Goal recovery is recorded as a paused history event);
-5. unified Activity read model and OpenAPI/client contract hardening.
+5. 🟡 unified Activity read model and OpenAPI/client contract hardening; the
+   current slice includes capability runs, Workers, Core-owned detached Bash
+   Background Tasks with runtime-recreation recovery, cursor pagination, and
+   source/status/time filters. Additional provider-native task producers
+   remain.
 
 The current capability-run store is the reference for atomic bounded snapshots,
 but its “old active run becomes interrupted” behavior must remain visible in the

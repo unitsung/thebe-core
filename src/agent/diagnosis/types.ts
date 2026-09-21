@@ -88,6 +88,7 @@ export type DiagnosisStatus =
 
 export type DiagnosisResult = {
   runId: string;
+  artifactId?: string;
   actionId: typeof DIAGNOSIS_ACTION_ID;
   status: DiagnosisStatus;
   resource: ResourceRef;

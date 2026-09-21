@@ -114,6 +114,7 @@ export function createFakeRuntime(
         abortWaiters: [],
         toolAborts: new Map(),
         resourceReloads: 0,
+        backgroundTasks: [],
         probeReply:
           (create.builtinTools?.length ?? -1) === 0 &&
           create.customTools.length === 0
@@ -174,6 +175,7 @@ export function createFakeRuntime(
         abortWaiters: [],
         toolAborts: new Map(),
         resourceReloads: 0,
+        backgroundTasks: [],
         leafId: copied.at(-1)?.id,
       };
       sessions.set(id, state);

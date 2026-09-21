@@ -27,11 +27,16 @@ import {
   type CapabilityRun,
 } from "../capabilities/invoke.ts";
 import { createCapabilityRunStore } from "../capabilities/runs.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
+import {
+  toProductBackgroundTask,
+  type ProductBackgroundTask,
+} from "../background-tasks/product.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
   `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 
-export function createControlApi(ctx: AgentContext) {
+export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStore) {
   const {
     options,
     audit,
@@ -42,6 +47,7 @@ export function createControlApi(ctx: AgentContext) {
     baseTools,
     mcp,
     now,
+    listMetas,
   } = ctx;
   const capabilityRuns = new Map<string, CapabilityRun>();
   const capabilityRunStore = createCapabilityRunStore({
@@ -67,7 +73,7 @@ export function createControlApi(ctx: AgentContext) {
 
   async function updateCapabilityRun(
     runId: string,
-    patch: Partial<Pick<CapabilityRun, "status" | "finishedAt" | "result" | "error">>,
+    patch: Partial<Pick<CapabilityRun, "status" | "finishedAt" | "result" | "error" | "artifactId">>,
   ): Promise<void> {
     const current = capabilityRuns.get(runId);
     if (!current) return;
@@ -272,9 +278,26 @@ export function createControlApi(ctx: AgentContext) {
         void (async () => {
           try {
             const text = await invokeTool(capability.id, args);
+            const result = parseCapabilityResult(text);
+            const artifact = artifactStore
+              ? await artifactStore.create({
+                  kind: "report",
+                  title: `Capability report: ${capability.id}`,
+                  runId,
+                  resource: resourceRef(input.resource),
+                  contentType: "application/json",
+                  content: JSON.stringify({
+                    version: 1,
+                    runId,
+                    capabilityId: capability.id,
+                    result,
+                  }),
+                })
+              : undefined;
             await updateCapabilityRun(runId, {
               status: CAPABILITY_RUN_STATUS_SUCCEEDED,
-              result: parseCapabilityResult(text),
+              result,
+              artifactId: artifact?.artifactId,
               finishedAt: now().toISOString(),
             });
           } catch (error) {
@@ -327,6 +350,28 @@ export function createControlApi(ctx: AgentContext) {
       const opened = await openSession(thebeSessionId);
       return opened.session.listBackgroundTasks();
     },
+    async listAllBackgroundTasks(): Promise<ProductBackgroundTask[]> {
+      const tasks: ProductBackgroundTask[] = [];
+      for (const meta of await listMetas()) {
+        if (meta.inPlace) continue;
+        try {
+          const opened = await openSession(meta.thebeSessionId);
+          const current = await opened.session.listBackgroundTasks();
+          tasks.push(
+            ...current.map((task) => toProductBackgroundTask(meta.thebeSessionId, task)),
+          );
+        } catch {
+          // A stale runtime session should not hide tasks from other sessions.
+        }
+      }
+      return tasks.sort((left, right) => {
+        if (left.updatedAt < right.updatedAt) return 1;
+        if (left.updatedAt > right.updatedAt) return -1;
+        const leftId = `${left.sessionId}:${left.id}`;
+        const rightId = `${right.sessionId}:${right.id}`;
+        return leftId < rightId ? 1 : leftId > rightId ? -1 : 0;
+      });
+    },
     async stopBackgroundTask(
       thebeSessionId: string,
       taskId: string,
@@ -370,4 +415,19 @@ export function createControlApi(ctx: AgentContext) {
       return options.runtime.auth();
     },
   };
+}
+
+function resourceRef(
+  resource: Record<string, unknown> | undefined,
+): { kind: string; id: string } | undefined {
+  if (
+    !resource ||
+    typeof resource.kind !== "string" ||
+    typeof resource.id !== "string" ||
+    !resource.kind.trim() ||
+    !resource.id.trim()
+  ) {
+    return undefined;
+  }
+  return { kind: resource.kind, id: resource.id };
 }
