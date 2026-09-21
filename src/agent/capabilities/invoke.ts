@@ -25,7 +25,9 @@ export type CapabilityRun = {
   capabilityId: string;
   status: CapabilityRunStatus;
   createdAt: string;
+  updatedAt?: string;
   finishedAt?: string;
+  resource?: Record<string, unknown>;
   result?: unknown;
   error?: string;
 };

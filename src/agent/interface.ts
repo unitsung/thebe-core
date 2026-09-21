@@ -32,6 +32,7 @@ import type {
   CapabilityRun,
 } from "./capabilities/invoke.ts";
 import type { ProductPendingPermission } from "./security/pending-permission.ts";
+import type { AuditPage, AuditQuery } from "./security/audit/audit-log.ts";
 import type { SubagentProfile } from "./subagents/catalog.ts";
 import type {
   GoalRun,
@@ -195,7 +196,8 @@ export interface ThebeAgent {
   exportSession(thebeSessionId?: string): Promise<RuntimeExport>;
   invokeTool(name: string, args: unknown): Promise<string>;
   invokeCapability(id: string, input?: CapabilityInvokeInput): Promise<CapabilityInvokeResult>;
-  getCapabilityRun(runId: string): CapabilityRun | undefined;
+  getCapabilityRun(runId: string): Promise<CapabilityRun | undefined>;
+  listCapabilityRuns(): Promise<CapabilityRun[]>;
   diagnose(request: DiagnosisRequest): Promise<DiagnosisResult>;
   getDiagnosis(runId: string): Promise<DiagnosisResult | undefined>;
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;
@@ -204,6 +206,7 @@ export interface ThebeAgent {
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;
+  listAudit(query?: AuditQuery): Promise<AuditPage>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;

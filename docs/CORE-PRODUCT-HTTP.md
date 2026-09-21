@@ -1,8 +1,8 @@
 # Core product HTTP — shipped vs leftover
 
-Date: 2026-09-18.
+Date: 2026-09-21.
 
-This slice productized remaining P0+P1 Agent surfaces as HTTP. Delivery still only calls `ThebeAgent`. Raw `/mcp` is unchanged.
+This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
 ## Shipped
 
@@ -10,22 +10,23 @@ This slice productized remaining P0+P1 Agent surfaces as HTTP. Delivery still on
 | --- | --- | --- |
 | Capability discovery | `GET /v1/capabilities` | Product metadata: category, provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. |
 | Capability invoke | `POST /v1/capabilities/{id}/invoke` | Through `ThebeAgent.invokeCapability` → policy/tools. Direct `{ type: result }` or background `{ type: run, runId }`. `container.restart` and `approval=required` return 403; use `POST /v1/action`. |
-| Capability run | `GET /v1/capabilities/runs/{runId}` | In-memory background invoke status. |
+| Capability run | `GET /v1/capabilities/runs`, `GET /v1/capabilities/runs/{runId}` | Durable snapshots under `{agentStoreDir}/capability-runs`; terminal runs and results survive Core recreation. Queued/running runs owned by an older Core instance recover as failed with an interruption error. |
 | Workers | `GET/POST /v1/subagents`, `GET /v1/subagents/profiles`, `GET /v1/subagents/{runId}`, `POST .../cancel`, `GET .../log` | Product object is `ProductWorker` mapped from `SubagentRun`. No parent transcript. |
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
 | Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
 | MCP inventory | `GET /v1/extensions/mcp/servers`, `GET /v1/extensions/mcp/tools` | External tools only. Raw `/mcp` stays for integrations. |
 | Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
+| Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 
-OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`.
+OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`, `AuditRecord`, `AuditList`.
 
 ## Explicit non-ships (leftover)
 
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for any of the above.
-- **P2** `GET /v1/audit`, artifacts, auto-summary / auto-compact settings dump (`GET /v1/settings/agent`).
+- **P2** artifacts, auto-summary / auto-compact settings dump (`GET /v1/settings/agent`), and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 - **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).

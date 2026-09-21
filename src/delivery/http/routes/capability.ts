@@ -20,11 +20,18 @@ export async function handleCapabilityRoutes(
     }
     if (
       request.method === "GET" &&
+      parts.length === 3 &&
+      parts[2] === PRODUCT_HTTP_SEGMENT.runs
+    ) {
+      return json({ runs: await agent.listCapabilityRuns() });
+    }
+    if (
+      request.method === "GET" &&
       parts.length === 4 &&
       parts[2] === PRODUCT_HTTP_SEGMENT.runs &&
       parts[3]
     ) {
-      const run = agent.getCapabilityRun(parts[3]);
+      const run = await agent.getCapabilityRun(parts[3]);
       if (!run) return notFound("capability run not found");
       return json(run);
     }

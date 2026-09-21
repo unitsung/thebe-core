@@ -2,6 +2,10 @@ export { createThebeApp } from "./app/create.ts";
 export { createThebeAgent } from "./agent/index.ts";
 export type {
   CreateThebeAgentOptions,
+  AuditPage,
+  AuditQuery,
+  AuditRecord,
+  AuditResult,
   HomelabCapability,
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,

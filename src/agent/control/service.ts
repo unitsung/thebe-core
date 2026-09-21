@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
+import type { AuditPage, AuditQuery } from "../security/audit/audit-log.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
@@ -24,6 +26,7 @@ import {
   type CapabilityInvokeResult,
   type CapabilityRun,
 } from "../capabilities/invoke.ts";
+import { createCapabilityRunStore } from "../capabilities/runs.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
   `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
@@ -38,8 +41,44 @@ export function createControlApi(ctx: AgentContext) {
     policy,
     baseTools,
     mcp,
+    now,
   } = ctx;
   const capabilityRuns = new Map<string, CapabilityRun>();
+  const capabilityRunStore = createCapabilityRunStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "capability-runs")
+      : undefined,
+    now,
+    ownerId: randomUUID(),
+  });
+  let capabilityRunsLoaded = false;
+  let capabilityRunsLoadPromise: Promise<void> | undefined;
+
+  async function ensureCapabilityRunsLoaded(): Promise<void> {
+    if (capabilityRunsLoaded) return;
+    capabilityRunsLoadPromise ??= (async () => {
+      for (const run of await capabilityRunStore.list()) {
+        capabilityRuns.set(run.runId, run);
+      }
+      capabilityRunsLoaded = true;
+    })();
+    await capabilityRunsLoadPromise;
+  }
+
+  async function updateCapabilityRun(
+    runId: string,
+    patch: Partial<Pick<CapabilityRun, "status" | "finishedAt" | "result" | "error">>,
+  ): Promise<void> {
+    const current = capabilityRuns.get(runId);
+    if (!current) return;
+    const updated: CapabilityRun = {
+      ...current,
+      ...patch,
+      updatedAt: now().toISOString(),
+    };
+    await capabilityRunStore.save(updated);
+    capabilityRuns.set(runId, updated);
+  }
 
   async function invokeTool(name: string, args: unknown): Promise<string> {
     if (name === CONTAINER_RESTART_ACTION_ID) {
@@ -170,6 +209,9 @@ export function createControlApi(ctx: AgentContext) {
       const opened = await openSession(thebeSessionId);
       return opened.session.exportSession();
     },
+    async listAudit(query?: AuditQuery): Promise<AuditPage> {
+      return audit?.list(query) ?? { entries: [] };
+    },
     invokeTool,
     async invokeCapability(
       id: string,
@@ -190,7 +232,6 @@ export function createControlApi(ctx: AgentContext) {
       }
       const mode = input.mode ?? CAPABILITY_INVOKE_MODE_DIRECT;
       const args = input.arguments ?? {};
-      void input.resource;
       if (mode === CAPABILITY_INVOKE_MODE_BACKGROUND) {
         if (!capability.background) {
           throw httpError(
@@ -200,35 +241,58 @@ export function createControlApi(ctx: AgentContext) {
           );
         }
         const runId = randomUUID();
+        const createdAt = now().toISOString();
         const run: CapabilityRun = {
           runId,
           capabilityId: capability.id,
           status: CAPABILITY_RUN_STATUS_RUNNING,
-          createdAt: new Date().toISOString(),
+          createdAt,
+          updatedAt: createdAt,
+          resource: input.resource,
         };
+        await ensureCapabilityRunsLoaded();
         capabilityRuns.set(runId, run);
-        void invokeTool(capability.id, args)
-          .then((text) => {
-            const current = capabilityRuns.get(runId);
-            if (!current) return;
-            current.status = CAPABILITY_RUN_STATUS_SUCCEEDED;
-            current.result = parseCapabilityResult(text);
-            current.finishedAt = new Date().toISOString();
-          })
-          .catch((error) => {
-            const current = capabilityRuns.get(runId);
-            if (!current) return;
-            current.status = CAPABILITY_RUN_STATUS_FAILED;
-            current.error = error instanceof Error ? error.message : String(error);
-            current.finishedAt = new Date().toISOString();
-          });
+        try {
+          await capabilityRunStore.save(run);
+        } catch (error) {
+          capabilityRuns.delete(runId);
+          throw error;
+        }
+        void (async () => {
+          try {
+            const text = await invokeTool(capability.id, args);
+            await updateCapabilityRun(runId, {
+              status: CAPABILITY_RUN_STATUS_SUCCEEDED,
+              result: parseCapabilityResult(text),
+              finishedAt: now().toISOString(),
+            });
+          } catch (error) {
+            await updateCapabilityRun(runId, {
+              status: CAPABILITY_RUN_STATUS_FAILED,
+              error: error instanceof Error ? error.message : String(error),
+              finishedAt: now().toISOString(),
+            }).catch(() => {});
+          }
+        })();
         return { type: CAPABILITY_INVOKE_TYPE_RUN, runId };
       }
       const text = await invokeTool(capability.id, args);
       return { type: CAPABILITY_INVOKE_TYPE_RESULT, result: parseCapabilityResult(text) };
     },
-    getCapabilityRun(runId: string): CapabilityRun | undefined {
-      return capabilityRuns.get(runId);
+    async getCapabilityRun(runId: string): Promise<CapabilityRun | undefined> {
+      await ensureCapabilityRunsLoaded();
+      const run = capabilityRuns.get(runId);
+      return run ? { ...run } : undefined;
+    },
+    async listCapabilityRuns(): Promise<CapabilityRun[]> {
+      await ensureCapabilityRunsLoaded();
+      return [...capabilityRuns.values()]
+        .sort((left, right) => {
+          const a = left.updatedAt ?? left.createdAt;
+          const b = right.updatedAt ?? right.createdAt;
+          return a < b ? 1 : a > b ? -1 : 0;
+        })
+        .map((run) => ({ ...run }));
     },
     async getContext(thebeSessionId: string): Promise<ThebeSessionContext> {
       const opened = await openSession(thebeSessionId);

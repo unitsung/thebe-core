@@ -1,5 +1,11 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
+import {
+  createCapabilityRunStore,
+} from "../../agent/capabilities/runs.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
@@ -33,11 +39,27 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-function app() {
+function app(options: { agentStoreDir?: string; now?: () => Date } = {}) {
   return createThebeApp({
     runtime: createFakeRuntime().runtime,
     provider: provider(),
+    ...options,
   });
+}
+
+async function fetchRun(
+  handler: ReturnType<typeof app>["handler"],
+  runId: string,
+): Promise<Record<string, unknown>> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const fetched = await handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
+    );
+    const run = await json(fetched);
+    if (run.status === "succeeded" || run.status === "failed") return run;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`capability run did not finish: ${runId}`);
 }
 
 describe("capability product HTTP", () => {
@@ -166,6 +188,71 @@ describe("capability product HTTP", () => {
     expect(run.runId).toBe(body.runId);
     expect(run.capabilityId).toBe("diagnose_from_events");
     expect(["queued", "running", "succeeded", "failed"]).toContain(run.status);
+  });
+
+  it("persists terminal runs and restores them through a new Agent instance", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-capability-runs-"));
+    const first = app({ agentStoreDir: dir });
+    const started = await first.handler.handle(
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/diagnose_from_events/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "background",
+            arguments: { category: "all" },
+            resource: { kind: "container", id: "ctr-emby" },
+          }),
+        },
+      ),
+    );
+    const body = await json(started);
+    const runId = String(body.runId);
+    const completed = await fetchRun(first.handler, runId);
+    expect(completed.status).toBe("succeeded");
+    expect(completed.resource).toEqual({ kind: "container", id: "ctr-emby" });
+
+    const restarted = app({ agentStoreDir: dir });
+    const restored = await restarted.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
+    );
+    expect(restored.status).toBe(200);
+    expect(await json(restored)).toEqual(completed);
+
+    const listed = await restarted.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/runs"),
+    );
+    expect(listed.status).toBe(200);
+    expect(await json(listed)).toEqual({ runs: [completed] });
+  });
+
+  it("recovers an in-flight run from an older Core instance as interrupted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-capability-runs-"));
+    const store = createCapabilityRunStore({
+      dir: join(dir, "capability-runs"),
+      ownerId: "previous-core-instance",
+      now: () => new Date("2026-09-21T00:00:00.000Z"),
+    });
+    await store.save({
+      runId: "stale-run",
+      capabilityId: "diagnose_from_events",
+      status: "running",
+      createdAt: "2026-09-20T23:59:00.000Z",
+    });
+
+    const restarted = app({
+      agentStoreDir: dir,
+      now: () => new Date("2026-09-21T00:00:00.000Z"),
+    });
+    const recovered = await restarted.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/runs/stale-run"),
+    );
+    expect(recovered.status).toBe(200);
+    const run = await json(recovered);
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("Capability run interrupted when Core restarted.");
+    expect(run.finishedAt).toBe("2026-09-21T00:00:00.000Z");
   });
 
   it("returns 404 for an unknown capability", async () => {

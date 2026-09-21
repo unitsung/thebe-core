@@ -222,6 +222,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     const body = (await spec.json()) as OpenApiDocument;
     const paths = [
       "/v1/capabilities/{id}/invoke",
+      "/v1/capabilities/runs",
       "/v1/capabilities/runs/{runId}",
       "/v1/subagents",
       "/v1/subagents/profiles",
@@ -247,6 +248,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "HomelabCapability",
       "CapabilityInvokeResult",
       "CapabilityRun",
+      "CapabilityRunList",
       "ProductWorker",
       "PendingPermission",
       "PermissionResolution",

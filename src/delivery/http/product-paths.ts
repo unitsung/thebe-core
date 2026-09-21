@@ -1,6 +1,7 @@
 /** Product HTTP prefixes and path segments. Routes and OpenAPI share these. */
 export const PRODUCT_HTTP_PATH = {
   capabilities: "/v1/capabilities",
+  audit: "/v1/audit",
   subagents: "/v1/subagents",
   permissions: "/v1/permissions",
   skills: "/v1/skills",

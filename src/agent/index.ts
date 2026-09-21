@@ -17,6 +17,12 @@ export type {
   CapabilityRunStatus,
 } from "./capabilities/invoke.ts";
 export type { ProductPendingPermission } from "./security/pending-permission.ts";
+export type {
+  AuditPage,
+  AuditQuery,
+  AuditRecord,
+  AuditResult,
+} from "./security/audit/audit-log.ts";
 export type { ProductSkill } from "./extensions/product.ts";
 export { toProductSkill, toProductCapability } from "./extensions/product.ts";
 export type { ProductWorker, ProductSubagentProfile } from "./subagents/product.ts";
