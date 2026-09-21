@@ -11,6 +11,7 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Capability discovery | `GET /v1/capabilities` | Product metadata: category, provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. |
 | Capability invoke | `POST /v1/capabilities/{id}/invoke` | Through `ThebeAgent.invokeCapability` → policy/tools. Direct `{ type: result }` or background `{ type: run, runId }`. `container.restart` and `approval=required` return 403; use `POST /v1/action`. |
 | Capability run | `GET /v1/capabilities/runs`, `GET /v1/capabilities/runs/{runId}` | Durable snapshots under `{agentStoreDir}/capability-runs`; terminal runs and results survive Core recreation. Queued/running runs owned by an older Core instance recover as failed with an interruption error. |
+| Activity feed | `GET /v1/activity`, `GET /v1/activity/{id}` | Typed union of Approval, Receipt, Goal, and Capability Run items. Capability Runs keep their source `runId`, status, timestamps, capability id, and resource payload; queued/running items are `running`, terminal items are `recent`. |
 | Workers | `GET/POST /v1/subagents`, `GET /v1/subagents/profiles`, `GET /v1/subagents/{runId}`, `POST .../cancel`, `GET .../log` | Product object is `ProductWorker` mapped from `SubagentRun`. No parent transcript. |
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
 | Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
@@ -21,13 +22,13 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts are the first producer. |
 | Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 
-OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `AgentArtifact`, `ArtifactList`, `ArtifactContent`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`.
+OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ActivityItem`, `ActivityRunItem`, `ActivityList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `AgentArtifact`, `ArtifactList`, `ArtifactContent`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`.
 
 ## Explicit non-ships (leftover)
 
 These are **not** deferred accidentally. They are out of this slice:
 
-- **App clients / iOS UI** for any of the above.
+- **App clients / iOS UI** for the remaining product surfaces; the Activity Run union member is decoded by the current App client.
 - **Additional Artifact producers** and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 - **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.

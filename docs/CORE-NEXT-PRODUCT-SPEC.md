@@ -1,6 +1,6 @@
 # Core durable product contract
 
-Status: in progress — Agent settings, enabled-resource durability, and the initial Artifact slice implemented; unified read model remains
+Status: in progress — Agent settings, enabled-resource durability, initial Artifact slice, and Capability Run Activity items implemented; broader unified read model remains
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -10,8 +10,9 @@ mutable values through the existing Thebe config boundary, keeps permission
 mode on `/v1/settings/permissions`, and reports concurrency changes as
 restart-required. Enabled resource selections now use that same boundary and
 survive Agent recreation. Core now stores bounded, redacted operation-receipt
-Artifacts with metadata/content HTTP reads. Additional producers and the
-unified durable Activity read model remain future slices.
+Artifacts with metadata/content HTTP reads. Activity now includes durable
+Capability Run items; additional producers, cursorable aggregation, and the
+remaining Worker/background-task read model remain future slices.
 
 This spec turns the remaining Core product-contract work into one executable
 backlog. The highest seam is `ThebeAgent` and its product HTTP delivery; the

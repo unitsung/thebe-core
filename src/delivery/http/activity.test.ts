@@ -55,6 +55,111 @@ async function postAction(
 }
 
 describe("GET /v1/activity", () => {
+  it("includes completed capability runs as typed Activity items", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const started = await app.handler.handle(
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/diagnose_from_events/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "background",
+            arguments: { category: "all" },
+            resource: { kind: "container", id: "ctr-emby" },
+          }),
+        },
+      ),
+    );
+    expect(started.status).toBe(202);
+    const startedBody = await json(started);
+    const runId = String(startedBody.runId);
+
+    let run: Record<string, unknown> | undefined;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const response = await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
+      );
+      run = await json(response);
+      if (run.status === "succeeded" || run.status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(run?.status).toBe("succeeded");
+
+    const listed = await json(
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/activity")),
+    );
+    expect(listed.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "run",
+          id: runId,
+          group: "recent",
+          updatedAt: expect.any(String),
+          run: expect.objectContaining({
+            runId,
+            capabilityId: "diagnose_from_events",
+            status: "succeeded",
+            resource: { kind: "container", id: "ctr-emby" },
+          }),
+        }),
+      ]),
+    );
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${runId}`),
+    );
+    expect(detail.status).toBe(200);
+    expect(await json(detail)).toEqual(
+      expect.objectContaining({
+        type: "run",
+        id: runId,
+        run: expect.objectContaining({ runId }),
+      }),
+    );
+  });
+
+  it("documents run items in the Activity OpenAPI contract", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      paths: Record<string, Record<string, Record<string, unknown>>>;
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    const activityGet = document.paths["/v1/activity"]?.get;
+    expect(activityGet?.responses).toEqual(
+      expect.objectContaining({
+        "200": expect.objectContaining({
+          content: expect.objectContaining({
+            "application/json": expect.objectContaining({
+              schema: { $ref: "#/components/schemas/ActivityList" },
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(document.components.schemas).toEqual(
+      expect.objectContaining({
+        ActivityItem: expect.objectContaining({
+          oneOf: expect.arrayContaining([
+            { $ref: "#/components/schemas/ActivityRunItem" },
+          ]),
+        }),
+        ActivityRunItem: expect.objectContaining({
+          properties: expect.objectContaining({
+            run: { $ref: "#/components/schemas/CapabilityRun" },
+          }),
+        }),
+        ActivityList: expect.any(Object),
+      }),
+    );
+  });
+
   it("lists persisted records and reloads them from disk after a new app", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-agent-store-"));
     const first = createThebeApp({

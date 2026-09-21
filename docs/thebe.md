@@ -253,8 +253,8 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 | `POST /v1/diagnosis/:runId/why` | 基于已有 observations 追问原因，不重放原始 inspect/logs | 已实现 |
 | `POST /v1/action` | 仅 `container.restart`：必须本机 `approval.approved`，然后确定性执行并程序化 verification，返回 Receipt | 已实现（Vertical Slice 02） |
 | `GET /v1/action/:receiptId` | 读取执行回执 | 已实现 |
-| `GET /v1/activity` | 列出持久化的最小 ActivityRecord（ActionReceipt 快照，非 Goal/Run） | 已实现（Vertical Slice 03） |
-| `GET /v1/activity/:id` | 读取单条 Activity | 已实现 |
+| `GET /v1/activity` | 列出 typed Activity union（Approval / Receipt / Goal / Capability Run），读取使用 0 tokens | 已实现（Capability Run 已纳入） |
+| `GET /v1/activity/:id` | 读取单条 Activity，包括 Capability Run 详情 | 已实现 |
 | `POST /v1/goals` | 创建 session 并启动 ProductGoal；`id`/`sessionId` 均为 `thebeSessionId` | 已实现 |
 | `GET /v1/goals` | 列出持久化 Goal（新进程可从 AgentStore 恢复） | 已实现 |
 | `GET /v1/goals/:id` | 读取单个 ProductGoal；与 `GET /v1/session/:id/goal` 返回同一对象 | 已实现 |

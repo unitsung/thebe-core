@@ -1,4 +1,5 @@
 import type { ProductGoal, ProductGoalStatus } from "../goals/product.ts";
+import type { CapabilityRun } from "../capabilities/invoke.ts";
 import {
   ACTIVITY_KIND_DIAGNOSE,
   ACTIVITY_KIND_RESTART,
@@ -9,7 +10,7 @@ import {
   type ActivityRecord,
 } from "./types.ts";
 
-export type ActivityFeedType = "approval" | "receipt" | "goal";
+export type ActivityFeedType = "approval" | "receipt" | "goal" | "run";
 
 export type ActivityFeedItem =
   | {
@@ -32,6 +33,13 @@ export type ActivityFeedItem =
       group: "running" | "recent";
       updatedAt: string;
       goal: ProductGoal;
+    }
+  | {
+      type: "run";
+      id: string;
+      group: "running" | "recent";
+      updatedAt: string;
+      run: CapabilityRun;
     };
 
 export function goalActivityGroup(
@@ -80,10 +88,22 @@ export function goalToFeedItem(goal: ProductGoal): ActivityFeedItem {
   };
 }
 
+export function capabilityRunToFeedItem(run: CapabilityRun): ActivityFeedItem {
+  const group = run.status === "queued" || run.status === "running" ? "running" : "recent";
+  return {
+    type: "run",
+    id: run.runId,
+    group,
+    updatedAt: run.updatedAt ?? run.finishedAt ?? run.createdAt,
+    run,
+  };
+}
+
 export function toActivityFeed(
   records: ActivityRecord[],
   goals: ProductGoal[],
   group?: ActivityGroup,
+  capabilityRuns: CapabilityRun[] = [],
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {
@@ -92,6 +112,9 @@ export function toActivityFeed(
   }
   for (const goal of goals) {
     items.push(goalToFeedItem(goal));
+  }
+  for (const run of capabilityRuns) {
+    items.push(capabilityRunToFeedItem(run));
   }
   items.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
   return group ? items.filter((item) => item.group === group) : items;

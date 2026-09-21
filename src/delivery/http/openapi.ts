@@ -95,8 +95,8 @@ const operations: Operation[] = [
   { method: "post", path: "/v1/diagnosis/{runId}/why", summary: "Ask why a diagnosis was reached", tag: "diagnosis", parameters: [idParameter("runId")], requestBody: { required: false } },
   { method: "post", path: "/v1/action", summary: "Execute an approved container.restart", tag: "action", requestBody: { required: true } },
   { method: "get", path: "/v1/action/{receiptId}", summary: "Read an action receipt", tag: "action", parameters: [idParameter("receiptId")] },
-  { method: "get", path: "/v1/activity", summary: "List Activity workspace items (approval, receipt, goal)", tag: "activity" },
-  { method: "get", path: "/v1/activity/{id}", summary: "Read one Activity workspace item", tag: "activity", parameters: [idParameter()] },
+  { method: "get", path: "/v1/activity", summary: "List Activity workspace items (approval, receipt, goal, run)", tag: "activity", responseSchema: "ActivityList" },
+  { method: "get", path: "/v1/activity/{id}", summary: "Read one Activity workspace item", tag: "activity", parameters: [idParameter()], responseSchema: "ActivityItem" },
   { method: "post", path: "/v1/activity/{id}/deny", summary: "Reject a pending Approval and remove it from Activity", tag: "activity", parameters: [idParameter()] },
   { method: "post", path: "/v1/goals", summary: "Create a session and start a Goal", tag: "goal", response: 201, requestBody: { required: true } },
   { method: "get", path: "/v1/goals", summary: "List persisted Goals", tag: "goal" },
@@ -227,7 +227,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "settings", description: "Runtime behavior settings consumed by the App" },
       { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
       { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
-      { name: "activity", description: "Minimal persisted ActionReceipt records; not a Goal/Run system" },
+      { name: "activity", description: "Typed Approval, Receipt, Goal, and Capability Run items; lifecycle remains owned by each source object" },
       { name: "goal", description: "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*." },
       { name: "compatibility", description: "Legacy iOS compatibility endpoints" },
       { name: "mcp", description: "MCP JSON-RPC" },
@@ -339,6 +339,65 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           required: ["runs"],
           properties: {
             runs: { type: "array", items: { $ref: "#/components/schemas/CapabilityRun" } },
+          },
+        },
+        ActivityApprovalItem: {
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "approval"],
+          properties: {
+            type: { type: "string", enum: ["approval"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["needs_approval"] },
+            updatedAt: { type: "string" },
+            approval: { type: "object", additionalProperties: true },
+          },
+        },
+        ActivityReceiptItem: {
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "receipt"],
+          properties: {
+            type: { type: "string", enum: ["receipt"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["running", "recent"] },
+            updatedAt: { type: "string" },
+            receipt: { type: "object", additionalProperties: true },
+          },
+        },
+        ActivityGoalItem: {
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "goal"],
+          properties: {
+            type: { type: "string", enum: ["goal"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["running", "recent"] },
+            updatedAt: { type: "string" },
+            goal: { type: "object", additionalProperties: true },
+          },
+        },
+        ActivityRunItem: {
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "run"],
+          properties: {
+            type: { type: "string", enum: ["run"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["running", "recent"] },
+            updatedAt: { type: "string" },
+            run: { $ref: "#/components/schemas/CapabilityRun" },
+          },
+        },
+        ActivityItem: {
+          oneOf: [
+            { $ref: "#/components/schemas/ActivityApprovalItem" },
+            { $ref: "#/components/schemas/ActivityReceiptItem" },
+            { $ref: "#/components/schemas/ActivityGoalItem" },
+            { $ref: "#/components/schemas/ActivityRunItem" },
+          ],
+        },
+        ActivityList: {
+          type: "object",
+          required: ["items"],
+          properties: {
+            items: { type: "array", items: { $ref: "#/components/schemas/ActivityItem" } },
           },
         },
         ProductWorker: {

@@ -1,5 +1,9 @@
 import { toProductGoal } from "../../../agent/goals/product.ts";
-import { recordToFeedItem, toActivityFeed } from "../../../agent/activity/feed.ts";
+import {
+  capabilityRunToFeedItem,
+  recordToFeedItem,
+  toActivityFeed,
+} from "../../../agent/activity/feed.ts";
 import { agentUnavailable, type ThebeHttpContext } from "../context.ts";
 import { json } from "../json.ts";
 
@@ -21,7 +25,8 @@ export async function handleActivityRoutes(
         : undefined;
     const records = await agent.listActivity();
     const goals = (await agent.listGoals()).map(toProductGoal);
-    return json({ items: toActivityFeed(records, goals, allowed) });
+    const capabilityRuns = await agent.listCapabilityRuns();
+    return json({ items: toActivityFeed(records, goals, allowed, capabilityRuns) });
   }
   if (
     request.method === "POST" &&
@@ -41,6 +46,8 @@ export async function handleActivityRoutes(
       const item = recordToFeedItem(record);
       if (item) return json(item);
     }
+    const capabilityRun = await agent.getCapabilityRun(id);
+    if (capabilityRun) return json(capabilityRunToFeedItem(capabilityRun));
     const goal = agent.getGoal(id);
     if (goal) {
       const items = toActivityFeed([], [toProductGoal(goal)]);
