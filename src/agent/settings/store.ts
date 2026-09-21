@@ -6,7 +6,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import type { PermissionMode } from "../runtime/interface.ts";
+import {
+  ENABLED_RESOURCE_KINDS,
+  type EnabledResource,
+  type PermissionMode,
+} from "../runtime/interface.ts";
 import type {
   AgentSettingsStore,
   AgentSettingsValues,
@@ -21,6 +25,7 @@ const SETTING_KEYS = [
   "maxSubagentsPerParent",
   "workspacePath",
   "outputDirectory",
+  "enabledResources",
 ] as const;
 
 /**
@@ -74,6 +79,9 @@ function pickSettings(config: Record<string, unknown>): AgentSettingsValues {
   }
   if (typeof config.workspacePath === "string") values.workspacePath = config.workspacePath;
   if (typeof config.outputDirectory === "string") values.outputDirectory = config.outputDirectory;
+  if (Array.isArray(config.enabledResources)) {
+    values.enabledResources = config.enabledResources.filter(isEnabledResource);
+  }
   return values;
 }
 
@@ -83,4 +91,14 @@ function isPermissionMode(value: unknown): value is PermissionMode {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isEnabledResource(value: unknown): value is EnabledResource {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.identity === "string" && value.identity.trim().length > 0 &&
+    typeof value.version === "string" && value.version.trim().length > 0 &&
+    typeof value.source === "string" && value.source.trim().length > 0 &&
+    ENABLED_RESOURCE_KINDS.some((kind) => kind === value.kind)
+  );
 }

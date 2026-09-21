@@ -8,6 +8,7 @@ import { handleMcp } from "./routes/mcp.ts";
 import { handleAgentRoutes } from "./routes/agent-api.ts";
 import { handleActionRoutes } from "./routes/action.ts";
 import { handleActivityRoutes } from "./routes/activity.ts";
+import { handleArtifactRoutes } from "./routes/artifacts.ts";
 import { handleAuditRoutes } from "./routes/audit.ts";
 import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
@@ -71,6 +72,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const actionResponse = await handleActionRoutes(context);
       if (actionResponse) {
         return actionResponse;
+      }
+      const artifactResponse = await handleArtifactRoutes(context);
+      if (artifactResponse) {
+        return artifactResponse;
       }
       const activityResponse = await handleActivityRoutes(context);
       if (activityResponse) {

@@ -1,4 +1,7 @@
-import type { PermissionMode } from "../runtime/interface.ts";
+import type {
+  EnabledResource,
+  PermissionMode,
+} from "../runtime/interface.ts";
 
 export const DEFAULT_AGENT_AUTO_COMPACT = true;
 export const DEFAULT_AGENT_AUTO_SUMMARY = true;
@@ -58,6 +61,7 @@ export type AgentSettingsValues = Partial<{
   maxSubagentsPerParent: number;
   workspacePath: string;
   outputDirectory: string;
+  enabledResources: EnabledResource[];
 }>;
 
 export type AgentSettingsStore = {

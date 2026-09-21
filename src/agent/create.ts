@@ -10,6 +10,7 @@ import type { CreateThebeAgentOptions, ThebeAgent } from "./interface.ts";
 import { createExtensionApi } from "./extensions/service.ts";
 import { createSessionApi } from "./sessions/service.ts";
 import { createSubagentApi } from "./subagents/api.ts";
+import { createArtifactStore } from "./artifacts/store.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -30,6 +31,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : undefined,
     now: ctx.now,
   });
+  const artifactStore = options.artifactStore ?? createArtifactStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "artifacts")
+      : undefined,
+    now: ctx.now,
+  });
   const diagnosis = createDiagnosisApi({
     now: ctx.now,
     policy: ctx.policy,
@@ -46,6 +53,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     audit: ctx.audit,
     getDiagnosis: diagnosis.getDiagnosis,
     activityStore,
+    artifactStore,
   });
   return {
     runtime: options.runtime,
@@ -58,5 +66,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...createControlApi(ctx),
     ...diagnosis,
     ...actions,
+    async listArtifacts(query) {
+      return artifactStore.list(query);
+    },
+    async getArtifact(artifactId) {
+      return artifactStore.get(artifactId);
+    },
+    async getArtifactContent(artifactId) {
+      return artifactStore.getContent(artifactId);
+    },
   };
 }

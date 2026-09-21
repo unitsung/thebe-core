@@ -8,6 +8,7 @@ export const PRODUCT_HTTP_PATH = {
   skills: "/v1/skills",
   mcpExtensions: "/v1/extensions/mcp",
   enabledResources: "/v1/resources/enabled",
+  artifacts: "/v1/artifacts",
   permissionSettings: "/v1/settings/permissions",
 } as const;
 

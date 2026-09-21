@@ -11,6 +11,7 @@ import {
   createThebeAgent,
   DEFAULT_AUTO_SUMMARY_DELAY_MS,
 } from "./index.ts";
+import { createJsonAgentSettingsStore } from "./settings/store.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
 
@@ -514,6 +515,92 @@ describe("Thebe agent service (fake runtime)", () => {
       source: "thebe://skills/homelab-status",
     });
     expect(agent.enabledResources()).toHaveLength(1);
+  });
+
+  it("restores enabled resources after the Agent is recreated", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-resources-config-"));
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const resource = {
+      kind: "skill" as const,
+      identity: "homelab-status",
+      version: "1.0.0",
+      source: "thebe://skills/homelab-status",
+    };
+
+    const first = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      settingsStore,
+    });
+    await first.putEnabledResource(resource);
+
+    const second = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      settingsStore,
+    });
+
+    expect(second.enabledResources()).toEqual([resource]);
+  });
+
+  it("persists removing an enabled resource", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-resources-remove-"));
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const resource = {
+      kind: "skill" as const,
+      identity: "homelab-status",
+      version: "1.0.0",
+      source: "thebe://skills/homelab-status",
+    };
+
+    const first = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      settingsStore,
+    });
+    await first.putEnabledResource(resource);
+
+    const second = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      settingsStore,
+    });
+    await expect(second.removeEnabledResource(resource.identity)).resolves.toBe(true);
+
+    const third = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      settingsStore,
+    });
+
+    expect(third.enabledResources()).toEqual([]);
+  });
+
+  it("persists enabling a skill through the Skill interface", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-skill-config-"));
+    await mkdir(join(dir, ".thebe", "skills", "demo-skill"), { recursive: true });
+    await writeFile(
+      join(dir, ".thebe", "skills", "demo-skill", "SKILL.md"),
+      "---\nname: demo-skill\ndescription: Demo skill\n---\nbody\n",
+    );
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+
+    const first = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      workspacePath: dir,
+      settingsStore,
+    });
+    await first.enableSkill("demo-skill");
+
+    const second = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      workspacePath: dir,
+      settingsStore,
+    });
+
+    expect((await second.getSkill("demo-skill"))?.enabled).toBe(true);
   });
 
   it("MCP tools/call uses the same agent invokeTool path", async () => {

@@ -12,6 +12,7 @@ import { verifyRestart, type ProbeHealth } from "./verify.ts";
 import type { ActivityStore } from "../activity/store.ts";
 import type { ActivityGroup, ActivityRecord } from "../activity/types.ts";
 import { idempotencyIndexKey } from "../activity/types.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
 import type {
   ActionReceipt,
   ActionRequest,
@@ -37,19 +38,32 @@ export function createActionApi(options: {
   probe?: ProbeHealth;
   explainVerification?: (facts: string) => Promise<string | undefined>;
   activityStore?: ActivityStore;
+  artifactStore?: ArtifactStore;
 }): ActionApi {
   const receipts = new Map<string, ActionReceipt>();
   const byIdempotency = new Map<string, string>();
 
   async function remember(receipt: ActionReceipt): Promise<ActionReceipt> {
-    receipts.set(receipt.receiptId, receipt);
-    byIdempotency.set(idempotencyKey(receipt), receipt.receiptId);
+    let stored = receipt;
+    if (options.artifactStore && !receipt.artifactId) {
+      const artifact = await options.artifactStore.create({
+        kind: "operation_receipt",
+        title: `Operation receipt: ${receipt.resource.name ?? receipt.resource.id}`,
+        runId: receipt.receiptId,
+        resource: { kind: receipt.resource.kind, id: receipt.resource.id },
+        contentType: "application/json",
+        content: JSON.stringify(receipt),
+      });
+      stored = { ...receipt, artifactId: artifact.artifactId };
+    }
+    receipts.set(stored.receiptId, stored);
+    byIdempotency.set(idempotencyKey(stored), stored.receiptId);
     if (receipts.size > MAX_RECEIPTS) {
       const oldest = receipts.keys().next().value;
       if (oldest) receipts.delete(oldest);
     }
-    await options.activityStore?.upsertFromReceipt(receipt);
-    return receipt;
+    await options.activityStore?.upsertFromReceipt(stored);
+    return stored;
   }
 
   return {
@@ -273,6 +287,7 @@ function receiptFromActivity(activity: ActivityRecord): ActionReceipt {
     actionId: CONTAINER_RESTART_ACTION_ID,
     resource: activity.resource,
     diagnosisRunId: activity.diagnosisRunId,
+    artifactId: activity.artifactId,
     approval: activity.approval,
     action: activity.action,
     verification: activity.verification,

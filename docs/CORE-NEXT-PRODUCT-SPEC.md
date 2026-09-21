@@ -1,6 +1,6 @@
 # Core durable product contract
 
-Status: in progress — Agent settings slice implemented; Artifacts and unified read model remain
+Status: in progress — Agent settings, enabled-resource durability, and the initial Artifact slice implemented; unified read model remains
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -8,8 +8,10 @@ The Agent settings slice is now available through `ThebeAgent.getAgentSettings()
 `updateAgentSettings()` and `GET/PATCH /v1/settings/agent`. It persists the
 mutable values through the existing Thebe config boundary, keeps permission
 mode on `/v1/settings/permissions`, and reports concurrency changes as
-restart-required. Artifacts and the unified durable Activity read model remain
-future slices.
+restart-required. Enabled resource selections now use that same boundary and
+survive Agent recreation. Core now stores bounded, redacted operation-receipt
+Artifacts with metadata/content HTTP reads. Additional producers and the
+unified durable Activity read model remain future slices.
 
 This spec turns the remaining Core product-contract work into one executable
 backlog. The highest seam is `ThebeAgent` and its product HTTP delivery; the
@@ -26,11 +28,12 @@ inspect and trust those objects:
 - capability run snapshots now survive Core recreation, but other long-lived
   objects still have uneven recovery and observation semantics;
 - results are still mostly embedded in runs, transcripts, or Activity records;
-  there is no structured, bounded, redacted Artifact contract;
+  the initial Artifact contract only has an operation-receipt producer;
 - Activity is a partial diagnosis/restart/Goal feed rather than a stable read
   model for capability runs, Workers, and background tasks;
-- enabled resources and permission mode are not consistently durable across a
-  Core restart.
+- enabled resources and permission mode now persist through the configuration
+  boundary, while capability results and broader read-model recovery remain
+  incomplete.
 
 As a result, a product client cannot reliably answer: “what is Core configured
 to do?”, “what did this run produce?”, “what survived restart?”, and “what work
@@ -239,9 +242,9 @@ must not call Pi, MCP, or providers directly.
 
 Implementation order should be:
 
-1. Agent settings read model and safe persistence;
-2. enabled-resource and permission-mode durability;
-3. Artifact model/store and one producer (operation receipt or diagnosis);
+1. ✅ Agent settings read model and safe persistence;
+2. ✅ enabled-resource and permission-mode durability;
+3. 🟡 Artifact model/store and the initial operation-receipt producer;
 4. capability/Goal/Worker recovery normalization;
 5. unified Activity read model and OpenAPI/client contract hardening.
 

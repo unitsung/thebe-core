@@ -63,6 +63,7 @@ export type VerificationResult = {
 
 export type ActionReceipt = {
   receiptId: string;
+  artifactId?: string;
   actionId: typeof CONTAINER_RESTART_ACTION_ID;
   resource: ResourceRef;
   diagnosisRunId?: string;

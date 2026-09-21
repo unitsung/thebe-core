@@ -21,6 +21,19 @@ export type {
   PermissionMode,
   SubagentRun,
   SubagentRunStatus,
+  AgentArtifact,
+  ArtifactContent,
+  ArtifactCreateInput,
+  ArtifactKind,
+  ArtifactQuery,
+  ArtifactResourceRef,
+  ArtifactStore,
+} from "./agent/index.ts";
+export {
+  ARTIFACT_KINDS,
+  DEFAULT_ARTIFACT_MAX_CONTENT_BYTES,
+  DEFAULT_ARTIFACT_RETENTION,
+  createArtifactStore,
 } from "./agent/index.ts";
 export { createAgentStore } from "./agent/store.ts";
 export {

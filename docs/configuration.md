@@ -30,7 +30,9 @@ Agent 设置以及每个字段的来源（`configured`、`default`、`environmen
 `autoSummaryDelayMs`；摘要延迟会限制在 60 秒到 15 分钟。并发上限、工作区
 和输出目录属于启动或授权边界：并发修改返回 `409 restart_required`，路径只读。
 权限模式继续使用 `GET/PATCH /v1/settings/permissions`，两类设置都会写入
-同一个 `config.json`。
+同一个 `config.json`。已启用的 skill、extension 和 prompt 资源也会写入该配置；
+重启后 Core 会恢复这些资源的 identity、version、source 和 kind 元数据，不会把
+skill 正文或任意文件内容写入配置。
 
 ## 外部编辑器
 
@@ -70,6 +72,14 @@ export EDITOR=vim
   "permissionMode": "ask",
   "maxSubagentConcurrency": 3,
   "maxSubagentsPerParent": 2,
+  "enabledResources": [
+    {
+      "kind": "skill",
+      "identity": "demo-skill",
+      "version": "1.0.0",
+      "source": "thebe://skills/demo-skill"
+    }
+  ],
   "steeringMode": "one-at-a-time",
   "followUpMode": "one-at-a-time",
   "hideThinking": false,

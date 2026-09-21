@@ -15,19 +15,20 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
 | Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
 | MCP inventory | `GET /v1/extensions/mcp/servers`, `GET /v1/extensions/mcp/tools` | External tools only. Raw `/mcp` stays for integrations. |
-| Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. |
+| Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. Selections persist through the Thebe config across Core recreation. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
 | Agent settings | `GET/PATCH /v1/settings/agent` | Effective auto-compact/summary settings, bounded delay, permission mode, concurrency limits, and guarded paths. Mutable fields are auto-compact/summary/delay; concurrency changes report `409 restart_required`. Each value includes a `sources` entry and the response reports `persistence.enabled`. |
+| Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts are the first producer. |
 | Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 
-OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`.
+OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `ProductWorker`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `AgentArtifact`, `ArtifactList`, `ArtifactContent`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`.
 
 ## Explicit non-ships (leftover)
 
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for any of the above.
-- **P2** artifacts and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
+- **Additional Artifact producers** and the remaining durable read-model work — tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 - **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).

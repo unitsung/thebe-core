@@ -43,6 +43,7 @@ export type ActivityRecord = {
   updatedAt: string;
   diagnosisRunId?: string;
   receiptId?: string;
+  artifactId?: string;
   idempotencyKey: string;
   approval?: ApprovalRecord;
   action?: ActionResult;
@@ -77,6 +78,7 @@ export function activityFromReceipt(
     updatedAt: timestamps.updatedAt,
     diagnosisRunId: receipt.diagnosisRunId ?? prior?.diagnosisRunId,
     receiptId: receipt.receiptId,
+    artifactId: receipt.artifactId ?? prior?.artifactId,
     idempotencyKey: receipt.idempotencyKey,
     approval: receipt.approval,
     action: receipt.action,

@@ -48,6 +48,12 @@ import type {
 } from "./diagnosis/types.ts";
 import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
+import type {
+  AgentArtifact,
+  ArtifactContent,
+  ArtifactQuery,
+} from "./artifacts/types.ts";
+import type { ArtifactStore } from "./artifacts/store.ts";
 import type { JudgmentModel } from "./judgment/interface.ts";
 import type { JudgmentEnabledSites } from "./judgment/types.ts";
 import type {
@@ -110,6 +116,8 @@ export type CreateThebeAgentOptions = {
   judgmentSites?: JudgmentEnabledSites;
   /** Optional persistence boundary for product-facing Agent settings. */
   settingsStore?: AgentSettingsStore;
+  /** Optional persistence boundary for product-facing Artifacts. */
+  artifactStore?: ArtifactStore;
 };
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
@@ -213,6 +221,9 @@ export interface ThebeAgent {
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;
   executeApprovedAction(request: ActionRequest): Promise<ActionReceipt>;
   getReceipt(receiptId: string): Promise<ActionReceipt | undefined>;
+  listArtifacts(query?: ArtifactQuery): Promise<AgentArtifact[]>;
+  getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
+  getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;

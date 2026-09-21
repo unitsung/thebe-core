@@ -10,6 +10,7 @@ import { createThebeApp } from "../../app/create.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 import type { OpenApiDocument } from "./openapi.ts";
+import { createJsonAgentSettingsStore } from "../../agent/settings/store.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -190,6 +191,47 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       ),
     );
     expect(after.resources).toEqual([]);
+  });
+
+  it("restores enabled resources after the HTTP App is recreated", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-resources-http-config-"));
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const first = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      settingsStore,
+    });
+
+    const put = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/resources/enabled/demo-skill", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "skill",
+          version: "1.0.0",
+          source: "thebe://skills/demo-skill",
+        }),
+      }),
+    );
+    expect(put.status).toBe(200);
+
+    const second = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      settingsStore,
+    });
+    const listed = await json(
+      await second.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/resources/enabled"),
+      ),
+    );
+
+    expect(listed.resources).toEqual([
+      expect.objectContaining({
+        identity: "demo-skill",
+        kind: "skill",
+      }),
+    ]);
   });
 
   it("GET/PATCH permission mode", async () => {

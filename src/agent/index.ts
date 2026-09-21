@@ -50,6 +50,21 @@ export type {
   ActionRequest,
   VerificationResult,
 } from "./action/types.ts";
+export type {
+  AgentArtifact,
+  ArtifactContent,
+  ArtifactCreateInput,
+  ArtifactKind,
+  ArtifactQuery,
+  ArtifactResourceRef,
+} from "./artifacts/types.ts";
+export { ARTIFACT_KINDS } from "./artifacts/types.ts";
+export {
+  DEFAULT_ARTIFACT_MAX_CONTENT_BYTES,
+  DEFAULT_ARTIFACT_RETENTION,
+  createArtifactStore,
+} from "./artifacts/store.ts";
+export type { ArtifactStore } from "./artifacts/store.ts";
 export type { ActivityGroup, ActivityRecord, ActivityStatus } from "./activity/types.ts";
 export type { ActivityFeedItem, ActivityFeedType } from "./activity/feed.ts";
 export { toActivityFeed } from "./activity/feed.ts";

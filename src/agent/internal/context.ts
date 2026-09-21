@@ -63,6 +63,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       inputOptions.maxSubagentsPerParent ?? storedSettings.maxSubagentsPerParent,
     workspacePath: inputOptions.workspacePath ?? storedSettings.workspacePath,
     outputDirectory: inputOptions.outputDirectory ?? storedSettings.outputDirectory,
+    enabledResources: inputOptions.enabledResources ?? storedSettings.enabledResources,
   };
   const now = options.now ?? (() => new Date());
   const callerId = options.callerId ?? "default";

@@ -27,14 +27,12 @@ export function createExtensionApi(ctx: AgentContext) {
   );
 
   async function putEnabledResource(resource: EnabledResource): Promise<EnabledResource> {
-    const index = enabledResources.findIndex(
-      (item) => item.identity === resource.identity,
+    const nextResources = enabledResources.filter(
+      (item) => item.identity !== resource.identity,
     );
-    if (index >= 0) {
-      enabledResources[index] = resource;
-    } else {
-      enabledResources.push(resource);
-    }
+    nextResources.push(resource);
+    await ctx.options.settingsStore?.save({ enabledResources: nextResources });
+    enabledResources.splice(0, enabledResources.length, ...nextResources);
     await audit?.append({
       method: "resource.enable",
       parameterHash: hashParameters(resource),
@@ -46,6 +44,19 @@ export function createExtensionApi(ctx: AgentContext) {
       source: resource.source,
     });
     return resource;
+  }
+
+  async function removeEnabledResource(identity: string): Promise<boolean> {
+    const index = enabledResources.findIndex(
+      (item) => item.identity === identity,
+    );
+    if (index < 0) return false;
+    const nextResources = enabledResources.filter(
+      (item) => item.identity !== identity,
+    );
+    await ctx.options.settingsStore?.save({ enabledResources: nextResources });
+    enabledResources.splice(0, enabledResources.length, ...nextResources);
+    return true;
   }
 
   return {
@@ -70,15 +81,7 @@ export function createExtensionApi(ctx: AgentContext) {
         version: "1.0.0",
         source: skill.filePath || `thebe://skills/${skill.name}`,
       };
-      enabledResources.push(resource);
-      await audit?.append({
-        method: "resource.enable",
-        parameterHash: hashParameters({ kind: "skill", identity: skill.name }),
-        responseBytes: 0,
-        budgetConsumed: 0,
-        redactionFired: false,
-        ...resource,
-      });
+      await putEnabledResource(resource);
       await reloadIdleSessions();
     },
     async disableSkill(name: string): Promise<void> {
@@ -86,7 +89,7 @@ export function createExtensionApi(ctx: AgentContext) {
         (resource) => resource.kind === "skill" && resource.identity === name,
       );
       if (index < 0) return;
-      enabledResources.splice(index, 1);
+      await removeEnabledResource(name);
       await reloadIdleSessions();
     },
     listCapabilities,
@@ -101,14 +104,7 @@ export function createExtensionApi(ctx: AgentContext) {
       await putEnabledResource(resource);
     },
     putEnabledResource,
-    async removeEnabledResource(identity: string): Promise<boolean> {
-      const index = enabledResources.findIndex(
-        (item) => item.identity === identity,
-      );
-      if (index < 0) return false;
-      enabledResources.splice(index, 1);
-      return true;
-    },
+    removeEnabledResource,
     enabledResources(): EnabledResource[] {
       return enabledResources.slice();
     },

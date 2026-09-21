@@ -83,6 +83,9 @@ const operations: Operation[] = [
   { method: "get", path: PRODUCT_HTTP_PATH.enabledResources, summary: "List enabled Agent resources", tag: "resources", responseSchema: "EnabledResourceList" },
   { method: "put", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Put an enabled resource", tag: "resources", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "EnabledResourceWrite", responseSchema: "EnabledResource" },
   { method: "delete", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Remove an enabled resource", tag: "resources", parameters: [idParameter()], responseSchema: "Ok" },
+  { method: "get", path: PRODUCT_HTTP_PATH.artifacts, summary: "List bounded product Artifacts", tag: "artifacts", parameters: [queryParameter("kind", { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt"] }), queryParameter("sessionId"), queryParameter("runId"), queryParameter("createdAfter"), queryParameter("createdBefore"), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 })], responseSchema: "ArtifactList" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}`, summary: "Read Artifact metadata", tag: "artifacts", parameters: [idParameter()], responseSchema: "AgentArtifact" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}/content`, summary: "Read bounded Artifact content", tag: "artifacts", parameters: [idParameter()], responseSchema: "ArtifactContent" },
   { method: "get", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Read permission mode", tag: "settings", responseSchema: "PermissionModeSettings" },
   { method: "patch", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Set permission mode", tag: "settings", requestBody: { required: true }, requestSchema: "PermissionModeSettings", responseSchema: "PermissionModeSettings" },
   { method: "get", path: PRODUCT_HTTP_PATH.agentSettings, summary: "Read effective Agent settings", tag: "settings", responseSchema: "AgentSettings" },
@@ -220,6 +223,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "skills", description: "Skill list/get/enable; no skill-file editing" },
       { name: "extensions", description: "Product MCP inventory; raw /mcp remains for integrations" },
       { name: "resources", description: "Enabled Agent resources/context, not a Resource database" },
+      { name: "artifacts", description: "Bounded, redacted product results owned by Core" },
       { name: "settings", description: "Runtime behavior settings consumed by the App" },
       { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
       { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
@@ -520,6 +524,41 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           required: ["resources"],
           properties: {
             resources: { type: "array", items: { $ref: "#/components/schemas/EnabledResource" } },
+          },
+        },
+        AgentArtifact: {
+          type: "object",
+          required: ["artifactId", "kind", "title", "createdAt", "updatedAt", "contentType", "sizeBytes"],
+          properties: {
+            artifactId: { type: "string" },
+            kind: { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt"] },
+            title: { type: "string" },
+            sessionId: { type: "string" },
+            runId: { type: "string" },
+            resource: {
+              type: "object",
+              required: ["kind", "id"],
+              properties: { kind: { type: "string" }, id: { type: "string" } },
+            },
+            createdAt: { type: "string" },
+            updatedAt: { type: "string" },
+            contentType: { type: "string" },
+            sizeBytes: { type: "integer", minimum: 0 },
+          },
+        },
+        ArtifactList: {
+          type: "object",
+          required: ["artifacts"],
+          properties: {
+            artifacts: { type: "array", items: { $ref: "#/components/schemas/AgentArtifact" } },
+          },
+        },
+        ArtifactContent: {
+          type: "object",
+          required: ["artifact", "content"],
+          properties: {
+            artifact: { $ref: "#/components/schemas/AgentArtifact" },
+            content: { type: "string" },
           },
         },
         PermissionModeSettings: {
