@@ -30,7 +30,7 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 
 These are **not** deferred accidentally. They are out of this slice:
 
-- **App clients / iOS UI** for the remaining product surfaces; the current App client covers Activity Run, audit detail, and push-device registration management.
+- **Remaining App contract adoption** is limited to broader cross-product hardening and future provider-specific surfaces. The current App client covers capabilities and runs, Activity, Goals, Workers, pending permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent settings, Artifacts, audit detail, and push-device registration management.
 - **Additional Artifact producers and provider-native background-task sources** — Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
