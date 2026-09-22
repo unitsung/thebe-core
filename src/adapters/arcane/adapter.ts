@@ -164,8 +164,8 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     const text = await response.text();
     try {
       return JSON.parse(text) as Json;
-    } catch {
-      return { data: text };
+    } catch (cause) {
+      throw new ProviderError("UNKNOWN", "Arcane returned invalid JSON", cause);
     }
   }
 }

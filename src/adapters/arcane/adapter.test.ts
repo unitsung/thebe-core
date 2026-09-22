@@ -289,4 +289,19 @@ describe("ArcaneAdapter", () => {
     expect(pe.message).not.toContain("secret-host");
     expect(JSON.stringify(pe)).not.toContain("secret-host");
   });
+
+  it("reports invalid JSON as an UNKNOWN provider failure", async () => {
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async () => new Response("not-json", { status: 200 }),
+    });
+
+    await expect(adapter.listContainers()).rejects.toMatchObject({
+      name: "ProviderError",
+      code: "UNKNOWN",
+      message: "Arcane returned invalid JSON",
+    });
+  });
 });
