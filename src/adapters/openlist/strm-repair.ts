@@ -20,6 +20,22 @@ type OpenListSearchResult = {
   isDirectory: boolean;
 };
 
+const MEDIA_EXTENSIONS = new Set([
+  "3gp",
+  "avi",
+  "flv",
+  "m2ts",
+  "m4v",
+  "mkv",
+  "mov",
+  "mp4",
+  "mpeg",
+  "mpg",
+  "ts",
+  "webm",
+  "wmv",
+]);
+
 export type OpenListStrmRepairProviderOptions = {
   baseUrl: string;
   token: string;
@@ -281,13 +297,21 @@ function requestTitle(input: StrmRepairRequest): string {
 function chooseCandidate(results: OpenListSearchResult[], title: string): OpenListSearchResult | undefined {
   const expected = normalizeName(title);
   return results
-    .filter((item) => !item.isDirectory && !item.name.toLowerCase().endsWith(".strm"))
+    .filter((item) => !item.isDirectory && MEDIA_EXTENSIONS.has(fileExtension(item.name)))
+    .map((item) => ({ item, score: candidateScore(item, expected) }))
+    .filter(({ score }) => score > 0)
     .sort((left, right) => {
-      const leftScore = normalizeName(fileStem(left.name)) === expected ? 1 : 0;
-      const rightScore = normalizeName(fileStem(right.name)) === expected ? 1 : 0;
-      return rightScore - leftScore || left.name.localeCompare(right.name);
+      return right.score - left.score ||
+        joinPath(left.item.parent, left.item.name).localeCompare(joinPath(right.item.parent, right.item.name));
     })
-    .find((item) => normalizeName(fileStem(item.name)) === expected);
+    .map(({ item }) => item)[0];
+}
+
+function candidateScore(item: OpenListSearchResult, expected: string): number {
+  const candidate = normalizeName(fileStem(item.name));
+  if (candidate === expected) return 3;
+  if (candidate.startsWith(expected) || candidate.includes(expected)) return 2;
+  return 0;
 }
 
 function asSearchResult(value: unknown): OpenListSearchResult | undefined {
@@ -361,6 +385,11 @@ function fileName(path: string): string {
 
 function fileStem(value: string): string {
   return value.replace(/\.[^.]+$/, "");
+}
+
+function fileExtension(value: string): string {
+  const match = /\.([^.]+)$/.exec(value);
+  return match?.[1]?.toLowerCase() ?? "";
 }
 
 function normalizeName(value: string): string {

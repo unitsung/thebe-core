@@ -26,13 +26,14 @@ describe("OpenListStrmRepairProvider", () => {
         if (method === "POST" && url.endsWith("/api/fs/get")) {
           const payload = JSON.parse(body) as { path?: string };
           const path = payload.path ?? "/";
+          const encodedPath = `/${path.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
           return jsonResponse(200, {
             code: 200,
             message: "success",
             data: {
               name: path.split("/").pop() ?? path,
               is_dir: false,
-              raw_url: `https://openlist.test/p${path}?sign=signed`,
+              raw_url: `https://openlist.test/p${encodedPath}?sign=signed`,
             },
           });
         }
@@ -41,7 +42,7 @@ describe("OpenListStrmRepairProvider", () => {
           return new Response(strmContent, { status: 200 });
         }
 
-        if (method === "GET" && url.endsWith("/p/Movies/Dune.mkv?sign=signed")) {
+        if (method === "GET" && url.endsWith("/p/Movies/Dune%20(2016).mkv?sign=signed")) {
           return new Response("media-bytes", { status: 200 });
         }
 
@@ -58,7 +59,7 @@ describe("OpenListStrmRepairProvider", () => {
             : [
                 {
                   parent: "/Movies",
-                  name: "Dune.mkv",
+                  name: "Dune (2016).mkv",
                   is_dir: false,
                   size: 128,
                 },
@@ -92,20 +93,20 @@ describe("OpenListStrmRepairProvider", () => {
 
     expect(result).toMatchObject({
       status: "repaired",
-      target: "/Movies/Dune.mkv",
+      target: "/Movies/Dune (2016).mkv",
       verification: {
         sourcePath: "/Movies/Dune.strm",
-        targetPath: "/Movies/Dune.mkv",
+        targetPath: "/Movies/Dune (2016).mkv",
         targetAccessible: true,
       },
     });
-    expect(strmContent).toBe("/Movies/Dune.mkv\n");
+    expect(strmContent).toBe("/Movies/Dune (2016).mkv\n");
     expect(requests.map(({ method, url }) => `${method} ${url}`)).toEqual(
       expect.arrayContaining([
         "POST https://openlist.test/api/fs/get",
         "GET https://openlist.test/p/Movies/Dune.strm?sign=signed",
         "POST https://openlist.test/api/fs/search",
-        "GET https://openlist.test/p/Movies/Dune.mkv?sign=signed",
+        "GET https://openlist.test/p/Movies/Dune%20(2016).mkv?sign=signed",
         "PUT https://openlist.test/api/fs/put",
       ]),
     );
@@ -125,5 +126,27 @@ describe("OpenListStrmRepairProvider", () => {
     expect(requests.filter(({ method }) => method !== "GET").every(({ headers }) => {
       return headers.get("Authorization") === "openlist-token";
     })).toBe(true);
+
+    const writesAfterRepair = requests.filter(({ method, url }) => {
+      return method === "PUT" && url.endsWith("/api/fs/put");
+    }).length;
+    const unchanged = await provider.repair({
+      arguments: {
+        title: "Dune",
+        itemId: "/Movies/Dune.strm",
+      },
+      resource: {
+        kind: "strm",
+        provider: "openlist",
+      },
+    });
+
+    expect(unchanged).toMatchObject({
+      status: "unchanged",
+      target: "/Movies/Dune (2016).mkv",
+    });
+    expect(requests.filter(({ method, url }) => {
+      return method === "PUT" && url.endsWith("/api/fs/put");
+    })).toHaveLength(writesAfterRepair);
   });
 });
