@@ -262,6 +262,19 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           "invalid_body",
         );
       }
+      if (capability.id === STRM_REPAIR_CAPABILITY_ID && capability.service) {
+        const resourceProvider = input.resource?.provider;
+        if (
+          typeof resourceProvider !== "string" ||
+          resourceProvider.trim().toLowerCase() !== capability.service.trim().toLowerCase()
+        ) {
+          throw httpError(
+            400,
+            `strm.repair requires resource.provider=${capability.service}`,
+            "invalid_body",
+          );
+        }
+      }
       if (capability.approval === "required" || capability.id === CONTAINER_RESTART_ACTION_ID) {
         throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
       }

@@ -522,8 +522,10 @@ strm.repair
 ```
 
 The Core composition root advertises `strm.repair` only when a provider supplies
-the `StrmRepairProvider` boundary. Invocation requires `resource.kind = "strm"`,
-passes the typed resource plus arguments to the provider, and returns the
+the `StrmRepairProvider` boundary. Invocation requires `resource.kind = "strm"`;
+when the capability declares a service, `resource.provider` must match that
+service before the provider is invoked. Core passes the typed resource plus
+arguments to the provider, and returns the
 provider's structured repair outcome. The same provider path supports direct
 and background capability runs; provider-specific credentials and storage
 writes remain outside the generic Agent layer.

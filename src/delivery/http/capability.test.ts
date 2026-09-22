@@ -222,6 +222,45 @@ describe("capability product HTTP", () => {
     expect(called).toBe(false);
   });
 
+  it("rejects strm.repair when the resource provider differs from the configured provider", async () => {
+    let called = false;
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          called = true;
+          return { status: "repaired", summary: "unexpected" };
+        },
+      },
+    });
+
+    const response = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+          resource: {
+            kind: "strm",
+            id: "emby:/Movies/Dune.strm",
+            provider: "emby",
+          },
+          mode: "direct",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual(
+      expect.objectContaining({
+        error: expect.stringContaining("resource.provider"),
+      }),
+    );
+    expect(called).toBe(false);
+  });
+
   it("GET /v1/capabilities includes product metadata for discovery", async () => {
     const res = await app().handler.handle(
       new Request("http://127.0.0.1:8787/v1/capabilities"),
