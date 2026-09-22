@@ -123,6 +123,58 @@ describe("subagent/worker product HTTP", () => {
     expect(after.status).toBe("cancelled");
   });
 
+  it("publishes a completed Worker report as a linked Artifact", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "worker report evidence" }]);
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const created = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(created.thebeSessionId);
+    const spawned = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/subagents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profileName: "diagnostics",
+          task: "retain this report",
+          parentSessionId,
+        }),
+      }),
+    );
+    const worker = await json(spawned);
+    const runId = String(worker.runId);
+    await app.agent.waitSubagent(runId);
+
+    const detail = await json(
+      await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`)),
+    );
+    expect(detail.artifactId).toEqual(expect.any(String));
+
+    const listed = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts?kind=report&runId=${runId}`),
+      ),
+    );
+    expect(listed.artifacts).toEqual([
+      expect.objectContaining({
+        artifactId: detail.artifactId,
+        kind: "report",
+        runId,
+        sessionId: parentSessionId,
+      }),
+    ]);
+
+    const content = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${detail.artifactId}/content`),
+      ),
+    );
+    expect(content.content).toContain("worker report evidence");
+  });
+
   it("lists persisted terminal workers after a Core restart without opening the parent session", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-worker-http-"));
     const firstFake = createFakeRuntime();
@@ -171,6 +223,23 @@ describe("subagent/worker product HTTP", () => {
           parentSessionId,
           status: "completed",
           result: "persisted worker result",
+          artifactId: expect.any(String),
+        }),
+      ]),
+    );
+    const restoredWorker = workers.find((item) => item.runId === worker.runId);
+    const artifacts = await json(
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts?runId=${worker.runId}`),
+      ),
+    );
+    expect(artifacts.artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactId: restoredWorker?.artifactId,
+          kind: "report",
+          runId: worker.runId,
+          sessionId: parentSessionId,
         }),
       ]),
     );

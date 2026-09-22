@@ -97,15 +97,17 @@ describe("Goal HTTP", () => {
       ),
     );
     const artifacts = listed.artifacts as Array<Record<string, unknown>>;
-    expect(artifacts).toHaveLength(1);
-    expect(artifacts[0]).toEqual(
-      expect.objectContaining({
-        artifactId: goal.artifactId,
-        kind: "report",
-        sessionId: id,
-        contentType: "text/plain; charset=utf-8",
-      }),
+    expect(artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactId: goal.artifactId,
+          kind: "report",
+          sessionId: id,
+          contentType: "text/plain; charset=utf-8",
+        }),
+      ]),
     );
+    expect(artifacts.filter((item) => item.artifactId === goal.artifactId)).toHaveLength(1);
 
     const content = await json(
       await app.handler.handle(

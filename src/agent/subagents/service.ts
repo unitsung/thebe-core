@@ -49,6 +49,7 @@ export function createSubagentRunManager(options: {
   emitToParent?: (parentSessionId: string, event: NormalizedEvent) => void;
   rejectPendingPermission?: (permissionId: string) => boolean;
   onSnapshot?: (run: SubagentRun) => void | Promise<void>;
+  beforeTerminal?: (run: SubagentExecutionRun) => void | Promise<void>;
   onTerminal?: (run: SubagentRun) => void | Promise<void>;
 }) {
   const now = options.now ?? (() => new Date());
@@ -107,6 +108,11 @@ export function createSubagentRunManager(options: {
   }
 
   async function finish(run: MutableRun): Promise<void> {
+    try {
+      await options.beforeTerminal?.(run);
+    } catch {
+      // Persistence must never change the terminal result of a child.
+    }
     const result = snapshot(run);
     try {
       await options.onTerminal?.(result);

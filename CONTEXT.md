@@ -69,7 +69,8 @@ Core-owned bounded product result with stable `artifactId`, allow-listed kind,
 title, optional session/run/resource links, timestamps, content type, and byte
 size. Metadata and redacted content are stored separately with safe ids,
 atomic writes, and bounded retention. Operation receipts, Diagnosis runs,
-background Capability runs, and terminal Goal reports can produce Artifacts;
+background Capability runs, terminal Goal reports, and terminal Worker reports
+can produce Artifacts;
 HTTP reads are `/v1/artifacts` and `/v1/artifacts/{id}/content`.
 _Avoid_: arbitrary filesystem paths, unbounded uploads, runtime transcripts,
 or treating Artifact metadata as an Activity lifecycle owner

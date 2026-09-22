@@ -90,8 +90,8 @@ export async function executeSubagentRun(
     session?.dispose();
     run.finishedAt = deps.now().toISOString();
     deps.appendActivity(run, { kind: "status", title: run.status });
-    deps.notify(run);
     await deps.finish(run);
+    deps.notify(run);
     deps.onFinished(run);
   }
 }

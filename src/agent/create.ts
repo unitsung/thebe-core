@@ -16,13 +16,13 @@ import { createArtifactStore } from "./artifacts/store.ts";
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const ctx = createAgentContext(options);
   const extensions = createExtensionApi(ctx);
-  const subagents = createSubagentApi(ctx);
   const artifactStore = options.artifactStore ?? createArtifactStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "artifacts")
       : undefined,
     now: ctx.now,
   });
+  const subagents = createSubagentApi(ctx, artifactStore);
   const goals = createGoalApi(ctx, subagents, artifactStore);
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);

@@ -75,6 +75,8 @@ export type SubagentRun = {
   finishedAt?: string;
   /** Live assistant output, retained so a completed child remains inspectable. */
   responseText?: string;
+  /** Bounded product Artifact containing terminal worker evidence. */
+  artifactId?: string;
   /** Bounded lifecycle/tool/reasoning summary; never contains full tool results. */
   activity?: SubagentActivity[];
   result?: string;

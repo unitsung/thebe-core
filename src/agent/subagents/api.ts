@@ -4,10 +4,14 @@ import type { SubagentRun, SubagentUpdate } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import { discoverSubagentProfiles, type SubagentProfile } from "./catalog.ts";
 import { createSubagentRunManager } from "./service.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
 
 const SUBAGENT_WRITE_TOOLS = new Set(["edit", "write"]);
 
-export function createSubagentApi(ctx: AgentContext) {
+export function createSubagentApi(
+  ctx: AgentContext,
+  artifactStore?: ArtifactStore,
+) {
   const {
     options,
     checkNotQuiesced,
@@ -86,6 +90,30 @@ export function createSubagentApi(ctx: AgentContext) {
     },
     rejectPendingPermission,
     onSnapshot: persistSubagentSnapshot,
+    beforeTerminal: async (run) => {
+      if (
+        artifactStore &&
+        !run.artifactId &&
+        (run.status === "completed" || run.status === "failed")
+      ) {
+        const content = workerReport(run.result ?? run.responseText);
+        if (content) {
+          try {
+            const artifact = await artifactStore.create({
+              kind: "report",
+              title: `Worker report: ${run.profileName}`,
+              content,
+              contentType: "text/plain; charset=utf-8",
+              sessionId: run.parentSessionId,
+              runId: run.runId,
+            });
+            run.artifactId = artifact.artifactId;
+          } catch {
+            // A report Artifact is supplementary; the Worker remains usable.
+          }
+        }
+      }
+    },
     onTerminal: persistSubagentSnapshot,
   });
   registerSubagentParentCanceller(subagentRuns.cancelForParent);
@@ -140,4 +168,14 @@ export function createSubagentApi(ctx: AgentContext) {
       return subagentRuns.cancel(runId, parentSessionId);
     },
   };
+}
+
+const MAX_WORKER_REPORT_LENGTH = 12_000;
+
+function workerReport(value: string | undefined): string | undefined {
+  const content = value?.trim();
+  if (!content) return undefined;
+  return content.length <= MAX_WORKER_REPORT_LENGTH
+    ? content
+    : `${content.slice(0, MAX_WORKER_REPORT_LENGTH)}\n…`;
 }

@@ -13,6 +13,7 @@ export type ProductWorker = {
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
+  artifactId?: string;
   responseText?: string;
   activity?: SubagentRun["activity"];
   result?: string;
@@ -39,6 +40,7 @@ export function toProductWorker(run: SubagentRun): ProductWorker {
     createdAt: run.createdAt,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
+    artifactId: run.artifactId,
     responseText: run.responseText,
     activity: run.activity,
     result: run.result,

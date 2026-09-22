@@ -460,6 +460,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             createdAt: { type: "string" },
             startedAt: { type: "string" },
             finishedAt: { type: "string" },
+            artifactId: { type: "string" },
             responseText: { type: "string" },
             activity: { type: "array", items: { type: "object", additionalProperties: true } },
             result: { type: "string" },
