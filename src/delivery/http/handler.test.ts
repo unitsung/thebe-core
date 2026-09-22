@@ -446,6 +446,55 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     ]);
   });
 
+  it("POST /mcp tools/call rejects a STRM resource from another provider", async () => {
+    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    let called = false;
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          called = true;
+          return { status: "repaired", summary: "unexpected" };
+        },
+      },
+    });
+
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "strm.repair",
+            arguments: {
+              arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+              resource: {
+                kind: "strm",
+                id: "emby:/Movies/Dune.strm",
+                provider: "emby",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toMatchObject({
+      error: {
+        code: -32000,
+        message: "strm.repair requires resource.provider=openlist",
+      },
+    });
+    expect(called).toBe(false);
+  });
+
   it("rejects requests when the shared token does not match", async () => {
     const app = handler({ token: "secret" });
     const res = await app.handle(

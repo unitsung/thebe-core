@@ -96,6 +96,26 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     }
     if (name === STRM_REPAIR_CAPABILITY_ID && options.strmRepairProvider) {
       const input = asStrmRepairRequest(args);
+      if (input.resource) {
+        if (input.resource.kind !== "strm") {
+          throw httpError(
+            400,
+            "strm.repair requires resource.kind=strm",
+            "invalid_body",
+          );
+        }
+        const resourceProvider = input.resource.provider;
+        if (
+          typeof resourceProvider !== "string" ||
+          resourceProvider.trim().toLowerCase() !== options.strmRepairProvider.service.trim().toLowerCase()
+        ) {
+          throw httpError(
+            400,
+            `strm.repair requires resource.provider=${options.strmRepairProvider.service}`,
+            "invalid_body",
+          );
+        }
+      }
       return JSON.stringify(await options.strmRepairProvider.repair(input));
     }
     const params = (args ?? {}) as Record<string, unknown>;
