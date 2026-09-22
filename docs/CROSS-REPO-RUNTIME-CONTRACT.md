@@ -13,7 +13,7 @@
 
 
 
-## Shipped vertical slices (dev implementation)
+## Shipped product contracts (dev implementation)
 
 The following HTTP product objects are implemented on `dev` and are the current App/Core boundary. They do not replace the rest of this contract.
 

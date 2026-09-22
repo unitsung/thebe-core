@@ -1,5 +1,7 @@
 # Core durable product contract
 
+Updated: 2026-09-22.
+
 Status: in progress — Agent settings, enabled-resource durability, operation-receipt/Diagnosis/resource-list/Goal-report/Worker-report Artifacts, Goal/Worker recovery, and Capability Run/Worker Activity items implemented; broader unified read model remains
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
@@ -29,36 +31,35 @@ Thebe Core already owns sessions, Goals, Workers, capabilities, permissions,
 resources, and audit. The remaining gaps are at the boundary where an App must
 inspect and trust those objects:
 
-- effective Agent settings can be supplied at startup and changed by internal
-  methods, but there is no complete product query/update contract;
-- capability run snapshots now survive Core recreation, but other long-lived
-  objects still have uneven recovery and observation semantics;
-- results are still mostly embedded in runs, transcripts, or Activity records;
-  the Artifact contract has operation-receipt, Diagnosis, resource-list, and background
-  Capability Run producers, while additional result producers remain;
+- the effective Agent settings query/update contract is shipped, but client
+  adoption and contract hardening continue;
+- capability runs, Goals, Workers, and Core-owned background tasks have durable
+  recovery semantics, while provider-native task sources remain optional;
+- the bounded Artifact contract has operation-receipt, Diagnosis, resource-list,
+  background Capability Run, Goal report, and Worker report producers, while
+  additional result producers remain;
 - Activity now includes capability runs, Workers, and Core-owned detached Bash
   tasks with bounded cursor pagination plus source/status/time filters; it
-  remains a partial diagnosis/restart/Goal feed until additional producers are
-  covered;
+  remains a partial product-wide feed until additional producers and App clients
+  are covered;
 - enabled resources and permission mode now persist through the configuration
-  boundary, while capability results and broader read-model recovery remain
-  incomplete.
+  boundary; broader cross-repository read-model adoption and provider coverage
+  remain incomplete.
 
-As a result, a product client cannot reliably answer: “what is Core configured
-to do?”, “what did this run produce?”, “what survived restart?”, and “what work
-is active or completed?” without knowing runtime-specific details.
+For the remaining provider-native and cross-repository surfaces, a product
+client still cannot reliably answer: “what did this run produce?”, “what
+survived restart?”, and “what work is active or completed?” without knowing
+runtime-specific details.
 
 ## Solution
 
-Complete the durable product contract in three compatible slices:
+Complete the remaining durable product-contract work in three compatible tracks:
 
-1. Expose effective Agent settings through a typed read/update surface with
-   validation, safe mutability, and persistence through the existing Thebe
-   configuration boundary.
-2. Add a Core-owned Artifact model and bounded Artifact store. Runs and
-   product actions may reference Artifacts instead of embedding unbounded
-   results, while secrets and runtime transcripts remain excluded.
-3. Finish the durable read model for long-running work. Preserve each source
+1. Harden the shipped settings, Artifact, recovery, and OpenAPI contracts and
+   finish the remaining App client adoption.
+2. Add provider-native Artifact and background-task producers without moving
+   lifecycle ownership out of their source adapters.
+3. Expand the durable read model for long-running work. Preserve each source
    lifecycle, but expose stable status, timestamps, recovery state, and a
    normalized Activity view without creating a second Agent loop or a second
    lifecycle owner.
@@ -249,20 +250,19 @@ must not call Pi, MCP, or providers directly.
 
 ## Further Notes
 
-Implementation order should be:
+Implementation status and remaining order:
 
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
-3. 🟡 Artifact model/store with operation-receipt, Diagnosis, enabled-resource
+3. ✅ Artifact model/store with operation-receipt, Diagnosis, enabled-resource
    snapshot, background Capability Run, terminal Goal report, and terminal
-   Worker report producers;
-4. 🟡 capability/Goal/Worker recovery normalization (Worker snapshots recover
-   as `interrupted`; active Goal recovery is recorded as a paused history event;
-   running Goal `updatedAt` advances with lifecycle events);
+   Worker report producers; 🟡 additional provider-native producers remain;
+4. ✅ capability/Goal/Worker recovery normalization for the current sources;
+   🟡 provider-native task recovery remains;
 5. 🟡 unified Activity read model and OpenAPI/client contract hardening; the
    current slice includes capability runs, Workers, Core-owned detached Bash
    Background Tasks with runtime-recreation recovery, cursor pagination, and
-   source/status/time filters. Additional provider-native task producers
+   source/status/time filters. Broader App adoption and additional producers
    remain.
 
 The current capability-run store is the reference for atomic bounded snapshots,

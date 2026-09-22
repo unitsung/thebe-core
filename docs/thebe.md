@@ -241,6 +241,10 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 
 ## 3. 完整 HTTP API 参考
 
+> 本节保留 Core 的 API 背景与历史设计说明。当前已实现/剩余状态以
+> `CORE-PRODUCT-HTTP.md`、`CORE-NEXT-PRODUCT-SPEC.md` 和
+> `CROSS-REPO-RUNTIME-CONTRACT.md` 为准。
+
 统一前缀 `/v1`，资源命名使用单数 `session`，需在项目范围内统一。
 
 ### 3.1 系统与运行状态
@@ -249,10 +253,10 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 |---|---|---|
 | `GET /v1/health` | 服务存活、版本、当前 runtime engine | 【待确认】应保留 |
 | `GET /v1/capabilities` | 列出内置与外部插件/MCP 的 homelab capability（分类、服务、权限、schema） | 已实现 |
-| `POST /v1/diagnosis` | 只读容器诊断：App 传 `ResourceRef`，Core 返回 observations / diagnosis / recommendations | 已实现（Vertical Slice 01） |
+| `POST /v1/diagnosis` | 只读容器诊断：App 传 `ResourceRef`，Core 返回 observations / diagnosis / recommendations | 已实现 |
 | `GET /v1/diagnosis/:runId` | 读取一次诊断 run | 已实现 |
 | `POST /v1/diagnosis/:runId/why` | 基于已有 observations 追问原因，不重放原始 inspect/logs | 已实现 |
-| `POST /v1/action` | 仅 `container.restart`：必须本机 `approval.approved`，然后确定性执行并程序化 verification，返回 Receipt | 已实现（Vertical Slice 02） |
+| `POST /v1/action` | 仅 `container.restart`：必须本机 `approval.approved`，然后确定性执行并程序化 verification，返回 Receipt | 已实现 |
 | `GET /v1/action/:receiptId` | 读取执行回执 | 已实现 |
 | `GET /v1/activity` | 列出 typed Activity union（Approval / Receipt / Goal / Capability Run），读取使用 0 tokens | 已实现（Capability Run 已纳入） |
 | `GET /v1/activity/:id` | 读取单条 Activity，包括 Capability Run 详情 | 已实现 |
