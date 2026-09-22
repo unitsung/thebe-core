@@ -33,7 +33,7 @@ import type {
   CapabilityRun,
 } from "./capabilities/invoke.ts";
 import type { ProductPendingPermission } from "./security/pending-permission.ts";
-import type { AuditPage, AuditQuery } from "./security/audit/audit-log.ts";
+import type { AuditPage, AuditRecord, AuditQuery } from "./security/audit/audit-log.ts";
 import type { SubagentProfile } from "./subagents/catalog.ts";
 import type {
   GoalRun,
@@ -235,6 +235,7 @@ export interface ThebeAgent {
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;
   listAudit(query?: AuditQuery): Promise<AuditPage>;
+  getAudit(id: string): Promise<AuditRecord | undefined>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;

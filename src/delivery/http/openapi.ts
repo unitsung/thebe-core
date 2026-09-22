@@ -66,6 +66,7 @@ const operations: Operation[] = [
   { method: "get", path: "/v1/agent/running", summary: "List running sessions", tag: "system" },
   { method: "get", path: PRODUCT_HTTP_PATH.capabilities, summary: "List homelab capabilities", tag: "capabilities", responseSchema: "CapabilityList" },
   { method: "get", path: PRODUCT_HTTP_PATH.audit, summary: "Read the redacted append-only audit log", tag: "audit", parameters: [queryParameter("limit", { type: "integer", minimum: 1, maximum: 200, default: 100 }), queryParameter("cursor", { type: "string" }), queryParameter("sessionId"), queryParameter("method"), queryParameter("result", { type: "string", enum: ["ok", "error", "denied"] })], responseSchema: "AuditList" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.audit}/{id}`, summary: "Read one redacted audit record", tag: "audit", parameters: [idParameter()], responseSchema: "AuditRecord" },
   { method: "post", path: `${PRODUCT_HTTP_PATH.capabilities}/{id}/${PRODUCT_HTTP_SEGMENT.invoke}`, summary: "Invoke a capability through ThebeAgent", tag: "capabilities", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "CapabilityInvokeRequest", responseSchema: "CapabilityInvokeResult", extraStatuses: [{ status: 202, description: "Background run started", schema: "CapabilityInvokeResult" }, { status: 403, description: "Write requires POST /v1/action" }] },
   { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}`, summary: "List persisted background capability runs", tag: "capabilities", responseSchema: "CapabilityRunList" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}`, summary: "Read a background capability run", tag: "capabilities", parameters: [idParameter("runId")], responseSchema: "CapabilityRun" },
@@ -254,8 +255,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         AuditRecord: {
           type: "object",
-          required: ["timestamp", "method", "parameterHash", "responseBytes", "budgetConsumed", "redactionFired"],
+          required: ["id", "timestamp", "method", "parameterHash", "responseBytes", "budgetConsumed", "redactionFired"],
           properties: {
+            id: { type: "string" },
             timestamp: { type: "string" },
             method: { type: "string" },
             parameterHash: { type: "string" },

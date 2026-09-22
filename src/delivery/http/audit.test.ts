@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -27,6 +27,26 @@ async function body(response: Response): Promise<Record<string, unknown>> {
 }
 
 describe("GET /v1/audit", () => {
+  it("assigns a deterministic compatibility id to legacy rows", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-audit-"));
+    const auditPath = join(dir, "audit.jsonl");
+    const legacy = {
+      timestamp: "2026-09-21T00:00:00.000Z",
+      method: "container.logs",
+      parameterHash: hashParameters({ id: "legacy" }),
+      responseBytes: 20,
+      budgetConsumed: 0,
+      redactionFired: false,
+    };
+    await writeFile(auditPath, `${JSON.stringify(legacy)}\n`, "utf8");
+    const audit = createAuditLog(auditPath, () => new Date("2026-09-21T00:00:00Z"));
+
+    const page = await audit.list();
+    const entry = page.entries[0];
+    expect(entry?.id).toMatch(/^legacy-[a-f0-9]{64}$/);
+    await expect(audit.get(entry?.id ?? "")).resolves.toEqual(entry);
+  });
+
   it("returns newest redacted records with filters and an opaque cursor", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-audit-"));
     const auditPath = join(dir, "audit.jsonl");
@@ -76,8 +96,24 @@ describe("GET /v1/audit", () => {
       "container.inspect",
       "container.logs",
     ]);
+    expect(entries[1]?.id).toEqual(expect.any(String));
     expect(first.nextCursor).toEqual(expect.any(String));
     expect(JSON.stringify(first)).not.toContain("never persisted");
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/audit/${entries[1]?.id}`),
+    );
+    expect(detail.status).toBe(200);
+    expect(await body(detail)).toMatchObject({
+      id: entries[1]?.id,
+      method: "container.logs",
+      sessionId: "session-a",
+    });
+
+    const missing = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/audit/missing"),
+    );
+    expect(missing.status).toBe(404);
 
     const older = await body(await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/audit?cursor=${first.nextCursor}`),
@@ -120,6 +156,7 @@ describe("GET /v1/audit", () => {
     );
     const document = await body(response);
     expect(document.paths).toHaveProperty("/v1/audit");
+    expect(document.paths).toHaveProperty("/v1/audit/{id}");
     expect(document.components).toEqual(expect.objectContaining({
       schemas: expect.objectContaining({ AuditRecord: expect.any(Object), AuditList: expect.any(Object) }),
     }));

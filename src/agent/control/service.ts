@@ -4,7 +4,7 @@ import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
-import type { AuditPage, AuditQuery } from "../security/audit/audit-log.ts";
+import type { AuditPage, AuditRecord, AuditQuery } from "../security/audit/audit-log.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
@@ -270,6 +270,9 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     },
     async listAudit(query?: AuditQuery): Promise<AuditPage> {
       return audit?.list(query) ?? { entries: [] };
+    },
+    async getAudit(id: string): Promise<AuditRecord | undefined> {
+      return audit?.get(id);
     },
     invokeTool,
     async invokeCapability(

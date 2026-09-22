@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -11,6 +11,7 @@ export const DEFAULT_AUDIT_LIMIT = 100;
 export const MAX_AUDIT_LIMIT = 200;
 
 export type AuditRecord = {
+  id: string;
   timestamp: string;
   method: string;
   parameterHash: string;
@@ -67,13 +68,32 @@ export function canonicalJson(
 
 export function createAuditLog(path: string, now: () => Date) {
   return {
-    async append(record: Omit<AuditRecord, "timestamp">): Promise<void> {
+    async append(record: Omit<AuditRecord, "id" | "timestamp">): Promise<void> {
       const row: AuditRecord = {
+        id: randomUUID(),
         timestamp: now().toISOString(),
         ...record,
       };
       await mkdir(dirname(path), { recursive: true });
       await appendFile(path, `${JSON.stringify(row)}\n`, "utf8");
+    },
+    async get(id: string): Promise<AuditRecord | undefined> {
+      if (!id.trim()) return undefined;
+      const input = createReadStream(path, { encoding: "utf8" });
+      const lines = createInterface({ input, crlfDelay: Infinity });
+      try {
+        for await (const raw of lines) {
+          const record = parseAuditRecord(raw);
+          if (record?.id === id) return record;
+        }
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+      } finally {
+        lines.close();
+        input.destroy();
+      }
+      return undefined;
     },
     async list(query: AuditQuery = {}): Promise<AuditPage> {
       const input = createReadStream(path, { encoding: "utf8" });
@@ -166,6 +186,7 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
   }
 
   const record: AuditRecord = {
+    id: typeof row.id === "string" && row.id.trim() ? row.id : legacyAuditId(raw),
     timestamp: row.timestamp,
     method: row.method,
     parameterHash: row.parameterHash,
@@ -179,4 +200,8 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
   if (typeof row.result === "string") record.result = row.result as AuditResult;
   if (typeof row.durationMs === "number") record.durationMs = row.durationMs;
   return record;
+}
+
+function legacyAuditId(raw: string): string {
+  return `legacy-${createHash("sha256").update(raw).digest("hex")}`;
 }
