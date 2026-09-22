@@ -340,4 +340,30 @@ describe("ArcaneAdapter", () => {
       message: "Arcane returned invalid JSON",
     });
   });
+
+  it("reports an Arcane application error instead of returning an empty list", async () => {
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async () => jsonResponse(200, {
+        success: false,
+        message: "raw panel failure details",
+      }),
+    });
+
+    const error = await adapter.listContainers().then(
+      () => {
+        throw new Error("expected the Arcane application error to reject");
+      },
+      (cause: unknown) => cause,
+    );
+
+    expect(error).toMatchObject({
+      name: "ProviderError",
+      code: "UNKNOWN",
+      message: "Arcane API returned an error",
+    });
+    expect(JSON.stringify(error)).not.toContain("raw panel failure details");
+  });
 });
