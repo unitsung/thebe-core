@@ -32,6 +32,7 @@ import {
 } from "../capabilities/invoke.ts";
 import { createCapabilityRunStore } from "../capabilities/runs.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
+import { redactToolOutput } from "../security/redaction.ts";
 import {
   toProductBackgroundTask,
   type ProductBackgroundTask,
@@ -373,9 +374,35 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
               finishedAt: now().toISOString(),
             });
           } catch (error) {
+            const errorMessage = redactToolOutput(
+              error instanceof Error ? error.message : String(error),
+            );
+            let artifactId: string | undefined;
+            try {
+              const artifact = artifactStore
+                ? await artifactStore.create({
+                    kind: "report",
+                    title: `Capability report: ${capability.id}`,
+                    runId,
+                    resource: resourceRef(input.resource),
+                    contentType: "application/json",
+                    content: JSON.stringify({
+                      version: 1,
+                      runId,
+                      capabilityId: capability.id,
+                      status: CAPABILITY_RUN_STATUS_FAILED,
+                      error: errorMessage,
+                    }),
+                  })
+                : undefined;
+              artifactId = artifact?.artifactId;
+            } catch {
+              // A report persistence failure must not hide the failed run.
+            }
             await updateCapabilityRun(runId, {
               status: CAPABILITY_RUN_STATUS_FAILED,
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage,
+              artifactId,
               finishedAt: now().toISOString(),
             }).catch(() => {});
           }

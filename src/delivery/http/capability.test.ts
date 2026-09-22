@@ -527,6 +527,69 @@ describe("capability product HTTP", () => {
     );
   });
 
+  it("links a redacted report Artifact from a failed background run", async () => {
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          throw new Error("provider failed: TOKEN=top-secret");
+        },
+      },
+    });
+    const started = await created.handler.handle(
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            mode: "background",
+            arguments: { title: "Dune" },
+            resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+          }),
+        },
+      ),
+    );
+    const startedBody = await json(started);
+    const run = await fetchRun(created.handler, String(startedBody.runId));
+
+    expect(run).toEqual(
+      expect.objectContaining({
+        status: "failed",
+        error: "provider failed: TOKEN=***REDACTED***",
+        artifactId: expect.any(String),
+      }),
+    );
+    const artifactId = String(run.artifactId);
+    const artifact = await json(
+      await created.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
+      ),
+    );
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        artifactId,
+        kind: "report",
+        runId: run.runId,
+        resource: { kind: "strm", id: "strm-1" },
+      }),
+    );
+    const content = await json(
+      await created.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
+      ),
+    );
+    expect(JSON.parse(content.content as string)).toEqual({
+      version: 1,
+      runId: run.runId,
+      capabilityId: "strm.repair",
+      status: "failed",
+      error: "provider failed: TOKEN=***REDACTED***",
+    });
+  });
+
   it("persists terminal runs and restores them through a new Agent instance", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-capability-runs-"));
     const first = app({ agentStoreDir: dir });
