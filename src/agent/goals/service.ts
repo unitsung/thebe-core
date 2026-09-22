@@ -12,12 +12,14 @@ import type {
 } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import type { StoredGoalEvent } from "../store.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
 
 const MAX_GOAL_EVENTS = 50;
 
 export function createGoalApi(
   ctx: AgentContext,
   subagents: GoalSubagentApi,
+  artifactStore?: ArtifactStore,
 ) {
   const runs = new Map<string, ManagedGoal>();
   const persistChains = new Map<string, Promise<void>>();
@@ -43,6 +45,7 @@ export function createGoalApi(
     finishedAt: run.finishedAt,
     summary: run.summary,
     finalReport: run.finalReport,
+    artifactId: run.artifactId,
     error: run.error,
   });
 
@@ -72,6 +75,25 @@ export function createGoalApi(
     run.summary = summary;
     run.error = error;
     run.finishedAt = ctx.now().toISOString();
+    if (
+      status !== "paused" &&
+      artifactStore &&
+      !run.artifactId &&
+      run.finalReport?.trim()
+    ) {
+      try {
+        const artifact = await artifactStore.create({
+          kind: "report",
+          title: `Goal report: ${run.goal}`,
+          content: run.finalReport,
+          contentType: "text/plain; charset=utf-8",
+          sessionId: run.thebeSessionId,
+        });
+        run.artifactId = artifact.artifactId;
+      } catch {
+        // A report Artifact is supplementary; it must not change Goal state.
+      }
+    }
     const result = snapshot(run);
     broadcast(run, {
       type: "goal_completed",
@@ -200,6 +222,7 @@ export function createGoalApi(
       ? `Goal paused after ${run.iteration} checkpoint(s); resume it to continue.`
       : persisted.summary;
     run.finalReport = persisted.finalReport;
+    run.artifactId = persisted.artifactId;
     run.error = interrupted
       ? "The previous Goal process ended before its active checkpoint completed."
       : persisted.error;
@@ -402,6 +425,7 @@ export function createGoalApi(
       run.finishedAt = undefined;
       run.summary = undefined;
       run.finalReport = undefined;
+      run.artifactId = undefined;
       run.error = undefined;
       run.pauseRequested = false;
       run.stopRequested = false;

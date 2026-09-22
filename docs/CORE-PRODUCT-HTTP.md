@@ -1,6 +1,6 @@
 # Core product HTTP — shipped vs leftover
 
-Date: 2026-09-21.
+Date: 2026-09-22.
 
 This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
@@ -12,6 +12,7 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Capability invoke | `POST /v1/capabilities/{id}/invoke` | Through `ThebeAgent.invokeCapability` → policy/tools. Direct `{ type: result }` or background `{ type: run, runId }`. `container.restart` and `approval=required` return 403; use `POST /v1/action`. |
 | Capability run | `GET /v1/capabilities/runs`, `GET /v1/capabilities/runs/{runId}` | Durable snapshots under `{agentStoreDir}/capability-runs`; terminal runs and results survive Core recreation. Completed background runs also link a bounded `report` Artifact. Queued/running runs owned by an older Core instance recover as failed with an interruption error. |
 | Activity feed | `GET /v1/activity`, `GET /v1/activity/{id}` | Typed union of Approval, Receipt, Goal, Capability Run, Worker, and Core-owned Background Task items. Supports `group`, `source`, exact `status`, inclusive `updatedAfter`/`updatedBefore`, bounded `limit`, and opaque `cursor`/`nextCursor`; filtering happens before pagination and ordering is stable by `updatedAt` plus id. Capability Runs keep their source `runId`, Workers keep their `ProductWorker` source link without the parent transcript, and Background Tasks keep their source task id plus parent session id. Pi detached Bash task snapshots survive runtime recreation and are stopped through the registry. Queued/running items are `running`, terminal items are `recent`. |
+| Goals | `GET/POST /v1/goals`, `GET /v1/goals/{id}`, `POST .../pause`, `POST .../resume`, `POST .../stop`, `GET .../log` | Durable ProductGoal attached to one parent session. A terminal Goal with an isolated worker/reviewer report links a bounded `report` Artifact through `artifactId`; Goal state and report Artifacts survive Core recreation. |
 | Workers | `GET/POST /v1/subagents`, `GET /v1/subagents/profiles`, `GET /v1/subagents/{runId}`, `POST .../cancel`, `GET .../log` | Product object is `ProductWorker` mapped from `SubagentRun`. No parent transcript. |
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
 | Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
@@ -19,7 +20,7 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. Selections persist through the Thebe config across Core recreation. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
 | Agent settings | `GET/PATCH /v1/settings/agent` | Effective auto-compact/summary settings, bounded delay, permission mode, concurrency limits, and guarded paths. Mutable fields are auto-compact/summary/delay; concurrency changes report `409 restart_required`. Each value includes a `sources` entry and the response reports `persistence.enabled`. |
-| Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts, Diagnosis runs, and completed background Capability Runs are producers. |
+| Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, session/run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts, Diagnosis runs, completed background Capability Runs, and terminal Goal reports are producers. |
 | Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 | Push device registration | `GET/POST /v1/devices`, `DELETE /v1/devices/{registrationId}` | Durable, token-redacted iOS registrations with notification categories, stable token-derived ids, and de-registration. APNs delivery remains an optional external relay. |
 
@@ -30,7 +31,7 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for the remaining product surfaces; the Activity Run union member is decoded by the current App client.
-- **Additional Artifact producers and provider-native background-task sources** — Pi detached Bash discovery and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
+- **Additional Artifact producers and provider-native background-task sources** — Goal reports, Pi detached Bash discovery, and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
 - **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).

@@ -17,7 +17,13 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const ctx = createAgentContext(options);
   const extensions = createExtensionApi(ctx);
   const subagents = createSubagentApi(ctx);
-  const goals = createGoalApi(ctx, subagents);
+  const artifactStore = options.artifactStore ?? createArtifactStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "artifacts")
+      : undefined,
+    now: ctx.now,
+  });
+  const goals = createGoalApi(ctx, subagents, artifactStore);
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
@@ -28,12 +34,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const activityStore = createActivityStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "activity")
-      : undefined,
-    now: ctx.now,
-  });
-  const artifactStore = options.artifactStore ?? createArtifactStore({
-    dir: options.agentStoreDir
-      ? join(options.agentStoreDir, "artifacts")
       : undefined,
     now: ctx.now,
   });

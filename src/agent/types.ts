@@ -110,6 +110,8 @@ export type GoalRun = {
   summary?: string;
   /** The latest isolated worker/reviewer report for the parent to inspect. */
   finalReport?: string;
+  /** Bounded product Artifact containing the latest terminal report. */
+  artifactId?: string;
   error?: string;
 };
 

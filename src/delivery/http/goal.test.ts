@@ -69,6 +69,53 @@ describe("Goal HTTP", () => {
     await app.agent.waitGoal(String(body.id));
   });
 
+  it("publishes a completed Goal report as a linked Artifact", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns(completingTurns());
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const created = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "Publish the verified result" }),
+        }),
+      ),
+    );
+    const id = String(created.id);
+
+    await app.agent.waitGoal(id);
+
+    const goal = await json(
+      await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${id}`)),
+    );
+    expect(goal.artifactId).toEqual(expect.any(String));
+
+    const listed = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts?kind=report&sessionId=${id}`),
+      ),
+    );
+    const artifacts = listed.artifacts as Array<Record<string, unknown>>;
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toEqual(
+      expect.objectContaining({
+        artifactId: goal.artifactId,
+        kind: "report",
+        sessionId: id,
+        contentType: "text/plain; charset=utf-8",
+      }),
+    );
+
+    const content = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${goal.artifactId}/content`),
+      ),
+    );
+    expect(content.content).toContain("VERDICT: pass");
+    expect(JSON.stringify(content)).not.toMatch(PI_LEAK);
+  });
+
   it("lists persisted goals after a new app process", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-http-"));
     const fake = createFakeRuntime();
@@ -102,12 +149,29 @@ describe("Goal HTTP", () => {
     expect(goals[0]?.id).toBe(created.id);
     expect(goals[0]?.title).toBe("Persist this objective");
     expect(goals[0]?.status).toBe("succeeded");
+    expect(goals[0]?.artifactId).toEqual(expect.any(String));
     expect(JSON.stringify(listed)).not.toMatch(PI_LEAK);
 
     const fetched = await json(
       await restarted.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${created.id}`)),
     );
     expect(fetched.id).toBe(created.id);
+    expect(fetched.artifactId).toBe(goals[0]?.artifactId);
+
+    const artifacts = await json(
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts?sessionId=${created.id}`),
+      ),
+    );
+    expect(artifacts.artifacts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          artifactId: goals[0]?.artifactId,
+          kind: "report",
+          sessionId: created.id,
+        }),
+      ]),
+    );
   });
 
   it("preserves Goal log history across a Core restart", async () => {

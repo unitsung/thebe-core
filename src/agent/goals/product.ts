@@ -49,6 +49,7 @@ export type ProductGoal = {
   updatedAt: string;
   finishedAt?: string;
   summary?: string;
+  artifactId?: string;
   error?: ProductError;
   currentRun?: ProductRun;
   controls: ProductGoalControls;
@@ -124,6 +125,7 @@ export function toProductGoal(run: GoalRun): ProductGoal {
     updatedAt: run.finishedAt ?? run.createdAt,
     finishedAt: run.finishedAt,
     summary: run.summary,
+    artifactId: run.artifactId,
     error: run.error
       ? {
           code: run.status === "max_iterations" ? "max_iterations" : "goal_failed",

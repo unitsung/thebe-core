@@ -803,6 +803,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
             finishedAt: { type: "string" },
             summary: { type: "string" },
+            artifactId: { type: "string" },
             error: {
               type: "object",
               properties: {
