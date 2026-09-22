@@ -27,7 +27,10 @@ function redactEnvLine(line: string): string {
 }
 
 export function redactLogs(text: string, tail = DEFAULT_LOG_TAIL): string {
-  const truncated = truncateLogLines(text, tail);
+  const safeTail = Number.isFinite(tail)
+    ? Math.min(DEFAULT_LOG_TAIL, Math.max(1, Math.trunc(tail)))
+    : DEFAULT_LOG_TAIL;
+  const truncated = truncateLogLines(text, safeTail);
   return redactSecrets(truncated);
 }
 

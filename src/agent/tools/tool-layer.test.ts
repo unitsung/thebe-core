@@ -148,6 +148,22 @@ describe("Tool Layer", () => {
     expect(text.split("\n")).toHaveLength(201);
   });
 
+  it("container.logs never expands beyond the 200-line safety limit", async () => {
+    const lines = Array.from({ length: 250 }, (_, i) => `L${i}`);
+    const tools = createToolLayer(fakeProvider({ logs: lines.join("\n") }));
+
+    const result = (await tools.invoke("container.logs", {
+      id: "abc123",
+      tail: 999,
+    })) as string;
+
+    expect(result.startsWith("[... truncated ...]\n")).toBe(true);
+    expect(result).not.toContain("L49\n");
+    expect(result).toContain("L50\n");
+    expect(result).toContain("L249");
+    expect(result.split("\n")).toHaveLength(201);
+  });
+
   it("container.status_summary returns host counts from ContainerInfoProvider", async () => {
     const tools = createToolLayer(
       fakeProvider({
