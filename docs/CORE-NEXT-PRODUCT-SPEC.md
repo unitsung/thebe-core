@@ -14,7 +14,7 @@ restart-required. Enabled resource selections now use that same boundary and
 survive Agent recreation. Core now stores bounded, redacted operation-receipt,
 Diagnosis, enabled-resource snapshot, direct or background Capability result,
 terminal Goal report, and terminal Worker report Artifacts with
-metadata/content HTTP reads. Activity now includes durable
+metadata/content HTTP reads. Activity now includes durable read-only Diagnosis,
 Capability Run, Worker, and Core-owned Background Task items; cursorable
 aggregation and source/status/time filters are now available. Pi detached Bash
 jobs are registered at the adapter seam and their bounded snapshots survive
@@ -38,8 +38,9 @@ inspect and trust those objects:
 - the bounded Artifact contract has operation-receipt, Diagnosis, resource-list,
   direct/background Capability result, Goal report, and Worker report producers,
   while provider-native task producers remain;
-- Activity now includes capability runs, Workers, and Core-owned detached Bash
-  tasks with bounded cursor pagination plus source/status/time filters; it
+- Activity now includes read-only diagnoses, capability runs, Workers, and
+  Core-owned detached Bash tasks with bounded cursor pagination plus
+  source/status/time filters; it
   remains a partial product-wide feed until additional producers and App clients
   are covered;
 - enabled resources and permission mode now persist through the configuration

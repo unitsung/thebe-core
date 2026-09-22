@@ -6,8 +6,8 @@ import type { ContainerInfoProvider } from "../../agent/capabilities/containers.
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
-function provider(): ContainerInfoProvider {
-  let state = "exited";
+function provider(initialState: "exited" | "running" = "exited"): ContainerInfoProvider {
+  let state = initialState;
   return {
     listContainers: async () => [],
     inspectContainer: async (id) => ({
@@ -490,7 +490,11 @@ describe("GET /v1/activity", () => {
         expect.objectContaining({ name: "group", in: "query" }),
         expect.objectContaining({ name: "limit", in: "query" }),
         expect.objectContaining({ name: "cursor", in: "query" }),
-        expect.objectContaining({ name: "source", in: "query" }),
+        expect.objectContaining({
+          name: "source",
+          in: "query",
+          schema: expect.objectContaining({ enum: expect.arrayContaining(["diagnosis"]) }),
+        }),
         expect.objectContaining({ name: "status", in: "query" }),
         expect.objectContaining({ name: "updatedAfter", in: "query" }),
         expect.objectContaining({ name: "updatedBefore", in: "query" }),
@@ -538,6 +542,16 @@ describe("GET /v1/activity", () => {
       expect.objectContaining({
         receipt: { $ref: "#/components/schemas/ActivityRecord" },
       }),
+    );
+    expect(schemas.ActivityDiagnosisItem?.properties).toEqual(
+      expect.objectContaining({
+        diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
+      }),
+    );
+    expect(schemas.ActivityItem?.oneOf).toEqual(
+      expect.arrayContaining([
+        { $ref: "#/components/schemas/ActivityDiagnosisItem" },
+      ]),
     );
     expect(schemas.ActivityGoalItem?.properties).toEqual(
       expect.objectContaining({
@@ -818,6 +832,57 @@ describe("GET /v1/activity", () => {
     expect(before.items).toEqual([
       expect.objectContaining({ id: first.receiptId }),
     ]);
+  });
+
+  it("exposes read-only diagnoses as typed Activity items", async () => {
+    const runningProvider = provider("running");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: {
+        ...runningProvider,
+        getStatusSummary: async () => {
+          throw new Error("summary unavailable");
+        },
+      },
+    });
+    const diagnosed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/diagnosis", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          }),
+        }),
+      ),
+    );
+    expect(diagnosed.approvalId).toBeUndefined();
+
+    const listed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?source=diagnosis"),
+      ),
+    );
+    expect(listed.items).toEqual([
+      expect.objectContaining({
+        type: "diagnosis",
+        id: diagnosed.runId,
+        group: "recent",
+        diagnosis: expect.objectContaining({
+          id: diagnosed.runId,
+          kind: "container.diagnose",
+          status: "completed",
+        }),
+      }),
+    ]);
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${diagnosed.runId}`),
+    );
+    expect(detail.status).toBe(200);
+    expect(await json(detail)).toEqual(
+      expect.objectContaining({ type: "diagnosis", id: diagnosed.runId }),
+    );
   });
 
   it("mints one approval from diagnosis and mutates it into a receipt", async () => {

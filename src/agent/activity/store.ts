@@ -6,6 +6,7 @@ import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import type { DiagnosisResult } from "../diagnosis/types.ts";
 import {
   activityApprovalFromDiagnosis,
+  activityFromDiagnosis,
   activityFromReceipt,
   assignActivityGroups,
   hasRestartRecommendation,
@@ -137,8 +138,36 @@ export function createActivityStore(options: {
     },
     async upsertFromDiagnosis(result: DiagnosisResult): Promise<ActivityRecord | undefined> {
       await ensureLoaded();
+      const diagnosisKey = idempotencyIndexKey({
+        actionId: result.actionId,
+        resource: result.resource,
+        idempotencyKey: `diagnose:${result.resource.id}:${result.runId}`,
+      });
+      const existingDiagnosisId = byIdempotency.get(diagnosisKey) ??
+        (memory.has(result.runId) ? result.runId : undefined);
       if (!hasRestartRecommendation(result)) {
-        return undefined;
+        for (const item of [...memory.values()]) {
+          if (
+            isPendingApproval(item) &&
+            item.resource.id === result.resource.id &&
+            item.actionId === CONTAINER_RESTART_ACTION_ID
+          ) {
+            await drop(item.id);
+          }
+        }
+        const prior = existingDiagnosisId ? memory.get(existingDiagnosisId) : undefined;
+        const stamp = options.now().toISOString();
+        const record = activityFromDiagnosis(result, {
+          createdAt: prior?.createdAt ?? stamp,
+          updatedAt: stamp,
+        });
+        memory.set(record.id, record);
+        byIdempotency.set(idempotencyIndexKey(record), record.id);
+        await persist(record);
+        return grouped(record);
+      }
+      if (existingDiagnosisId) {
+        await drop(existingDiagnosisId);
       }
       for (const item of [...memory.values()]) {
         if (

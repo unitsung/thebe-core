@@ -102,7 +102,7 @@ const operations: Operation[] = [
   { method: "post", path: "/v1/diagnosis/{runId}/why", summary: "Ask why a diagnosis was reached", tag: "diagnosis", parameters: [idParameter("runId")], requestBody: { required: false }, responseSchema: "DiagnosisResult" },
   { method: "post", path: "/v1/action", summary: "Execute an approved container.restart", tag: "action", requestBody: { required: true }, requestSchema: "ActionRequest", responseSchema: "ActionReceipt", extraStatuses: [{ status: 403, description: "Action requires on-device approval", schema: "ActionReceipt" }] },
   { method: "get", path: "/v1/action/{receiptId}", summary: "Read an action receipt", tag: "action", parameters: [idParameter("receiptId")], responseSchema: "ActionReceipt" },
-  { method: "get", path: "/v1/activity", summary: "List Activity workspace items (approval, receipt, goal, run, worker, background task)", tag: "activity", parameters: [queryParameter("group", { type: "string", enum: ["needs_approval", "running", "recent"] }), queryParameter("source", { type: "string", enum: ["approval", "receipt", "goal", "run", "worker", "background_task"] }), queryParameter("status"), queryParameter("updatedAfter", { type: "string", format: "date-time" }), queryParameter("updatedBefore", { type: "string", format: "date-time" }), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100, default: 50 }), queryParameter("cursor")], responseSchema: "ActivityList" },
+  { method: "get", path: "/v1/activity", summary: "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task)", tag: "activity", parameters: [queryParameter("group", { type: "string", enum: ["needs_approval", "running", "recent"] }), queryParameter("source", { type: "string", enum: ["approval", "receipt", "diagnosis", "goal", "run", "worker", "background_task"] }), queryParameter("status"), queryParameter("updatedAfter", { type: "string", format: "date-time" }), queryParameter("updatedBefore", { type: "string", format: "date-time" }), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100, default: 50 }), queryParameter("cursor")], responseSchema: "ActivityList" },
   { method: "get", path: "/v1/activity/{id}", summary: "Read one Activity workspace item", tag: "activity", parameters: [idParameter()], responseSchema: "ActivityItem" },
   { method: "post", path: "/v1/activity/{id}/deny", summary: "Reject a pending Approval and remove it from Activity", tag: "activity", parameters: [idParameter()] },
   { method: "post", path: "/v1/goals", summary: "Create a session and start a Goal", tag: "goal", response: 201, requestBody: { required: true }, requestSchema: "GoalCreateRequest", responseSchema: "ProductGoal" },
@@ -234,7 +234,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "settings", description: "Runtime behavior settings consumed by the App" },
       { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
       { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
-      { name: "activity", description: "Typed Approval, Receipt, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object" },
+      { name: "activity", description: "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object" },
       { name: "goal", description: "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*." },
       { name: "compatibility", description: "Legacy iOS compatibility endpoints" },
       { name: "mcp", description: "MCP JSON-RPC" },
@@ -482,6 +482,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
+        ActivityDiagnosisItem: {
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "diagnosis"],
+          properties: {
+            type: { type: "string", enum: ["diagnosis"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["recent"] },
+            updatedAt: { type: "string" },
+            diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
+          },
+        },
         ActivityGoalItem: {
           type: "object",
           required: ["type", "id", "group", "updatedAt", "goal"],
@@ -530,6 +541,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           oneOf: [
             { $ref: "#/components/schemas/ActivityApprovalItem" },
             { $ref: "#/components/schemas/ActivityReceiptItem" },
+            { $ref: "#/components/schemas/ActivityDiagnosisItem" },
             { $ref: "#/components/schemas/ActivityGoalItem" },
             { $ref: "#/components/schemas/ActivityRunItem" },
             { $ref: "#/components/schemas/ActivityWorkerItem" },

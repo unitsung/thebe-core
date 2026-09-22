@@ -192,7 +192,7 @@ describe("activity store", () => {
     expect(await store.list("running")).toEqual([]);
   });
 
-  it("does not persist a diagnosis with no write recommendation", async () => {
+  it("persists a diagnosis with no write recommendation", async () => {
     const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
     const saved = await store.upsertFromDiagnosis({
       runId: "run-ok",
@@ -215,8 +215,20 @@ describe("activity store", () => {
       recommendations: [],
       technicalDetails: { evidence: [], toolTranscript: [] },
     });
-    expect(saved).toBeUndefined();
-    expect(await store.list()).toEqual([]);
+    expect(saved).toEqual(
+      expect.objectContaining({
+        id: "run-ok",
+        kind: "container.diagnose",
+        status: "completed",
+        group: "recent",
+        summary: "Container is running",
+        diagnosisRunId: "run-ok",
+        recommendations: [],
+      }),
+    );
+    expect(await store.list()).toEqual([
+      expect.objectContaining({ id: "run-ok", kind: "container.diagnose" }),
+    ]);
   });
 
   it("removes a pending approval on deny", async () => {

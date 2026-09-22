@@ -9,7 +9,6 @@ import {
   ACTIVITY_KIND_DIAGNOSE,
   ACTIVITY_KIND_RESTART,
   assignActivityGroups,
-  hasRestartRecommendation,
   isPendingApproval,
   type ActivityGroup,
   type ActivityRecord,
@@ -18,6 +17,7 @@ import {
 export const ACTIVITY_FEED_TYPES = [
   "approval",
   "receipt",
+  "diagnosis",
   "goal",
   "run",
   "worker",
@@ -48,6 +48,13 @@ export type ActivityFeedItem =
       group: "running" | "recent";
       updatedAt: string;
       receipt: ActivityRecord;
+    }
+  | {
+      type: "diagnosis";
+      id: string;
+      group: "recent";
+      updatedAt: string;
+      diagnosis: ActivityRecord;
     }
   | {
       type: "goal";
@@ -101,9 +108,6 @@ export function goalActivityGroup(
 
 export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | undefined {
   const grouped = assignActivityGroups([record])[0] ?? record;
-  if (grouped.kind === ACTIVITY_KIND_DIAGNOSE && !hasRestartRecommendation(grouped)) {
-    return undefined;
-  }
   if (isPendingApproval(grouped)) {
     return {
       type: "approval",
@@ -111,6 +115,15 @@ export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | und
       group: "needs_approval",
       updatedAt: grouped.updatedAt,
       approval: grouped,
+    };
+  }
+  if (grouped.kind === ACTIVITY_KIND_DIAGNOSE) {
+    return {
+      type: "diagnosis",
+      id: grouped.id,
+      group: "recent",
+      updatedAt: grouped.updatedAt,
+      diagnosis: grouped,
     };
   }
   if (grouped.kind === ACTIVITY_KIND_RESTART && grouped.action) {
@@ -249,6 +262,8 @@ function activityFeedItemStatus(item: ActivityFeedItem): string {
       return item.approval.status;
     case "receipt":
       return item.receipt.status;
+    case "diagnosis":
+      return item.diagnosis.status;
     case "goal":
       return item.goal.status;
     case "run":

@@ -8,6 +8,7 @@ import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { ThebePromptResult } from "../types.ts";
 import type { ActivityStore } from "../activity/store.ts";
+import { ACTIVITY_KIND_RESTART } from "../activity/types.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { deterministicDiagnosis } from "./deterministic.ts";
 import {
@@ -98,7 +99,7 @@ export function createDiagnosisApi(options: {
       if (oldest) runs.delete(oldest);
     }
     const persisted = await options.activityStore?.upsertFromDiagnosis(stored);
-    if (persisted) {
+    if (persisted?.kind === ACTIVITY_KIND_RESTART) {
       return { ...stored, approvalId: persisted.id };
     }
     return stored;

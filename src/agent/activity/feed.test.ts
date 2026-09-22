@@ -43,7 +43,7 @@ describe("toActivityFeed", () => {
     expect(items[1]?.type).toBe("approval");
   });
 
-  it("omits diagnosis rows that have no write recommendation", () => {
+  it("includes completed diagnosis rows without a write recommendation", () => {
     const diagnose: ActivityRecord = {
       id: "run-ok",
       kind: "container.diagnose",
@@ -57,6 +57,14 @@ describe("toActivityFeed", () => {
       idempotencyKey: "diagnose:ctr-emby:run-ok",
       recommendations: [],
     };
-    expect(toActivityFeed([diagnose], [])).toEqual([]);
+    expect(toActivityFeed([diagnose], [])).toEqual([
+      {
+        type: "diagnosis",
+        id: "run-ok",
+        group: "recent",
+        updatedAt: "2026-09-17T00:00:00Z",
+        diagnosis: diagnose,
+      },
+    ]);
   });
 });
