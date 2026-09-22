@@ -48,6 +48,14 @@ async function callTool(
     }
     return agent.invokeTool(mapped, asObject(args) ?? {});
   }
+  if (agent) {
+    const coreCapability = (await agent.listMcpTools()).find((tool) => {
+      return tool.source === "core" && (tool.id === mapped || tool.name === mapped);
+    });
+    if (coreCapability) {
+      return agent.invokeTool(coreCapability.name, asObject(args) ?? {});
+    }
+  }
   if (agent && name.startsWith("mcp:")) {
     return agent.invokeTool(name, asObject(args) ?? {});
   }

@@ -382,6 +382,70 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(body.error).toBeUndefined();
   });
 
+  it("POST /mcp tools/call invokes an advertised provider-backed STRM capability", async () => {
+    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const calls: unknown[] = [];
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair(input) {
+          calls.push(input);
+          return {
+            status: "repaired",
+            summary: "STRM path repaired and verified.",
+            target: "/Movies/Dune.mkv",
+          };
+        },
+      },
+    });
+
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: {
+            name: "strm.repair",
+            arguments: {
+              arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+              resource: {
+                kind: "strm",
+                id: "openlist:/Movies/Dune.strm",
+                provider: "openlist",
+              },
+            },
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const body = await json(response);
+    const text = ((body.result as { content?: Array<{ text?: string }> })
+      .content?.[0]?.text ?? "");
+    expect(JSON.parse(text)).toEqual({
+      status: "repaired",
+      summary: "STRM path repaired and verified.",
+      target: "/Movies/Dune.mkv",
+    });
+    expect(calls).toEqual([
+      {
+        arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+        resource: {
+          kind: "strm",
+          id: "openlist:/Movies/Dune.strm",
+          provider: "openlist",
+        },
+      },
+    ]);
+  });
+
   it("rejects requests when the shared token does not match", async () => {
     const app = handler({ token: "secret" });
     const res = await app.handle(
