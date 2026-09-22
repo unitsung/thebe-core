@@ -80,7 +80,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
 
   async inspectContainer(id: string): Promise<ContainerDetail> {
     const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/${id}`,
+      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}`,
     );
     return mapDetail(asObject(body.data));
   }

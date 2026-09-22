@@ -139,6 +139,33 @@ describe("ArcaneAdapter", () => {
     });
   });
 
+  it("encodes container ids when inspecting a container", async () => {
+    let requestedURL = "";
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async (input) => {
+        requestedURL = String(input);
+        return jsonResponse(200, {
+          success: true,
+          data: {
+            id: "abc/def?x=1",
+            name: "/nginx",
+            image: "nginx:1.27",
+            state: { status: "running" },
+          },
+        });
+      },
+    });
+
+    await adapter.inspectContainer("abc/def?x=1");
+
+    expect(requestedURL).toBe(
+      "https://arcane.internal:3552/api/environments/0/containers/abc%2Fdef%3Fx%3D1",
+    );
+  });
+
   it("reads container logs from the Arcane WebSocket path", async () => {
     let logsUrl = "";
     let logsKey = "";
