@@ -126,6 +126,39 @@ describe("container diagnosis service", () => {
     expect(result.technicalDetails.judgment).toBeUndefined();
   });
 
+  it("updates the linked Artifact when explaining a diagnosis", async () => {
+    let tick = 0;
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: embyProvider(),
+      now: () => new Date(`2026-09-21T00:00:0${tick++}.000Z`),
+    });
+    const initial = await agent.diagnose({
+      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    });
+    const initialArtifact = await agent.getArtifactContent(initial.artifactId!);
+    expect(initialArtifact?.content).not.toContain("why-reasoning");
+
+    fake.queueTurns([{
+      kind: "text",
+      text: JSON.stringify({
+        code: "container_exited",
+        title: "Container is not running",
+        summary: "The container exited after a database lock.",
+        confidence: "high",
+        reasoning: "why-reasoning",
+        recommendations: [],
+      }),
+    }]);
+    const explained = await agent.explainDiagnosis(initial.runId, "Why did this happen?");
+
+    expect(explained.artifactId).toBe(initial.artifactId);
+    const updatedArtifact = await agent.getArtifactContent(initial.artifactId!);
+    expect(updatedArtifact?.content).toContain("why-reasoning");
+    expect(updatedArtifact?.artifact.updatedAt).not.toBe(initialArtifact?.artifact.updatedAt);
+  });
+
   it("does not let a low Noul veto a high-confidence deterministic restart", async () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({

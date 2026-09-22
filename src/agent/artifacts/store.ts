@@ -16,6 +16,7 @@ import {
   type ArtifactCreateInput,
   type ArtifactKind,
   type ArtifactQuery,
+  type ArtifactUpdateInput,
 } from "./types.ts";
 
 export const DEFAULT_ARTIFACT_RETENTION = 100;
@@ -26,6 +27,7 @@ const ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 export type ArtifactStore = {
   create(input: ArtifactCreateInput): Promise<AgentArtifact>;
+  update?(artifactId: string, input: ArtifactUpdateInput): Promise<AgentArtifact | undefined>;
   get(artifactId: string): Promise<AgentArtifact | undefined>;
   getContent(artifactId: string): Promise<ArtifactContent | undefined>;
   list(query?: ArtifactQuery): Promise<AgentArtifact[]>;
@@ -140,6 +142,36 @@ export function createArtifactStore(options: {
       }
       return cloneArtifact(artifact);
     },
+    async update(artifactId, input): Promise<AgentArtifact | undefined> {
+      assertValidArtifactId(artifactId);
+      await ensureLoaded();
+      const existing = memory.get(artifactId);
+      if (!existing) return undefined;
+      assertUpdateInput(input);
+      const content = redactToolOutput(input.content);
+      const sizeBytes = Buffer.byteLength(content, "utf8");
+      if (sizeBytes > maxContentBytes) {
+        throw new Error(`artifact content exceeds ${maxContentBytes} bytes`);
+      }
+      const updated: AgentArtifact = {
+        ...existing,
+        updatedAt: options.now().toISOString(),
+        contentType: input.contentType?.trim() || existing.contentType,
+        sizeBytes,
+      };
+      const previousContent = contentMemory.get(artifactId);
+      memory.set(artifactId, updated);
+      contentMemory.set(artifactId, content);
+      try {
+        await persist(updated, content);
+      } catch (error) {
+        memory.set(artifactId, existing);
+        if (previousContent === undefined) contentMemory.delete(artifactId);
+        else contentMemory.set(artifactId, previousContent);
+        throw error;
+      }
+      return cloneArtifact(updated);
+    },
     async get(artifactId): Promise<AgentArtifact | undefined> {
       assertValidArtifactId(artifactId);
       await ensureLoaded();
@@ -210,6 +242,15 @@ function assertCreateInput(input: ArtifactCreateInput): void {
     (!input.resource.kind.trim() || !input.resource.id.trim())
   ) {
     throw new Error("artifact resource kind and id are required");
+  }
+}
+
+function assertUpdateInput(input: ArtifactUpdateInput): void {
+  if (typeof input.content !== "string") {
+    throw new Error("artifact content must be a string");
+  }
+  if (input.contentType !== undefined && !input.contentType.trim()) {
+    throw new Error("artifact content type must not be empty");
   }
 }
 

@@ -71,6 +71,39 @@ describe("ArtifactStore", () => {
     });
   });
 
+  it("updates bounded content in place and restores the new version", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-artifacts-update-"));
+    let tick = 0;
+    const store = createArtifactStore({
+      dir,
+      now: () => new Date(`2026-09-21T00:00:0${tick++}.000Z`),
+    });
+    const created = await store.create({
+      kind: "diagnosis",
+      title: "Diagnosis: emby",
+      contentType: "application/json",
+      content: JSON.stringify({ summary: "initial" }),
+    });
+
+    const updated = await store.update!(created.artifactId, {
+      contentType: "application/json",
+      content: JSON.stringify({ summary: "explained", secret: "sk-live-update" }),
+    });
+
+    expect(updated).toEqual(expect.objectContaining({
+      artifactId: created.artifactId,
+      createdAt: created.createdAt,
+      updatedAt: "2026-09-21T00:00:01.000Z",
+      sizeBytes: expect.any(Number),
+    }));
+    const content = await store.getContent(created.artifactId);
+    expect(content?.content).toContain("explained");
+    expect(content?.content).toContain("***REDACTED***");
+
+    const restored = createArtifactStore({ dir, now: () => new Date("2026-09-21T00:00:02.000Z") });
+    await expect(restored.getContent(created.artifactId)).resolves.toEqual(content);
+  });
+
   it("redacts secrets before writing Artifact content to disk", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-artifacts-redaction-"));
     const secret = "sk-live-artifact-secret";

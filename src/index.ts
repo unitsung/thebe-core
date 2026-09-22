@@ -34,6 +34,7 @@ export type {
   ArtifactKind,
   ArtifactQuery,
   ArtifactResourceRef,
+  ArtifactUpdateInput,
   ArtifactStore,
   ProductBackgroundTask,
   ActivityFeedItem,

@@ -66,17 +66,31 @@ export function createDiagnosisApi(options: {
 
   async function remember(result: DiagnosisResult): Promise<DiagnosisResult> {
     let stored = result;
-    if (options.artifactStore && !result.artifactId) {
-      const artifact = await options.artifactStore.create({
-        kind: "diagnosis",
-        title: `Diagnosis: ${result.resource.name ?? result.resource.id}`,
-        runId: result.runId,
-        sessionId: result.sessionId,
-        resource: { kind: result.resource.kind, id: result.resource.id },
-        contentType: "application/json",
-        content: JSON.stringify(diagnosisArtifactPayload(result)),
-      });
-      stored = { ...result, artifactId: artifact.artifactId };
+    if (options.artifactStore) {
+      const content = JSON.stringify(diagnosisArtifactPayload(result));
+      if (result.artifactId && options.artifactStore.update) {
+        const updated = await options.artifactStore.update(result.artifactId, {
+          contentType: "application/json",
+          content,
+        });
+        if (updated) {
+          stored = { ...result, artifactId: updated.artifactId };
+        } else {
+          stored = { ...result, artifactId: undefined };
+        }
+      }
+      if (!stored.artifactId) {
+        const artifact = await options.artifactStore.create({
+          kind: "diagnosis",
+          title: `Diagnosis: ${result.resource.name ?? result.resource.id}`,
+          runId: result.runId,
+          sessionId: result.sessionId,
+          resource: { kind: result.resource.kind, id: result.resource.id },
+          contentType: "application/json",
+          content,
+        });
+        stored = { ...result, artifactId: artifact.artifactId };
+      }
     }
     runs.set(stored.runId, stored);
     if (runs.size > MAX_RUNS) {

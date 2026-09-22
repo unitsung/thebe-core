@@ -40,6 +40,11 @@ export type ArtifactCreateInput = {
   resource?: ArtifactResourceRef;
 };
 
+export type ArtifactUpdateInput = {
+  content: string;
+  contentType?: string;
+};
+
 export type ArtifactQuery = {
   kind?: ArtifactKind;
   sessionId?: string;

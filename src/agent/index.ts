@@ -65,6 +65,7 @@ export type {
   ArtifactKind,
   ArtifactQuery,
   ArtifactResourceRef,
+  ArtifactUpdateInput,
 } from "./artifacts/types.ts";
 export { ARTIFACT_KINDS } from "./artifacts/types.ts";
 export {
