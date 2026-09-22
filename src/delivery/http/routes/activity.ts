@@ -113,7 +113,12 @@ export async function handleActivityRoutes(
       (item) => backgroundTaskActivityId(item.sessionId, item.id) === id,
     );
     if (backgroundTask) return json(backgroundTaskToFeedItem(backgroundTask));
-    const goal = agent.getGoal(id);
+    let goal = agent.getGoal(id);
+    if (!goal) {
+      goal = (await agent.listGoals()).find(
+        (item) => item.thebeSessionId === id,
+      );
+    }
     if (goal) {
       const items = toActivityFeed([], [toProductGoal(goal)]);
       if (items[0]) return json(items[0]);

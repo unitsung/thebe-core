@@ -55,6 +55,53 @@ async function postAction(
 }
 
 describe("GET /v1/activity", () => {
+  it("reads a persisted Goal by Activity id after Core recreation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-activity-goal-"));
+    const firstRuntime = createFakeRuntime();
+    firstRuntime.queueTurns([
+      { kind: "text", text: "I inspected the workspace and completed the checkpoint." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: persisted goal\nREMAINING: none",
+      },
+    ]);
+    const first = createThebeApp({
+      runtime: firstRuntime.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.agent.createSession({ title: "activity goal" });
+    await first.agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Persist this Activity Goal",
+    });
+    await first.agent.waitGoal(session.thebeSessionId);
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const response = await restarted.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/activity/${session.thebeSessionId}`,
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(
+      expect.objectContaining({
+        type: "goal",
+        id: session.thebeSessionId,
+        goal: expect.objectContaining({
+          id: session.thebeSessionId,
+          title: "Persist this Activity Goal",
+          status: "succeeded",
+        }),
+      }),
+    );
+  });
+
   it("includes completed workers as typed Activity items", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "worker result" }]);
