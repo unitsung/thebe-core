@@ -296,6 +296,7 @@ function requestTitle(input: StrmRepairRequest): string {
 
 function chooseCandidate(results: OpenListSearchResult[], title: string): OpenListSearchResult | undefined {
   const expected = normalizeName(title);
+  if (!expected) return undefined;
   return results
     .filter((item) => !item.isDirectory && MEDIA_EXTENSIONS.has(fileExtension(item.name)))
     .map((item) => ({ item, score: candidateScore(item, expected) }))
@@ -393,7 +394,10 @@ function fileExtension(value: string): string {
 }
 
 function normalizeName(value: string): string {
-  return fileStem(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return fileStem(value)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
 function asObject(value: unknown): JsonObject {
