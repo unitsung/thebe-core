@@ -505,6 +505,47 @@ describe("GET /v1/activity", () => {
     );
   });
 
+  it("uses named schemas for embedded Activity source objects", async () => {
+    const { createThebeHttpHandler } = await import("./handler.ts");
+    const response = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const document = (await response.json()) as {
+      components: { schemas: Record<string, Record<string, unknown>> };
+    };
+    const schemas = document.components.schemas;
+
+    expect(schemas.ResourceRef).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["kind", "id", "provider"],
+      }),
+    );
+    expect(schemas.ActivityRecord).toEqual(
+      expect.objectContaining({
+        type: "object",
+        properties: expect.objectContaining({
+          resource: { $ref: "#/components/schemas/ResourceRef" },
+        }),
+      }),
+    );
+    expect(schemas.ActivityApprovalItem?.properties).toEqual(
+      expect.objectContaining({
+        approval: { $ref: "#/components/schemas/ActivityRecord" },
+      }),
+    );
+    expect(schemas.ActivityReceiptItem?.properties).toEqual(
+      expect.objectContaining({
+        receipt: { $ref: "#/components/schemas/ActivityRecord" },
+      }),
+    );
+    expect(schemas.ActivityGoalItem?.properties).toEqual(
+      expect.objectContaining({
+        goal: { $ref: "#/components/schemas/ProductGoal" },
+      }),
+    );
+  });
+
   it("lists persisted records and reloads them from disk after a new app", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-agent-store-"));
     const first = createThebeApp({
