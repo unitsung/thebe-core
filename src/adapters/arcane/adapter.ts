@@ -37,6 +37,7 @@ const STATES = new Set<ContainerState>([
 ]);
 
 const DEFAULT_MAX_PAGES = 1_000;
+const MAX_LOG_TAIL = 200;
 
 export class ArcaneAdapter implements ContainerInfoProvider {
   // Checked 2026-09-05 against instance v2.10.2 openapi.json:
@@ -97,7 +98,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   }
 
   async getContainerLogs(id: string, tail?: number): Promise<string> {
-    const linesWanted = tail ?? 200;
+    const linesWanted = normalizeLogTail(tail);
     const encodedId = encodeURIComponent(id);
     const path =
       `/api/environments/${this.environmentId}/ws/containers/${encodedId}/logs` +
@@ -273,6 +274,14 @@ function statusToCode(
   if (status === 401 || status === 403) return "UNAUTHORIZED";
   if (status === 429) return "RATE_LIMITED";
   return "UNKNOWN";
+}
+
+function normalizeLogTail(tail?: number): number {
+  const requested =
+    typeof tail === "number" && Number.isFinite(tail)
+      ? Math.trunc(tail)
+      : MAX_LOG_TAIL;
+  return Math.min(MAX_LOG_TAIL, Math.max(1, requested));
 }
 
 function asObject(value: unknown): Json {

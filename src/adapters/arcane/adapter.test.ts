@@ -238,6 +238,22 @@ describe("ArcaneAdapter", () => {
     expect(logsUrl).toContain("/ws/containers/");
   });
 
+  it("caps the requested log tail before contacting Arcane", async () => {
+    let logsUrl = "";
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      openLogSocket: async (url) => {
+        logsUrl = url;
+        return (async function* () {})();
+      },
+    });
+
+    await adapter.getContainerLogs("abc123", 999);
+
+    expect(new URL(logsUrl).searchParams.get("tail")).toBe("200");
+  });
+
   it("maps status counts", async () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
