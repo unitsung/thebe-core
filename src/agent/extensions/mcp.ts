@@ -51,6 +51,7 @@ export const HOMELAB_RESOURCE_KINDS = {
   container: "container",
   mediaLibrary: "media_library",
   mediaItem: "media_item",
+  strm: "strm",
   playbackSession: "playback_session",
   photo: "photo",
   album: "album",
@@ -169,6 +170,7 @@ const MEDIA_RESOURCE_KINDS: Record<(typeof MEDIA_READ_TOOL_NAMES)[number], strin
 
 function defaultResourceKinds(capability: HomelabCapability): string[] {
   if (capability.category === "containers") return [HOMELAB_RESOURCE_KINDS.container];
+  if (capability.id.startsWith("strm.")) return [HOMELAB_RESOURCE_KINDS.strm];
   const mediaKinds = MEDIA_RESOURCE_KINDS[capability.id as (typeof MEDIA_READ_TOOL_NAMES)[number]];
   if (mediaKinds) return mediaKinds;
   if (capability.category === "media") return [HOMELAB_RESOURCE_KINDS.mediaLibrary];
