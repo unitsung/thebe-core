@@ -435,9 +435,13 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       expect(schemas[name]?.type).toBe("object");
     }
     const capabilityRun = schemas.CapabilityRun as {
-      properties?: { status?: { enum?: string[] } };
+      properties?: {
+        status?: { enum?: string[] };
+        recovery?: { enum?: string[] };
+      };
     };
     expect(capabilityRun.properties?.status?.enum).toContain("interrupted");
+    expect(capabilityRun.properties?.recovery?.enum).toEqual(["restored", "interrupted"]);
     const invokePost = body.paths["/v1/capabilities/{id}/invoke"]?.post as {
       responses?: Record<string, { content?: { "application/json"?: { schema?: unknown } } }>;
     };

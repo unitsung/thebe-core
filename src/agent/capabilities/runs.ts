@@ -3,7 +3,9 @@ import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/pro
 import { join } from "node:path";
 import {
   CAPABILITY_RUN_STATUS_INTERRUPTED,
+  CAPABILITY_RUN_STATUS_FAILED,
   CAPABILITY_RUN_STATUSES,
+  CAPABILITY_RUN_RECOVERY_STATES,
   type CapabilityRun,
   type CapabilityRunStatus,
 } from "./invoke.ts";
@@ -57,29 +59,41 @@ export function createCapabilityRunStore(options: {
       return;
     }
 
-    const interrupted: CapabilityRun[] = [];
+    const recovered: CapabilityRun[] = [];
     for (const name of names) {
       const stored = await readStoredRun(join(options.dir, name));
       if (!stored) continue;
       let run = stored.run;
-      if (
-        isActive(run.status) &&
-        stored.ownerId !== ownerId
-      ) {
+      const belongsToPreviousOwner = stored.ownerId !== ownerId;
+      const legacyInterruption =
+        run.status === CAPABILITY_RUN_STATUS_FAILED &&
+        run.error === CAPABILITY_RUN_INTERRUPTED_ERROR;
+      if (legacyInterruption) {
+        run = {
+          ...run,
+          status: CAPABILITY_RUN_STATUS_INTERRUPTED,
+          recovery: "interrupted",
+        };
+        recovered.push(run);
+      } else if (isActive(run.status) && belongsToPreviousOwner) {
         const stamp = options.now().toISOString();
         run = {
           ...run,
           status: CAPABILITY_RUN_STATUS_INTERRUPTED,
           error: CAPABILITY_RUN_INTERRUPTED_ERROR,
+          recovery: "interrupted",
           finishedAt: stamp,
           updatedAt: stamp,
         };
-        interrupted.push(run);
+        recovered.push(run);
+      } else if (belongsToPreviousOwner && run.recovery === undefined) {
+        run = { ...run, recovery: "restored" };
+        recovered.push(run);
       }
       memory.set(run.runId, run);
     }
 
-    for (const run of interrupted) {
+    for (const run of recovered) {
       await persist(run);
     }
   }
@@ -171,6 +185,12 @@ function assertValidRun(run: CapabilityRun): void {
   }
   if (run.finishedAt !== undefined && typeof run.finishedAt !== "string") {
     throw new Error("capability run finishedAt must be a string");
+  }
+  if (
+    run.recovery !== undefined &&
+    !CAPABILITY_RUN_RECOVERY_STATES.includes(run.recovery)
+  ) {
+    throw new Error(`invalid capability run recovery: ${run.recovery}`);
   }
   if (run.error !== undefined && typeof run.error !== "string") {
     throw new Error("capability run error must be a string");

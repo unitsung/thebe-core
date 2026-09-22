@@ -15,6 +15,9 @@ export const CAPABILITY_RUN_STATUS_SUCCEEDED = CAPABILITY_RUN_STATUSES[2];
 export const CAPABILITY_RUN_STATUS_FAILED = CAPABILITY_RUN_STATUSES[3];
 export const CAPABILITY_RUN_STATUS_INTERRUPTED = CAPABILITY_RUN_STATUSES[4];
 
+export const CAPABILITY_RUN_RECOVERY_STATES = ["restored", "interrupted"] as const;
+export type CapabilityRunRecovery = (typeof CAPABILITY_RUN_RECOVERY_STATES)[number];
+
 export type CapabilityInvokeInput = {
   resource?: Record<string, unknown>;
   arguments?: unknown;
@@ -29,6 +32,7 @@ export type CapabilityRun = {
   createdAt: string;
   updatedAt?: string;
   finishedAt?: string;
+  recovery?: CapabilityRunRecovery;
   resource?: Record<string, unknown>;
   result?: unknown;
   error?: string;

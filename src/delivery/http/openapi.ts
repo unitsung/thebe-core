@@ -338,6 +338,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             createdAt: { type: "string" },
             updatedAt: { type: "string" },
             finishedAt: { type: "string" },
+            recovery: { type: "string", enum: ["restored", "interrupted"] },
             resource: { type: "object", additionalProperties: true },
             result: { description: "Direct invoke payload", nullable: true },
             error: { type: "string" },

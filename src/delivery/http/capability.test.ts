@@ -509,13 +509,17 @@ describe("capability product HTTP", () => {
       new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
     );
     expect(restored.status).toBe(200);
-    expect(await json(restored)).toEqual(completed);
+    const restoredRun = await json(restored);
+    expect(restoredRun).toEqual({
+      ...completed,
+      recovery: "restored",
+    });
 
     const listed = await restarted.handler.handle(
       new Request("http://127.0.0.1:8787/v1/capabilities/runs"),
     );
     expect(listed.status).toBe(200);
-    expect(await json(listed)).toEqual({ runs: [completed] });
+    expect(await json(listed)).toEqual({ runs: [restoredRun] });
   });
 
   it("recovers an in-flight run from an older Core instance as interrupted", async () => {
@@ -542,8 +546,41 @@ describe("capability product HTTP", () => {
     expect(recovered.status).toBe(200);
     const run = await json(recovered);
     expect(run.status).toBe("interrupted");
+    expect(run.recovery).toBe("interrupted");
     expect(run.error).toBe("Capability run interrupted when Core restarted.");
     expect(run.finishedAt).toBe("2026-09-21T00:00:00.000Z");
+  });
+
+  it("normalizes legacy interruption failures into explicit recovery state", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-capability-legacy-recovery-"));
+    const store = createCapabilityRunStore({
+      dir: join(dir, "capability-runs"),
+      ownerId: "previous-core-instance",
+      now: () => new Date("2026-09-21T00:00:00.000Z"),
+    });
+    await store.save({
+      runId: "legacy-interrupted",
+      capabilityId: "diagnose_from_events",
+      status: "failed",
+      createdAt: "2026-09-20T23:59:00.000Z",
+      updatedAt: "2026-09-21T00:00:00.000Z",
+      finishedAt: "2026-09-21T00:00:00.000Z",
+      error: "Capability run interrupted when Core restarted.",
+    });
+
+    const restarted = app({
+      agentStoreDir: dir,
+      now: () => new Date("2026-09-21T00:00:01.000Z"),
+    });
+    const recovered = await restarted.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/runs/legacy-interrupted"),
+    );
+    expect(recovered.status).toBe(200);
+    expect(await json(recovered)).toEqual(expect.objectContaining({
+      status: "interrupted",
+      recovery: "interrupted",
+      error: "Capability run interrupted when Core restarted.",
+    }));
   });
 
   it("returns 404 for an unknown capability", async () => {

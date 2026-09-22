@@ -14,6 +14,7 @@ export type {
   CapabilityInvokeMode,
   CapabilityInvokeResult,
   CapabilityRun,
+  CapabilityRunRecovery,
   CapabilityRunStatus,
 } from "./capabilities/invoke.ts";
 export type { ProductPendingPermission } from "./security/pending-permission.ts";
