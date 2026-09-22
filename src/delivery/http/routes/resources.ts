@@ -23,6 +23,15 @@ export async function handleResourceRoutes(
         resources: agent.enabledResources().map(toProductEnabledResource),
       });
     }
+    if (
+      request.method === "POST" &&
+      parts.length === 4 &&
+      parts[3] === "artifact"
+    ) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      return json(await agent.createEnabledResourceArtifact());
+    }
     const id = parts[3] ? decodeURIComponent(parts[3]) : "";
     if (!id || parts.length !== 4) return undefined;
     if (request.method === "PUT") {

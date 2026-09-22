@@ -194,6 +194,7 @@ export interface ThebeAgent {
   putEnabledResource(resource: EnabledResource): Promise<EnabledResource>;
   removeEnabledResource(identity: string): Promise<boolean>;
   enabledResources(): EnabledResource[];
+  createEnabledResourceArtifact(): Promise<AgentArtifact>;
 
   startGoal(input: { thebeSessionId: string; goal: string; criteria?: string[]; maxIterations?: number }): Promise<GoalRun>;
   getGoal(thebeSessionId: string): GoalRun | undefined;

@@ -279,6 +279,86 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     ]);
   });
 
+  it("captures enabled resources as a durable resource-list Artifact", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-resource-artifact-http-"));
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const first = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: join(dir, "agent"),
+      settingsStore,
+    });
+
+    const put = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/resources/enabled/demo-skill", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "skill",
+          version: "1.0.0",
+          source: "thebe://skills/demo-skill",
+        }),
+      }),
+    );
+    expect(put.status).toBe(200);
+
+    const captured = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/resources/enabled/artifact", {
+        method: "POST",
+      }),
+    );
+    expect(captured.status).toBe(200);
+    const artifact = await json(captured);
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        kind: "resource_list",
+        title: "Enabled resources",
+        contentType: "application/json",
+      }),
+    );
+
+    const artifactId = artifact.artifactId as string;
+    const content = await json(
+      await first.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
+      ),
+    );
+    expect(JSON.parse(content.content as string)).toEqual({
+      resources: [
+        {
+          identity: "demo-skill",
+          kind: "skill",
+          version: "1.0.0",
+          source: "thebe://skills/demo-skill",
+        },
+      ],
+    });
+
+    await first.agent.quiesce();
+    const blocked = await first.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/resources/enabled/artifact", {
+        method: "POST",
+      }),
+    );
+    expect(blocked.status).toBe(503);
+    await first.agent.unquiesce();
+
+    const second = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: join(dir, "agent"),
+      settingsStore,
+    });
+    const listed = await json(
+      await second.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/artifacts?kind=resource_list"),
+      ),
+    );
+    expect(listed.artifacts).toEqual([
+      expect.objectContaining({ artifactId, kind: "resource_list" }),
+    ]);
+  });
+
   it("GET/PATCH permission mode", async () => {
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -327,6 +407,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/extensions/mcp/tools",
       "/v1/resources/enabled",
       "/v1/resources/enabled/{id}",
+      "/v1/resources/enabled/artifact",
       "/v1/settings/permissions",
       "/v1/settings/agent",
     ];

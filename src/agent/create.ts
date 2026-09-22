@@ -15,13 +15,13 @@ import { createArtifactStore } from "./artifacts/store.ts";
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const ctx = createAgentContext(options);
-  const extensions = createExtensionApi(ctx);
   const artifactStore = options.artifactStore ?? createArtifactStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "artifacts")
       : undefined,
     now: ctx.now,
   });
+  const extensions = createExtensionApi(ctx, artifactStore);
   const subagents = createSubagentApi(ctx, artifactStore);
   const goals = createGoalApi(ctx, subagents, artifactStore);
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {

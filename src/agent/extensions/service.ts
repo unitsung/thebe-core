@@ -8,10 +8,13 @@ import {
   type McpServerInfo,
   type McpToolInfo,
 } from "./mcp.ts";
+import { toProductEnabledResource } from "./product.ts";
 import { discoverSkills, readSkillDetails, type SkillInfo } from "./skills.ts";
+import type { AgentArtifact } from "../artifacts/types.ts";
+import type { ArtifactStore } from "../artifacts/store.ts";
 
 /** Skills and MCP extensions exposed through the stable Agent Interface. */
-export function createExtensionApi(ctx: AgentContext) {
+export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactStore) {
   const { enabledResources, workspacePath, audit, openedSessions, streaming } = ctx;
 
   async function reloadIdleSessions(): Promise<void> {
@@ -131,6 +134,16 @@ export function createExtensionApi(ctx: AgentContext) {
     removeEnabledResource,
     enabledResources(): EnabledResource[] {
       return enabledResources.slice();
+    },
+    async createEnabledResourceArtifact(): Promise<AgentArtifact> {
+      return artifactStore.create({
+        kind: "resource_list",
+        title: "Enabled resources",
+        contentType: "application/json",
+        content: JSON.stringify({
+          resources: enabledResources.map(toProductEnabledResource),
+        }),
+      });
     },
   };
 }

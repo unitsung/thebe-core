@@ -1,6 +1,6 @@
 # Core durable product contract
 
-Status: in progress — Agent settings, enabled-resource durability, operation-receipt/Diagnosis/Goal-report/Worker-report Artifacts, Goal/Worker recovery, and Capability Run/Worker Activity items implemented; broader unified read model remains
+Status: in progress — Agent settings, enabled-resource durability, operation-receipt/Diagnosis/resource-list/Goal-report/Worker-report Artifacts, Goal/Worker recovery, and Capability Run/Worker Activity items implemented; broader unified read model remains
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -10,8 +10,8 @@ mutable values through the existing Thebe config boundary, keeps permission
 mode on `/v1/settings/permissions`, and reports concurrency changes as
 restart-required. Enabled resource selections now use that same boundary and
 survive Agent recreation. Core now stores bounded, redacted operation-receipt,
-Diagnosis, background Capability Run, terminal Goal report, and terminal Worker
-report Artifacts with
+Diagnosis, enabled-resource snapshot, background Capability Run, terminal Goal
+report, and terminal Worker report Artifacts with
 metadata/content HTTP reads. Activity now includes durable
 Capability Run, Worker, and Core-owned Background Task items; cursorable
 aggregation and source/status/time filters are now available. Pi detached Bash
@@ -34,7 +34,7 @@ inspect and trust those objects:
 - capability run snapshots now survive Core recreation, but other long-lived
   objects still have uneven recovery and observation semantics;
 - results are still mostly embedded in runs, transcripts, or Activity records;
-  the Artifact contract has operation-receipt, Diagnosis, and background
+  the Artifact contract has operation-receipt, Diagnosis, resource-list, and background
   Capability Run producers, while additional result producers remain;
 - Activity now includes capability runs, Workers, and Core-owned detached Bash
   tasks with bounded cursor pagination plus source/status/time filters; it
@@ -253,8 +253,9 @@ Implementation order should be:
 
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
-3. 🟡 Artifact model/store with operation-receipt, Diagnosis, background
-   Capability Run, terminal Goal report, and terminal Worker report producers;
+3. 🟡 Artifact model/store with operation-receipt, Diagnosis, enabled-resource
+   snapshot, background Capability Run, terminal Goal report, and terminal
+   Worker report producers;
 4. 🟡 capability/Goal/Worker recovery normalization (Worker snapshots recover
    as `interrupted`; active Goal recovery is recorded as a paused history event;
    running Goal `updatedAt` advances with lifecycle events);

@@ -17,10 +17,10 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
 | Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
 | MCP inventory and lifecycle | `GET/PATCH /v1/extensions/mcp/servers/{name}`, `GET /v1/extensions/mcp/tools` | External tools only. Server enable/disable state persists through the Thebe config and is applied when the MCP registry is recreated. Raw `/mcp` stays for integrations; advertised Core capabilities remain callable there through the Agent seam with the same typed-resource validation. |
-| Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. Selections persist through the Thebe config across Core recreation. |
+| Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}`, `POST /v1/resources/enabled/artifact` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. Selections persist through the Thebe config across Core recreation; the explicit POST captures a bounded `resource_list` Artifact. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
 | Agent settings | `GET/PATCH /v1/settings/agent` | Effective auto-compact/summary settings, bounded delay, permission mode, concurrency limits, and guarded paths. Mutable fields are auto-compact/summary/delay; concurrency changes report `409 restart_required`. Each value includes a `sources` entry and the response reports `persistence.enabled`. |
-| Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, session/run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts, Diagnosis runs, completed background Capability Runs, terminal Goal reports, and terminal Worker reports are producers. |
+| Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, session/run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts, Diagnosis runs, enabled-resource snapshots, completed background Capability Runs, terminal Goal reports, and terminal Worker reports are producers. |
 | Audit log | `GET /v1/audit` | Read-only redacted records with bounded pagination and filters; raw parameters are never returned. |
 | Push device registration | `GET/POST /v1/devices`, `DELETE /v1/devices/{registrationId}` | Durable, token-redacted iOS registrations with notification categories, stable token-derived ids, and de-registration. APNs delivery remains an optional external relay. |
 
@@ -31,7 +31,7 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for the remaining product surfaces; the Activity Run union member is decoded by the current App client.
-- **Additional Artifact producers and provider-native background-task sources** — Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
+- **Additional Artifact producers and provider-native background-task sources** — Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
 - **Skill file editing**.
