@@ -139,6 +139,49 @@ describe("Goal HTTP", () => {
     );
   });
 
+  it("documents named Goal request and response schemas in OpenAPI", async () => {
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const document = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/openapi.json"),
+      ),
+    );
+    const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
+    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const responseRef = (method: string, path: string, status: string) =>
+      (paths[path]?.[method]?.responses as Record<string, Record<string, unknown>>)?.[status]
+        ?.content as Record<string, Record<string, unknown>>;
+
+    expect(paths["/v1/goals"]?.post?.requestBody).toEqual(
+      expect.objectContaining({
+        content: { "application/json": { schema: { $ref: "#/components/schemas/GoalCreateRequest" } } },
+      }),
+    );
+    expect(responseRef("post", "/v1/goals", "201")["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/ProductGoal",
+    });
+    expect(responseRef("get", "/v1/goals", "200")["application/json"]?.schema).toEqual({
+      $ref: "#/components/schemas/ProductGoalList",
+    });
+    for (const path of ["/v1/goals/{id}", "/v1/goals/{id}/pause", "/v1/goals/{id}/resume", "/v1/goals/{id}/stop"]) {
+      expect(responseRef(path === "/v1/goals/{id}" ? "get" : "post", path, "200")["application/json"]?.schema).toEqual({
+        $ref: "#/components/schemas/ProductGoal",
+      });
+    }
+    expect(schemas.GoalCreateRequest).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["goal"],
+      }),
+    );
+    expect(schemas.ProductGoalList).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["goals"],
+      }),
+    );
+  });
+
   it("advances Goal updatedAt when a running checkpoint emits progress", async () => {
     let tick = 0;
     const now = () => new Date(Date.UTC(2026, 8, 22, 0, 0, tick++));
