@@ -54,7 +54,9 @@ const operations: Operation[] = [
   { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
   { method: "get", path: "/v1/events", summary: "Recent process events", tag: "system" },
   { method: "get", path: "/v1/event", summary: "Recent process events (singular compatibility alias)", tag: "system" },
-  { method: "post", path: "/v1/devices", summary: "Register an iOS device", tag: "compatibility", requestBody: { required: true } },
+  { method: "get", path: "/v1/devices", summary: "List registered iOS devices", tag: "compatibility", responseSchema: "DeviceRegistrationList" },
+  { method: "post", path: "/v1/devices", summary: "Register an iOS device", tag: "compatibility", requestBody: { required: true }, requestSchema: "DeviceRegistrationRequest", responseSchema: "DeviceRegistration" },
+  { method: "delete", path: "/v1/devices/{registrationId}", summary: "Remove a registered iOS device", tag: "compatibility", parameters: [idParameter("registrationId")], responseSchema: "Ok" },
   { method: "post", path: "/v1/messages", summary: "Send a prompt (iOS compatibility endpoint)", tag: "compatibility", requestBody: { required: true } },
   { method: "get", path: "/v1/system/status", summary: "Read maintenance state", tag: "system" },
   { method: "post", path: "/v1/system/quiesce", summary: "Enter maintenance mode", tag: "system" },
@@ -519,6 +521,35 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             task: { type: "string" },
             taskPrompt: { type: "string" },
             parentSessionId: { type: "string" },
+          },
+        },
+        DeviceRegistration: {
+          type: "object",
+          required: ["registrationId", "platform", "categories", "registeredAt", "updatedAt"],
+          properties: {
+            registrationId: { type: "string" },
+            platform: { type: "string", enum: ["ios"] },
+            deviceId: { type: "string" },
+            categories: { type: "array", items: { type: "string" } },
+            registeredAt: { type: "string", format: "date-time" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        DeviceRegistrationList: {
+          type: "object",
+          required: ["devices"],
+          properties: {
+            devices: { type: "array", items: { $ref: "#/components/schemas/DeviceRegistration" } },
+          },
+        },
+        DeviceRegistrationRequest: {
+          type: "object",
+          required: ["token", "platform"],
+          properties: {
+            token: { type: "string", maxLength: 512, writeOnly: true },
+            platform: { type: "string", enum: ["ios"] },
+            deviceId: { type: "string" },
+            categories: { type: "array", maxItems: 16, items: { type: "string", minLength: 1, maxLength: 64 } },
           },
         },
         PendingPermission: {

@@ -1,4 +1,5 @@
 import { json } from "./json.ts";
+import { createDeviceRegistry, type DeviceRegistry } from "./devices.ts";
 import {
   createThebeHttpContext,
   type ThebeHttpContext,
@@ -26,16 +27,15 @@ import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
 export type ThebeHttpRouterOptions = {
   version: string;
   agent?: ThebeHttpContext["agent"];
+  deviceStoreDir?: string;
+  deviceRegistry?: DeviceRegistry;
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
-  const devices = new Map<
-    string,
-    { platform: string; deviceId?: string; registeredAt: string }
-  >();
+  const deviceRegistry = options.deviceRegistry ?? createDeviceRegistry({ dir: options.deviceStoreDir });
   return {
     async handle(request: Request): Promise<Response> {
-      const context = createThebeHttpContext(request, { ...options, devices });
+      const context = createThebeHttpContext(request, { ...options, deviceRegistry });
 
       if (request.method === "GET" && context.path === "/openapi.json") {
         return json(createOpenApiDocument(options.version), 200, {

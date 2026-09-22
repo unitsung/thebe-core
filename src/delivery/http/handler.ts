@@ -10,6 +10,7 @@ export type ThebeHttpHandlerOptions = {
   token?: string;
   agent?: ThebeAgent;
   allowedHosts?: string[];
+  deviceStoreDir?: string;
 };
 
 /** Stable public composition shell for the HTTP agent. */
@@ -21,6 +22,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
   const router = createThebeHttpRouter({
     version: options.version,
     agent: options.agent,
+    deviceStoreDir: options.deviceStoreDir,
   });
 
   return {

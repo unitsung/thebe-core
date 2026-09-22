@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
@@ -78,6 +79,7 @@ export function createThebeApp(options: {
     token: options.token,
     agent,
     allowedHosts: options.allowedHosts ?? resolveAllowedHosts("127.0.0.1"),
+    deviceStoreDir: options.agentStoreDir ? join(options.agentStoreDir, "devices") : undefined,
   });
   return { agent, prompt, send: prompt, handler };
 }

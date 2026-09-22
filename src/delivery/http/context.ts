@@ -1,5 +1,6 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { json } from "./json.ts";
+import type { DeviceRegistry } from "./devices.ts";
 
 /** The shared seam between HTTP dispatch and focused route modules. */
 export type ThebeHttpContext = {
@@ -9,8 +10,8 @@ export type ThebeHttpContext = {
   parts: string[];
   version: string;
   agent?: ThebeAgent;
-  /** Process-local device registration state used by the iOS compatibility endpoint. */
-  devices?: Map<string, { platform: string; deviceId?: string; registeredAt: string }>;
+  /** Durable device registration state used by the iOS push endpoint. */
+  deviceRegistry?: DeviceRegistry;
 };
 
 export type ThebeHttpRoute = (
@@ -23,7 +24,7 @@ export function createThebeHttpContext(
     version: string;
     agent?: ThebeAgent;
     path?: string;
-    devices?: Map<string, { platform: string; deviceId?: string; registeredAt: string }>;
+    deviceRegistry?: DeviceRegistry;
   },
 ): ThebeHttpContext {
   const url = new URL(request.url);
@@ -35,7 +36,7 @@ export function createThebeHttpContext(
     parts: path.split("/").filter(Boolean),
     version: options.version,
     agent: options.agent,
-    devices: options.devices ?? new Map(),
+    deviceRegistry: options.deviceRegistry,
   };
 }
 
