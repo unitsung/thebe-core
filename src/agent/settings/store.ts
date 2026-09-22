@@ -15,6 +15,7 @@ import type {
   AgentSettingsStore,
   AgentSettingsValues,
 } from "./product.ts";
+import type { McpServerState } from "../extensions/mcp.ts";
 
 const SETTING_KEYS = [
   "autoCompact",
@@ -26,6 +27,7 @@ const SETTING_KEYS = [
   "workspacePath",
   "outputDirectory",
   "enabledResources",
+  "mcpServerStates",
 ] as const;
 
 /**
@@ -82,6 +84,9 @@ function pickSettings(config: Record<string, unknown>): AgentSettingsValues {
   if (Array.isArray(config.enabledResources)) {
     values.enabledResources = config.enabledResources.filter(isEnabledResource);
   }
+  if (Array.isArray(config.mcpServerStates)) {
+    values.mcpServerStates = config.mcpServerStates.filter(isMcpServerState);
+  }
   return values;
 }
 
@@ -100,5 +105,13 @@ function isEnabledResource(value: unknown): value is EnabledResource {
     typeof value.version === "string" && value.version.trim().length > 0 &&
     typeof value.source === "string" && value.source.trim().length > 0 &&
     ENABLED_RESOURCE_KINDS.some((kind) => kind === value.kind)
+  );
+}
+
+function isMcpServerState(value: unknown): value is McpServerState {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" && value.name.trim().length > 0 &&
+    typeof value.enabled === "boolean"
   );
 }

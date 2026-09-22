@@ -3,6 +3,8 @@ import { McpTransport } from "./transport.ts";
 import type {
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,
+  McpServerInfo,
+  McpServerState,
   McpToolInfo,
 } from "../../agent/extensions/mcp.ts";
 
@@ -80,8 +82,19 @@ function inferPermission(name: string, description: string): HomelabCapabilityPe
   return "read";
 }
 
-async function loadStateTools(state: ServerState): Promise<ExternalBinding[]> {
-  if (state.config.disabled) {
+function serverDisabled(
+  config: McpServerConfig,
+  overrides: Map<string, boolean>,
+): boolean {
+  const enabled = overrides.get(config.name);
+  return enabled === undefined ? config.disabled === true : !enabled;
+}
+
+async function loadStateTools(
+  state: ServerState,
+  overrides: Map<string, boolean>,
+): Promise<ExternalBinding[]> {
+  if (serverDisabled(state.config, overrides)) {
     state.status = "disabled";
     state.bindings = [];
     return [];
@@ -123,8 +136,17 @@ export function createMcpClientRegistry(options: {
   cwd?: string;
   homeDir?: string;
   timeoutMs?: number;
+  serverStates?: readonly McpServerState[];
 } = {}) {
   const states = new Map<string, ServerState>();
+  const serverOverrides = new Map(
+    (options.serverStates ?? []).map((state) => [state.name, state.enabled]),
+  );
+  const createClient = (config: McpServerConfig): McpTransport => new McpTransport(
+    config,
+    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    options.cwd,
+  );
 
   async function sync(): Promise<McpServerConfig[]> {
     const configs = await listConfiguredMcpServers(options);
@@ -143,12 +165,8 @@ export function createMcpClientRegistry(options: {
       states.set(config.name, {
         config,
         configKey: key,
-        client: new McpTransport(
-          config,
-          options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-          options.cwd,
-        ),
-        status: config.disabled ? "disabled" : "configured",
+        client: createClient(config),
+        status: serverDisabled(config, serverOverrides) ? "disabled" : "configured",
         bindings: [],
       });
     }
@@ -168,7 +186,7 @@ export function createMcpClientRegistry(options: {
       const tools: McpToolInfo[] = [];
       for (const state of states.values()) {
         try {
-          tools.push(...(await loadStateTools(state)).map((binding) => binding.tool));
+          tools.push(...(await loadStateTools(state, serverOverrides)).map((binding) => binding.tool));
         } catch (error) {
           state.status = "error";
           state.error = errorText(error);
@@ -181,10 +199,30 @@ export function createMcpClientRegistry(options: {
       await sync();
       return [...states.values()].map((state) => ({
         ...state.config,
+        disabled: serverDisabled(state.config, serverOverrides),
         status: state.status,
         error: state.error,
         toolCount: state.bindings.length || undefined,
       }));
+    },
+    async setServerEnabled(
+      name: string,
+      enabled: boolean,
+    ): Promise<McpServerInfo | undefined> {
+      await sync();
+      const state = states.get(name);
+      if (!state) return undefined;
+      serverOverrides.set(name, enabled);
+      state.client.close();
+      state.client = createClient(state.config);
+      state.status = enabled ? "configured" : "disabled";
+      state.error = undefined;
+      state.bindings = [];
+      return {
+        ...state.config,
+        disabled: !enabled,
+        status: state.status,
+      };
     },
     async invokeTool(name: string, args: unknown): Promise<string | undefined> {
       if (!name.startsWith("mcp:")) return undefined;
@@ -196,10 +234,12 @@ export function createMcpClientRegistry(options: {
       const originalName = rest.slice(separator + 1);
       const state = states.get(serverName);
       if (!state) throw new Error(`unknown MCP server: ${serverName}`);
-      if (state.config.disabled) throw new Error(`MCP server disabled: ${serverName}`);
+      if (serverDisabled(state.config, serverOverrides)) {
+        throw new Error(`MCP server disabled: ${serverName}`);
+      }
       if (!state.bindings.some((binding) => binding.originalName === originalName)) {
         try {
-          await loadStateTools(state);
+          await loadStateTools(state, serverOverrides);
         } catch (error) {
           state.status = "error";
           state.error = errorText(error);

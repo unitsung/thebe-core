@@ -100,6 +100,27 @@ export function createExtensionApi(ctx: AgentContext) {
     async listMcpServers(): Promise<McpServerInfo[]> {
       return ctx.mcp.listServers();
     },
+    async setMcpServerEnabled(
+      name: string,
+      enabled: boolean,
+    ): Promise<McpServerInfo | undefined> {
+      const server = await ctx.mcp.setServerEnabled(name, enabled);
+      if (!server) return undefined;
+      const states = ctx.options.settingsStore?.load().mcpServerStates ?? [];
+      const nextStates = states.filter((state) => state.name !== name);
+      nextStates.push({ name, enabled });
+      await ctx.options.settingsStore?.save({ mcpServerStates: nextStates });
+      await audit?.append({
+        method: enabled ? "mcp.server.enable" : "mcp.server.disable",
+        parameterHash: hashParameters({ name, enabled }),
+        responseBytes: 0,
+        budgetConsumed: 0,
+        redactionFired: false,
+        identity: name,
+        source: `mcp://servers/${name}`,
+      });
+      return server;
+    },
     closeMcp(): void {
       ctx.mcp.close();
     },

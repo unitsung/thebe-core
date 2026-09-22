@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { HOMELAB_CAPABILITY_CATEGORIES } from "../../agent/extensions/mcp.ts";
 import type {
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,
@@ -82,7 +83,7 @@ export async function listConfiguredMcpServers(options?: {
 }
 
 function isCapabilityCategory(value: unknown): value is HomelabCapabilityCategory {
-  return ["files", "media", "downloads", "containers", "automation", "diagnostics", "other"].includes(value as string);
+  return (HOMELAB_CAPABILITY_CATEGORIES as readonly string[]).includes(value as string);
 }
 
 function isCapabilityPermission(value: unknown): value is HomelabCapabilityPermission {

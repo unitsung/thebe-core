@@ -110,10 +110,16 @@ export type McpServerInfo = {
   disabled?: boolean;
 };
 
+export type McpServerState = {
+  name: string;
+  enabled: boolean;
+};
+
 /** Agent-facing MCP capability port. Implementations belong to integrations. */
 export type McpRegistry = {
   listTools(): Promise<McpToolInfo[]>;
   listServers(): Promise<McpServerInfo[]>;
+  setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
   invokeTool(name: string, args: unknown): Promise<string | undefined>;
   close(): void;
 };
@@ -122,6 +128,7 @@ export function createEmptyMcpRegistry(): McpRegistry {
   return {
     async listTools(): Promise<McpToolInfo[]> { return []; },
     async listServers(): Promise<McpServerInfo[]> { return []; },
+    async setServerEnabled(): Promise<McpServerInfo | undefined> { return undefined; },
     async invokeTool(): Promise<string | undefined> { return undefined; },
     close(): void {},
   };

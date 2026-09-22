@@ -178,6 +178,7 @@ export interface ThebeAgent {
   listCapabilities(): Promise<HomelabCapability[]>;
   listMcpTools(): Promise<McpToolInfo[]>;
   listMcpServers(): Promise<McpServerInfo[]>;
+  setMcpServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
   closeMcp(): void;
   listSubagentProfiles(): Promise<SubagentProfile[]>;
   spawnSubagent(input: { profileName: string; taskPrompt: string; parentSessionId: string }): Promise<SubagentRun>;

@@ -5,6 +5,7 @@ import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
+import type { McpRegistry } from "../agent/extensions/mcp.ts";
 import type { JudgmentModel } from "../agent/judgment/interface.ts";
 import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
@@ -41,6 +42,7 @@ export function createThebeApp(options: {
   judgment?: JudgmentModel;
   judgmentSites?: JudgmentEnabledSites;
   settingsStore?: AgentSettingsStore;
+  mcp?: McpRegistry;
   artifactStore?: ArtifactStore;
   strmRepairProvider?: StrmRepairProvider;
 }): {
@@ -49,6 +51,7 @@ export function createThebeApp(options: {
   send: ThebeAppSend;
   handler: ReturnType<typeof createThebeHttpHandler>;
 } {
+  const storedSettings = options.settingsStore?.load();
   const agent = createThebeAgent({
     runtime: options.runtime,
     provider: options.provider,
@@ -66,7 +69,10 @@ export function createThebeApp(options: {
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,
     outputDirectory: options.outputDirectory,
-    mcp: createMcpClientRegistry({ cwd: options.workspacePath }),
+    mcp: options.mcp ?? createMcpClientRegistry({
+      cwd: options.workspacePath,
+      serverStates: storedSettings?.mcpServerStates,
+    }),
     judgment: options.judgment,
     judgmentSites: options.judgmentSites,
     settingsStore: options.settingsStore,

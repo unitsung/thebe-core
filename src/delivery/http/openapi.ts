@@ -83,6 +83,7 @@ const operations: Operation[] = [
   { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Get skill metadata", tag: "skills", parameters: [idParameter("name")], responseSchema: "Skill" },
   { method: "patch", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Enable or disable a skill", tag: "skills", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "SkillPatch", responseSchema: "Skill" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`, summary: "List MCP servers", tag: "extensions", responseSchema: "McpServerList" },
+  { method: "patch", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`, summary: "Enable or disable an MCP server", tag: "extensions", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "McpServerPatch", responseSchema: "McpServer" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.tools}`, summary: "List external MCP tools", tag: "extensions", responseSchema: "McpToolList" },
   { method: "get", path: PRODUCT_HTTP_PATH.enabledResources, summary: "List enabled Agent resources", tag: "resources", responseSchema: "EnabledResourceList" },
   { method: "put", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Put an enabled resource", tag: "resources", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "EnabledResourceWrite", responseSchema: "EnabledResource" },
@@ -622,6 +623,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             toolCount: { type: "integer" },
             disabled: { type: "boolean" },
           },
+        },
+        McpServerPatch: {
+          type: "object",
+          required: ["enabled"],
+          properties: { enabled: { type: "boolean" } },
         },
         McpTool: {
           type: "object",

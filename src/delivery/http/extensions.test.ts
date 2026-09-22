@@ -101,6 +101,9 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       async listServers() {
         return [{ name: "notes", command: "notes-mcp", toolCount: 1 }];
       },
+      async setServerEnabled(name: string, enabled: boolean) {
+        return { name, status: enabled ? "configured" : "disabled", disabled: !enabled };
+      },
       async invokeTool() {
         return "ok";
       },
@@ -134,6 +137,48 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       }),
     ]);
     expect(listed.some((item) => item.id === "container.list")).toBe(false);
+  });
+
+  it("PATCHes an MCP server enabled state and persists the product setting", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-toggle-http-"));
+    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const calls: Array<{ name: string; enabled: boolean }> = [];
+    const mcp = {
+      async listTools() { return []; },
+      async listServers() {
+        return [{ name: "notes", status: "ready", disabled: false }];
+      },
+      async setServerEnabled(name: string, enabled: boolean) {
+        calls.push({ name, enabled });
+        return { name, status: enabled ? "configured" : "disabled", disabled: !enabled };
+      },
+      async invokeTool() { return "ok"; },
+      close() {},
+    };
+    const agent = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      mcp,
+      settingsStore,
+    });
+    const handler = createThebeHttpHandler({ version: "0.1.0", agent });
+
+    const response = await handler.handle(
+      new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers/notes", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual(
+      expect.objectContaining({ name: "notes", disabled: true }),
+    );
+    expect(calls).toEqual([{ name: "notes", enabled: false }]);
+    expect(settingsStore.load().mcpServerStates).toEqual([
+      { name: "notes", enabled: false },
+    ]);
   });
 
   it("GET/PUT/DELETE enabled resources", async () => {
@@ -278,6 +323,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/skills",
       "/v1/skills/{name}",
       "/v1/extensions/mcp/servers",
+      "/v1/extensions/mcp/servers/{name}",
       "/v1/extensions/mcp/tools",
       "/v1/resources/enabled",
       "/v1/resources/enabled/{id}",
@@ -311,6 +357,10 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       responses?: Record<string, { content?: { "application/json"?: { schema?: unknown } } }>;
     };
     expect(JSON.stringify(invokePost.responses?.["200"])).toContain("CapabilityInvokeResult");
+    expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.patch).toBeDefined();
+    expect(schemas.McpServerPatch).toEqual(
+      expect.objectContaining({ required: ["enabled"] }),
+    );
   });
 
   it("advertises product capability categories for infrastructure and photos", async () => {

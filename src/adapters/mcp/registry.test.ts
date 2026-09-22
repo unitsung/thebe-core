@@ -31,7 +31,7 @@ describe("external MCP client registry", () => {
             command: process.execPath,
             args: ["-e", serverScript],
             service: "qbittorrent",
-            category: "downloads",
+            category: "photos",
             permission: "confirm",
           },
         },
@@ -51,7 +51,7 @@ describe("external MCP client registry", () => {
           source: "external",
           serverName: "notes",
           service: "qbittorrent",
-          category: "downloads",
+          category: "photos",
           permission: "confirm",
         }),
       ]);
@@ -61,6 +61,29 @@ describe("external MCP client registry", () => {
       await expect(registry.listServers()).resolves.toEqual([
         expect.objectContaining({ name: "notes", status: "ready", toolCount: 1 }),
       ]);
+      await expect(registry.setServerEnabled("notes", false)).resolves.toEqual(
+        expect.objectContaining({ name: "notes", status: "disabled", disabled: true }),
+      );
+      await expect(registry.listTools()).resolves.toEqual([]);
+      await expect(registry.setServerEnabled("notes", true)).resolves.toEqual(
+        expect.objectContaining({ name: "notes", disabled: false }),
+      );
+      await expect(registry.listTools()).resolves.toEqual([
+        expect.objectContaining({ name: "mcp:notes/echo" }),
+      ]);
+      const restored = createMcpClientRegistry({
+        cwd,
+        homeDir,
+        serverStates: [{ name: "notes", enabled: false }],
+      });
+      try {
+        await expect(restored.listServers()).resolves.toEqual([
+          expect.objectContaining({ name: "notes", status: "disabled", disabled: true }),
+        ]);
+        await expect(restored.listTools()).resolves.toEqual([]);
+      } finally {
+        restored.close();
+      }
     } finally {
       registry.close();
       process.chdir(previousCwd);
