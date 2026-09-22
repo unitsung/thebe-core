@@ -1,10 +1,11 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
+import { resetWorkerLogStreamsForTests } from "./protocol/sse.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -26,6 +27,12 @@ function provider(): ContainerInfoProvider {
 async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
+
+const PI_LEAK = /assistantMessageEvent|@earendil|tools\/call|internalState|AgentSession/;
+
+afterEach(() => {
+  resetWorkerLogStreamsForTests();
+});
 
 describe("subagent/worker product HTTP", () => {
   it("lists builtin profiles without host file paths", async () => {
@@ -173,6 +180,69 @@ describe("subagent/worker product HTTP", () => {
       ),
     );
     expect(content.content).toContain("worker report evidence");
+  });
+
+  it("streams sanitized Worker snapshots over the log SSE route", async () => {
+    resetWorkerLogStreamsForTests({ max: 1 });
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const created = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      ),
+    );
+    const parentSessionId = String(created.thebeSessionId);
+    const spawned = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/subagents", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          profileName: "diagnostics",
+          task: "stream this worker",
+          parentSessionId,
+        }),
+      }),
+    );
+    const worker = await json(spawned);
+    const runId = String(worker.runId);
+    await vi.waitFor(() => {
+      expect(app.agent.getSubagent(runId)?.status).toBe("running");
+    });
+
+    const abort = new AbortController();
+    const response = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
+        headers: { accept: "text/event-stream" },
+        signal: abort.signal,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const reader = response.body!.getReader();
+    const chunk = new TextDecoder().decode((await reader.read()).value);
+    expect(chunk).toContain("event: worker_update");
+    expect(chunk).toContain(`\"runId\":\"${runId}\"`);
+    expect(chunk).not.toMatch(PI_LEAK);
+
+    const crowded = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
+        headers: { accept: "text/event-stream" },
+      }),
+    );
+    expect(crowded.status).toBe(429);
+
+    abort.abort();
+    await reader.cancel();
+
+    const second = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
+        headers: { accept: "text/event-stream" },
+      }),
+    );
+    expect(second.status).toBe(200);
+    await second.body?.cancel();
+    await app.agent.cancelSubagent(runId, parentSessionId);
   });
 
   it("lists persisted terminal workers after a Core restart without opening the parent session", async () => {

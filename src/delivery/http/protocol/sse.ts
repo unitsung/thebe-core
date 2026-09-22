@@ -1,5 +1,6 @@
 import {
   isTerminalGoalStatus,
+  toProductWorker,
   toProductGoalEvent,
   type GoalEvent,
   type NormalizedEvent,
@@ -247,4 +248,97 @@ export function goalEventStream(
       connection: "keep-alive",
     },
   });
+}
+
+export const WORKER_LOG_IDLE_MS = 5 * 60 * 1000;
+export const MAX_WORKER_LOG_STREAMS = 32;
+
+let maxWorkerLogStreams = MAX_WORKER_LOG_STREAMS;
+let activeWorkerLogStreams = 0;
+
+export function resetWorkerLogStreamsForTests(options?: { max?: number }): void {
+  activeWorkerLogStreams = 0;
+  maxWorkerLogStreams = options?.max ?? MAX_WORKER_LOG_STREAMS;
+}
+
+export function workerEventStream(
+  agent: ThebeAgent,
+  runId: string,
+  request: Request,
+  options?: { idleMs?: number },
+): Response {
+  if (activeWorkerLogStreams >= maxWorkerLogStreams) {
+    return json({ ok: false, error: "too many log streams" }, 429);
+  }
+  const run = agent.getSubagent(runId);
+  if (!run) {
+    return json({ ok: false, error: "subagent not found" }, 404);
+  }
+  activeWorkerLogStreams += 1;
+  const idleMs = options?.idleMs ?? WORKER_LOG_IDLE_MS;
+  const encoder = new TextEncoder();
+  let close: () => void = () => {};
+  const stream = new ReadableStream({
+    start(controller) {
+      let nextId = 0;
+      let closed = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let unsub: () => void = () => {};
+      close = () => {
+        if (closed) return;
+        closed = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        unsub();
+        activeWorkerLogStreams = Math.max(0, activeWorkerLogStreams - 1);
+        request.signal.removeEventListener("abort", close);
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+      const bumpIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (idleMs > 0) idleTimer = setTimeout(close, idleMs);
+      };
+      const send = (snapshot: Parameters<typeof toProductWorker>[0]) => {
+        if (closed) return;
+        const line =
+          `id: ${nextId}\nevent: worker_update\ndata: ${JSON.stringify(toProductWorker(snapshot))}\n\n`;
+        nextId += 1;
+        try {
+          controller.enqueue(encoder.encode(line));
+          bumpIdle();
+        } catch {
+          close();
+          return;
+        }
+        if (isTerminalWorkerStatus(snapshot.status)) close();
+      };
+
+      send(run);
+      if (closed) return;
+      unsub = agent.subscribeSubagent(runId, (update) => send(update.run));
+      bumpIdle();
+      if (request.signal.aborted) {
+        close();
+        return;
+      }
+      request.signal.addEventListener("abort", close);
+    },
+    cancel() {
+      close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
+}
+
+function isTerminalWorkerStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
 }

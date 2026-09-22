@@ -6,6 +6,7 @@ import { agentUnavailable, quiescedWrite, type ThebeHttpContext } from "../conte
 import { json, readJson } from "../json.ts";
 import { agentError, invalidBody, notFound } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
+import { workerEventStream } from "../protocol/sse.ts";
 
 type Agent = NonNullable<ThebeHttpContext["agent"]>;
 
@@ -54,6 +55,9 @@ export async function handleSubagentRoutes(
     if (request.method === "GET" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.log) {
       const run = await loadSubagent(agent, runId);
       if (!run) return notFound("subagent not found");
+      if ((request.headers.get("accept") ?? "").includes("text/event-stream")) {
+        return workerEventStream(agent, runId, request);
+      }
       return json({ activity: run.activity ?? [] });
     }
     if (request.method === "POST" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.cancel) {
