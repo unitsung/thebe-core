@@ -36,6 +36,15 @@ const MEDIA_EXTENSIONS = new Set([
   "wmv",
 ]);
 
+const NON_MEDIA_CONTENT_TYPES = new Set([
+  "text/html",
+  "text/plain",
+  "application/json",
+  "text/json",
+  "application/xml",
+  "text/xml",
+]);
+
 export type OpenListStrmRepairProviderOptions = {
   baseUrl: string;
   token: string;
@@ -139,7 +148,17 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
 
   private async probeFile(path: string, file: OpenListFile): Promise<void> {
     const response = await this.fetchFile(path, file, "*/*", { Range: "bytes=0-0" });
+    const contentType = response.headers.get("content-type")
+      ?.split(";", 1)[0]
+      ?.trim()
+      .toLowerCase();
+    const contentLength = response.headers.get("content-length")?.trim();
+    const isDocument = contentType !== undefined && NON_MEDIA_CONTENT_TYPES.has(contentType);
+    const isEmpty = contentLength === "0";
     await response.body?.cancel();
+    if (isDocument || isEmpty) {
+      throw new ProviderError("UNKNOWN", `OpenList target is not a media response: ${path}`);
+    }
   }
 
   private async fetchFile(

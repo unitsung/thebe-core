@@ -43,7 +43,10 @@ describe("OpenListStrmRepairProvider", () => {
         }
 
         if (method === "GET" && url.endsWith("/p/Movies/Dune%20(2016).mkv?sign=signed")) {
-          return new Response("media-bytes", { status: 200 });
+          return new Response("media-bytes", {
+            status: 200,
+            headers: { "content-type": "video/x-matroska", "content-length": "11" },
+          });
         }
 
         if (method === "POST" && url.endsWith("/api/fs/search")) {
@@ -181,7 +184,10 @@ describe("OpenListStrmRepairProvider", () => {
         }
 
         if (method === "GET" && url.endsWith("/p/Movies/%E6%B5%81%E6%B5%AA%E5%9C%B0%E7%90%83%202.mkv?sign=signed")) {
-          return new Response("media-bytes", { status: 200 });
+          return new Response("media-bytes", {
+            status: 200,
+            headers: { "content-type": "video/x-matroska", "content-length": "11" },
+          });
         }
 
         if (method === "GET" && url.endsWith("/p/A/Unrelated.mkv?sign=signed")) {
@@ -263,5 +269,65 @@ describe("OpenListStrmRepairProvider", () => {
       arguments: { title: "!!!", itemId: "/Movies/!!!.strm" },
       resource: { kind: "strm", provider: "openlist" },
     })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("does not write a STRM path when the target responds with an HTML document", async () => {
+    let writes = 0;
+    const provider = new OpenListStrmRepairProvider({
+      baseUrl: "https://openlist.test",
+      token: "openlist-token",
+      fetch: async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const body = typeof init?.body === "string" ? init.body : "";
+
+        if (method === "POST" && url.endsWith("/api/fs/get")) {
+          const payload = JSON.parse(body) as { path?: string };
+          const path = payload.path ?? "/";
+          const encodedPath = `/${path.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: {
+              name: path.split("/").pop() ?? path,
+              is_dir: false,
+              raw_url: `https://openlist.test/p${encodedPath}?sign=signed`,
+            },
+          });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Movies/Dune.strm?sign=signed")) {
+          return new Response("/Movies/Dune-old.mkv\n", { status: 200 });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Movies/Dune%20(2016).mkv?sign=signed")) {
+          return new Response("<html>login</html>", {
+            status: 200,
+            headers: { "content-type": "text/html", "content-length": "128" },
+          });
+        }
+
+        if (method === "POST" && url.endsWith("/api/fs/search")) {
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: { content: [{ parent: "/Movies", name: "Dune (2016).mkv", is_dir: false }] },
+          });
+        }
+
+        if (method === "PUT" && url.endsWith("/api/fs/put")) {
+          writes += 1;
+          return jsonResponse(200, { code: 200, message: "success", data: null });
+        }
+
+        return jsonResponse(404, { code: 404, message: "not found" });
+      },
+    });
+
+    await expect(provider.repair({
+      arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+      resource: { kind: "strm", provider: "openlist" },
+    })).rejects.toMatchObject({ code: "UNKNOWN" });
+    expect(writes).toBe(0);
   });
 });
