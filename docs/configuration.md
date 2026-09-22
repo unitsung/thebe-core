@@ -131,7 +131,8 @@ export THEBE_OPENLIST_TOKEN=your-openlist-token
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
-写回与复读验证；token 只由 Core adapter 使用，不进入 Agent capability 参数。
+写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
+token 只由 Core adapter 使用，不进入 Agent capability 参数。
 
 ## Judgment Model（默认关闭）
 

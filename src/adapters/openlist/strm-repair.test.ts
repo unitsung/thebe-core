@@ -228,6 +228,73 @@ describe("OpenListStrmRepairProvider", () => {
     expect(strmContent).toBe("/Movies/流浪地球 2.mkv\n");
   });
 
+  it("repairs an HLS playlist target when the title matches", async () => {
+    let strmContent = "/Shows/Arrival-old.m3u8\n";
+
+    const provider = new OpenListStrmRepairProvider({
+      baseUrl: "https://openlist.test",
+      token: "openlist-token",
+      fetch: async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const body = typeof init?.body === "string" ? init.body : "";
+
+        if (method === "POST" && url.endsWith("/api/fs/get")) {
+          const payload = JSON.parse(body) as { path?: string };
+          const path = payload.path ?? "/";
+          const encodedPath = `/${path.split("/").filter(Boolean).map(encodeURIComponent).join("/")}`;
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: {
+              name: path.split("/").pop() ?? path,
+              is_dir: false,
+              raw_url: `https://openlist.test/p${encodedPath}?sign=signed`,
+            },
+          });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Shows/Arrival.strm?sign=signed")) {
+          return new Response(strmContent, { status: 200 });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Shows/Arrival.m3u8?sign=signed")) {
+          return new Response("#EXTM3U\n", {
+            status: 200,
+            headers: {
+              "content-type": "application/vnd.apple.mpegurl",
+              "content-length": "8",
+            },
+          });
+        }
+
+        if (method === "POST" && url.endsWith("/api/fs/search")) {
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: { content: [{ parent: "/Shows", name: "Arrival.m3u8", is_dir: false }] },
+          });
+        }
+
+        if (method === "PUT" && url.endsWith("/api/fs/put")) {
+          strmContent = body;
+          return jsonResponse(200, { code: 200, message: "success", data: null });
+        }
+
+        return jsonResponse(404, { code: 404, message: "not found" });
+      },
+    });
+
+    await expect(provider.repair({
+      arguments: { title: "Arrival", itemId: "/Shows/Arrival.strm" },
+      resource: { kind: "strm", provider: "openlist" },
+    })).resolves.toMatchObject({
+      status: "repaired",
+      target: "/Shows/Arrival.m3u8",
+    });
+    expect(strmContent).toBe("/Shows/Arrival.m3u8\n");
+  });
+
   it("does not treat a punctuation-only title as a wildcard", async () => {
     const provider = new OpenListStrmRepairProvider({
       baseUrl: "https://openlist.test",

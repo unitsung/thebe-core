@@ -31,6 +31,8 @@ const MEDIA_EXTENSIONS = new Set([
   "mp4",
   "mpeg",
   "mpg",
+  "m3u8",
+  "mpd",
   "ts",
   "webm",
   "wmv",
