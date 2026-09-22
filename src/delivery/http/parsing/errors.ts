@@ -1,3 +1,4 @@
+import { redactToolOutput } from "../../../agent/security/redaction.ts";
 import { json } from "../json.ts";
 
 export const INVALID_BODY = "invalid_body";
@@ -30,7 +31,9 @@ export function oauthCallbackInput(body: Record<string, unknown>): string | unde
 }
 
 export function agentError(error: unknown): Response {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = redactToolOutput(
+    error instanceof Error ? error.message : String(error),
+  );
   const extra = error instanceof Error ? error as Error & { status?: unknown; code?: unknown } : undefined;
   const body: Record<string, unknown> = { ok: false, error: message };
   if (typeof extra?.code === "string") body.code = extra.code;

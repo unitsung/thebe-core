@@ -180,6 +180,37 @@ describe("capability product HTTP", () => {
     ]);
   });
 
+  it("redacts provider errors from direct capability responses", async () => {
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          throw new Error("provider failed: TOKEN=top-secret");
+        },
+      },
+    });
+
+    const response = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          arguments: { title: "Dune" },
+          resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+          mode: "direct",
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await json(response)).toEqual({
+      ok: false,
+      error: "provider failed: TOKEN=***REDACTED***",
+    });
+  });
+
   it("runs provider-backed strm.repair in the background with its resource", async () => {
     const calls: unknown[] = [];
     const created = createThebeApp({
