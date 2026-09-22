@@ -154,11 +154,27 @@ describe("GET /v1/activity", () => {
 
   it("includes runtime background tasks as session-linked Activity items", async () => {
     const fake = createFakeRuntime();
-    const app = createThebeApp({
+    const dir = await mkdtemp(join(tmpdir(), "thebe-activity-task-"));
+    let resumeCalls = 0;
+    const runtime = {
+      ...fake.runtime,
+      async resumeSession(
+        runtimeSessionId: string,
+        create: Parameters<typeof fake.runtime.resumeSession>[1],
+      ) {
+        resumeCalls += 1;
+        return fake.runtime.resumeSession(runtimeSessionId, create);
+      },
+      async listBackgroundTasksForSession(runtimeSessionId: string) {
+        return fake.snapshot(runtimeSessionId).backgroundTasks;
+      },
+    };
+    const first = createThebeApp({
       runtime: fake.runtime,
       provider: provider(),
+      agentStoreDir: dir,
     });
-    const session = await app.agent.createSession({ title: "task owner" });
+    const session = await first.agent.createSession({ title: "task owner" });
     fake.snapshot(session.runtimeSessionId).backgroundTasks = [
       {
         id: "task-1",
@@ -169,6 +185,12 @@ describe("GET /v1/activity", () => {
         startedAt: "2026-09-21T00:00:01.000Z",
       },
     ];
+
+    const app = createThebeApp({
+      runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
 
     const activity = await json(
       await app.handler.handle(
@@ -191,6 +213,7 @@ describe("GET /v1/activity", () => {
         }),
       }),
     ]);
+    expect(resumeCalls).toBe(0);
 
     const detail = await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/activity/${encodeURIComponent(activityId)}`),

@@ -408,6 +408,8 @@ export interface AgentRuntime {
     options: CreateRuntimeSessionOptions,
   ): Promise<RuntimeSession>;
   listSessions(): Promise<RuntimeSessionSummary[]>;
+  /** Read persisted task state without opening the parent runtime session. */
+  listBackgroundTasksForSession?(runtimeSessionId: string): Promise<BackgroundTask[]>;
   /** Permanently removes a runtime session and its persisted transcript. */
   deleteSession(runtimeSessionId: string): Promise<void>;
   forkSession(

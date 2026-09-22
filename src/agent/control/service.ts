@@ -409,8 +409,9 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       for (const meta of await listMetas()) {
         if (meta.inPlace) continue;
         try {
-          const opened = await openSession(meta.thebeSessionId);
-          const current = await opened.session.listBackgroundTasks();
+          const current = options.runtime.listBackgroundTasksForSession
+            ? await options.runtime.listBackgroundTasksForSession(meta.runtimeSessionId)
+            : await (await openSession(meta.thebeSessionId)).session.listBackgroundTasks();
           tasks.push(
             ...current.map((task) => toProductBackgroundTask(meta.thebeSessionId, task)),
           );

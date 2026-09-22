@@ -218,6 +218,9 @@ export async function createPiCodingAgentRuntime(
         runtimeSessionId: row.id,
       }));
     },
+    async listBackgroundTasksForSession(runtimeSessionId: string) {
+      return backgroundTasksFor(runtimeSessionId).list();
+    },
     async listModels(query?: { all?: boolean; providerId?: string }) {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       const models = (
