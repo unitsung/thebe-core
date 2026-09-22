@@ -158,4 +158,50 @@ describe("POST /v1/action container.restart", () => {
     );
     expect(res.status).toBe(503);
   });
+
+  it("documents named Action request and receipt schemas in OpenAPI", async () => {
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const document = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/openapi.json"),
+      ),
+    );
+    const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
+    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const actionPost = paths["/v1/action"]?.post;
+    const actionGet = paths["/v1/action/{receiptId}"]?.get;
+
+    expect(actionPost?.requestBody).toEqual(
+      expect.objectContaining({
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionRequest" } } },
+      }),
+    );
+    expect((actionPost?.responses as Record<string, Record<string, unknown>>)?.["200"]).toEqual(
+      expect.objectContaining({
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
+      }),
+    );
+    expect((actionPost?.responses as Record<string, Record<string, unknown>>)?.["403"]).toEqual(
+      expect.objectContaining({
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
+      }),
+    );
+    expect((actionGet?.responses as Record<string, Record<string, unknown>>)?.["200"]).toEqual(
+      expect.objectContaining({
+        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
+      }),
+    );
+    expect(schemas.ActionRequest).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["actionId", "resource"],
+      }),
+    );
+    expect(schemas.ActionReceipt).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["receiptId", "actionId", "resource", "approval", "action", "verification", "idempotencyKey", "tokenUsed"],
+      }),
+    );
+  });
 });
