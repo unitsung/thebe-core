@@ -220,6 +220,7 @@ export interface ThebeAgent {
   invokeCapability(id: string, input?: CapabilityInvokeInput): Promise<CapabilityInvokeResult>;
   getCapabilityRun(runId: string): Promise<CapabilityRun | undefined>;
   listCapabilityRuns(): Promise<CapabilityRun[]>;
+  subscribeCapabilityRun(runId: string, listener: (run: CapabilityRun) => void): () => void;
   diagnose(request: DiagnosisRequest): Promise<DiagnosisResult>;
   getDiagnosis(runId: string): Promise<DiagnosisResult | undefined>;
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;

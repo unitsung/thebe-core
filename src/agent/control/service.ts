@@ -54,6 +54,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     listMetas,
   } = ctx;
   const capabilityRuns = new Map<string, CapabilityRun>();
+  const capabilityRunListeners = new Map<string, Set<(run: CapabilityRun) => void>>();
   const capabilityRunStore = createCapabilityRunStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "capability-runs")
@@ -88,6 +89,19 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     };
     await capabilityRunStore.save(updated);
     capabilityRuns.set(runId, updated);
+    notifyCapabilityRun(updated);
+  }
+
+  function notifyCapabilityRun(run: CapabilityRun): void {
+    const listeners = capabilityRunListeners.get(run.runId);
+    if (!listeners) return;
+    for (const listener of listeners) {
+      try {
+        listener({ ...run });
+      } catch {
+        // A disconnected product client must not affect run persistence.
+      }
+    }
   }
 
   async function invokeTool(name: string, args: unknown): Promise<string> {
@@ -329,6 +343,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           capabilityRuns.delete(runId);
           throw error;
         }
+        notifyCapabilityRun(run);
         void (async () => {
           try {
             const text = await invokeTool(capability.id, invocationArgs);
@@ -381,6 +396,18 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           return a < b ? 1 : a > b ? -1 : 0;
         })
         .map((run) => ({ ...run }));
+    },
+    subscribeCapabilityRun(
+      runId: string,
+      listener: (run: CapabilityRun) => void,
+    ): () => void {
+      const listeners = capabilityRunListeners.get(runId) ?? new Set();
+      listeners.add(listener);
+      capabilityRunListeners.set(runId, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) capabilityRunListeners.delete(runId);
+      };
     },
     async getContext(thebeSessionId: string): Promise<ThebeSessionContext> {
       const opened = await openSession(thebeSessionId);

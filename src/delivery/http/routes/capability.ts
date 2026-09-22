@@ -4,6 +4,7 @@ import { agentUnavailable, quiescedWrite, type ThebeHttpContext } from "../conte
 import { json, readJson } from "../json.ts";
 import { agentError, notFound } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
+import { capabilityRunEventStream } from "../protocol/sse.ts";
 
 export async function handleCapabilityRoutes(
   context: ThebeHttpContext,
@@ -34,6 +35,16 @@ export async function handleCapabilityRoutes(
       const run = await agent.getCapabilityRun(parts[3]);
       if (!run) return notFound("capability run not found");
       return json(run);
+    }
+    if (
+      request.method === "GET" &&
+      parts.length === 5 &&
+      parts[2] === PRODUCT_HTTP_SEGMENT.runs &&
+      parts[3] &&
+      parts[4] === PRODUCT_HTTP_SEGMENT.log &&
+      (request.headers.get("accept") ?? "").includes("text/event-stream")
+    ) {
+      return await capabilityRunEventStream(agent, parts[3], request);
     }
     if (
       request.method === "POST" &&

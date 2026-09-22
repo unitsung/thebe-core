@@ -2,6 +2,7 @@ import {
   isTerminalGoalStatus,
   toProductWorker,
   toProductGoalEvent,
+  type CapabilityRun,
   type GoalEvent,
   type NormalizedEvent,
   type ThebeAgent,
@@ -341,4 +342,96 @@ export function workerEventStream(
 
 function isTerminalWorkerStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
+}
+
+export const CAPABILITY_RUN_LOG_IDLE_MS = 5 * 60 * 1000;
+export const MAX_CAPABILITY_RUN_LOG_STREAMS = 32;
+
+let maxCapabilityRunLogStreams = MAX_CAPABILITY_RUN_LOG_STREAMS;
+let activeCapabilityRunLogStreams = 0;
+
+export function resetCapabilityRunLogStreamsForTests(options?: { max?: number }): void {
+  activeCapabilityRunLogStreams = 0;
+  maxCapabilityRunLogStreams = options?.max ?? MAX_CAPABILITY_RUN_LOG_STREAMS;
+}
+
+export async function capabilityRunEventStream(
+  agent: ThebeAgent,
+  runId: string,
+  request: Request,
+  options?: { idleMs?: number },
+): Promise<Response> {
+  if (activeCapabilityRunLogStreams >= maxCapabilityRunLogStreams) {
+    return json({ ok: false, error: "too many log streams" }, 429);
+  }
+  const run = await agent.getCapabilityRun(runId);
+  if (!run) {
+    return json({ ok: false, error: "capability run not found" }, 404);
+  }
+  activeCapabilityRunLogStreams += 1;
+  const idleMs = options?.idleMs ?? CAPABILITY_RUN_LOG_IDLE_MS;
+  const encoder = new TextEncoder();
+  let close: () => void = () => {};
+  const stream = new ReadableStream({
+    start(controller) {
+      let nextId = 0;
+      let closed = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let unsub: () => void = () => {};
+      close = () => {
+        if (closed) return;
+        closed = true;
+        if (idleTimer) clearTimeout(idleTimer);
+        unsub();
+        activeCapabilityRunLogStreams = Math.max(0, activeCapabilityRunLogStreams - 1);
+        request.signal.removeEventListener("abort", close);
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
+      };
+      const bumpIdle = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (idleMs > 0) idleTimer = setTimeout(close, idleMs);
+      };
+      const send = (snapshot: CapabilityRun) => {
+        if (closed) return;
+        const line =
+          `id: ${nextId}\nevent: capability_update\ndata: ${JSON.stringify(snapshot)}\n\n`;
+        nextId += 1;
+        try {
+          controller.enqueue(encoder.encode(line));
+          bumpIdle();
+        } catch {
+          close();
+          return;
+        }
+        if (isTerminalCapabilityRunStatus(snapshot.status)) close();
+      };
+
+      unsub = agent.subscribeCapabilityRun(runId, send);
+      send(run);
+      if (closed) return;
+      if (request.signal.aborted) {
+        close();
+        return;
+      }
+      request.signal.addEventListener("abort", close);
+    },
+    cancel() {
+      close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
+}
+
+function isTerminalCapabilityRunStatus(status: string): boolean {
+  return status === "succeeded" || status === "failed";
 }

@@ -266,6 +266,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/capabilities/{id}/invoke",
       "/v1/capabilities/runs",
       "/v1/capabilities/runs/{runId}",
+      "/v1/capabilities/runs/{runId}/log",
       "/v1/subagents",
       "/v1/subagents/profiles",
       "/v1/subagents/{runId}",

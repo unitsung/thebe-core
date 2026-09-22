@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import {
   createCapabilityRunStore,
@@ -9,6 +9,7 @@ import {
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 import type { StrmRepairProvider } from "../../agent/capabilities/strm.ts";
+import { resetCapabilityRunLogStreamsForTests } from "./protocol/sse.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -62,6 +63,10 @@ async function fetchRun(
   }
   throw new Error(`capability run did not finish: ${runId}`);
 }
+
+afterEach(() => {
+  resetCapabilityRunLogStreamsForTests();
+});
 
 describe("capability product HTTP", () => {
   it("exposes and invokes a provider-backed strm.repair capability", async () => {
@@ -386,6 +391,56 @@ describe("capability product HTTP", () => {
     expect(run.runId).toBe(body.runId);
     expect(run.capabilityId).toBe("diagnose_from_events");
     expect(["queued", "running", "succeeded", "failed"]).toContain(run.status);
+  });
+
+  it("streams capability run snapshots over the log SSE route", async () => {
+    let releaseRepair!: () => void;
+    const repairReady = new Promise<void>((resolve) => {
+      releaseRepair = resolve;
+    });
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          await repairReady;
+          return { status: "repaired", summary: "stream complete" };
+        },
+      },
+    });
+    const started = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "background",
+          arguments: { title: "Dune" },
+          resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+        }),
+      }),
+    );
+    const startedBody = await json(started);
+    const runId = String(startedBody.runId);
+    const response = await created.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}/log`, {
+        headers: { accept: "text/event-stream" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const reader = response.body!.getReader();
+    const initial = new TextDecoder().decode((await reader.read()).value);
+    expect(initial).toContain("event: capability_update");
+    expect(initial).toContain(`\"runId\":\"${runId}\"`);
+    expect(initial).toContain(`\"status\":\"running\"`);
+
+    releaseRepair();
+    const completed = new TextDecoder().decode((await reader.read()).value);
+    expect(completed).toContain("event: capability_update");
+    expect(completed).toContain(`\"status\":\"succeeded\"`);
+    await reader.cancel();
   });
 
   it("links a bounded report Artifact from a completed background run", async () => {
