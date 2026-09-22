@@ -9,6 +9,7 @@ import type { JudgmentModel } from "../agent/judgment/interface.ts";
 import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
 import type { ArtifactStore } from "../agent/artifacts/store.ts";
+import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
 
 export type ThebeAppPrompt = (
   text: string,
@@ -41,6 +42,7 @@ export function createThebeApp(options: {
   judgmentSites?: JudgmentEnabledSites;
   settingsStore?: AgentSettingsStore;
   artifactStore?: ArtifactStore;
+  strmRepairProvider?: StrmRepairProvider;
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -69,6 +71,7 @@ export function createThebeApp(options: {
     judgmentSites: options.judgmentSites,
     settingsStore: options.settingsStore,
     artifactStore: options.artifactStore,
+    strmRepairProvider: options.strmRepairProvider,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);

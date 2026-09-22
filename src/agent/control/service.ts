@@ -14,6 +14,10 @@ import {
   withProductMetadata,
 } from "../extensions/mcp.ts";
 import {
+  STRM_REPAIR_CAPABILITY_ID,
+  type StrmRepairRequest,
+} from "../capabilities/strm.ts";
+import {
   CAPABILITY_INVOKE_MODE_BACKGROUND,
   CAPABILITY_INVOKE_MODE_DIRECT,
   CAPABILITY_INVOKE_TYPE_RESULT,
@@ -89,6 +93,10 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
   async function invokeTool(name: string, args: unknown): Promise<string> {
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
+    }
+    if (name === STRM_REPAIR_CAPABILITY_ID && options.strmRepairProvider) {
+      const input = asStrmRepairRequest(args);
+      return JSON.stringify(await options.strmRepairProvider.repair(input));
     }
     const params = (args ?? {}) as Record<string, unknown>;
     const external = await mcp.invokeTool(name, params);
@@ -235,7 +243,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       input: CapabilityInvokeInput = {},
     ): Promise<CapabilityInvokeResult> {
       const capabilities = [
-        ...listCoreMcpTools(),
+        ...listCoreMcpTools({ strmRepairProvider: options.strmRepairProvider }),
         ...(await mcp.listTools()),
       ].map(withProductMetadata);
       const capability = capabilities.find(
@@ -244,11 +252,24 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       if (!capability) {
         throw httpError(404, `unknown capability: ${id}`);
       }
+      if (
+        capability.id === STRM_REPAIR_CAPABILITY_ID &&
+        input.resource?.kind !== "strm"
+      ) {
+        throw httpError(
+          400,
+          "strm.repair requires resource.kind=strm",
+          "invalid_body",
+        );
+      }
       if (capability.approval === "required" || capability.id === CONTAINER_RESTART_ACTION_ID) {
         throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
       }
       const mode = input.mode ?? CAPABILITY_INVOKE_MODE_DIRECT;
       const args = input.arguments ?? {};
+      const invocationArgs = capability.id === STRM_REPAIR_CAPABILITY_ID
+        ? { arguments: args, resource: input.resource }
+        : args;
       if (mode === CAPABILITY_INVOKE_MODE_BACKGROUND) {
         if (!capability.background) {
           throw httpError(
@@ -277,7 +298,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         }
         void (async () => {
           try {
-            const text = await invokeTool(capability.id, args);
+            const text = await invokeTool(capability.id, invocationArgs);
             const result = parseCapabilityResult(text);
             const artifact = artifactStore
               ? await artifactStore.create({
@@ -310,7 +331,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         })();
         return { type: CAPABILITY_INVOKE_TYPE_RUN, runId };
       }
-      const text = await invokeTool(capability.id, args);
+      const text = await invokeTool(capability.id, invocationArgs);
       return { type: CAPABILITY_INVOKE_TYPE_RESULT, result: parseCapabilityResult(text) };
     },
     async getCapabilityRun(runId: string): Promise<CapabilityRun | undefined> {
@@ -414,6 +435,23 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     auth() {
       return options.runtime.auth();
     },
+  };
+}
+
+function asStrmRepairRequest(value: unknown): StrmRepairRequest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { arguments: value };
+  }
+  const record = value as Record<string, unknown>;
+  const resource = record.resource;
+  return {
+    arguments: Object.prototype.hasOwnProperty.call(record, "arguments")
+      ? record.arguments
+      : value,
+    resource:
+      resource && typeof resource === "object" && !Array.isArray(resource)
+        ? resource as Record<string, unknown>
+        : undefined,
   };
 }
 

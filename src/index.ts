@@ -33,6 +33,9 @@ export type {
   ActivityFeedFilters,
   ActivityFeedPage,
   ActivityFeedType,
+  StrmRepairOutcome,
+  StrmRepairProvider,
+  StrmRepairRequest,
 } from "./agent/index.ts";
 export {
   ARTIFACT_KINDS,

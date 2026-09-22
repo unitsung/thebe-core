@@ -8,6 +8,7 @@ import {
 } from "../../agent/capabilities/runs.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
+import type { StrmRepairProvider } from "../../agent/capabilities/strm.ts";
 
 function provider(): ContainerInfoProvider {
   return {
@@ -63,6 +64,164 @@ async function fetchRun(
 }
 
 describe("capability product HTTP", () => {
+  it("exposes and invokes a provider-backed strm.repair capability", async () => {
+    const calls: unknown[] = [];
+    const strmRepairProvider: StrmRepairProvider = {
+      service: "openlist",
+      async repair(input) {
+        calls.push(input);
+        return {
+          status: "repaired",
+          summary: "STRM path repaired and verified.",
+          target: "/Movies/Dune.mkv",
+          verification: { media: "reachable" },
+        };
+      },
+    };
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider,
+    });
+
+    const capabilities = await json(
+      await created.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/capabilities"),
+      ),
+    );
+    expect(capabilities.capabilities).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "strm.repair",
+          service: "openlist",
+          category: "media",
+          effect: "write",
+          permission: "confirm",
+          approval: "none",
+          resourceKinds: ["strm"],
+          execution: "either",
+          background: true,
+          destructive: true,
+        }),
+      ]),
+    );
+
+    const response = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+          resource: {
+            kind: "strm",
+            id: "openlist:/Movies/Dune.strm",
+            provider: "openlist",
+          },
+          mode: "direct",
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(await json(response)).toEqual({
+      type: "result",
+      result: {
+        status: "repaired",
+        summary: "STRM path repaired and verified.",
+        target: "/Movies/Dune.mkv",
+        verification: { media: "reachable" },
+      },
+    });
+    expect(calls).toEqual([
+      {
+        arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
+        resource: {
+          kind: "strm",
+          id: "openlist:/Movies/Dune.strm",
+          provider: "openlist",
+        },
+      },
+    ]);
+  });
+
+  it("runs provider-backed strm.repair in the background with its resource", async () => {
+    const calls: unknown[] = [];
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair(input) {
+          calls.push(input);
+          return {
+            status: "repaired",
+            summary: "background repair complete",
+          };
+        },
+      },
+    });
+
+    const response = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "background",
+          arguments: { title: "Dune" },
+          resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+        }),
+      }),
+    );
+    expect(response.status).toBe(202);
+    const started = await json(response);
+    const run = await fetchRun(created.handler, String(started.runId));
+    expect(run).toEqual(
+      expect.objectContaining({
+        capabilityId: "strm.repair",
+        status: "succeeded",
+        resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+        result: { status: "repaired", summary: "background repair complete" },
+      }),
+    );
+    expect(calls).toEqual([
+      {
+        arguments: { title: "Dune" },
+        resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+      },
+    ]);
+  });
+
+  it("rejects strm.repair for a non-STRM resource before calling the provider", async () => {
+    let called = false;
+    const created = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      strmRepairProvider: {
+        service: "openlist",
+        async repair() {
+          called = true;
+          return { status: "repaired", summary: "unexpected" };
+        },
+      },
+    });
+
+    const response = await created.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          arguments: { title: "Dune" },
+          resource: { kind: "media_item", id: "movie-1" },
+          mode: "direct",
+        }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await json(response)).toEqual(
+      expect.objectContaining({ error: expect.stringContaining("resource.kind") }),
+    );
+    expect(called).toBe(false);
+  });
+
   it("GET /v1/capabilities includes product metadata for discovery", async () => {
     const res = await app().handler.handle(
       new Request("http://127.0.0.1:8787/v1/capabilities"),

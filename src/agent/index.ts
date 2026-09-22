@@ -30,6 +30,11 @@ export { toProductWorker, toProductSubagentProfile } from "./subagents/product.t
 export type { ProductBackgroundTask } from "./background-tasks/product.ts";
 export { toProductBackgroundTask } from "./background-tasks/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
+export type {
+  StrmRepairOutcome,
+  StrmRepairProvider,
+  StrmRepairRequest,
+} from "./capabilities/strm.ts";
 export type { JudgmentModel } from "./judgment/interface.ts";
 export type { JudgmentApi } from "./judgment/service.ts";
 export type {

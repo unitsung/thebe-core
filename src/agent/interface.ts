@@ -17,6 +17,7 @@ import type {
   ThebeSessionContext,
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
+import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
 import type { GoalEvent } from "./goals/runner.ts";
 import type { SkillInfo } from "./extensions/skills.ts";
@@ -111,6 +112,8 @@ export type CreateThebeAgentOptions = {
   outputDirectory?: string;
   /** External MCP capability supplied by the composition root. */
   mcp?: McpRegistry;
+  /** Optional provider-owned STRM repair write boundary. */
+  strmRepairProvider?: StrmRepairProvider;
   /** Optional Judgment Model. Absent means the Judgment Gate is off. */
   judgment?: JudgmentModel;
   /** Which catalog Sites may call the model. Default all when a model is present. */

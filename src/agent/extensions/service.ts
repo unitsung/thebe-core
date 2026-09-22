@@ -23,7 +23,10 @@ export function createExtensionApi(ctx: AgentContext) {
   }
 
   const listCapabilities = async (): Promise<HomelabCapability[]> => (
-    [...listCoreMcpTools(), ...(await ctx.mcp.listTools())].map(withProductMetadata)
+    [
+      ...listCoreMcpTools({ strmRepairProvider: ctx.options.strmRepairProvider }),
+      ...(await ctx.mcp.listTools()),
+    ].map(withProductMetadata)
   );
 
   async function putEnabledResource(resource: EnabledResource): Promise<EnabledResource> {

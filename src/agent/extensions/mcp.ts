@@ -14,6 +14,12 @@ import {
   MEDIA_READ_SCHEMAS,
   MEDIA_READ_TOOL_NAMES,
 } from "../capabilities/media.ts";
+import {
+  STRM_REPAIR_CAPABILITY_ID,
+  STRM_REPAIR_DESCRIPTION,
+  STRM_REPAIR_SCHEMA,
+  type StrmRepairProvider,
+} from "../capabilities/strm.ts";
 
 export const HOMELAB_CAPABILITY_CATEGORIES = [
   "files",
@@ -183,7 +189,9 @@ function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): stri
   return MEDIA_PROVIDER_IDS.immich;
 }
 
-export function listCoreMcpTools(): McpToolInfo[] {
+export function listCoreMcpTools(options: {
+  strmRepairProvider?: StrmRepairProvider;
+} = {}): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
 
   for (const name of CONTAINER_TOOL_NAMES) {
@@ -251,6 +259,25 @@ export function listCoreMcpTools(): McpToolInfo[] {
       service: mediaServiceForTool(name),
       source: CORE_CAPABILITY_SOURCE,
       serverName: CORE_CAPABILITY_SERVER,
+    }));
+  }
+
+  if (options.strmRepairProvider) {
+    tools.push(withProductMetadata({
+      id: STRM_REPAIR_CAPABILITY_ID,
+      name: STRM_REPAIR_CAPABILITY_ID,
+      description: STRM_REPAIR_DESCRIPTION,
+      inputSchema: STRM_REPAIR_SCHEMA,
+      category: "media",
+      permission: "confirm",
+      effect: "write",
+      risk: "low",
+      approval: "none",
+      service: options.strmRepairProvider.service,
+      source: CORE_CAPABILITY_SOURCE,
+      serverName: CORE_CAPABILITY_SERVER,
+      execution: "either",
+      background: true,
     }));
   }
 
