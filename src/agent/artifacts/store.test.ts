@@ -35,6 +35,26 @@ describe("ArtifactStore", () => {
     });
   });
 
+  it("shares one reload when metadata and content are read concurrently", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-artifacts-concurrent-reload-"));
+    const now = () => new Date("2026-09-21T00:00:00.000Z");
+    const first = createArtifactStore({ dir, now });
+    const created = await first.create({
+      kind: "report",
+      title: "Concurrent report",
+      content: "ready",
+    });
+
+    const second = createArtifactStore({ dir, now });
+    const [listed, content] = await Promise.all([
+      second.list(),
+      second.getContent(created.artifactId),
+    ]);
+
+    expect(listed).toEqual([created]);
+    expect(content).toEqual({ artifact: created, content: "ready" });
+  });
+
   it("serves content from memory when no persistence directory is configured", async () => {
     const store = createArtifactStore({
       now: () => new Date("2026-09-21T00:00:00.000Z"),

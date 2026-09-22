@@ -122,7 +122,7 @@ export function toProductGoal(run: GoalRun): ProductGoal {
     maxIterations: run.maxIterations,
     criteria: run.criteria?.slice(),
     createdAt: run.createdAt,
-    updatedAt: run.finishedAt ?? run.createdAt,
+    updatedAt: run.updatedAt ?? run.finishedAt ?? run.createdAt,
     finishedAt: run.finishedAt,
     summary: run.summary,
     artifactId: run.artifactId,

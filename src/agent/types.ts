@@ -99,6 +99,7 @@ export type GoalRun = {
   iteration: number;
   status: GoalRunStatus;
   createdAt: string;
+  updatedAt?: string;
   subagentRunIds: string[];
   activeSubagent?: SubagentRun;
   lastReview?: {

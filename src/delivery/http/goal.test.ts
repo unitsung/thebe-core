@@ -116,6 +116,58 @@ describe("Goal HTTP", () => {
     expect(JSON.stringify(content)).not.toMatch(PI_LEAK);
   });
 
+  it("documents Goal run and report links in OpenAPI", async () => {
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const document = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/openapi.json"),
+      ),
+    );
+    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const productGoal = schemas.ProductGoal as Record<string, unknown>;
+    const properties = productGoal.properties as Record<string, unknown>;
+
+    expect(properties.artifactId).toEqual({ type: "string" });
+    expect(properties.currentRun).toEqual({ $ref: "#/components/schemas/ProductGoalRun" });
+    expect(schemas.ProductGoalRun).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["id", "goalId", "sessionId", "status", "createdAt", "updatedAt"],
+      }),
+    );
+  });
+
+  it("advances Goal updatedAt when a running checkpoint emits progress", async () => {
+    let tick = 0;
+    const now = () => new Date(Date.UTC(2026, 8, 22, 0, 0, tick++));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider(), now });
+    const created = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "Track live progress" }),
+        }),
+      ),
+    );
+    const id = String(created.id);
+
+    try {
+      await vi.waitFor(() => {
+        expect(app.agent.getGoal(id)?.activeSubagent?.status).toBe("running");
+      });
+      const current = await json(
+        await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${id}`)),
+      );
+
+      expect(current.updatedAt).not.toBe(created.updatedAt);
+    } finally {
+      await app.agent.stopGoal(id);
+    }
+  });
+
   it("lists persisted goals after a new app process", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-http-"));
     const fake = createFakeRuntime();

@@ -785,6 +785,21 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             autoSummaryDelayMs: { type: "number", description: "Milliseconds; values are clamped to 60000..900000." },
           },
         },
+        ProductGoalRun: {
+          type: "object",
+          required: ["id", "goalId", "sessionId", "status", "createdAt", "updatedAt"],
+          properties: {
+            id: { type: "string" },
+            goalId: { type: "string" },
+            sessionId: { type: "string" },
+            status: { type: "string" },
+            role: { type: "string" },
+            progress: { type: "number" },
+            currentStep: { type: "string" },
+            createdAt: { type: "string" },
+            updatedAt: { type: "string" },
+          },
+        },
         ProductGoal: {
           type: "object",
           description: "Product-facing Goal. id and sessionId are the parent thebeSessionId.",
@@ -804,6 +819,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             finishedAt: { type: "string" },
             summary: { type: "string" },
             artifactId: { type: "string" },
+            currentRun: { $ref: "#/components/schemas/ProductGoalRun" },
             error: {
               type: "object",
               properties: {

@@ -43,10 +43,20 @@ export function createArtifactStore(options: {
   const memory = new Map<string, AgentArtifact>();
   const contentMemory = new Map<string, string>();
   let loaded = !options.dir;
+  let loading: Promise<void> | undefined;
 
   async function ensureLoaded(): Promise<void> {
     if (loaded) return;
-    loaded = true;
+    if (!loading) {
+      loading = loadFromDisk().finally(() => {
+        loaded = true;
+        loading = undefined;
+      });
+    }
+    await loading;
+  }
+
+  async function loadFromDisk(): Promise<void> {
     if (!options.dir) return;
     let names: string[] = [];
     try {

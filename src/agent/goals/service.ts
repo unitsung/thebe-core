@@ -32,6 +32,7 @@ export function createGoalApi(
     iteration: run.iteration,
     status: run.status,
     createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
     subagentRunIds: run.subagentRunIds.slice(),
     activeSubagent: run.activeSubagent
       ? { ...run.activeSubagent }
@@ -53,7 +54,9 @@ export function createGoalApi(
     "Goal recovered as paused after Core restart; resume it to continue.";
 
   function broadcast(run: ManagedGoal, event: GoalEvent): void {
-    run.events.push({ event, at: ctx.now().toISOString() });
+    const at = ctx.now().toISOString();
+    run.updatedAt = at;
+    run.events.push({ event, at });
     if (run.events.length > MAX_GOAL_EVENTS) {
       run.events.splice(0, run.events.length - MAX_GOAL_EVENTS);
     }
@@ -75,6 +78,7 @@ export function createGoalApi(
     run.summary = summary;
     run.error = error;
     run.finishedAt = ctx.now().toISOString();
+    run.updatedAt = run.finishedAt;
     if (
       status !== "paused" &&
       artifactStore &&
@@ -94,7 +98,6 @@ export function createGoalApi(
         // A report Artifact is supplementary; it must not change Goal state.
       }
     }
-    const result = snapshot(run);
     broadcast(run, {
       type: "goal_completed",
       // GoalEvent's generic loop has no paused terminal state; the UI has the
@@ -103,6 +106,7 @@ export function createGoalApi(
       totalIterations: run.iteration,
       summary: summary ?? `Goal ${status}.`,
     });
+    const result = snapshot(run);
     await queueGoalPersistence(
       result,
       run.thebeSessionId,
@@ -198,6 +202,7 @@ export function createGoalApi(
     run.iteration = persisted.iteration;
     run.status = interrupted ? "paused" : persisted.status;
     run.createdAt = persisted.createdAt;
+    run.updatedAt = persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
     run.subagentRunIds = persisted.subagentRunIds.slice();
     run.activeSubagent = persisted.activeSubagent
       ? { ...persisted.activeSubagent }
@@ -227,13 +232,15 @@ export function createGoalApi(
       ? "The previous Goal process ended before its active checkpoint completed."
       : persisted.error;
     if (interrupted) {
+      const recoveredAt = ctx.now().toISOString();
+      run.updatedAt = recoveredAt;
       run.events.push({
         event: {
           type: "goal_status",
           status: "paused",
           message: RECOVERY_MESSAGE,
         },
-        at: ctx.now().toISOString(),
+        at: recoveredAt,
       });
     }
     runs.set(run.thebeSessionId, run);
@@ -289,6 +296,7 @@ export function createGoalApi(
     maxIterations: number;
   }): ManagedGoal {
     let resolveFinished!: (result: GoalRun) => void;
+    const createdAt = ctx.now().toISOString();
     const run: ManagedGoal = {
       thebeSessionId: input.thebeSessionId,
       goal: input.goal,
@@ -296,7 +304,8 @@ export function createGoalApi(
       maxIterations: input.maxIterations,
       iteration: 0,
       status: "running",
-      createdAt: ctx.now().toISOString(),
+      createdAt,
+      updatedAt: createdAt,
       subagentRunIds: [],
       stopRequested: false,
       pauseRequested: false,
@@ -427,6 +436,7 @@ export function createGoalApi(
       run.finalReport = undefined;
       run.artifactId = undefined;
       run.error = undefined;
+      run.updatedAt = ctx.now().toISOString();
       run.pauseRequested = false;
       run.stopRequested = false;
       await queueGoalPersistence(

@@ -68,8 +68,9 @@ _Avoid_: attaching `container.restart` to the chat tool loop, auto-executing fro
 Core-owned bounded product result with stable `artifactId`, allow-listed kind,
 title, optional session/run/resource links, timestamps, content type, and byte
 size. Metadata and redacted content are stored separately with safe ids,
-atomic writes, and bounded retention. The first producer is an operation
-receipt; HTTP reads are `/v1/artifacts` and `/v1/artifacts/{id}/content`.
+atomic writes, and bounded retention. Operation receipts, Diagnosis runs,
+background Capability runs, and terminal Goal reports can produce Artifacts;
+HTTP reads are `/v1/artifacts` and `/v1/artifacts/{id}/content`.
 _Avoid_: arbitrary filesystem paths, unbounded uploads, runtime transcripts,
 or treating Artifact metadata as an Activity lifecycle owner
 
@@ -78,7 +79,7 @@ Persistence for a pending Approval or a completed Receipt (`GET /v1/activity` re
 _Avoid_: treating this as a full Activity product, naming it the user-facing Activity workspace, dumping raw events, calling the model to summarize the list, or persisting Diagnosis as a sibling row
 
 **ProductGoal**:
-Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `GET /v1/goals/{id}/log` (JSON or SSE). Session-scoped aliases under `/v1/session/{id}/goal`. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
+Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `GET /v1/goals/{id}/log` (JSON or SSE). Session-scoped aliases under `/v1/session/{id}/goal`. Terminal worker/reviewer evidence may be exposed as a linked `report` Artifact. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
 _Avoid_: a second Goal id scheme, `GET /v1/goals/{id}/runs`, exposing Pi/MCP/subagent internals, or treating ActivityRecord as a Goal
 
 **Pi built-in tools**:
