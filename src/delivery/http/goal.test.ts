@@ -110,6 +110,49 @@ describe("Goal HTTP", () => {
     expect(fetched.id).toBe(created.id);
   });
 
+  it("preserves Goal log history across a Core restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-log-recovery-http-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns(completingTurns());
+    const first = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const created = await json(
+      await first.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "Keep the progress history" }),
+        }),
+      ),
+    );
+    const id = String(created.id);
+    await first.agent.waitGoal(id);
+
+    const restarted = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      agentStoreDir: dir,
+    });
+    const log = await json(
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`),
+      ),
+    );
+    const events = log.events as Array<Record<string, unknown>>;
+    expect(events.some((event) => event.type === "goal_started")).toBe(true);
+    expect(events.some((event) => event.type === "goal_completed")).toBe(true);
+    expect(log.next).toEqual(expect.any(Number));
+    expect(JSON.stringify(log)).not.toMatch(PI_LEAK);
+    expect(
+      events.every(
+        (event) => !Object.prototype.hasOwnProperty.call(event, "run"),
+      ),
+    ).toBe(true);
+  });
+
   it("records explicit paused recovery in the Goal log after a Core restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-recovery-http-"));
     const fake = createFakeRuntime();

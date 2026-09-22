@@ -21,7 +21,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
-    goals.restoreGoal(meta.goalRun);
+    goals.restoreGoal(meta.goalRun, meta.goalEvents);
   };
   const sessions = createSessionApi(ctx, restoreSessionState);
   const prompts = createPromptApi(ctx);

@@ -1,6 +1,38 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { GoalRun, SubagentRun } from "./types.ts";
+import type { GoalRun, SubagentRun, SubagentRunStatus } from "./types.ts";
+
+export type StoredGoalEvent = {
+  event:
+    | { type: "goal_started"; goal: string; criteria?: string[]; maxIterations: number }
+    | { type: "goal_iteration"; iteration: number; maxIterations: number }
+    | {
+        type: "goal_reviewed";
+        iteration: number;
+        complete: boolean;
+        score: number;
+        critique: string;
+        remainingTasks?: string[];
+      }
+    | {
+        type: "goal_completed";
+        status: "completed" | "max_iterations" | "cancelled" | "failed";
+        totalIterations: number;
+        summary: string;
+      }
+    | {
+        type: "goal_subagent_update";
+        iteration: number;
+        role: "worker" | "reviewer";
+        run: { runId: string; profileName: string; status: SubagentRunStatus };
+      }
+    | {
+        type: "goal_status";
+        status: "running" | "pausing" | "paused" | "cancelled" | "failed";
+        message?: string;
+      };
+  at: string;
+};
 
 export type AgentSessionMeta = {
   thebeSessionId: string;
@@ -36,6 +68,8 @@ export type AgentSessionMeta = {
   lastSummaryAt?: string;
   /** Bounded Goal control-plane state for restoring the Tasks view. */
   goalRun?: GoalRun;
+  /** Bounded Goal lifecycle events retained for the product log. */
+  goalEvents?: StoredGoalEvent[];
   /** Bounded child-run snapshots retained for later inspection and recovery. */
   subagentRuns?: SubagentRun[];
 };
