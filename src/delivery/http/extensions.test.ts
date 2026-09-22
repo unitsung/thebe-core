@@ -312,4 +312,18 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     };
     expect(JSON.stringify(invokePost.responses?.["200"])).toContain("CapabilityInvokeResult");
   });
+
+  it("advertises product capability categories for infrastructure and photos", async () => {
+    const spec = await createThebeHttpHandler({ version: "0.1.0" }).handle(
+      new Request("http://127.0.0.1:8787/openapi.json"),
+    );
+    const body = (await spec.json()) as OpenApiDocument;
+    const capability = body.components.schemas.HomelabCapability as {
+      properties?: { category?: { enum?: string[] } };
+    };
+
+    expect(capability.properties?.category?.enum).toEqual(
+      expect.arrayContaining(["compute", "storage", "network", "photos"]),
+    );
+  });
 });

@@ -8,7 +8,7 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 
 | Surface | HTTP | Notes |
 | --- | --- | --- |
-| Capability discovery | `GET /v1/capabilities` | Product metadata: category, provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. |
+| Capability discovery | `GET /v1/capabilities` | Product metadata: category (`files`, `media`, `downloads`, `containers`, `automation`, `diagnostics`, `compute`, `storage`, `network`, `photos`, or `other`), provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. |
 | Capability invoke | `POST /v1/capabilities/{id}/invoke` | Through `ThebeAgent.invokeCapability` → policy/tools. Direct `{ type: result }` or background `{ type: run, runId }`. `container.restart` and `approval=required` return 403; use `POST /v1/action`. |
 | Capability run | `GET /v1/capabilities/runs`, `GET /v1/capabilities/runs/{runId}`, `GET /v1/capabilities/runs/{runId}/log` | Durable snapshots under `{agentStoreDir}/capability-runs`; terminal runs and results survive Core recreation. Completed background runs also link a bounded `report` Artifact. Queued/running runs owned by an older Core instance recover as failed with an interruption error. The log route returns the current snapshot as JSON by default or `capability_update` SSE snapshots when `Accept: text/event-stream` is requested. |
 | Activity feed | `GET /v1/activity`, `GET /v1/activity/{id}` | Typed union of Approval, Receipt, Goal, Capability Run, Worker, and Core-owned Background Task items. Supports `group`, `source`, exact `status`, inclusive `updatedAfter`/`updatedBefore`, bounded `limit`, and opaque `cursor`/`nextCursor`; filtering happens before pagination and ordering is stable by `updatedAt` plus id. Capability Runs keep their source `runId`, Workers keep their `ProductWorker` source link without the parent transcript, and Background Tasks keep their source task id plus parent session id. Pi detached Bash task snapshots survive runtime recreation and are stopped through the registry. Queued/running items are `running`, terminal items are `recent`. |
@@ -32,7 +32,6 @@ These are **not** deferred accidentally. They are out of this slice:
 
 - **App clients / iOS UI** for the remaining product surfaces; the Activity Run union member is decoded by the current App client.
 - **Additional Artifact producers and provider-native background-task sources** — Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery are implemented at the Core adapter seam; other provider-native task sources remain future producers.
-- **Capability category expansion** (`compute` / `storage` / `network` / `photos`).
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. MCP server enable/disable writes (no durable registry seam).
 - **Skill file editing**.

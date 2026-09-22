@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
+import { HOMELAB_CAPABILITY_CATEGORIES } from "../../agent/extensions/mcp.ts";
 import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "./product-paths.ts";
 
 /**
@@ -283,7 +284,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             name: { type: "string" },
             description: { type: "string" },
             inputSchema: { type: "object", additionalProperties: true },
-            category: { type: "string", enum: ["files", "media", "downloads", "containers", "automation", "diagnostics", "other"] },
+            category: { type: "string", enum: [...HOMELAB_CAPABILITY_CATEGORIES] },
             permission: { type: "string", enum: ["read", "confirm", "admin"] },
             effect: { type: "string", enum: ["read", "write"] },
             risk: { type: "string", enum: ["low", "disruptive"] },

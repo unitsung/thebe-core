@@ -245,7 +245,6 @@ must not call Pi, MCP, or providers directly.
 - A new global Goal identity or `GET /v1/goals/{id}/runs` unless separately
   decided; current Goal identity remains the parent session id.
 - Resource graph, relations, triggers, and scheduled automation.
-- Expanding capability categories beyond the current product need.
 
 ## Further Notes
 

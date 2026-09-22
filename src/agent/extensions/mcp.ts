@@ -28,6 +28,10 @@ export const HOMELAB_CAPABILITY_CATEGORIES = [
   "containers",
   "automation",
   "diagnostics",
+  "compute",
+  "storage",
+  "network",
+  "photos",
   "other",
 ] as const;
 
