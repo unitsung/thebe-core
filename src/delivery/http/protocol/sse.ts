@@ -433,5 +433,5 @@ export async function capabilityRunEventStream(
 }
 
 function isTerminalCapabilityRunStatus(status: string): boolean {
-  return status === "succeeded" || status === "failed";
+  return status === "succeeded" || status === "failed" || status === "interrupted";
 }

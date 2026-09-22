@@ -234,7 +234,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "settings", description: "Runtime behavior settings consumed by the App" },
       { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
       { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
-      { name: "activity", description: "Typed Approval, Receipt, Goal, and Capability Run items; lifecycle remains owned by each source object" },
+      { name: "activity", description: "Typed Approval, Receipt, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object" },
       { name: "goal", description: "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*." },
       { name: "compatibility", description: "Legacy iOS compatibility endpoints" },
       { name: "mcp", description: "MCP JSON-RPC" },
@@ -333,7 +333,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             runId: { type: "string" },
             capabilityId: { type: "string" },
-            status: { type: "string", enum: ["queued", "running", "succeeded", "failed"] },
+            status: { type: "string", enum: ["queued", "running", "succeeded", "failed", "interrupted"] },
             artifactId: { type: "string" },
             createdAt: { type: "string" },
             updatedAt: { type: "string" },

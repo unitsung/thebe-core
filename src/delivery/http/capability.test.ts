@@ -58,7 +58,7 @@ async function fetchRun(
       new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
     );
     const run = await json(fetched);
-    if (run.status === "succeeded" || run.status === "failed") return run;
+    if (run.status === "succeeded" || run.status === "failed" || run.status === "interrupted") return run;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error(`capability run did not finish: ${runId}`);
@@ -390,7 +390,7 @@ describe("capability product HTTP", () => {
     const run = await json(fetched);
     expect(run.runId).toBe(body.runId);
     expect(run.capabilityId).toBe("diagnose_from_events");
-    expect(["queued", "running", "succeeded", "failed"]).toContain(run.status);
+    expect(["queued", "running", "succeeded", "failed", "interrupted"]).toContain(run.status);
   });
 
   it("streams capability run snapshots over the log SSE route", async () => {
@@ -541,7 +541,7 @@ describe("capability product HTTP", () => {
     );
     expect(recovered.status).toBe(200);
     const run = await json(recovered);
-    expect(run.status).toBe("failed");
+    expect(run.status).toBe("interrupted");
     expect(run.error).toBe("Capability run interrupted when Core restarted.");
     expect(run.finishedAt).toBe("2026-09-21T00:00:00.000Z");
   });

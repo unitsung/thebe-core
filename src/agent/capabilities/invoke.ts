@@ -8,11 +8,12 @@ export type CapabilityInvokeType = (typeof CAPABILITY_INVOKE_TYPES)[number];
 export const CAPABILITY_INVOKE_TYPE_RESULT = CAPABILITY_INVOKE_TYPES[0];
 export const CAPABILITY_INVOKE_TYPE_RUN = CAPABILITY_INVOKE_TYPES[1];
 
-export const CAPABILITY_RUN_STATUSES = ["queued", "running", "succeeded", "failed"] as const;
+export const CAPABILITY_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "interrupted"] as const;
 export type CapabilityRunStatus = (typeof CAPABILITY_RUN_STATUSES)[number];
 export const CAPABILITY_RUN_STATUS_RUNNING = CAPABILITY_RUN_STATUSES[1];
 export const CAPABILITY_RUN_STATUS_SUCCEEDED = CAPABILITY_RUN_STATUSES[2];
 export const CAPABILITY_RUN_STATUS_FAILED = CAPABILITY_RUN_STATUSES[3];
+export const CAPABILITY_RUN_STATUS_INTERRUPTED = CAPABILITY_RUN_STATUSES[4];
 
 export type CapabilityInvokeInput = {
   resource?: Record<string, unknown>;

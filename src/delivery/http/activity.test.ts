@@ -311,7 +311,7 @@ describe("GET /v1/activity", () => {
         new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
       );
       run = await json(response);
-      if (run.status === "succeeded" || run.status === "failed") break;
+      if (run.status === "succeeded" || run.status === "failed" || run.status === "interrupted") break;
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(run?.status).toBe("succeeded");

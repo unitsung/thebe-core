@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
-  CAPABILITY_RUN_STATUS_FAILED,
+  CAPABILITY_RUN_STATUS_INTERRUPTED,
   CAPABILITY_RUN_STATUSES,
   type CapabilityRun,
   type CapabilityRunStatus,
@@ -69,7 +69,7 @@ export function createCapabilityRunStore(options: {
         const stamp = options.now().toISOString();
         run = {
           ...run,
-          status: CAPABILITY_RUN_STATUS_FAILED,
+          status: CAPABILITY_RUN_STATUS_INTERRUPTED,
           error: CAPABILITY_RUN_INTERRUPTED_ERROR,
           finishedAt: stamp,
           updatedAt: stamp,
