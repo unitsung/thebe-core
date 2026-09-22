@@ -61,6 +61,11 @@ export { EmbyAdapter } from "./adapters/emby/adapter.ts";
 export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
 export { ImmichAdapter } from "./adapters/immich/adapter.ts";
 export {
+  createOpenListStrmRepairProviderFromEnv,
+  OpenListStrmRepairProvider,
+} from "./adapters/openlist/index.ts";
+export type { OpenListStrmRepairProviderOptions } from "./adapters/openlist/index.ts";
+export {
   createThebeHttpHandler,
   listenThebeHttp,
 } from "./delivery/http/index.ts";

@@ -1,0 +1,121 @@
+import { describe, expect, it } from "vitest";
+import { OpenListStrmRepairProvider } from "./strm-repair.ts";
+
+function jsonResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+describe("OpenListStrmRepairProvider", () => {
+  it("repairs a STRM path and verifies the rewritten target", async () => {
+    let strmContent = "/Movies/Dune-old.mkv\n";
+    const requests: { method: string; url: string; headers: Headers; body: string }[] = [];
+
+    const provider = new OpenListStrmRepairProvider({
+      baseUrl: "https://openlist.test",
+      token: "openlist-token",
+      fetch: async (input, init) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        const headers = new Headers(init?.headers);
+        const body = typeof init?.body === "string" ? init.body : "";
+        requests.push({ method, url, headers, body });
+
+        if (method === "POST" && url.endsWith("/api/fs/get")) {
+          const payload = JSON.parse(body) as { path?: string };
+          const path = payload.path ?? "/";
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: {
+              name: path.split("/").pop() ?? path,
+              is_dir: false,
+              raw_url: `https://openlist.test/p${path}?sign=signed`,
+            },
+          });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Movies/Dune.strm?sign=signed")) {
+          return new Response(strmContent, { status: 200 });
+        }
+
+        if (method === "GET" && url.endsWith("/p/Movies/Dune.mkv?sign=signed")) {
+          return new Response("media-bytes", { status: 200 });
+        }
+
+        if (method === "POST" && url.endsWith("/api/fs/search")) {
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: {
+              content: [
+                {
+                  parent: "/Movies",
+                  name: "Dune.mkv",
+                  is_dir: false,
+                  size: 128,
+                },
+              ],
+            },
+          });
+        }
+
+        if (method === "PUT" && url.endsWith("/api/fs/put")) {
+          strmContent = body;
+          return jsonResponse(200, { code: 200, message: "success", data: null });
+        }
+
+        return jsonResponse(404, { code: 404, message: "not found" });
+      },
+    });
+
+    const result = await provider.repair({
+      arguments: {
+        title: "Dune",
+        itemId: "/Movies/Dune.strm",
+      },
+      resource: {
+        kind: "strm",
+        provider: "openlist",
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: "repaired",
+      target: "/Movies/Dune.mkv",
+      verification: {
+        sourcePath: "/Movies/Dune.strm",
+        targetPath: "/Movies/Dune.mkv",
+        targetAccessible: true,
+      },
+    });
+    expect(strmContent).toBe("/Movies/Dune.mkv\n");
+    expect(requests.map(({ method, url }) => `${method} ${url}`)).toEqual(
+      expect.arrayContaining([
+        "POST https://openlist.test/api/fs/get",
+        "GET https://openlist.test/p/Movies/Dune.strm?sign=signed",
+        "POST https://openlist.test/api/fs/search",
+        "GET https://openlist.test/p/Movies/Dune.mkv?sign=signed",
+        "PUT https://openlist.test/api/fs/put",
+      ]),
+    );
+    const searchRequest = requests.find(({ method, url }) => {
+      return method === "POST" && url.endsWith("/api/fs/search");
+    });
+    expect(searchRequest && JSON.parse(searchRequest.body)).toMatchObject({
+      parent: "/",
+      keywords: "Dune",
+      page: 1,
+      per_page: 100,
+    });
+    const writeRequest = requests.find(({ method, url }) => {
+      return method === "PUT" && url.endsWith("/api/fs/put");
+    });
+    expect(writeRequest?.headers.get("File-Path")).toBe("/Movies/Dune.strm");
+    expect(requests.filter(({ method }) => method !== "GET").every(({ headers }) => {
+      return headers.get("Authorization") === "openlist-token";
+    })).toBe(true);
+  });
+});

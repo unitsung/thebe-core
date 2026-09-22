@@ -118,6 +118,21 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 
+## OpenList STRM 修复 provider
+
+Core 可以在启动时注册一个 provider-owned `strm.repair` 实现。配置完整的
+OpenList 地址和 token 后，能力会自动出现在 Core capability catalog；缺少任一
+变量时不会暴露该写能力：
+
+```bash
+export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
+export THEBE_OPENLIST_TOKEN=your-openlist-token
+```
+
+`OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
+OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
+写回与复读验证；token 只由 Core adapter 使用，不进入 Agent capability 参数。
+
 ## Judgment Model（默认关闭）
 
 Judgment Model 不是聊天模型服务商，也不绑死在诊断上。默认所有 Site 走各自的传统路径。

@@ -233,6 +233,7 @@ Thebe 代码**不提供**进程沙箱。生产部署必须由运行环境承担�
 | 监听日志 | `THEBE_LISTEN <url> (<version>) bind=<host>:<port>`，避免把 `0.0.0.0` 显示成本机地址 |
 | `THEBE_TOKEN` | `NODE_ENV=production` 时强制非空；请求头 `X-Thebe-Token` |
 | `THEBE_ALLOWED_HOSTS` | 逗号分隔 Host 白名单，始终叠加 localhost/`127.0.0.1`/`::1`。`THEBE_HOST=0.0.0.0` 时也启用该白名单；局域网 Host 必须写进此变量，否则 DNS-rebinding 的 Origin==Host 会被拒绝 |
+| `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` | 可选。配置后由 Core 注册 provider-owned `strm.repair`，执行 OpenList STRM 候选搜索、写回与验证；缺少任一项则不暴露能力 |
 | 凭证端点 | `PUT /v1/auth/:providerId` 与 `POST /v1/provider/:id/api-key` 走明文 HTTP，生产环境应放在 Tailscale 或 HTTPS 反代后面 |
 | `POST /v1/system/quiesce` | 等同管理员权限，只靠 token 门禁，无角色隔离 |
 

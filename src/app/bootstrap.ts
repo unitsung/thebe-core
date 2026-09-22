@@ -14,6 +14,7 @@ import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
 import { createJevAdapter } from "../adapters/jev/adapter.ts";
+import { createOpenListStrmRepairProviderFromEnv } from "../adapters/openlist/index.ts";
 import { readJudgmentGate } from "../agent/judgment/gate.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 
@@ -126,6 +127,7 @@ export async function bootstrapThebe(
     baseUrl && arcaneKey
       ? new ArcaneAdapter({ baseUrl, apiKey: arcaneKey })
       : stubProvider();
+  const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
 
   const version = readPackageVersion(fromDir);
   const agentStoreDir =
@@ -171,6 +173,7 @@ export async function bootstrapThebe(
     judgment,
     judgmentSites,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
+    strmRepairProvider,
   });
 
   return {
