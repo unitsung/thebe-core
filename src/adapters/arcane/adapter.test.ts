@@ -45,6 +45,42 @@ describe("ArcaneAdapter", () => {
     expect(starts).toEqual([0, 10, 20]);
   });
 
+  it("fails closed when container pagination exceeds its safety limit", async () => {
+    let requests = 0;
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      pageSize: 1,
+      maxPages: 2,
+      fetch: async () => {
+        requests += 1;
+        if (requests > 2) {
+          return jsonResponse(503, { message: "page source unavailable" });
+        }
+        return jsonResponse(200, {
+          success: true,
+          data: [{
+            id: `id-${requests}`,
+            name: `c${requests}`,
+            image: "nginx:1.27",
+            state: "running",
+            status: "Up",
+            created: 1_700_000_000 + requests,
+          }],
+          pagination: { totalItems: 99, itemsPerPage: 1 },
+        });
+      },
+    });
+
+    await expect(adapter.listContainers()).rejects.toMatchObject({
+      name: "ProviderError",
+      code: "UNKNOWN",
+      message: "Arcane container pagination exceeded safety limit",
+    });
+    expect(requests).toBe(2);
+  });
+
   it("restarts a container with POST", async () => {
     const seen: string[] = [];
     const adapter = new ArcaneAdapter({

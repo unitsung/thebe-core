@@ -21,6 +21,7 @@ export type ArcaneAdapterOptions = {
   fetch?: typeof fetch;
   now?: () => number;
   pageSize?: number;
+  maxPages?: number;
   openLogSocket?: OpenArcaneLogSocket;
 };
 
@@ -35,6 +36,8 @@ const STATES = new Set<ContainerState>([
   "restarting",
 ]);
 
+const DEFAULT_MAX_PAGES = 1_000;
+
 export class ArcaneAdapter implements ContainerInfoProvider {
   // Checked 2026-09-05 against instance v2.10.2 openapi.json:
   // list uses pagination.totalItems and names[]; inspect state is {status,running};
@@ -47,6 +50,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   private readonly fetchImpl: typeof fetch;
   private readonly now: () => number;
   private readonly pageSize: number;
+  private readonly maxPages: number;
   private readonly openLogSocket: OpenArcaneLogSocket;
 
   constructor(options: ArcaneAdapterOptions) {
@@ -56,13 +60,17 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     this.fetchImpl = options.fetch ?? fetch;
     this.now = options.now ?? (() => Date.now());
     this.pageSize = options.pageSize ?? 100;
+    const maxPages = options.maxPages ?? DEFAULT_MAX_PAGES;
+    this.maxPages = Number.isFinite(maxPages)
+      ? Math.max(1, Math.min(Math.floor(maxPages), DEFAULT_MAX_PAGES))
+      : DEFAULT_MAX_PAGES;
     this.openLogSocket = options.openLogSocket ?? defaultOpenLogSocket;
   }
 
   async listContainers(): Promise<ContainerSummary[]> {
     const all: ContainerSummary[] = [];
     let start = 0;
-    while (true) {
+    for (let page = 0; page < this.maxPages; page += 1) {
       const body = await this.requestJson(
         `/api/environments/${this.environmentId}/containers?limit=${this.pageSize}&start=${start}&order=asc`,
       );
@@ -72,10 +80,13 @@ export class ArcaneAdapter implements ContainerInfoProvider {
         numberField(asObject(body.pagination), "totalItems") || all.length;
       start += rows.length;
       if (rows.length === 0 || start >= total || rows.length < this.pageSize) {
-        break;
+        return all;
       }
     }
-    return all;
+    throw new ProviderError(
+      "UNKNOWN",
+      "Arcane container pagination exceeded safety limit",
+    );
   }
 
   async inspectContainer(id: string): Promise<ContainerDetail> {
