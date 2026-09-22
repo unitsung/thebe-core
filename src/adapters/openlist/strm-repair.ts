@@ -35,12 +35,13 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxSearchResults: number;
+  private readonly searchPageSize = 100;
 
   constructor(options: OpenListStrmRepairProviderOptions) {
     this.baseUrl = options.baseUrl.trim().replace(/\/+$/, "");
     this.token = options.token.trim();
     this.fetchImpl = options.fetch ?? fetch;
-    this.maxSearchResults = Math.max(1, Math.min(options.maxSearchResults ?? 100, 500));
+    this.maxSearchResults = Math.max(1, Math.min(options.maxSearchResults ?? 500, 500));
   }
 
   async repair(input: StrmRepairRequest): Promise<StrmRepairOutcome> {
@@ -151,22 +152,48 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
   }
 
   private async search(keyword: string): Promise<OpenListSearchResult[]> {
-    const data = await this.requestJSON("/api/fs/search", {
-      method: "POST",
-      body: {
-        parent: "/",
-        keywords: keyword,
-        scope: 0,
-        page: 1,
-        per_page: this.maxSearchResults,
-        password: "",
-      },
-    });
-    const rawContent = asObject(data).content;
-    const content: unknown[] = Array.isArray(rawContent) ? rawContent : [];
-    return content
-      .map((item: unknown) => asSearchResult(item))
-      .filter((item): item is OpenListSearchResult => item !== undefined);
+    const results: OpenListSearchResult[] = [];
+    const seen = new Set<string>();
+    let page = 1;
+
+    while (results.length < this.maxSearchResults) {
+      const data = await this.requestJSON("/api/fs/search", {
+        method: "POST",
+        body: {
+          parent: "/",
+          keywords: keyword,
+          scope: 0,
+          page,
+          per_page: this.searchPageSize,
+          password: "",
+        },
+      });
+      const rawContent = asObject(data).content;
+      const content: unknown[] = Array.isArray(rawContent) ? rawContent : [];
+      if (content.length === 0) break;
+
+      let added = 0;
+      for (const rawItem of content) {
+        const item = asSearchResult(rawItem);
+        if (!item) continue;
+        const key = joinPath(item.parent, item.name);
+        if (!seen.add(key)) continue;
+        results.push(item);
+        added += 1;
+        if (results.length === this.maxSearchResults) break;
+      }
+
+      if (
+        results.length === this.maxSearchResults ||
+        content.length < this.searchPageSize ||
+        added === 0
+      ) {
+        break;
+      }
+      page += 1;
+    }
+
+    return results;
   }
 
   private async writeText(path: string, content: string): Promise<void> {

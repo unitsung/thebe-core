@@ -9,7 +9,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 describe("OpenListStrmRepairProvider", () => {
-  it("repairs a STRM path and verifies the rewritten target", async () => {
+  it("finds a later-page candidate, repairs the STRM path, and verifies the target", async () => {
     let strmContent = "/Movies/Dune-old.mkv\n";
     const requests: { method: string; url: string; headers: Headers; body: string }[] = [];
 
@@ -46,19 +46,27 @@ describe("OpenListStrmRepairProvider", () => {
         }
 
         if (method === "POST" && url.endsWith("/api/fs/search")) {
-          return jsonResponse(200, {
-            code: 200,
-            message: "success",
-            data: {
-              content: [
+          const payload = JSON.parse(body) as { page?: number };
+          const page = payload.page ?? 1;
+          const content = page === 1
+            ? Array.from({ length: 100 }, (_, index) => ({
+                parent: "/Other",
+                name: `Unrelated-${index}.mkv`,
+                is_dir: false,
+                size: 128,
+              }))
+            : [
                 {
                   parent: "/Movies",
                   name: "Dune.mkv",
                   is_dir: false,
                   size: 128,
                 },
-              ],
-            },
+              ];
+          return jsonResponse(200, {
+            code: 200,
+            message: "success",
+            data: { content },
           });
         }
 
