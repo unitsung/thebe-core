@@ -446,6 +446,12 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       responses?: Record<string, { content?: { "application/json"?: { schema?: unknown } } }>;
     };
     expect(JSON.stringify(invokePost.responses?.["200"])).toContain("CapabilityInvokeResult");
+    const invokeResult = schemas.CapabilityInvokeResult as {
+      properties?: { artifactId?: { type?: string } };
+    };
+    expect(invokeResult.properties?.artifactId).toEqual(
+      expect.objectContaining({ type: "string" }),
+    );
     expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.patch).toBeDefined();
     expect(schemas.McpServerPatch).toEqual(
       expect.objectContaining({ required: ["enabled"] }),

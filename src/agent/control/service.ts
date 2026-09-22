@@ -383,7 +383,25 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         return { type: CAPABILITY_INVOKE_TYPE_RUN, runId };
       }
       const text = await invokeTool(capability.id, invocationArgs);
-      return { type: CAPABILITY_INVOKE_TYPE_RESULT, result: parseCapabilityResult(text) };
+      const result = parseCapabilityResult(text);
+      const artifact = capability.id === STRM_REPAIR_CAPABILITY_ID && artifactStore
+        ? await artifactStore.create({
+            kind: "report",
+            title: `Capability report: ${capability.id}`,
+            resource: resourceRef(input.resource),
+            contentType: "application/json",
+            content: JSON.stringify({
+              version: 1,
+              capabilityId: capability.id,
+              result,
+            }),
+          })
+        : undefined;
+      return {
+        type: CAPABILITY_INVOKE_TYPE_RESULT,
+        result,
+        artifactId: artifact?.artifactId,
+      };
     },
     async getCapabilityRun(runId: string): Promise<CapabilityRun | undefined> {
       await ensureCapabilityRunsLoaded();

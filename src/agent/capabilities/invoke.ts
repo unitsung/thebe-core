@@ -39,7 +39,11 @@ export type CapabilityRun = {
 };
 
 export type CapabilityInvokeResult =
-  | { type: typeof CAPABILITY_INVOKE_TYPE_RESULT; result: unknown }
+  | {
+      type: typeof CAPABILITY_INVOKE_TYPE_RESULT;
+      result: unknown;
+      artifactId?: string;
+    }
   | { type: typeof CAPABILITY_INVOKE_TYPE_RUN; runId: string };
 
 export function parseCapabilityInvokeMode(value: unknown): CapabilityInvokeMode | undefined {

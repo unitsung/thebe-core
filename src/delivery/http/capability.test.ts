@@ -127,7 +127,8 @@ describe("capability product HTTP", () => {
       }),
     );
     expect(response.status).toBe(200);
-    expect(await json(response)).toEqual({
+    const direct = await json(response);
+    expect(direct).toEqual(expect.objectContaining({
       type: "result",
       result: {
         status: "repaired",
@@ -135,7 +136,38 @@ describe("capability product HTTP", () => {
         target: "/Movies/Dune.mkv",
         verification: { media: "reachable" },
       },
-    });
+      artifactId: expect.any(String),
+    }));
+    const artifactId = String(direct.artifactId);
+    const artifact = await json(
+      await created.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
+      ),
+    );
+    expect(artifact).toEqual(expect.objectContaining({
+      artifactId,
+      kind: "report",
+      resource: {
+        kind: "strm",
+        id: "openlist:/Movies/Dune.strm",
+      },
+      contentType: "application/json",
+    }));
+    const content = await json(
+      await created.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
+      ),
+    );
+    expect(JSON.parse(content.content as string)).toEqual(expect.objectContaining({
+      version: 1,
+      capabilityId: "strm.repair",
+      result: {
+        status: "repaired",
+        summary: "STRM path repaired and verified.",
+        target: "/Movies/Dune.mkv",
+        verification: { media: "reachable" },
+      },
+    }));
     expect(calls).toEqual([
       {
         arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
