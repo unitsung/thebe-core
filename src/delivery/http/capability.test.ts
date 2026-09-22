@@ -355,7 +355,8 @@ describe("capability product HTTP", () => {
   });
 
   it("POST /v1/capabilities/{id}/invoke returns a direct result through the Agent", async () => {
-    const res = await app().handler.handle(
+    const created = app();
+    const res = await created.handler.handle(
       new Request("http://127.0.0.1:8787/v1/capabilities/container.list/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -372,6 +373,19 @@ describe("capability product HTTP", () => {
     expect(body.result).toEqual([
       expect.objectContaining({ id: "abc123", name: "nginx" }),
     ]);
+    expect(body.artifactId).toEqual(expect.any(String));
+    const artifactId = String(body.artifactId);
+    const artifact = await json(
+      await created.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
+      ),
+    );
+    expect(artifact).toEqual(expect.objectContaining({
+      artifactId,
+      kind: "report",
+      title: "Capability report: container.list",
+      contentType: "application/json",
+    }));
   });
 
   it("rejects unapproved container.restart invoke and does not restart", async () => {

@@ -325,7 +325,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             type: { type: "string", enum: ["result", "run"] },
             result: { description: "Direct invoke payload", nullable: true },
             runId: { type: "string" },
-            artifactId: { type: "string", description: "Report Artifact created from a direct provider capability" },
+            artifactId: { type: "string", description: "Report Artifact created from a direct capability result" },
           },
         },
         CapabilityRun: {

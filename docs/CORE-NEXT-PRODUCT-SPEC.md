@@ -12,8 +12,8 @@ mutable values through the existing Thebe config boundary, keeps permission
 mode on `/v1/settings/permissions`, and reports concurrency changes as
 restart-required. Enabled resource selections now use that same boundary and
 survive Agent recreation. Core now stores bounded, redacted operation-receipt,
-Diagnosis, enabled-resource snapshot, background Capability Run, terminal Goal
-report, and terminal Worker report Artifacts with
+Diagnosis, enabled-resource snapshot, direct or background Capability result,
+terminal Goal report, and terminal Worker report Artifacts with
 metadata/content HTTP reads. Activity now includes durable
 Capability Run, Worker, and Core-owned Background Task items; cursorable
 aggregation and source/status/time filters are now available. Pi detached Bash
@@ -36,8 +36,8 @@ inspect and trust those objects:
 - capability runs, Goals, Workers, and Core-owned background tasks have durable
   recovery semantics, while provider-native task sources remain optional;
 - the bounded Artifact contract has operation-receipt, Diagnosis, resource-list,
-  background Capability Run, Goal report, and Worker report producers, while
-  additional result producers remain;
+  direct/background Capability result, Goal report, and Worker report producers,
+  while provider-native task producers remain;
 - Activity now includes capability runs, Workers, and Core-owned detached Bash
   tasks with bounded cursor pagination plus source/status/time filters; it
   remains a partial product-wide feed until additional producers and App clients
@@ -255,8 +255,9 @@ Implementation status and remaining order:
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
 3. ✅ Artifact model/store with operation-receipt, Diagnosis, enabled-resource
-   snapshot, background Capability Run, terminal Goal report, and terminal
-   Worker report producers; 🟡 additional provider-native producers remain;
+   snapshot, direct/background Capability result, terminal Goal report, and
+   terminal Worker report producers; 🟡 additional provider-native task
+   producers remain;
 4. ✅ capability/Goal/Worker recovery normalization for the current sources;
    🟡 provider-native task recovery remains;
 5. 🟡 unified Activity read model and OpenAPI/client contract hardening; the

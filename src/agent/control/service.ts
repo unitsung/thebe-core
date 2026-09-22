@@ -384,7 +384,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       }
       const text = await invokeTool(capability.id, invocationArgs);
       const result = parseCapabilityResult(text);
-      const artifact = capability.id === STRM_REPAIR_CAPABILITY_ID && artifactStore
+      const artifact = artifactStore
         ? await artifactStore.create({
             kind: "report",
             title: `Capability report: ${capability.id}`,
