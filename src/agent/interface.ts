@@ -55,7 +55,10 @@ import type {
   ArtifactQuery,
 } from "./artifacts/types.ts";
 import type { ArtifactStore } from "./artifacts/store.ts";
-import type { ProductBackgroundTask } from "./background-tasks/product.ts";
+import type {
+  ProductBackgroundTask,
+  ProductBackgroundTaskProvider,
+} from "./background-tasks/product.ts";
 import type { JudgmentModel } from "./judgment/interface.ts";
 import type { JudgmentEnabledSites } from "./judgment/types.ts";
 import type {
@@ -114,6 +117,8 @@ export type CreateThebeAgentOptions = {
   mcp?: McpRegistry;
   /** Optional provider-owned STRM repair write boundary. */
   strmRepairProvider?: StrmRepairProvider;
+  /** Optional provider-native background task sources. */
+  backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
   /** Optional Judgment Model. Absent means the Judgment Gate is off. */
   judgment?: JudgmentModel;
   /** Which catalog Sites may call the model. Default all when a model is present. */

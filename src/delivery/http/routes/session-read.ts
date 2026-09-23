@@ -12,9 +12,9 @@ export async function handleSessionRead(
     return undefined;
   }
   const method = request.method;
-  const id = parts[2];
+  const id = decodePathPart(parts[2]);
   const action = parts[3];
-  const extra = parts[4];
+  const extra = decodePathPart(parts[4]);
 
   if (method === "GET" && parts.length === 2) {
     return json({
@@ -93,6 +93,15 @@ export async function handleSessionRead(
     return json({ diff: result.output, workspacePath: agent.workspacePath });
   }
   return undefined;
+}
+
+function decodePathPart(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 async function readMessages(

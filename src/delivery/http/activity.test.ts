@@ -224,6 +224,92 @@ describe("GET /v1/activity", () => {
     );
   });
 
+  it("includes provider-native background tasks and routes provider controls", async () => {
+    const stopCalls: string[] = [];
+    let stopAllCalls = 0;
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      backgroundTaskProviders: [
+        {
+          service: "openlist",
+          async list() {
+            return [
+              {
+                id: "copy:task-1",
+                kind: "copy",
+                name: "OpenList copy",
+                status: "running" as const,
+                startedAt: "2026-09-22T01:00:00Z",
+                updatedAt: "2026-09-22T01:00:00Z",
+              },
+            ];
+          },
+          async stop(taskId: string) {
+            stopCalls.push(taskId);
+          },
+          async stopAll() {
+            stopAllCalls += 1;
+          },
+        },
+      ],
+    });
+
+    const activity = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/activity?source=background_task"),
+      ),
+    );
+    const activityId = "provider-openlist:copy:task-1";
+    expect(activity.items).toEqual([
+      expect.objectContaining({
+        type: "background_task",
+        id: activityId,
+        group: "running",
+        task: expect.objectContaining({
+          id: "copy:task-1",
+          sessionId: "provider-openlist",
+          provider: "openlist",
+          kind: "copy",
+          name: "OpenList copy",
+        }),
+      }),
+    ]);
+
+    const detail = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/activity/${activityId}`),
+    );
+    expect(detail.status).toBe(200);
+    expect(await json(detail)).toEqual(
+      expect.objectContaining({ type: "background_task", id: activityId }),
+    );
+
+    const sessionTasks = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/session/provider-openlist/background-task"),
+    );
+    expect(await json(sessionTasks)).toEqual({
+      tasks: [expect.objectContaining({ id: "copy:task-1", status: "running" })],
+    });
+
+    const stopped = await app.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${encodeURIComponent("provider-openlist")}/background-task/${encodeURIComponent("copy:task-1")}/stop`,
+        { method: "POST" },
+      ),
+    );
+    expect(stopped.status).toBe(200);
+    expect(stopCalls).toEqual(["copy:task-1"]);
+
+    const stoppedAll = await app.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${encodeURIComponent("provider-openlist")}/background-task/stop-all`,
+        { method: "POST" },
+      ),
+    );
+    expect(stoppedAll.status).toBe(200);
+    expect(stopAllCalls).toBe(1);
+  });
+
   it("reads a worker Activity detail without the parent transcript", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
@@ -443,7 +529,13 @@ describe("GET /v1/activity", () => {
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           }),
         }),
-        ProductBackgroundTask: expect.any(Object),
+        ProductBackgroundTask: expect.objectContaining({
+          properties: expect.objectContaining({
+            provider: { type: "string" },
+            kind: { type: "string" },
+            error: { type: "string" },
+          }),
+        }),
       }),
     );
   });

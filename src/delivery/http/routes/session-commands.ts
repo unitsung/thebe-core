@@ -21,9 +21,9 @@ export async function handleSessionCommands(
     return undefined;
   }
   const method = request.method;
-  const id = parts[2];
+  const id = decodePathPart(parts[2]);
   const action = parts[3];
-  const extra = parts[4];
+  const extra = decodePathPart(parts[4]);
 
   // During maintenance, reads remain available and the two controls needed
   // to finish an in-flight run (interrupt and permission) remain usable.
@@ -200,6 +200,15 @@ export async function handleSessionCommands(
     }
   }
   return undefined;
+}
+
+function decodePathPart(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 async function createSession(request: Request, agent: Agent): Promise<Response> {

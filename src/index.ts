@@ -37,6 +37,8 @@ export type {
   ArtifactUpdateInput,
   ArtifactStore,
   ProductBackgroundTask,
+  ProductBackgroundTaskProvider,
+  ProviderBackgroundTask,
   ActivityFeedItem,
   ActivityFeedFilters,
   ActivityFeedPage,
@@ -70,9 +72,14 @@ export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
 export { ImmichAdapter } from "./adapters/immich/adapter.ts";
 export {
   createOpenListStrmRepairProviderFromEnv,
+  createOpenListBackgroundTaskProviderFromEnv,
+  OpenListBackgroundTaskProvider,
   OpenListStrmRepairProvider,
 } from "./adapters/openlist/index.ts";
-export type { OpenListStrmRepairProviderOptions } from "./adapters/openlist/index.ts";
+export type {
+  OpenListBackgroundTaskProviderOptions,
+  OpenListStrmRepairProviderOptions,
+} from "./adapters/openlist/index.ts";
 export {
   createThebeHttpHandler,
   listenThebeHttp,

@@ -583,6 +583,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             id: { type: "string" },
             sessionId: { type: "string" },
+            provider: { type: "string" },
+            kind: { type: "string" },
             name: { type: "string" },
             pid: { type: "integer" },
             port: { type: "integer" },
@@ -590,6 +592,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             startedAt: { type: "string" },
             finishedAt: { type: "string" },
             updatedAt: { type: "string" },
+            error: { type: "string" },
           },
         },
         ProductSubagentProfile: {

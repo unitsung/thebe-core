@@ -28,8 +28,17 @@ export type { ProductSkill } from "./extensions/product.ts";
 export { toProductSkill, toProductCapability } from "./extensions/product.ts";
 export type { ProductWorker, ProductSubagentProfile } from "./subagents/product.ts";
 export { toProductWorker, toProductSubagentProfile } from "./subagents/product.ts";
-export type { ProductBackgroundTask } from "./background-tasks/product.ts";
-export { toProductBackgroundTask } from "./background-tasks/product.ts";
+export type {
+  ProductBackgroundTask,
+  ProductBackgroundTaskProvider,
+  ProviderBackgroundTask,
+} from "./background-tasks/product.ts";
+export {
+  backgroundTaskActivityId,
+  providerBackgroundTaskSessionId,
+  toProductBackgroundTask,
+  toProductProviderBackgroundTask,
+} from "./background-tasks/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
 export type {
   StrmRepairOutcome,

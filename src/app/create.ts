@@ -11,6 +11,7 @@ import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
 import type { ArtifactStore } from "../agent/artifacts/store.ts";
 import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
+import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/product.ts";
 
 export type ThebeAppPrompt = (
   text: string,
@@ -45,6 +46,7 @@ export function createThebeApp(options: {
   mcp?: McpRegistry;
   artifactStore?: ArtifactStore;
   strmRepairProvider?: StrmRepairProvider;
+  backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -78,6 +80,7 @@ export function createThebeApp(options: {
     settingsStore: options.settingsStore,
     artifactStore: options.artifactStore,
     strmRepairProvider: options.strmRepairProvider,
+    backgroundTaskProviders: options.backgroundTaskProviders,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);

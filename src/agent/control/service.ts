@@ -35,7 +35,10 @@ import type { ArtifactStore } from "../artifacts/store.ts";
 import { redactToolOutput } from "../security/redaction.ts";
 import {
   toProductBackgroundTask,
+  providerBackgroundTaskSessionId,
+  toProductProviderBackgroundTask,
   type ProductBackgroundTask,
+  type ProviderBackgroundTask,
 } from "../background-tasks/product.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
@@ -54,6 +57,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     now,
     listMetas,
   } = ctx;
+  const backgroundTaskProviders = options.backgroundTaskProviders ?? [];
   const capabilityRuns = new Map<string, CapabilityRun>();
   const capabilityRunListeners = new Map<string, Set<(run: CapabilityRun) => void>>();
   const capabilityRunStore = createCapabilityRunStore({
@@ -476,6 +480,12 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     async listBackgroundTasks(
       thebeSessionId: string,
     ): Promise<BackgroundTask[]> {
+      const provider = backgroundTaskProviders.find(
+        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+      );
+      if (provider) {
+        return (await provider.list()).map(toRuntimeBackgroundTask);
+      }
       const opened = await openSession(thebeSessionId);
       return opened.session.listBackgroundTasks();
     },
@@ -494,6 +504,17 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           // A stale runtime session should not hide tasks from other sessions.
         }
       }
+      for (const provider of backgroundTaskProviders) {
+        try {
+          tasks.push(
+            ...(await provider.list()).map((task) =>
+              toProductProviderBackgroundTask(provider.service, task),
+            ),
+          );
+        } catch {
+          // A provider outage should not hide runtime tasks or other providers.
+        }
+      }
       return tasks.sort((left, right) => {
         if (left.updatedAt < right.updatedAt) return 1;
         if (left.updatedAt > right.updatedAt) return -1;
@@ -506,10 +527,24 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       thebeSessionId: string,
       taskId: string,
     ): Promise<void> {
+      const provider = backgroundTaskProviders.find(
+        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+      );
+      if (provider) {
+        await provider.stop(taskId);
+        return;
+      }
       const opened = await openSession(thebeSessionId);
       await opened.session.stopBackgroundTask(taskId);
     },
     async stopAllBackgroundTasks(thebeSessionId: string): Promise<void> {
+      const provider = backgroundTaskProviders.find(
+        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+      );
+      if (provider) {
+        await provider.stopAll();
+        return;
+      }
       const opened = await openSession(thebeSessionId);
       const tasks = await opened.session.listBackgroundTasks();
       for (const task of tasks) {
@@ -544,6 +579,19 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     auth() {
       return options.runtime.auth();
     },
+  };
+}
+
+function toRuntimeBackgroundTask(
+  task: ProviderBackgroundTask,
+): BackgroundTask {
+  return {
+    id: task.id,
+    ...(task.name ? { name: task.name } : {}),
+    status: task.status,
+    ...(task.startedAt ? { startedAt: task.startedAt } : {}),
+    ...(task.finishedAt ? { finishedAt: task.finishedAt } : {}),
+    ...(task.updatedAt ? { updatedAt: task.updatedAt } : {}),
   };
 }
 
