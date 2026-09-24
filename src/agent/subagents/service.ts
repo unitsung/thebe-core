@@ -65,6 +65,7 @@ export function createSubagentRunManager(options: {
     ),
   );
   const runs = new Map<string, MutableRun>();
+  const finished = new Set<string>();
   const sessions = new Map<string, RuntimeSession>();
   const pendingByRun = new Map<string, Set<string>>();
   const waiters = new Map<string, Set<(run: SubagentRun) => void>>();
@@ -119,6 +120,7 @@ export function createSubagentRunManager(options: {
     } catch {
       // Persistence must never change the terminal result of a child.
     }
+    finished.add(run.runId);
     const callbacks = waiters.get(run.runId);
     if (callbacks) {
       waiters.delete(run.runId);
@@ -168,7 +170,10 @@ export function createSubagentRunManager(options: {
     if (runs.size <= MAX_RETAINED_RUNS) return;
     for (const [runId, run] of runs) {
       if (runs.size <= MAX_RETAINED_RUNS) break;
-      if (terminal(run.status) && !waiters.has(runId)) runs.delete(runId);
+      if (terminal(run.status) && !waiters.has(runId)) {
+        runs.delete(runId);
+        finished.delete(runId);
+      }
     }
   }
 
@@ -339,7 +344,7 @@ export function createSubagentRunManager(options: {
     async wait(runId: string): Promise<SubagentRun> {
       const resolvedId = resolveRunId(runId);
       const run = runs.get(resolvedId)!;
-      if (terminal(run.status)) return snapshot(run);
+      if (finished.has(resolvedId)) return snapshot(run);
       return new Promise((resolve) => {
         const callbacks = waiters.get(resolvedId) ?? new Set();
         callbacks.add(resolve);
@@ -389,6 +394,7 @@ export function createSubagentRunManager(options: {
           nextActivityId,
         };
         runs.set(restored.runId, restored);
+        if (terminal(restored.status)) finished.add(restored.runId);
         if (recoveryAt) recovered.push(snapshot(restored));
       }
       trimHistory();

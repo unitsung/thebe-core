@@ -343,9 +343,7 @@ describe("subagent/worker product HTTP", () => {
     );
     const worker = await json(spawned);
     const runId = String(worker.runId);
-    await vi.waitFor(() => {
-      expect(first.agent.getSubagent(runId)?.status).toBe("running");
-    });
+    expect(worker.status).toBe("running");
 
     const restarted = createThebeApp({
       runtime: createFakeRuntime().runtime,

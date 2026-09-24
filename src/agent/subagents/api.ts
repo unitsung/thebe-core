@@ -46,6 +46,15 @@ export function createSubagentApi(
     }
   }
 
+  async function waitForSubagentPersistence(parentSessionId: string): Promise<void> {
+    while (true) {
+      const pending = subagentPersistence.get(parentSessionId);
+      if (!pending) return;
+      await pending;
+      if (subagentPersistence.get(parentSessionId) === pending) return;
+    }
+  }
+
   const subagentRuns = createSubagentRunManager({
     now,
     maxConcurrent: options.maxSubagentConcurrency,
@@ -134,7 +143,10 @@ export function createSubagentApi(
       if (!spawn.taskPrompt.trim()) throw new Error("subagent task cannot be empty");
       await lookup(spawn.parentSessionId);
       const run = subagentRuns.spawn({ profile, task: spawn.taskPrompt, parentSessionId: spawn.parentSessionId });
-      void persistSubagentSnapshot(run);
+      if (run.status === "queued") {
+        await persistSubagentSnapshot(run);
+      }
+      await waitForSubagentPersistence(run.parentSessionId);
       return run;
     },
     async listSubagents(parentSessionId?: string): Promise<SubagentRun[]> {
