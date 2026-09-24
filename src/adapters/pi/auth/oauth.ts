@@ -137,13 +137,15 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
       const entry = ensureOAuthLogin(providerId, interaction?.openUrl);
       return entry.completion;
     },
-    async authorizeOAuth(providerId) {
-      try {
-        if (await modelRuntime.checkAuth(providerId)) {
-          return { providerId, connected: true as const };
+    async authorizeOAuth(providerId, options) {
+      if (!options?.force) {
+        try {
+          if (await modelRuntime.checkAuth(providerId)) {
+            return { providerId, connected: true as const };
+          }
+        } catch {
+          // fall through and start the login so the real error surfaces
         }
-      } catch {
-        // fall through and start the login so the real error surfaces
       }
       const entry = ensureOAuthLogin(providerId);
       await Promise.race([
@@ -153,12 +155,14 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
           () => undefined,
         ),
       ]);
-      try {
-        if (await modelRuntime.checkAuth(providerId)) {
-          return { providerId, connected: true as const };
+      if (!options?.force) {
+        try {
+          if (await modelRuntime.checkAuth(providerId)) {
+            return { providerId, connected: true as const };
+          }
+        } catch {
+          // fall through to the pending response
         }
-      } catch {
-        // fall through to the pending response
       }
       let failed: unknown;
       let settled = false;
@@ -174,6 +178,9 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
       await Promise.resolve();
       if (settled && failed !== undefined) {
         throw failed;
+      }
+      if (settled && options?.force) {
+        return { providerId, connected: true as const };
       }
       return {
         providerId,
@@ -224,6 +231,7 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
           displayName: provider.name,
           authMethods: methods,
           authStatus,
+          oauthPending: pendingOAuth.has(provider.id),
         });
       }
       return out;

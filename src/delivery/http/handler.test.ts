@@ -714,6 +714,26 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     );
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toMatchObject({ connected: true });
+
+    const reauthorize = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ force: true }),
+      }),
+    );
+    expect(reauthorize.status).toBe(202);
+    await expect(reauthorize.json()).resolves.toMatchObject({ pending: true });
+    const pendingProviders = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/auth"),
+    );
+    const pendingBody = (await pendingProviders.json()) as {
+      providers: Array<{ id: string; authStatus: string; oauthPending?: boolean }>;
+    };
+    expect(pendingBody.providers.find((row) => row.id === "fake")).toMatchObject({
+      authStatus: "connected",
+      oauthPending: true,
+    });
   });
 
   it("OAuth callback without a pending login is 404, empty input is 400", async () => {

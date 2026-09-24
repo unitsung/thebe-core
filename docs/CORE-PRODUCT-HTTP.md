@@ -1,6 +1,6 @@
 # Core product HTTP — shipped vs leftover
 
-Date: 2026-09-22.
+Date: 2026-09-24.
 
 This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
@@ -23,6 +23,7 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 | Artifacts | `GET /v1/artifacts`, `GET /v1/artifacts/{id}`, `GET /v1/artifacts/{id}/content` | Bounded Core-owned metadata/content with kind, session/run/resource links, filters, atomic persistence, server-side redaction, and bounded retention. Operation receipts, Diagnosis runs, enabled-resource snapshots, direct/background Capability results, terminal Goal reports, and terminal Worker reports are producers. |
 | Audit log | `GET /v1/audit`, `GET /v1/audit/{id}` | Read-only redacted records with bounded pagination, filters, and stable detail lookup; raw parameters are never returned. |
 | Push device registration | `GET/POST /v1/devices`, `DELETE /v1/devices/{registrationId}` | Durable, token-redacted iOS registrations with notification categories, stable token-derived ids, and de-registration. APNs delivery remains an optional external relay. |
+| Provider OAuth renewal | `POST /v1/provider/{providerId}/oauth/authorize` | Optional `{ "force": true }` starts a fresh login even while old credentials remain connected. Provider inventory reports `oauthPending` separately from `authStatus` so clients can wait for the new flow without mistaking old credentials for completion. |
 
 OpenAPI named schemas (not generic objects) for the new product types: `HomelabCapability`, `CapabilityInvokeResult`, `CapabilityRun`, `CapabilityRunList`, `DiagnosisResult`, `ActivityItem`, `ActivityDiagnosisItem`, `ActivityRunItem`, `ActivityWorkerItem`, `ActivityBackgroundTaskItem`, `ActivityList`, `ProductGoal`, `ProductGoalRun`, `ProductWorker`, `ProductBackgroundTask`, `PendingPermission`, `PermissionResolution`, `Skill`, `McpServer`, `McpTool`, `EnabledResource`, `AgentArtifact`, `ArtifactList`, `ArtifactContent`, `PermissionModeSettings`, `AgentSettings`, `AgentSettingsPatch`, `AuditRecord`, `AuditList`, `DeviceRegistration`, `DeviceRegistrationList`, `DeviceRegistrationRequest`.
 

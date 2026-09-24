@@ -112,7 +112,10 @@ async function handleOAuth(
     if (parts[4] === "login") {
       return submitOAuthCallback(request, agent, providerId);
     }
-    const result = await agent.auth().authorizeOAuth(providerId);
+    const body = await readJson(request);
+    const result = await agent.auth().authorizeOAuth(providerId, {
+      force: body.force === true,
+    });
     if ("connected" in result && result.connected) {
       return json({ ok: true, connected: true, providerId });
     }

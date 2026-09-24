@@ -162,6 +162,7 @@ export type RuntimeProvider = {
   displayName?: string;
   authMethods?: Array<"apiKey" | "oauth">;
   authStatus?: "connected" | "missing" | "error";
+  oauthPending?: boolean;
 };
 
 export type PermissionDecision = {
@@ -352,7 +353,7 @@ export type RuntimeAuth = {
    * the flow in a browser; the resulting code comes back via
    * `submitOAuthCallback`. Tokens stay in the runtime, never in AgentStore.
    */
-  authorizeOAuth(providerId: string): Promise<OAuthAuthorizeResult>;
+  authorizeOAuth(providerId: string, options?: { force?: boolean }): Promise<OAuthAuthorizeResult>;
   /**
    * Feeds a user-pasted authorization code / redirect URL into a pending
    * `authorizeOAuth` login. Throws when no login is pending for the provider.

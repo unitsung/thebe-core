@@ -16,10 +16,10 @@ export function createFakeRuntimeAuth(state: FakeAuthState): RuntimeAuth {
       state.oauthLogins.push(providerId);
       return { kind: "oauth", providerId };
     },
-    async authorizeOAuth(providerId) {
+    async authorizeOAuth(providerId, options) {
       if (
-        state.apiKeys.has(providerId) ||
-        state.oauthLogins.includes(providerId)
+        !options?.force &&
+        (state.apiKeys.has(providerId) || state.oauthLogins.includes(providerId))
       ) {
         return { providerId, connected: true as const };
       }
@@ -65,6 +65,7 @@ export function createFakeRuntimeAuth(state: FakeAuthState): RuntimeAuth {
     async listProviders(): Promise<RuntimeProvider[]> {
       return FAKE_RUNTIME_PROVIDERS.map((provider) => ({
         ...provider,
+        oauthPending: state.oauthPending.has(provider.id),
         authStatus:
           state.apiKeys.has(provider.id) || state.oauthLogins.includes(provider.id)
             ? ("connected" as const)

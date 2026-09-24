@@ -510,6 +510,22 @@ describe("PiCodingAgentRuntime sessions", () => {
     ).rejects.toThrow("unknown OAuth authorization");
   });
 
+  it("force authorizeOAuth starts a new login when credentials already exist", async () => {
+    const { runtime, modelRuntime } = await piWithFaux();
+    vi.spyOn(modelRuntime, "checkAuth").mockResolvedValue(true);
+    const loginSpy = vi.spyOn(modelRuntime, "login").mockImplementation(async (...args: unknown[]) => {
+      const interaction = args[2] as {
+        notify: (event: { type: string; url?: string }) => void;
+      };
+      interaction.notify({ type: "auth_url", url: "https://example.com/renew" });
+      return { type: "oauth", access: "renewed", refresh: "r", expires: Date.now() + 60_000 };
+    });
+
+    await runtime.auth().authorizeOAuth("connected-provider", { force: true });
+
+    expect(loginSpy).toHaveBeenCalledOnce();
+  });
+
   it("submitOAuthCallback feeds the prompt and waits for login to finish", async () => {
     const { runtime, modelRuntime } = await piWithFaux();
     let received = "";

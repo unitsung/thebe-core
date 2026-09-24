@@ -145,7 +145,7 @@ const operations: Operation[] = [
   { method: "post", path: "/v1/provider/{providerId}/api-key", summary: "Set an API key", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
   { method: "delete", path: "/v1/provider/{providerId}/api-key", summary: "Delete an API key", tag: "providers", parameters: [idParameter("providerId")] },
   { method: "get", path: "/v1/provider/{providerId}/oauth/login", summary: "Start OAuth login (SSE)", tag: "providers", parameters: [idParameter("providerId")], responseContentType: "text/event-stream" },
-  { method: "post", path: "/v1/provider/{providerId}/oauth/authorize", summary: "Authorize OAuth", tag: "providers", parameters: [idParameter("providerId")] },
+  { method: "post", path: "/v1/provider/{providerId}/oauth/authorize", summary: "Authorize OAuth (force starts a fresh login)", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: false }, requestSchema: "OAuthAuthorizeRequest", responseSchema: "OAuthAuthorizeResult", extraStatuses: [{ status: 202, description: "Authorization pending", schema: "OAuthAuthorizeResult" }] },
   { method: "post", path: "/v1/provider/{providerId}/oauth/callback", summary: "Submit OAuth callback", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
   { method: "post", path: "/v1/provider/{providerId}/oauth/login", summary: "Submit OAuth callback (compatibility alias)", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
   { method: "post", path: "/v1/provider/{providerId}/oauth/logout", summary: "Logout OAuth", tag: "providers", parameters: [idParameter("providerId")] },
@@ -252,6 +252,23 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         Ok: {
           type: "object",
           properties: { ok: { type: "boolean" } },
+        },
+        OAuthAuthorizeRequest: {
+          type: "object",
+          properties: { force: { type: "boolean", description: "Start a new OAuth flow even when the current credential is connected." } },
+        },
+        OAuthAuthorizeResult: {
+          type: "object",
+          required: ["ok", "providerId"],
+          properties: {
+            ok: { type: "boolean" },
+            providerId: { type: "string" },
+            connected: { type: "boolean" },
+            pending: { type: "boolean" },
+            url: { type: "string", format: "uri" },
+            instructions: { type: "string" },
+            deviceCode: { type: "object", additionalProperties: true },
+          },
         },
         AuditRecord: {
           type: "object",
