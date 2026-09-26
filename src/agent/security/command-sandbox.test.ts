@@ -2,8 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildBwrapArgs,
   buildBwrapCommandString,
-  sandboxModeFromEnv,
-  sandboxNetworkFromEnv,
   wrapCommandForSandbox,
 } from "./command-sandbox.ts";
 
@@ -115,17 +113,14 @@ describe("Sandbox command wrapping", () => {
 
 });
 
-describe("Sandbox environment configuration", () => {
-  it("enables bwrap only when THEBE_SANDBOX says so", () => {
-    expect(sandboxModeFromEnv({})).toBe("off");
-    expect(sandboxModeFromEnv({ THEBE_SANDBOX: "off" })).toBe("off");
-    expect(sandboxModeFromEnv({ THEBE_SANDBOX: "bwrap" })).toBe("bwrap");
-    expect(sandboxModeFromEnv({ THEBE_SANDBOX: " BWRAP " })).toBe("bwrap");
-  });
-
-  it("keeps the network unless it is explicitly denied", () => {
-    expect(sandboxNetworkFromEnv({})).toBe(true);
-    expect(sandboxNetworkFromEnv({ THEBE_SANDBOX_NETWORK: "allow" })).toBe(true);
-    expect(sandboxNetworkFromEnv({ THEBE_SANDBOX_NETWORK: "deny" })).toBe(false);
+describe("Sandbox modes", () => {
+  it("delegates gondolin mode to the Micro-VM bash backend", () => {
+    const res = wrapCommandForSandbox("uptime", {
+      mode: "gondolin",
+      workspacePath: "/volume1/docker/app",
+    });
+    expect(res.command).toBe("uptime");
+    expect(res.applied).toBe(false);
+    expect(res.warning).toContain("Micro-VM bash backend");
   });
 });

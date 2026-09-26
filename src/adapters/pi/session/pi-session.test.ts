@@ -170,6 +170,37 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
+  it("routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin", async () => {
+    const previous = process.env.THEBE_SANDBOX;
+    process.env.THEBE_SANDBOX = "gondolin";
+    try {
+      const { faux, runtime } = await piWithFaux();
+      faux.setResponses([
+        fauxAssistantMessage([
+          fauxToolCall("bash", { command: "uname -a" }, { id: "call_vm" }),
+        ]),
+        fauxAssistantMessage("done"),
+      ]);
+      const agent = createThebeAgent({
+        runtime,
+        provider: emptyProvider(),
+        permissionMode: "full-access",
+      });
+      const session = await agent.createSession();
+
+      // @earendil-works/gondolin is an optional runtime dependency, so the VM
+      // backend must fail loudly instead of silently executing on the host.
+      await expect(
+        agent.send("run uname in the vm", session.thebeSessionId),
+      ).resolves.toMatchObject({ text: "done" });
+      const messages = await agent.loadMessages(session.thebeSessionId);
+      expect(JSON.stringify(messages)).toContain("Gondolin Micro-VM runtime is not installed");
+    } finally {
+      if (previous === undefined) delete process.env.THEBE_SANDBOX;
+      else process.env.THEBE_SANDBOX = previous;
+    }
+  });
+
   it("exposes Pi native content and filename search without bash", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "thebe-pi-search-tools-"));
     await writeFile(join(workspace, "needle.txt"), "needle in workspace\n", "utf8");

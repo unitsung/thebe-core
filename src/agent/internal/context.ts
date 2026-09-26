@@ -15,9 +15,9 @@ import {
 } from "../runtime/index.ts";
 import { createStreamGuard } from "../../agent/security/stream-guard/stream-guard.ts";
 import {
-  commandGuardEnabled,
   commandGuardPreflight,
 } from "../security/command-risk.ts";
+import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
@@ -129,7 +129,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         workspacePath: undefined,
         async preflight(): Promise<"ask"> { return "ask"; },
       };
-  const commandGuard = commandGuardEnabled();
+  // Scenario presets (THEBE_SCENARIO) set the guard, confinement, and sandbox
+  // defaults; explicit THEBE_* variables win over the preset.
+  const scenario = resolveScenarioSettings();
+  const commandGuard = scenario.commandGuard;
   // Critical commands (storage destruction, disk writes, container breakouts)
   // never reach approval: policy denies them. Dangerous ones still ask, with the
   // risk raised for the approval UI, and everything else falls through to the
@@ -140,6 +143,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     if (commandGuard) {
       const guarded = commandGuardPreflight(request.toolName, request.args, {
         workspacePath,
+        allowGlobalEscapes: scenario.workspaceEscapes,
+        dockerGuard: scenario.dockerGuard,
       });
       if (guarded) return guarded;
     }

@@ -368,5 +368,68 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       }
     });
 
+  describe("Docker Engine API calls over the socket (curl bypass)", () => {
+    const socket = "curl --unix-socket /var/run/docker.sock";
+
+    it("blocks volume pruning issued directly against the Docker API", () => {
+      const res = assessCommand(`${socket} -X POST http://localhost/v1.41/volumes/prune`);
+      expect(res.risk).toBe("critical");
+      expect(res.allowed).toBe(false);
+      expect(res.reason).toContain("Volume pruning");
+    });
+
+    it("blocks privileged container creation with host root and socket mounts", () => {
+      const privileged = assessCommand(
+        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`,
+      );
+      expect(privileged.risk).toBe("critical");
+
+      const hostRoot = assessCommand(
+        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/:/host"]}}'`,
+      );
+      expect(hostRoot.risk).toBe("critical");
+
+      const socketMount = assessCommand(
+        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/var/run/docker.sock:/var/run/docker.sock"]}}'`,
+      );
+      expect(socketMount.risk).toBe("critical");
+    });
+
+    it("asks for review when the create body cannot be inspected", () => {
+      const res = assessCommand(
+        `${socket} -X POST http://localhost/v1.41/containers/create -d "$BODY"`,
+      );
+      expect(res.risk).toBe("dangerous");
+      expect(res.requiresConfirmation).toBe(true);
+    });
+
+    it("allows read-only Docker API queries and hardened creates", () => {
+      const list = assessCommand(`${socket} http://localhost/v1.41/containers/json`);
+      expect(list.risk).toBe("safe");
+
+      const hardened = assessCommand(
+        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/volume1/app:/app"]}}'`,
+      );
+      expect(hardened.risk).toBe("safe");
+    });
+
+    it("honours the scenario docker policy", () => {
+      const command = `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`;
+      const homelab = assessCommand(command, {
+        dockerGuard: {
+          blockPrivileged: false,
+          blockHostRootMounts: true,
+          blockDockerSocketMount: false,
+          blockVolumePrune: true,
+        },
+      });
+      expect(homelab.risk).toBe("safe");
+    });
+
+    it("leaves unrelated curl commands untouched", () => {
+      const res = assessCommand("curl -s https://example.com/containers/create");
+      expect(res.risk).toBe("safe");
+    });
   });
+});
 });

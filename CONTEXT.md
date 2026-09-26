@@ -13,11 +13,19 @@ Agent-owned replaceable runtime Interface in `src/agent/runtime`. Delivery code 
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code
 
 **CommandRisk**:
-Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`). `THEBE_COMMAND_GUARD=off` disables the layer.
+Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`), and Docker Engine API calls issued straight at `docker.sock` (curl/podman) go through `docker-api-guard.ts`. `THEBE_COMMAND_GUARD=off` disables the layer.
 _Avoid_: putting model-based review here (that is `JudgmentModel`), blocking inside the adapter instead of the preflight
 
+**ScenarioProfile**:
+Deployment presets in `src/agent/security/scenario-profile.ts`, ported from the pre-refactor `src/policy/scenario-profile.ts`: `nas-strict`, `homelab-host`, `microvm-sandbox`, `yolo-guarded`. `THEBE_SCENARIO=<name>` sets the guard, workspace-escape, sandbox, and Docker-API-guard defaults; explicit `THEBE_*` variables always win.
+_Avoid_: a second safety engine behind the profiles, per-session scenario state that delivery code mutates directly
+
+**GondolinMicroVM**:
+Micro-VM execution path in `src/adapters/gondolin`: `runner.ts` maps the workspace to `/workspace` (escaping the jail throws) and owns the VM lifecycle, `bash-operations.ts` makes it the `bash` backend behind `THEBE_SANDBOX=gondolin`. The VM provider is injectable, so tests run without QEMU/KVM; `@earendil-works/gondolin` stays an optional dynamic import (clear failure, no silent unsandboxed run).
+_Avoid_: importing Pi types outside `src/adapters/pi`, falling back to local execution without telling the caller
+
 **CommandSandbox**:
-Optional bubblewrap jail for the `bash` tool in `src/agent/security/command-sandbox.ts`, enabled by `THEBE_SANDBOX=bwrap`: read-only host, ephemeral `/tmp`, workspace-only writes, dropped capabilities, `THEBE_SANDBOX_NETWORK=deny` for an unshared network. Wrapping happens in the Pi session's bash `spawnHook`; it degrades to the raw command when `bwrap` is absent.
+Optional bubblewrap jail for the `bash` tool in `src/agent/security/command-sandbox.ts`, enabled by `THEBE_SANDBOX=bwrap`: read-only host, ephemeral `/tmp`, workspace-only writes, dropped capabilities, `THEBE_SANDBOX_NETWORK=deny` for an unshared network. Wrapping happens in the Pi session's bash `spawnHook`; it degrades to the raw command when `bwrap` is absent. `THEBE_SANDBOX=gondolin` (same variable) instead routes bash through `src/adapters/gondolin` for hardware-VM isolation.
 _Avoid_: forcing the sandbox on by default, sandboxing through the tool layer instead of the spawn hook
 
 **PiCodingAgentRuntime**:

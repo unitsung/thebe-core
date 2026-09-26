@@ -1,5 +1,11 @@
 import { isAbsolute, relative, resolve } from "node:path";
-import { inspectDockerCommandSafety } from "./docker-command-guard.ts";
+import {
+  inspectDockerCommandSafety,
+} from "./docker-command-guard.ts";
+import {
+  validateDockerApiRequest,
+  type DockerProxyPolicy,
+} from "./docker-api-guard.ts";
 
 /**
  * Homelab/NAS command risk heuristics.
@@ -49,6 +55,8 @@ export type AssessToolCallOptions = {
   /** Explicit opt-in to escape the workspace (old `allowGlobalEscapes`). */
   allowGlobalEscapes?: boolean;
   cache?: CommandRiskCache | null;
+  /** Docker control-plane policy for direct Docker API calls; see scenario profiles. */
+  dockerGuard?: DockerProxyPolicy;
 };
 
 
@@ -376,6 +384,76 @@ const CAUTION_PATTERNS: RiskRule[] = [
   },
 ];
 
+/** Docker Engine API paths the guard understands, as seen in curl/podman calls. */
+const DOCKER_API_PATH =
+  /\/v?[0-9.]*\/(containers\/create|containers\/prune|volumes\/prune|images\/prune|build\/prune|system\/prune)/i;
+const DOCKER_API_MARKER = /\bdocker\.sock\b|DOCKER_HOST=|\/v1\.[0-9]+\//;
+
+function extractDockerApiBody(command: string): unknown | undefined {
+  const match = /(?:-d|--data|--data-binary|--data-raw)\s+(['"])([\s\S]*?)\1/.exec(
+    command,
+  );
+  if (!match?.[2]) return undefined;
+  try {
+    return JSON.parse(match[2]);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Screens Docker Engine API calls issued directly over the socket (curl, podman
+ * remote), which never contain the `docker <verb>` shape the CLI rules catch.
+ * Returns `undefined` when the command is not such a call or the guard allows it.
+ */
+function assessDockerApiCall(
+  command: string,
+  policy?: DockerProxyPolicy,
+): CommandRiskAssessment | undefined {
+  if (!DOCKER_API_MARKER.test(command)) return undefined;
+  const pathMatch = DOCKER_API_PATH.exec(command);
+  if (!pathMatch) return undefined;
+
+  const pathname = `/${(pathMatch[1] ?? "").toLowerCase()}`;
+  const methodMatch = /(?:-X|--request)\s+([A-Za-z]+)/.exec(command);
+  const method = methodMatch?.[1]
+    ? methodMatch[1].toUpperCase()
+    : /(?:^|\s)(?:-d|--data|--data-binary|--data-raw)\s/.test(command)
+      ? "POST"
+      : "GET";
+  const body = extractDockerApiBody(command);
+
+  if (pathname === "/containers/create" && method === "POST" && body === undefined) {
+    return {
+      allowed: false,
+      risk: "dangerous",
+      reason:
+        "Docker API container creation whose body could not be inspected must be reviewed",
+      warnings: [
+        "Docker API: /containers/create with an unparsed body bypasses static container hardening checks",
+      ],
+      requiresConfirmation: true,
+      category: "container",
+    };
+  }
+
+  const verdict = validateDockerApiRequest(method, pathname, body, policy);
+  if (verdict.allowed) return undefined;
+
+  return {
+    allowed: false,
+    risk: "critical",
+    reason: verdict.reason ?? `Docker API ${method} ${pathname} is blocked`,
+    warnings: [
+      `Critical risk: ${verdict.reason ?? "Docker API call blocked by policy"}`,
+      ...(verdict.violation ? [`violation: ${verdict.violation}`] : []),
+    ],
+    requiresConfirmation: false,
+    category: "container",
+  };
+}
+
+/** Whether a target path escapes the workspace root (ported `checkWorkspaceEscape`). */
 export function detectWorkspaceEscape(
   targetPath: string,
   workspacePath: string,
@@ -394,7 +472,10 @@ export function detectWorkspaceEscape(
   };
 }
 
-export function assessCommand(command: string): CommandRiskAssessment {
+export function assessCommand(
+  command: string,
+  options: { dockerGuard?: DockerProxyPolicy } = {},
+): CommandRiskAssessment {
   const trimmed = command.trim();
   if (!trimmed) {
     return {
@@ -436,6 +517,11 @@ export function assessCommand(command: string): CommandRiskAssessment {
       };
     }
   }
+
+  // 2b. Docker Engine API calls made directly (curl/podman socket), where the CLI
+  // rules above never see the `docker` subcommand. `docker-api-guard.ts` decides.
+  const apiAssessment = assessDockerApiCall(trimmed, options.dockerGuard);
+  if (apiAssessment) return apiAssessment;
 
   // 3. Check dangerous (requires human confirmation, blocked from automatic YOLO execution)
   for (const item of DANGEROUS_PATTERNS) {
@@ -490,8 +576,10 @@ export function assessCommand(command: string): CommandRiskAssessment {
 export function assessCommandCached(
   command: string,
   cache: CommandRiskCache | null = defaultCommandRiskCache,
+  options: { dockerGuard?: DockerProxyPolicy } = {},
 ): CommandRiskAssessment {
-  if (!cache) return assessCommand(command);
+  // The Docker API policy changes verdicts, so it bypasses the shared cache.
+  if (!cache || options.dockerGuard) return assessCommand(command, options);
   const cached = cache.get(command);
   if (cached) return cached;
   const assessment = assessCommand(command);
@@ -516,7 +604,9 @@ export function assessToolCall(
         : input && typeof input === "object"
           ? String((input as Record<string, unknown>).command ?? "")
           : "";
-    const assessment = assessCommandCached(command, options.cache);
+    const assessment = assessCommandCached(command, options.cache, {
+      dockerGuard: options.dockerGuard,
+    });
     if (
       options.workspacePath &&
       (assessment.risk === "critical" || assessment.risk === "dangerous")

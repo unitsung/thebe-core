@@ -11,11 +11,9 @@ import { permissionRisk, summarizeArgs } from "../../../agent/security/redaction
 import { createExplicitResourceLoader } from "../sdk/explicit-loader.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 import { sanitizeBashEnv } from "../../../agent/security/process-env.ts";
-import {
-  sandboxModeFromEnv,
-  sandboxNetworkFromEnv,
-  wrapCommandForSandbox,
-} from "../../../agent/security/command-sandbox.ts";
+import { wrapCommandForSandbox } from "../../../agent/security/command-sandbox.ts";
+import { resolveScenarioSettings } from "../../../agent/security/scenario-profile.ts";
+import { createGondolinBashOperations } from "../../gondolin/bash-operations.ts";
 import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
 import { toPiTool } from "./pi-tools.ts";
@@ -195,13 +193,21 @@ export async function openPiSession(
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
-  const bashOperations = backgroundTasks.wrap(sdk.createLocalBashOperations());
+  const sandbox = resolveScenarioSettings();
+  const workspacePath = create.cwd ?? cwd;
+  const baseBashOperations = backgroundTasks.wrap(sdk.createLocalBashOperations());
+  const gondolinBash =
+    sandbox.sandboxMode === "gondolin"
+      ? createGondolinBashOperations({
+          workspacePath,
+          allowedHosts: sandbox.sandboxNetwork ? undefined : [],
+        })
+      : undefined;
+  const bashOperations = gondolinBash ?? baseBashOperations;
   // `THEBE_SANDBOX=bwrap` jails bash in a bubblewrap namespace: read-only host,
   // ephemeral /tmp, one writable workspace. Off by default (and it degrades to
   // the raw command when bwrap is missing, e.g. on macOS).
-  const sandboxMode = sandboxModeFromEnv();
-  const sandboxNetwork = sandboxNetworkFromEnv();
-  const sanitizedBash = sdk.createBashTool(create.cwd ?? cwd, {
+  const sanitizedBash = sdk.createBashTool(workspacePath, {
     operations: bashOperations,
     spawnHook: (ctx: {
       command: string;
@@ -209,9 +215,10 @@ export async function openPiSession(
       env: Record<string, string | undefined>;
     }) => {
       const wrapped = wrapCommandForSandbox(ctx.command, {
-        mode: sandboxMode,
-        workspacePath: create.cwd ?? cwd,
-        allowNetwork: sandboxNetwork,
+        mode: sandbox.sandboxMode,
+        workspacePath,
+        allowNetwork: sandbox.sandboxNetwork,
+        image: process.env.THEBE_SANDBOX_IMAGE?.trim() || undefined,
       });
       // bwrap re-enters the workspace with --chdir, so ctx.cwd stays the
       // tool's own working directory.
@@ -264,7 +271,7 @@ export async function openPiSession(
   });
   live.set(session.sessionId, session as PiSession);
   sessionToolControllers.set(session as object, controllers);
-  return wrapPiSession(
+  const wrappedSession = wrapPiSession(
     session as PiSession,
     create,
     listeners,
@@ -276,4 +283,13 @@ export async function openPiSession(
     backgroundTasks,
     bashOperations,
   );
+  if (!gondolinBash) return wrappedSession;
+  // Pi's dispose is synchronous, so the Micro-VM is torn down best-effort
+  // (its lifetime is the session; the VM is disposable either way).
+  const dispose = wrappedSession.dispose.bind(wrappedSession);
+  wrappedSession.dispose = () => {
+    dispose();
+    void gondolinBash.dispose();
+  };
+  return wrappedSession;
 }

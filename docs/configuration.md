@@ -195,6 +195,7 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
 - Docker/Podman 命令另有一层容器守卫（`src/agent/security/docker-command-guard.ts`）：特权容器 + 宿主根挂载、宿主根 bind mount、`--privileged`、docker.sock 挂载、volume prune。
 - 存储系统识别：ZFS / Btrfs / EXT4（含 xfs/f2fs）/ NTFS / NFS，判定结果会带在 `storageSystem` 上。
 - 工作区越界：写工作区外路径、或 `rm/mv/cp/chmod/chown` 等改动工作区外路径，都会升级为 `dangerous`。
+- 直接打 Docker Engine API 的调用（`curl --unix-socket /var/run/docker.sock ... /containers/create`、podman remote）走 `docker-api-guard.ts`：`HostConfig.Privileged=true`、`Binds` 里的宿主根 / `docker.sock`、`CapAdd: SYS_ADMIN|ALL`、`/volumes/prune` 与 `/system/prune` 一律 `critical`（策略拒绝）；`/containers/create` 的 body 解析不出来时降级为 `dangerous`（转人工）而不是放行。
 - `THEBE_COMMAND_GUARD=off` 完全关闭这层守卫，恢复“一切靠审批”。
 - 小模型安全复核不复用这里的启发式：它是 `Judgment Model`（见下节，默认关闭）。
 
@@ -210,6 +211,46 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
 
 默认关闭；开启但宿主没有 `bwrap`（例如 macOS、普通容器）时会退回不加沙箱执行，并记录 warning。
 推荐组合（NAS 严格模式）：`THEBE_SANDBOX=bwrap` + `THEBE_SANDBOX_NETWORK=deny` + 保持 `THEBE_COMMAND_GUARD` 默认开启。
+
+### 其它后端（docker / seatbelt）
+
+同一层还提供两种宿主无关/开发机可用的后端（`wrapCommandForSandbox` 按 `THEBE_SANDBOX` 分派）：
+
+- `THEBE_SANDBOX=docker`：一次性容器执行——`--rm --read-only --tmpfs /tmp`、
+  `--cap-drop ALL --security-opt no-new-privileges`、默认 `--network none`、只把工作区
+  `-v ws:ws:rw` 挂进去，镜像用 `THEBE_SANDBOX_IMAGE`（默认 `alpine:3`）。
+  适合有 Docker 守护进程的 NAS/宿主；没有守护进程时退回本地执行并记录 warning。
+- `THEBE_SANDBOX=seatbelt`：macOS 开发机用 `sandbox-exec` + 生成的 profile（路径按 `realpath`
+  规范化，兼容 `/var/folders` → `/private/var/folders`）；写只允许工作区与 `TMPDIR`，
+  默认拒绝网络。有真实进程级测试（越界写入被拒 + 断网被拒），`pnpm test` 覆盖。
+- `sandboxAvailability()` 可以自检当前宿主能跑哪些后端（`off/bwrap/docker/seatbelt/gondolin`）。
+
+### 微虚拟机沙箱（可选）
+
+`THEBE_SANDBOX=gondolin` 改走硬件虚拟化隔离：`src/adapters/gondolin/runner.ts`（`/workspace` 挂载 + 越狱路径直接抛错）
+提供 VM 生命周期，`bash-operations.ts` 把它接成 `bash` 工具的执行后端，每条命令在一次性 Micro-VM 内运行，随会话销毁。
+需要自备运行时：`pnpm add @earendil-works/gondolin` + QEMU/KVM；未安装时初始化报明确错误，**不会**静默退回本地执行。
+`THEBE_SANDBOX_NETWORK=deny` 时 VM 只拿到空的出口白名单。
+
+## 部署情景（Scenario Profile）
+
+`src/agent/security/scenario-profile.ts`（移植自重构前的 `src/policy/scenario-profile.ts`）把多层开关打包成情景：
+
+| 情景 | 命令守卫 | 工作区越界 | 沙箱 | Docker 守卫 |
+| --- | --- | --- | --- | --- |
+| `nas-strict` | 开 | 禁止 | `bwrap` | 全开（含 volume prune） |
+| `homelab-host` | 开 | 允许 | 关 | 只挡宿主根挂载 + volume prune |
+| `microvm-sandbox` | 开 | 禁止 | `gondolin` + 断网 | 全开 |
+| `yolo-guarded` | 开 | 禁止 | `bwrap` | 全开 |
+
+```bash
+export THEBE_SCENARIO=nas-strict   # 等价于照抄上表
+```
+
+- 显式 `THEBE_*` 永远覆盖情景取值（`THEBE_SANDBOX=off` 可以只推翻沙箱这一项）；
+- 不设 `THEBE_SCENARIO` 时保留原有默认（守卫开、沙箱关、联网、禁止越界）；
+- `THEBE_ALLOW_WORKSPACE_ESCAPES=true` 单独放开工作区越界（`homelab-host` 情景的取值）；
+- 情景只是预设，不是第二套安全引擎：判定仍由命令守卫 / 沙箱 / Docker 守卫各自完成。
 
 ## Judgment Model（默认关闭）
 
