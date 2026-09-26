@@ -1,0 +1,42 @@
+# Supported Core deployment shape (docs/DEPLOYMENT.md, ADR 0002).
+#
+#   cd deploy
+#   cp .env.example .env       # set THEBE_TOKEN, THEBE_ALLOWED_HOSTS, THEBE_WORKSPACE
+#   docker compose up -d --build
+#
+# The HTTP port is published on loopback only. Terminate TLS with Tailscale
+# Serve/Funnel or a reverse proxy on the host; never publish Core directly to
+# the internet, and never send the token over plaintext off-host traffic.
+services:
+  thebe-core:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: thebe-core:0.1.0
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      THEBE_HOST: 0.0.0.0
+      THEBE_PORT: 8787
+      THEBE_CONFIG_DIR: /data/config
+      THEBE_AGENT_DIR: /data/agent
+      THEBE_AGENT_STORE_DIR: /data/store
+      THEBE_OUTPUT_DIR: /data/outputs
+      THEBE_WORKSPACE_DIR: /workspace
+      HOME: /data/home
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - ./data:/data
+      - ${THEBE_WORKSPACE:?set THEBE_WORKSPACE in deploy/.env}:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The image already declares the healthcheck (GET /v1/health with
+    # X-Thebe-Token); keep it in one place so the two cannot drift apart.

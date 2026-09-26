@@ -1,0 +1,14 @@
+# Keep the build context to the sources the image actually needs.
+.git
+.github
+.thebe
+node_modules
+dist
+build
+docs
+deploy
+*.log
+.env
+.env.local
+.env.*.local
+.DS_Store

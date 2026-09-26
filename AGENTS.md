@@ -8,6 +8,8 @@ Build and maintain Thebe Core: a terminal-first coding and homelab agent whose c
 
 For the current implementation order and App-facing runtime/API work, read **`docs/CORE-ITERATION-PLAN.md`** before starting a new product capability. After the 2026-09-18 product HTTP slice, read **`docs/CORE-PRODUCT-HTTP.md`** for shipped routes versus leftover P2/App/non-ships.
 
+For deployment, release, or operations work, read **`docs/DEPLOYMENT.md`** (supported container shape, production configuration, upgrade/rollback, backup/restore, release gate).
+
 Always use Context7 when library/API documentation, code generation, setup, or configuration steps are needed, without waiting for an explicit request. Resolve every external API through Context7 before writing or calling it; when Context7 has no entry, read the vendor's current official documentation and use that API.
 
 ## Working loop
