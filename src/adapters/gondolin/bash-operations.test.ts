@@ -19,7 +19,7 @@ describe("Gondolin bash backend", () => {
 
     expect(result.exitCode).toBe(0);
     expect(chunks.join("")).toContain("hello from vm");
-    expect(vm.instance.exec).toHaveBeenCalledWith("uname -a");
+    expect(vm.instance.exec).toHaveBeenCalledWith("uname -a", { cwd: "/workspace" });
 
     await operations.dispose();
     expect(vm.instance.close).toHaveBeenCalled();

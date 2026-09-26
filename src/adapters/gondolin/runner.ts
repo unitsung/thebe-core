@@ -1,14 +1,21 @@
 /**
  * Gondolin Micro-VM runner (isolation layer 3).
  *
- * Ported from the pre-refactor `src/sandbox/gondolin-runner.ts`: a disposable
- * hardware-virtualized VM for untrusted scripts, with the workspace mounted at
- * `/workspace` and the same escape check as the jail. The VM provider is
- * injectable, so the class is testable without QEMU/KVM; `bash-operations.ts`
- * wires it to the bash tool behind `THEBE_SANDBOX=gondolin`.
+ * Ported from the pre-refactor `src/sandbox/gondolin-runner.ts` and aligned with
+ * `@earendil-works/gondolin` 0.12: a disposable hardware-virtualized VM for
+ * untrusted scripts, with the host workspace mounted (through `RealFSProvider`)
+ * at `/workspace` and the same escape check as the file jail. HTTP egress is
+ * mediated by `createHttpHooks`, so `allowedHosts` doubles as the network policy.
+ *
+ * The VM provider is injectable, so the class stays testable without QEMU;
+ * `bash-operations.ts` wires it to the bash tool behind `THEBE_SANDBOX=gondolin`.
+ * Guest images are fetched on first boot and cached under `~/.cache/gondolin`.
  */
 
 import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+
+const GUEST_WORKSPACE = "/workspace";
+const SESSION_LABEL = "thebe-sandbox";
 
 export interface GondolinExecResult {
   exitCode: number;
@@ -19,11 +26,23 @@ export interface GondolinExecResult {
 
 export interface GondolinRunnerOptions {
   workspacePath: string;
+  /** Guest HTTP allowlist; `[]` denies all egress, undefined allows every host. */
   allowedHosts?: string[];
   secrets?: Record<string, { hosts: string[]; value?: string }>;
+  /** Guest image selector (`GONDOLIN_DEFAULT_IMAGE`), default `alpine-base:latest`. */
   image?: string;
   timeoutMs?: number;
 }
+
+/** Minimal structural view of the gondolin API the runner relies on. */
+type GondolinModule = {
+  VM: { create(options?: Record<string, unknown>): Promise<IMicroVMInstance> };
+  RealFSProvider: new (rootPath: string) => unknown;
+  createHttpHooks: (options?: Record<string, unknown>) => {
+    httpHooks: unknown;
+    env: unknown;
+  };
+};
 
 /**
  * Maps a local host path into the Micro-VM /workspace path.
@@ -49,7 +68,10 @@ export function toGuestWorkspacePath(localWorkspace: string, targetPath: string)
  * Interface representing an active Micro-VM instance.
  */
 export interface IMicroVMInstance {
-  exec(command: string | string[]): Promise<{ exitCode: number; stdout: string; stderr: string }>;
+  exec(
+    command: string | string[],
+    options?: { cwd?: string; signal?: AbortSignal },
+  ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   close(): Promise<void>;
 }
 
@@ -69,8 +91,9 @@ export class GondolinMicroVMRunner {
   }
 
   /**
-   * Initializes the Micro-VM.
-   * If real @earendil-works/gondolin is present, creates real VM; otherwise uses provider or mock.
+   * Initializes the Micro-VM: the injected provider for tests, otherwise the
+   * real `@earendil-works/gondolin` package. Failures are surfaced with the fix
+   * instead of silently running commands on the host.
    */
   async init(customVmProvider?: () => Promise<IMicroVMInstance>): Promise<void> {
     if (this.activeVm) {
@@ -83,23 +106,36 @@ export class GondolinMicroVMRunner {
     }
 
     try {
-      // Dynamic import to allow running on systems without native gondolin installed
-      const gondolin = await import("@earendil-works/gondolin" as string);
-      const { VM, createHttpHooks } = gondolin as any;
-
-      const { httpHooks, env } = createHttpHooks({
-        allowedHosts: this.options.allowedHosts,
-        secrets: this.options.secrets,
+      const gondolin = (await import("@earendil-works/gondolin")) as unknown as GondolinModule;
+      const { httpHooks, env } = gondolin.createHttpHooks({
+        ...(this.options.allowedHosts ? { allowedHosts: this.options.allowedHosts } : {}),
+        ...(this.options.secrets ? { secrets: this.options.secrets } : {}),
       });
-
-      this.activeVm = await VM.create({
+      if (this.options.image) {
+        process.env.GONDOLIN_DEFAULT_IMAGE = this.options.image;
+      }
+      const vm = await gondolin.VM.create({
         httpHooks,
         env,
-        image: this.options.image,
+        vfs: {
+          mounts: {
+            [GUEST_WORKSPACE]: new gondolin.RealFSProvider(
+              resolve(this.options.workspacePath),
+            ),
+          },
+        },
+        ...(this.options.timeoutMs ? { startTimeoutMs: this.options.timeoutMs } : {}),
+        sessionLabel: SESSION_LABEL,
       });
-    } catch {
+      this.activeVm = vm;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
-        "Gondolin Micro-VM runtime is not installed. Run 'pnpm add @earendil-works/gondolin' and ensure QEMU/KVM is available.",
+        "Gondolin Micro-VM is unavailable. Install it with " +
+          "`pnpm add -O @earendil-works/gondolin@0.12.0` and provide a VM backend " +
+          "(bundled krun runner, or QEMU: `brew install qemu` on macOS, " +
+          "`apt install qemu-system-arm` on Linux). " +
+          `Underlying error: ${detail}`,
       );
     }
   }
@@ -107,13 +143,18 @@ export class GondolinMicroVMRunner {
   /**
    * Executes a command safely inside the Micro-VM.
    */
-  async exec(command: string): Promise<GondolinExecResult> {
+  async exec(command: string, signal?: AbortSignal): Promise<GondolinExecResult> {
     if (!this.activeVm) {
       throw new Error("Micro-VM is not initialized. Call init() first.");
     }
 
     const startMs = Date.now();
-    const res = await this.activeVm.exec(command);
+    // Run from the mounted workspace so shell commands behave like the jailed
+    // backends (`bwrap --chdir`).
+    const res = await this.activeVm.exec(command, {
+      cwd: GUEST_WORKSPACE,
+      ...(signal ? { signal } : {}),
+    });
     return {
       exitCode: res.exitCode,
       stdout: res.stdout,

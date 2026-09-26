@@ -225,12 +225,31 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
   默认拒绝网络。有真实进程级测试（越界写入被拒 + 断网被拒），`pnpm test` 覆盖。
 - `sandboxAvailability()` 可以自检当前宿主能跑哪些后端（`off/bwrap/docker/seatbelt/gondolin`）。
 
-### 微虚拟机沙箱（可选）
+### 微虚拟机沙箱（gondolin，已实测可用）
 
-`THEBE_SANDBOX=gondolin` 改走硬件虚拟化隔离：`src/adapters/gondolin/runner.ts`（`/workspace` 挂载 + 越狱路径直接抛错）
-提供 VM 生命周期，`bash-operations.ts` 把它接成 `bash` 工具的执行后端，每条命令在一次性 Micro-VM 内运行，随会话销毁。
-需要自备运行时：`pnpm add @earendil-works/gondolin` + QEMU/KVM；未安装时初始化报明确错误，**不会**静默退回本地执行。
-`THEBE_SANDBOX_NETWORK=deny` 时 VM 只拿到空的出口白名单。
+`THEBE_SANDBOX=gondolin` 走硬件虚拟化隔离：`src/adapters/gondolin/runner.ts` 用一个一次性的
+Gondolin micro-VM（QEMU 后端）执行 bash，宿主工作区通过 `RealFSProvider` 挂到 guest 的
+`/workspace`（命令默认在该目录执行，越出工作区的路径会直接抛错），HTTP 出口由
+`createHttpHooks` 中介（`THEBE_SANDBOX_NETWORK=deny` → 空白名单＝断网）。
+`bash-operations.ts` 把它接成 `bash` 工具的执行后端，VM 随会话创建/销毁，`dispose()` 回收。
+
+安装（已验证的步骤）：
+
+```bash
+# 1) 包本体（Core 已把它列为 optionalDependency，可跳过）
+npx pnpm@11.25.0 add -O @earendil-works/gondolin@0.12.0
+# 2) VM 后端：QEMU（macOS）
+brew install qemu                     # Linux: sudo apt install qemu-system-arm
+# 3) 首次启动自动下载 guest 镜像（约 200MB），缓存在 ~/.cache/gondolin/images/
+THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe
+```
+
+- `GONDOLIN_DEFAULT_IMAGE` 选择 guest 镜像（默认 `alpine-base:latest`），`GondolinRunnerOptions.image`
+  会写进该环境变量；`timeoutMs` 映射为启动超时。
+- 缺包或缺 QEMU 时初始化报明确错误（含修复命令），**不会**静默退回本地执行。
+- 实测：`THEBE_GONDOLIN_IT=1 npx vitest run src/adapters/gondolin` 会真的起 VM 跑命令
+  （guest `uname` 返回 Alpine 内核、宿主机 `/workspace` 文件可读写、guest 看不到宿主根目录）；
+  `pi-session.test.ts` 也在 `THEBE_SANDBOX=gondolin` 下验证了 bash 工具确实走 VM。
 
 ## 部署情景（Scenario Profile）
 

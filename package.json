@@ -44,5 +44,8 @@
   },
   "bin": {
     "thebe": "./dist/cli.js"
+  },
+  "optionalDependencies": {
+    "@earendil-works/gondolin": "0.12.0"
   }
 }

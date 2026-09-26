@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +31,17 @@ function emptyProvider(): ContainerInfoProvider {
       throw new Error("summary not used");
     },
   };
+}
+
+function gondolinMicroVmAvailable(): boolean {
+  try {
+    // The micro-VM needs the package plus a VM backend (QEMU images).
+    require.resolve("@earendil-works/gondolin");
+    const probe = spawnSync("qemu-img", ["--version"], { stdio: "ignore" });
+    return probe.status === 0;
+  } catch {
+    return false;
+  }
 }
 
 async function piWithFaux(sessionDir?: string) {
@@ -188,13 +200,21 @@ describe("PiCodingAgentRuntime sessions", () => {
       });
       const session = await agent.createSession();
 
-      // @earendil-works/gondolin is an optional runtime dependency, so the VM
-      // backend must fail loudly instead of silently executing on the host.
+      // @earendil-works/gondolin is an optional runtime dependency: when the
+      // package and a VM backend are present the command runs inside the guest;
+      // otherwise the tool call must fail loudly instead of touching the host.
       await expect(
         agent.send("run uname in the vm", session.thebeSessionId),
       ).resolves.toMatchObject({ text: "done" });
-      const messages = await agent.loadMessages(session.thebeSessionId);
-      expect(JSON.stringify(messages)).toContain("Gondolin Micro-VM runtime is not installed");
+      const transcript = JSON.stringify(
+        await agent.loadMessages(session.thebeSessionId),
+      );
+      if (gondolinMicroVmAvailable()) {
+        expect(transcript).toContain("Linux");
+        expect(transcript).toContain("toolName\":\"bash");
+      } else {
+        expect(transcript).toContain("Gondolin Micro-VM is unavailable");
+      }
     } finally {
       if (previous === undefined) delete process.env.THEBE_SANDBOX;
       else process.env.THEBE_SANDBOX = previous;

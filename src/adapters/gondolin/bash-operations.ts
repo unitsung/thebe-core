@@ -61,7 +61,7 @@ export function createGondolinBashOperations(
         ? runner.init(options.vmProvider)
         : runner.init();
       await ready;
-      const result = await runner.exec(command);
+      const result = await runner.exec(command, execOptions.signal);
       if (result.stdout) execOptions.onData(Buffer.from(result.stdout));
       if (result.stderr) execOptions.onData(Buffer.from(result.stderr));
       return { exitCode: result.exitCode };
