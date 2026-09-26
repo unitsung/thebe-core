@@ -2,6 +2,10 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
+import {
+  arcaneEnvironmentIdFromEnv,
+  createArcaneBackgroundTaskProviderFromEnv,
+} from "../adapters/arcane/tasks.ts";
 import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { createThebeApp } from "./create.ts";
@@ -126,12 +130,18 @@ export async function bootstrapThebe(
     await applyThebeApiKey(runtime.auth(), "anthropic", anthropicKey);
   }
 
+  const arcaneEnvironmentId = arcaneEnvironmentIdFromEnv();
   const provider: ContainerInfoProvider =
     baseUrl && arcaneKey
-      ? new ArcaneAdapter({ baseUrl, apiKey: arcaneKey })
+      ? new ArcaneAdapter({
+          baseUrl,
+          apiKey: arcaneKey,
+          ...(arcaneEnvironmentId ? { environmentId: arcaneEnvironmentId } : {}),
+        })
       : stubProvider();
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
   const openListBackgroundTaskProvider = createOpenListBackgroundTaskProviderFromEnv();
+  const arcaneBackgroundTaskProvider = createArcaneBackgroundTaskProviderFromEnv();
 
   const version = readPackageVersion(fromDir);
   const agentStoreDir =
@@ -178,9 +188,10 @@ export async function bootstrapThebe(
     judgmentSites,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     strmRepairProvider,
-    backgroundTaskProviders: openListBackgroundTaskProvider
-      ? [openListBackgroundTaskProvider]
-      : [],
+    backgroundTaskProviders: [
+      ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
+      ...(openListBackgroundTaskProvider ? [openListBackgroundTaskProvider] : []),
+    ],
   });
 
   return {

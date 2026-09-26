@@ -18,9 +18,9 @@ metadata/content HTTP reads. Activity now includes durable read-only Diagnosis,
 Capability Run, Worker, and Core-owned Background Task items; cursorable
 aggregation and source/status/time filters are now available. Pi detached Bash
 jobs are registered at the adapter seam and their bounded snapshots survive
-runtime recreation; OpenList provider-native task discovery/control now joins
-the Activity source seam, while other provider-native task sources remain
-future producers.
+runtime recreation; OpenList provider-native task discovery/control and Arcane
+provider activity discovery/control now join the Activity source seam, while
+further provider-native task sources remain future producers.
 
 This spec turns the remaining Core product-contract work into one executable
 backlog. The highest seam is `ThebeAgent` and its product HTTP delivery; the
@@ -35,8 +35,9 @@ inspect and trust those objects:
 - the effective Agent settings query/update contract is shipped, but client
   adoption and contract hardening continue;
 - capability runs, Goals, Workers, and Core-owned background tasks have durable
-  recovery semantics, while OpenList provider tasks are read from their own
-  durable source and other provider-native task sources remain optional;
+  recovery semantics, while OpenList and Arcane provider tasks are read from
+  their own durable source and further provider-native task sources remain
+  optional;
 - the bounded Artifact contract has operation-receipt, Diagnosis, resource-list,
   direct/background Capability result, Goal report, and Worker report producers,
   while provider-native Artifact producers remain future work;
@@ -259,13 +260,14 @@ Implementation status and remaining order:
 2. ✅ enabled-resource and permission-mode durability;
 3. ✅ Artifact model/store with operation-receipt, Diagnosis, enabled-resource
    snapshot, direct/background Capability result, terminal Goal report, and
-   terminal Worker report producers; ✅ OpenList provider task discovery/control;
-   🟡 additional provider-native task producers remain;
+   terminal Worker report producers; ✅ OpenList provider task discovery/control
+   and Arcane provider activity discovery/control; 🟡 additional provider-native
+   task producers remain;
 4. ✅ capability/Goal/Worker recovery normalization for the current sources;
    🟡 provider-native task recovery remains;
 5. 🟡 unified Activity read model and OpenAPI/client contract hardening; the
    current slice includes capability runs, Workers, Core-owned detached Bash
-   Background Tasks, OpenList provider tasks, cursor pagination, and
+   Background Tasks, OpenList and Arcane provider tasks, cursor pagination, and
    source/status/time filters. Broader App adoption and additional producers
    remain.
 

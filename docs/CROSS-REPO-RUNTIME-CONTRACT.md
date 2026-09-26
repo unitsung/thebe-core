@@ -29,7 +29,7 @@ The following HTTP product objects are implemented on `dev` and are the current 
 - **Audit log:** `GET /v1/audit` returns bounded, newest-first, redacted audit records with optional `sessionId`, `method`, `result`, and cursor filters; `GET /v1/audit/{id}` reads one stable record. It never returns raw tool parameters.
 - **Push device registration:** `GET /v1/devices` lists token-redacted registrations, `POST /v1/devices` upserts an iOS registration, and `DELETE /v1/devices/{registrationId}` removes one. The iOS settings surface now exposes list and remove management; APNs delivery remains an optional external relay.
 
-Leftover (not this slice): broader cross-product hardening and future provider-specific App surfaces, additional provider-native background-task sources beyond OpenList, Goal `/runs` identity rewrite, replacing raw `/mcp`, and a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`; the next durable Core implementation spec is [issue #4](https://github.com/unitsung/thebe-core/issues/4).
+Leftover (not this slice): broader cross-product hardening and future provider-specific App surfaces, additional provider-native background-task sources beyond OpenList and Arcane, Goal `/runs` identity rewrite, replacing raw `/mcp`, and a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`; the next durable Core implementation spec is [issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
 The App must not call raw MCP `tools/call` for these workflows.
 

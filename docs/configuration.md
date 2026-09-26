@@ -136,6 +136,25 @@ OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查�
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
 
+## Arcane 容器 provider 与活动来源
+
+Arcane 提供容器能力（`containers.list` / `containers.inspect` / `container.logs` /
+`host.status`）；配置完整的地址与 API key 后，Core 还会把 Arcane 的
+background activity 注册为 Activity 的后台任务来源（`provider=arcane`）：
+
+```bash
+export ARCANE_BASE_URL=http://127.0.0.1:3552
+export ARCANE_API_KEY=your-arcane-api-key
+export ARCANE_ENVIRONMENT_ID=0   # 可选；0 是 Arcane 的本地环境
+```
+
+`THEBE_ARCANE_BASE_URL` / `THEBE_ARCANE_API_KEY` / `THEBE_ARCANE_ENVIRONMENT_ID`
+是等价别名。活动来源读取 `/api/environments/{id}/activities`（最近 25 条，倒序），
+映射 `id` / `type` / `name` / 状态与起止时间，错误文本先脱敏再截断；App 上的“停止”
+调用 `/api/environments/{id}/activities/{activityId}/cancel`，activity 已结束时
+Core 返回 409 与 “already finished” 说明（取消需要 Arcane 版本带活动取消能力，
+旧版本返回 404）。缺少凭据时既不暴露容器能力，也不注册该活动来源。
+
 ## Google / Antigravity（OAuth 登录）
 
 `google-antigravity` 走 Google 账号 OAuth，API 为 Cloud Code Assist
