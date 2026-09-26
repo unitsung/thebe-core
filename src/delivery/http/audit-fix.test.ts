@@ -134,7 +134,7 @@ describe("audit remediation", () => {
   it("remember deny for bash is scoped to the command hash", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
-      { kind: "tools", calls: [{ name: "bash", args: { command: "rm -rf /" } }] },
+      { kind: "tools", calls: [{ name: "bash", args: { command: "docker volume prune -f" } }] },
       { kind: "text", text: "after-deny" },
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
       { kind: "text", text: "after-ls" },
@@ -170,6 +170,23 @@ describe("audit remediation", () => {
     });
     const result = await second;
     expect(result.text).toBe("after-ls");
+  });
+
+  it("policy-denies critical commands without creating an approval", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "zpool destroy tank" } }] },
+      { kind: "text", text: "after-denial" },
+    ]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: mockProvider(),
+    });
+
+    const result = await agent.prompt("destroy the pool");
+
+    expect(result.text).toBe("after-denial");
+    expect(agent.pendingPermissionIds()).toHaveLength(0);
   });
 
   it("interrupt denies pending permissions so the run does not hang", async () => {
@@ -314,8 +331,8 @@ describe("audit remediation", () => {
     fake.queueTurns([
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
       { kind: "text", text: "after-ls" },
-      { kind: "tools", calls: [{ name: "bash", args: { command: "rm -rf /" } }] },
-      { kind: "text", text: "after-rm" },
+      { kind: "tools", calls: [{ name: "bash", args: { command: "docker volume prune -f" } }] },
+      { kind: "text", text: "after-prune" },
     ]);
     const agent = createThebeAgent({
       runtime: fake.runtime,
@@ -339,7 +356,7 @@ describe("audit remediation", () => {
       ],
     ).toBe("allow");
 
-    const second = agent.prompt("rm", { thebeSessionId: sessionId });
+    const second = agent.prompt("prune", { thebeSessionId: sessionId });
     await vi.waitFor(() => {
       expect(agent.pendingPermissionIds().length).toBe(1);
     });
@@ -347,7 +364,7 @@ describe("audit remediation", () => {
       response: "deny",
     });
     const result = await second;
-    expect(result.text).toBe("after-rm");
+    expect(result.text).toBe("after-prune");
   });
 
   it("createThebeApp default Host allowlist rejects attacker Origin==Host", async () => {

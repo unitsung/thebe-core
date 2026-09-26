@@ -11,6 +11,11 @@ import { permissionRisk, summarizeArgs } from "../../../agent/security/redaction
 import { createExplicitResourceLoader } from "../sdk/explicit-loader.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 import { sanitizeBashEnv } from "../../../agent/security/process-env.ts";
+import {
+  sandboxModeFromEnv,
+  sandboxNetworkFromEnv,
+  wrapCommandForSandbox,
+} from "../../../agent/security/command-sandbox.ts";
 import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
 import { toPiTool } from "./pi-tools.ts";
@@ -191,16 +196,27 @@ export async function openPiSession(
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
   const bashOperations = backgroundTasks.wrap(sdk.createLocalBashOperations());
+  // `THEBE_SANDBOX=bwrap` jails bash in a bubblewrap namespace: read-only host,
+  // ephemeral /tmp, one writable workspace. Off by default (and it degrades to
+  // the raw command when bwrap is missing, e.g. on macOS).
+  const sandboxMode = sandboxModeFromEnv();
+  const sandboxNetwork = sandboxNetworkFromEnv();
   const sanitizedBash = sdk.createBashTool(create.cwd ?? cwd, {
     operations: bashOperations,
     spawnHook: (ctx: {
       command: string;
       cwd: string;
       env: Record<string, string | undefined>;
-    }) => ({
-      ...ctx,
-      env: sanitizeBashEnv(ctx.env),
-    }),
+    }) => {
+      const wrapped = wrapCommandForSandbox(ctx.command, {
+        mode: sandboxMode,
+        workspacePath: create.cwd ?? cwd,
+        allowNetwork: sandboxNetwork,
+      });
+      // bwrap re-enters the workspace with --chdir, so ctx.cwd stays the
+      // tool's own working directory.
+      return { ...ctx, command: wrapped.command, env: sanitizeBashEnv(ctx.env) };
+    },
   });
   const piCustomTools = [
     ...create.customTools.map((tool) =>

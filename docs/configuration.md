@@ -180,6 +180,37 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
 - pi-ai 的辅助函数（Gemini 消息/工具转换、事件流、成本计算）在运行时从 Pi 自己的依赖树按 URL 载入，
   所以 Core 仍然只依赖 `@earendil-works/pi-coding-agent` 一个包，也不会打包出第二份 pi-ai。
 
+## 命令风险守卫（homelab / NAS 启发式）
+
+`bash`、`write`、`edit` 的审批前会先过一遍命令风险守卫（`src/agent/security/command-risk.ts`，
+规则表来自重构前的 `src/policy/safety-evaluator.ts`），分四档：
+
+| 风险 | 行为 | 例子 |
+|---|---|---|
+| `critical` | **策略直接拒绝**（不会进入审批，模型收到 `denied by policy`） | `rm -rf /`、`/volume1` 等 NAS 数据目录批量删除、`zfs destroy`、`zpool destroy`、`mkfs.*`/`mke2fs`、`ntfsclone --overwrite`、`ntfswipe`、`exportfs -ua`、`mdadm --stop/--zero-superblock`、`fdisk`/`parted`、`dd of=/dev/sdX`、fork bomb、`kill -9 1`、`docker run -v /:... --privileged` |
+| `dangerous` | 仍需人工审批（审批界面显示高风险） | 关机/重启、防火墙清空、`docker rm -f $(ps -aq)`、`docker volume prune -f`、挂载 docker.sock、`ntfsfix`/`ntfsresize`、强制卸载共享存储、停掉 smbd/nfs-server/sshd/docker 服务、写 `/etc/…` 等系统路径、越出工作区写文件或改文件 |
+| `caution` | 允许，记录警号 | 重启/停止容器或系统服务、`chmod -R`/`chown -R`、scrub、`exportfs -a` |
+| `safe` | 正常执行 | 只读检查类命令（`docker ps`、`zpool status` 等） |
+
+- Docker/Podman 命令另有一层容器守卫（`src/agent/security/docker-command-guard.ts`）：特权容器 + 宿主根挂载、宿主根 bind mount、`--privileged`、docker.sock 挂载、volume prune。
+- 存储系统识别：ZFS / Btrfs / EXT4（含 xfs/f2fs）/ NTFS / NFS，判定结果会带在 `storageSystem` 上。
+- 工作区越界：写工作区外路径、或 `rm/mv/cp/chmod/chown` 等改动工作区外路径，都会升级为 `dangerous`。
+- `THEBE_COMMAND_GUARD=off` 完全关闭这层守卫，恢复“一切靠审批”。
+- 小模型安全复核不复用这里的启发式：它是 `Judgment Model`（见下节，默认关闭）。
+
+## 命令沙箱（bubblewrap）
+
+`THEBE_SANDBOX=bwrap` 会把 `bash` 工具包进 bubblewrap 命名空间（`src/agent/security/command-sandbox.ts`，
+移植自重构前的 `src/sandbox/bwrap.ts` + `runner.ts`）：
+
+- 宿主根只读（`--ro-bind / /`）、`/tmp` 用 tmpfs（退出即丢）、`/dev`、`/proc` 重新挂载；
+- **只有工作区可写**（`--bind <workspace> <workspace>` + `--chdir`）；
+- `--unshare-all` 隔离 PID/IPC/UTS/user 命名空间，`--cap-drop ALL` 去能力，`--die-with-parent` 防僵尸；
+- 网络默认保留，`THEBE_SANDBOX_NETWORK=deny` 加 `--unshare-net` 断网。
+
+默认关闭；开启但宿主没有 `bwrap`（例如 macOS、普通容器）时会退回不加沙箱执行，并记录 warning。
+推荐组合（NAS 严格模式）：`THEBE_SANDBOX=bwrap` + `THEBE_SANDBOX_NETWORK=deny` + 保持 `THEBE_COMMAND_GUARD` 默认开启。
+
 ## Judgment Model（默认关闭）
 
 Judgment Model 不是聊天模型服务商，也不绑死在诊断上。默认所有 Site 走各自的传统路径。

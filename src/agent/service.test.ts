@@ -82,6 +82,82 @@ describe("Thebe agent service (fake runtime)", () => {
     })).toBe("ask");
   });
 
+  it("denies critical commands and asks before running dangerous ones", async () => {
+    const fake = createFakeRuntime();
+    const workspace = await mkdtemp(join(tmpdir(), "thebe-command-guard-"));
+    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const runtime = {
+      ...fake.runtime,
+      async createSession(
+        create: Parameters<typeof fake.runtime.createSession>[0],
+      ) {
+        createCalls.push(create);
+        return fake.runtime.createSession(create);
+      },
+    };
+    const agent = createThebeAgent({
+      runtime,
+      provider: emptyProvider(),
+      workspacePath: workspace,
+    });
+
+    await agent.createSession();
+    const preflight = createCalls[0]!.permissionHandler!.preflight!;
+    const bash = (command: string) => ({
+      permissionId: "p",
+      toolName: "bash",
+      toolCallId: "c",
+      args: { command },
+    });
+
+    // Storage destruction and disk writes are policy-denied, not approvable.
+    expect(await preflight(bash("zpool destroy tank"))).toBe("deny");
+    expect(await preflight(bash("mkfs.ext4 /dev/sdb1"))).toBe("deny");
+    expect(await preflight(bash("rm -rf /"))).toBe("deny");
+    // Container breakouts need a human, not an outright denial.
+    expect(await preflight(bash("docker run --privileged nginx"))).toBe("ask");
+    // Ordinary commands keep the pre-guard behaviour of asking for approval.
+    expect(await preflight(bash("ls -la"))).toBe("ask");
+    expect(
+      await preflight({
+        permissionId: "p2",
+        toolName: "write",
+        toolCallId: "c2",
+        args: { path: "/etc/sudoers", content: "x" },
+      }),
+    ).toBe("ask");
+  });
+
+  it("lets THEBE_COMMAND_GUARD=off fall back to plain approvals", async () => {
+    vi.stubEnv("THEBE_COMMAND_GUARD", "off");
+    try {
+      const fake = createFakeRuntime();
+      const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+      const runtime = {
+        ...fake.runtime,
+        async createSession(
+          create: Parameters<typeof fake.runtime.createSession>[0],
+        ) {
+          createCalls.push(create);
+          return fake.runtime.createSession(create);
+        },
+      };
+      const agent = createThebeAgent({ runtime, provider: emptyProvider() });
+      await agent.createSession();
+      const preflight = createCalls[0]!.permissionHandler!.preflight!;
+      expect(
+        await preflight({
+          permissionId: "p",
+          toolName: "bash",
+          toolCallId: "c",
+          args: { command: "zpool destroy tank" },
+        }),
+      ).toBe("ask");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("never treats the host process directory as an implicit workspace", async () => {
     const fake = createFakeRuntime();
     const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];

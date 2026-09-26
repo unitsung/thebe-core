@@ -7,11 +7,17 @@ import {
   asPromptInput,
   type EnabledResource,
   type NormalizedEvent,
+  type PermissionPreflightDecision,
+  type PermissionRequest,
   type PromptInput,
   type RuntimeModelRef,
   type RuntimeSession,
 } from "../runtime/index.ts";
 import { createStreamGuard } from "../../agent/security/stream-guard/stream-guard.ts";
+import {
+  commandGuardEnabled,
+  commandGuardPreflight,
+} from "../security/command-risk.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
@@ -123,6 +129,22 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         workspacePath: undefined,
         async preflight(): Promise<"ask"> { return "ask"; },
       };
+  const commandGuard = commandGuardEnabled();
+  // Critical commands (storage destruction, disk writes, container breakouts)
+  // never reach approval: policy denies them. Dangerous ones still ask, with the
+  // risk raised for the approval UI, and everything else falls through to the
+  // workspace policy.
+  const preflight = async (
+    request: PermissionRequest,
+  ): Promise<PermissionPreflightDecision> => {
+    if (commandGuard) {
+      const guarded = commandGuardPreflight(request.toolName, request.args, {
+        workspacePath,
+      });
+      if (guarded) return guarded;
+    }
+    return workspaceAccess.preflight(request);
+  };
   const policy = createPolicyEngine({
     now,
     maxToolCalls: options.maxToolCalls,
@@ -164,7 +186,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
 
   const permissions = createPermissionControl({
     initialMode: options.permissionMode,
-    preflight: workspaceAccess.preflight,
+    preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,
     lookupRemembered,
     active: () => getActive(),

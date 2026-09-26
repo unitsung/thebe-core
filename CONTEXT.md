@@ -12,6 +12,14 @@ _Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, a dashboard proxy with no 
 Agent-owned replaceable runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; concrete runtime Adapters implement this boundary.
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code
 
+**CommandRisk**:
+Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`). `THEBE_COMMAND_GUARD=off` disables the layer.
+_Avoid_: putting model-based review here (that is `JudgmentModel`), blocking inside the adapter instead of the preflight
+
+**CommandSandbox**:
+Optional bubblewrap jail for the `bash` tool in `src/agent/security/command-sandbox.ts`, enabled by `THEBE_SANDBOX=bwrap`: read-only host, ephemeral `/tmp`, workspace-only writes, dropped capabilities, `THEBE_SANDBOX_NETWORK=deny` for an unshared network. Wrapping happens in the Pi session's bash `spawnHook`; it degrades to the raw command when `bwrap` is absent.
+_Avoid_: forcing the sandbox on by default, sandboxing through the tool layer instead of the spawn hook
+
 **PiCodingAgentRuntime**:
 First `AgentRuntime` implementation. Embeds `@earendil-works/pi-coding-agent` via `createAgentSession`. Must not spawn the Pi CLI.
 _Avoid_: depending on Pi types outside `src/adapters/pi`, wrapping the Pi CLI
