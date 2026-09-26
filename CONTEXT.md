@@ -16,6 +16,10 @@ _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`,
 First `AgentRuntime` implementation. Embeds `@earendil-works/pi-coding-agent` via `createAgentSession`. Must not spawn the Pi CLI.
 _Avoid_: depending on Pi types outside `src/adapters/pi`, wrapping the Pi CLI
 
+**Pi version pin**:
+`@earendil-works/pi-coding-agent`, `pi-server`, `pi-tui` (dependencies) and `pi-ai` (dev) are pinned together (currently `0.87.1`) and listed in `pnpm-workspace.yaml#minimumReleaseAgeExclude`. Pi's dist is loaded by URL from its own `node_modules` (`src/adapters/pi/sdk/load-pi.ts`), including `pi-ai` for providers that need its helpers, so Core never depends on pi-ai directly and never bundles a second copy. Provider streams receive a normalized transcript (`getCurrentSystemPrompt` / `getCurrentTools`), not `context.systemPrompt`/`context.tools`.
+_Avoid_: bumping one Pi package alone, importing pi-ai outside `src/adapters/pi`, reading `context.systemPrompt` in a provider
+
 **MCP Integration**:
 External capability Adapter in `src/adapters/mcp`. It discovers and invokes configured command- or URL-based MCP servers; the Agent owns the stable MCP extension Interface in `src/agent/extensions/mcp`, and HTTP/TUI expose it through `src/delivery`.
 _Avoid_: putting Agent runtime, HTTP routes, TUI commands, or homelab business state inside the MCP Adapter; treating server names as the product API

@@ -8,6 +8,7 @@ import {
   fauxProvider,
   fauxThinking,
   fauxToolCall,
+  getCurrentTools,
 } from "@earendil-works/pi-ai";
 import { describe, expect, it, vi } from "vitest";
 import { createThebeAgent } from "../../../agent/index.ts";
@@ -176,7 +177,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     let modelToolNames: string[] | undefined;
     faux.setResponses([
       (context) => {
-        modelToolNames = context.tools?.map((tool) => tool.name);
+        modelToolNames = getCurrentTools(context.messages).map((tool) => tool.name);
         return fauxAssistantMessage([
           fauxToolCall("grep", { pattern: "needle" }, { id: "call_grep" }),
         ]);
