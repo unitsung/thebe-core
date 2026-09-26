@@ -1,8 +1,9 @@
 import type { RuntimeAuth } from "../agent/runtime/interface.ts";
 
 /**
- * API-key and OAuth lifecycle stay on the runtime (Pi ModelRuntime).
- * Thebe does not store or refresh OAuth tokens.
+ * API-key and OAuth lifecycle stay on the runtime.
+ * Pi keeps its own OAuth tokens; Antigravity credentials are written by the
+ * Google adapter under the agent directory (see `adapters/google/antigravity.ts`).
  */
 export async function applyThebeApiKey(
   auth: RuntimeAuth,

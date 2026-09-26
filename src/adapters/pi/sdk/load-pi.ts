@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -26,6 +26,52 @@ export function piDistDir(): string {
 
 export function piDistUrl(rel: string): string {
   return pathToFileURL(join(piDistDir(), rel)).href;
+}
+
+/**
+ * pi-ai ships inside the Pi agent's own dependency tree (Core pins it as a dev
+ * dependency only), so its dist is resolved the same way as the agent's: walk up
+ * from Core's location and, when the install is pruned (pnpm production), from
+ * the real path of the agent package so pnpm's sibling link is found.
+ */
+export function findPiAiDist(roots: string[]): string | undefined {
+  for (const root of roots) {
+    let dir = root;
+    for (let i = 0; i < 12; i++) {
+      const candidate = join(
+        dir,
+        "node_modules",
+        "@earendil-works",
+        "pi-ai",
+        "dist",
+      );
+      if (existsSync(join(candidate, "index.js"))) {
+        return candidate;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) {
+        break;
+      }
+      dir = parent;
+    }
+  }
+  return undefined;
+}
+
+export function piAiDistDir(): string {
+  const roots = [dirname(fileURLToPath(import.meta.url))];
+  try {
+    roots.push(realpathSync(piDistDir()));
+  } catch {}
+  const found = findPiAiDist(roots);
+  if (!found) {
+    throw new Error("Could not find @earendil-works/pi-ai dist");
+  }
+  return found;
+}
+
+export function piAiDistUrl(rel: string): string {
+  return pathToFileURL(join(piAiDistDir(), rel)).href;
 }
 
 export async function loadPiSdk() {

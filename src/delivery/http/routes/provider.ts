@@ -171,7 +171,13 @@ async function handleProviderAction(
     const models = await agent.listAvailableModels({ providerId });
     const model = models[0];
     if (!model) {
-      return json({ ok: false, message: "no available model to probe" }, 400);
+      // The auth-level probe already reached the provider (that is how
+      // provider-owned sessions such as Antigravity report health); with no
+      // model to run, report that result instead of failing.
+      return json({
+        ok: true,
+        message: authResult.message ?? "provider reachable",
+      });
     }
     try {
       const probed = await agent.testModel({

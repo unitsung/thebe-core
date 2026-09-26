@@ -6,6 +6,16 @@ import type { AgentRuntime } from "../../agent/runtime/interface.ts";
 import { PI_RUNTIME_ID } from "../../agent/runtime/interface.ts";
 import { createPiRuntimeAuth } from "./auth/oauth.ts";
 import {
+  ANTIGRAVITY_PROVIDER_ID,
+  AntigravityCredentialStore,
+  createAntigravityAuth,
+  withAntigravityAuth,
+} from "../google/antigravity.ts";
+import {
+  createAntigravityProvider,
+  loadAntigravityPiAi,
+} from "../google/antigravity-provider.ts";
+import {
   ensureOpencodeFreeAlias,
   modelKey,
   resolveModelRef as resolvePiModel,
@@ -13,7 +23,7 @@ import {
   type PiModelShape,
 } from "./config/model-shape.ts";
 import { syncAgentModelsFile } from "./config/agent-dir.ts";
-import { loadPiSdk, type PiSdk } from "./sdk/load-pi.ts";
+import { loadPiSdk, piAiDistUrl, type PiSdk } from "./sdk/load-pi.ts";
 import { openPiSession, toolControllersFor } from "./session/open-session.ts";
 import { wrapSession as wrapPiSession } from "./session/wrap-session.ts";
 import type { PiSession } from "./session/pi-session.ts";
@@ -85,7 +95,42 @@ export async function createPiCodingAgentRuntime(
     : undefined;
   let quiesced = false;
   const livenessRegistry = new Map<string, () => boolean>();
-  const auth = createPiRuntimeAuth(modelRuntime);
+  // Antigravity keeps its own credential file next to Pi's auth.json so an agent
+  // directory backup carries the Google session too.
+  const antigravityAgentDir =
+    options.agentDir ?? join(process.env.HOME ?? ".", ".thebe", "agent");
+  const antigravityStore = new AntigravityCredentialStore(
+    join(antigravityAgentDir, "antigravity.json"),
+  );
+  // Escape hatch for local proxies and tests; defaults to Google's endpoint.
+  const antigravityEndpoint =
+    process.env.THEBE_ANTIGRAVITY_ENDPOINT?.trim() || undefined;
+  const antigravity = createAntigravityAuth({
+    store: antigravityStore,
+    endpoint: antigravityEndpoint,
+  });
+  const auth = withAntigravityAuth(createPiRuntimeAuth(modelRuntime), antigravity);
+  // Pi dropped its built-in Antigravity provider, so Core registers one on the
+  // same ModelRuntime the sessions use: `provider: "google-antigravity"` then
+  // resolves, lists, and streams like any Pi provider, with auth and models
+  // coming from Core's Google session.
+  const antigravityProvider = createAntigravityProvider({
+    piAi: await loadAntigravityPiAi(piAiDistUrl),
+    store: antigravityStore,
+    endpoint: antigravityEndpoint,
+    credential: (refreshOptions) =>
+      antigravity.credential(ANTIGRAVITY_PROVIDER_ID, refreshOptions),
+    listModels: async () =>
+      (await antigravity.models(ANTIGRAVITY_PROVIDER_ID)).map((model) => ({
+        id: model.modelId,
+        displayName: model.displayName,
+      })),
+  });
+  modelRuntime.registerNativeProvider(
+    antigravityProvider as Parameters<
+      InstanceType<PiSdk["ModelRuntime"]>["registerNativeProvider"]
+    >[0],
+  );
 
   function backgroundTasksFor(runtimeSessionId: string): BackgroundTaskRegistry {
     let registry = backgroundTasks.get(runtimeSessionId);
@@ -223,6 +268,18 @@ export async function createPiCodingAgentRuntime(
     },
     async listModels(query?: { all?: boolean; providerId?: string }) {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+      if (query?.providerId === antigravity.providerId) {
+        // An explicit model listing is the one place Core may reach the network
+        // for models: it refreshes the account's real Antigravity list (login,
+        // app model picker, TUI "fetch models") and caches it in Pi's store.
+        // PI_OFFLINE keeps even this offline.
+        await modelRuntime
+          .refresh({
+            allowNetwork: process.env.PI_OFFLINE === undefined,
+            providers: [antigravity.providerId],
+          })
+          .catch(() => {});
+      }
       const models = (
         query?.providerId
           ? modelRuntime.getModels(query.providerId)
