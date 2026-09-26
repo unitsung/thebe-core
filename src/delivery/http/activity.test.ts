@@ -242,6 +242,7 @@ describe("GET /v1/activity", () => {
                 status: "running" as const,
                 startedAt: "2026-09-22T01:00:00Z",
                 updatedAt: "2026-09-22T01:00:00Z",
+                resource: { kind: "file", id: "/movies/dune.mkv" },
               },
             ];
           },
@@ -272,6 +273,7 @@ describe("GET /v1/activity", () => {
           provider: "openlist",
           kind: "copy",
           name: "OpenList copy",
+          resource: { kind: "file", provider: "openlist", id: "/movies/dune.mkv" },
         }),
       }),
     ]);
@@ -534,7 +536,11 @@ describe("GET /v1/activity", () => {
             provider: { type: "string" },
             kind: { type: "string" },
             error: { type: "string" },
+            resource: { $ref: "#/components/schemas/ProductBackgroundTaskResource" },
           }),
+        }),
+        ProductBackgroundTaskResource: expect.objectContaining({
+          required: ["kind", "provider", "id"],
         }),
       }),
     );

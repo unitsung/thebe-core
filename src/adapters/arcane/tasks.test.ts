@@ -69,6 +69,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
           type: "image_pull",
           status: "running",
           resourceType: "container",
+          resourceId: "ctr-42",
           resourceName: "immich-server",
           progress: 42,
           latestMessage: "Pulling image layers",
@@ -103,6 +104,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
           id: "act-5",
           type: "system_prune",
           status: "cancelled",
+          resourceType: "system",
           startedAt: "2026-09-25T20:00:00Z",
           endedAt: "2026-09-25T20:00:30Z",
         },
@@ -126,6 +128,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
         status: "running",
         startedAt: "2026-09-26T01:00:00Z",
         updatedAt: "2026-09-26T01:02:00Z",
+        resource: { kind: "container", id: "ctr-42" },
       }),
       expect.objectContaining({
         id: "act-2",
@@ -162,6 +165,11 @@ describe("ArcaneBackgroundTaskProvider", () => {
         status: "stopped",
         updatedAt: "2026-09-25T19:00:10Z",
       }),
+    ]);
+    // Only activities that name a resource id get a link; a kind alone is not
+    // enough to guess a target.
+    expect(tasks.filter((task) => task.resource !== undefined).map((task) => task.id)).toEqual([
+      "act-1",
     ]);
     expect(requests).toEqual([
       {

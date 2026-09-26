@@ -1,5 +1,13 @@
 import type { BackgroundTask } from "../runtime/interface.ts";
 
+/** Provider-native handle for the resource a task belongs to. */
+export type ProviderBackgroundTaskResource = {
+  /** Provider-native kind, lowercased, e.g. `container`. */
+  kind: string;
+  /** Provider-native resource id. */
+  id: string;
+};
+
 export type ProviderBackgroundTask = {
   id: string;
   kind?: string;
@@ -9,6 +17,7 @@ export type ProviderBackgroundTask = {
   finishedAt?: string;
   updatedAt?: string;
   error?: string;
+  resource?: ProviderBackgroundTaskResource;
 };
 
 export type ProductBackgroundTaskProvider = {
@@ -16,6 +25,11 @@ export type ProductBackgroundTaskProvider = {
   list(): Promise<ProviderBackgroundTask[]>;
   stop(taskId: string): Promise<void>;
   stopAll(): Promise<void>;
+};
+
+export type ProductBackgroundTaskResource = ProviderBackgroundTaskResource & {
+  /** Provider that owns the resource, e.g. `arcane`. */
+  provider: string;
 };
 
 export type ProductBackgroundTask = {
@@ -31,6 +45,7 @@ export type ProductBackgroundTask = {
   finishedAt?: string;
   updatedAt: string;
   error?: string;
+  resource?: ProductBackgroundTaskResource;
 };
 
 export function toProductBackgroundTask(
@@ -73,6 +88,15 @@ export function toProductProviderBackgroundTask(
     ...(task.finishedAt ? { finishedAt: task.finishedAt } : {}),
     updatedAt,
     ...(task.error ? { error: task.error } : {}),
+    ...(task.resource
+      ? {
+          resource: {
+            kind: task.resource.kind,
+            provider: service,
+            id: task.resource.id,
+          },
+        }
+      : {}),
   };
 }
 

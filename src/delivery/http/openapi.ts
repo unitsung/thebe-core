@@ -610,6 +610,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             finishedAt: { type: "string" },
             updatedAt: { type: "string" },
             error: { type: "string" },
+            resource: { $ref: "#/components/schemas/ProductBackgroundTaskResource" },
+          },
+        },
+        ProductBackgroundTaskResource: {
+          type: "object",
+          required: ["kind", "provider", "id"],
+          properties: {
+            kind: { type: "string" },
+            provider: { type: "string" },
+            id: { type: "string" },
           },
         },
         ProductSubagentProfile: {

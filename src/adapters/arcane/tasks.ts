@@ -196,6 +196,10 @@ function toProviderTask(value: unknown): ProviderBackgroundTask | undefined {
   const name =
     stringField(dto, "resourceName") || stringField(dto, "step") || kind;
   const error = stringField(dto, "error");
+  // Arcane names the object an activity belongs to, so the App can deep link to
+  // it (`thebe://resource/<kind>/<provider>/<id>`).
+  const resourceKind = stringField(dto, "resourceType").toLowerCase();
+  const resourceId = stringField(dto, "resourceId");
   return {
     id,
     ...(kind ? { kind } : {}),
@@ -206,6 +210,9 @@ function toProviderTask(value: unknown): ProviderBackgroundTask | undefined {
     updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
     ...(error
       ? { error: redactToolOutput(error).slice(0, MAX_TASK_ERROR_LENGTH) }
+      : {}),
+    ...(resourceKind && resourceId
+      ? { resource: { kind: resourceKind, id: resourceId } }
       : {}),
   };
 }
