@@ -27,7 +27,10 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
 
   const listCapabilities = async (): Promise<HomelabCapability[]> => (
     [
-      ...listCoreMcpTools({ strmRepairProvider: ctx.options.strmRepairProvider }),
+      ...listCoreMcpTools({
+        strmRepairProvider: ctx.options.strmRepairProvider,
+        navidrome: Boolean(ctx.options.navidrome),
+      }),
       ...(await ctx.mcp.listTools()),
     ].map(withProductMetadata)
   );

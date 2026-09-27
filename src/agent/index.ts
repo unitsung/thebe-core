@@ -45,6 +45,26 @@ export type {
   StrmRepairProvider,
   StrmRepairRequest,
 } from "./capabilities/strm.ts";
+export type {
+  NavidromeAlbum,
+  NavidromeArtist,
+  NavidromeArtistDetails,
+  NavidromeCreatePlaylistInput,
+  NavidromeLibraryInput,
+  NavidromeLibraryMode,
+  NavidromeLibraryResult,
+  NavidromeLyrics,
+  NavidromeLyricsLine,
+  NavidromePlaybackMode,
+  NavidromePlaylist,
+  NavidromeProvider,
+  NavidromeQueue,
+  NavidromeQueueInput,
+  NavidromeQueueItem,
+  NavidromeSearchResult,
+  NavidromeSong,
+  NavidromeUpdatePlaylistInput,
+} from "./capabilities/navidrome.ts";
 export type { JudgmentModel } from "./judgment/interface.ts";
 export type { JudgmentApi } from "./judgment/service.ts";
 export type {

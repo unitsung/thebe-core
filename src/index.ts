@@ -46,6 +46,24 @@ export type {
   StrmRepairOutcome,
   StrmRepairProvider,
   StrmRepairRequest,
+  NavidromeAlbum,
+  NavidromeArtist,
+  NavidromeArtistDetails,
+  NavidromeCreatePlaylistInput,
+  NavidromeLibraryInput,
+  NavidromeLibraryMode,
+  NavidromeLibraryResult,
+  NavidromeLyrics,
+  NavidromeLyricsLine,
+  NavidromePlaybackMode,
+  NavidromePlaylist,
+  NavidromeProvider,
+  NavidromeQueue,
+  NavidromeQueueInput,
+  NavidromeQueueItem,
+  NavidromeSearchResult,
+  NavidromeSong,
+  NavidromeUpdatePlaylistInput,
 } from "./agent/index.ts";
 export {
   ARTIFACT_KINDS,
@@ -76,6 +94,12 @@ export type { ArcaneBackgroundTaskProviderOptions } from "./adapters/arcane/task
 export { EmbyAdapter } from "./adapters/emby/adapter.ts";
 export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
 export { ImmichAdapter } from "./adapters/immich/adapter.ts";
+export {
+  NavidromeAdapter,
+  createNavidromeProviderFromEnv,
+  navidromeOptionsFromEnv,
+} from "./adapters/navidrome/index.ts";
+export type { NavidromeAdapterOptions } from "./adapters/navidrome/index.ts";
 export {
   createOpenListStrmRepairProviderFromEnv,
   createOpenListBackgroundTaskProviderFromEnv,

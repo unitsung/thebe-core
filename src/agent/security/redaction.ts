@@ -1,6 +1,10 @@
 export const REDACTED = "***REDACTED***";
 export const DEFAULT_LOG_TAIL = 200;
 export const TRUNCATION_MARKER = "[... truncated ...]";
+const HIGH_RISK_TOOL_NAMES = new Set([
+  "bash",
+  "navidrome.playlist.delete",
+]);
 
 const SENSITIVE_ENV_KEY =
   /(SECRET|TOKEN|KEY|PASSWORD|PASS|CREDENTIAL|PRIVATE)/i;
@@ -42,9 +46,9 @@ export function redactToolOutput(text: string): string {
   return redactSecrets(envStyle);
 }
 
-/** Static risk hint for the approval UI: arbitrary commands are high. */
+/** Static risk hint for the approval UI. */
 export function permissionRisk(toolName: string): "high" | "standard" {
-  return toolName === "bash" ? "high" : "standard";
+  return HIGH_RISK_TOOL_NAMES.has(toolName) ? "high" : "standard";
 }
 
 /** Redacted, truncated rendering of a tool input for approval display. */

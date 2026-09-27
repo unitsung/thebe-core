@@ -2,6 +2,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
+import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import {
   arcaneEnvironmentIdFromEnv,
   createArcaneBackgroundTaskProviderFromEnv,
@@ -140,6 +141,7 @@ export async function bootstrapThebe(
         })
       : stubProvider();
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
+  const navidrome = createNavidromeProviderFromEnv();
   const openListBackgroundTaskProvider = createOpenListBackgroundTaskProviderFromEnv();
   const arcaneBackgroundTaskProvider = createArcaneBackgroundTaskProviderFromEnv();
 
@@ -188,6 +190,7 @@ export async function bootstrapThebe(
     judgmentSites,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     strmRepairProvider,
+    navidrome,
     backgroundTaskProviders: [
       ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
       ...(openListBackgroundTaskProvider ? [openListBackgroundTaskProvider] : []),

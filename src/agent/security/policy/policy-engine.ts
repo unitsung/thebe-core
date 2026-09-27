@@ -26,6 +26,7 @@ export function decide(input: {
   runState: PolicyRunState;
   maxToolCalls: number;
   maxBlocks: number;
+  allowedToolNames?: readonly string[];
 }): { allow: true } | { allow: false; reason: string } {
   if (input.toolName === "container.restart") {
     return {
@@ -33,9 +34,8 @@ export function decide(input: {
       reason: "container.restart requires on-device approval",
     };
   }
-  if (
-    !(CONTAINER_TOOL_NAMES as readonly string[]).includes(input.toolName)
-  ) {
+  const allowedToolNames = input.allowedToolNames ?? CONTAINER_TOOL_NAMES;
+  if (!allowedToolNames.includes(input.toolName)) {
     return { allow: false, reason: `unknown tool: ${input.toolName}` };
   }
   if (input.runState.denyLatch || input.runState.violationLatch) {
@@ -54,10 +54,12 @@ export function createPolicyEngine(options: {
   now: () => Date;
   maxToolCalls?: number;
   maxBlocks?: number;
+  allowedToolNames?: readonly string[];
 }) {
   const logsByDayAndCaller = new Map<string, number>();
   const maxToolCalls = options.maxToolCalls ?? 50;
   const maxBlocks = options.maxBlocks ?? 3;
+  const allowedToolNames = options.allowedToolNames ?? CONTAINER_TOOL_NAMES;
   // Mutable per-Run state. Hooks close over this; beginRun() resets it.
   let run: PolicyRunState = createPolicyRunState();
 
@@ -82,9 +84,7 @@ export function createPolicyEngine(options: {
       if (name === "container.restart") {
         return { ok: false, reason: "container.restart requires on-device approval" };
       }
-      if (
-        !(CONTAINER_TOOL_NAMES as readonly string[]).includes(name)
-      ) {
+      if (!allowedToolNames.includes(name)) {
         return { ok: false, reason: `unknown tool: ${name}` };
       }
       if (name !== "container.logs") {
@@ -112,6 +112,7 @@ export function createPolicyEngine(options: {
           runState: run,
           maxToolCalls,
           maxBlocks,
+          allowedToolNames,
         });
         run.toolCalls += 1;
         if (!decision.allow) {

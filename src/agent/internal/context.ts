@@ -19,6 +19,12 @@ import {
 } from "../security/command-risk.ts";
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
+import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
+import { CONTAINER_TOOL_NAMES } from "../capabilities/containers.ts";
+import {
+  NAVIDROME_TOOL_NAMES,
+  NAVIDROME_WRITE_TOOL_NAMES,
+} from "../capabilities/navidrome.ts";
 import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
@@ -154,6 +160,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     now,
     maxToolCalls: options.maxToolCalls,
     maxBlocks: options.maxBlocks,
+    allowedToolNames: [
+      ...CONTAINER_TOOL_NAMES,
+      ...(options.navidrome ? NAVIDROME_TOOL_NAMES : []),
+    ],
   });
   const audit = options.auditPath
     ? createAuditLog(options.auditPath, now)
@@ -306,10 +316,19 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   function baseTools(toolPolicy = policy, toolCallerId = callerId) {
-    return createContainerTools(options.provider, {
+    const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
       callerId: toolCallerId,
     });
+    if (options.navidrome) {
+      tools.push(
+        ...createNavidromeTools(options.navidrome, {
+          policy: toolPolicy,
+          callerId: toolCallerId,
+        }),
+      );
+    }
+    return tools;
   }
 
   function sessionOptions(
@@ -351,7 +370,11 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       enabledResources: isChatOnly ? [] : enabledResources,
       ...(workspacePath ? { cwd: workspacePath, workspacePath } : {}),
       permissionHandler: permissions.permissionHandler(permissionSessionId),
-      toolsRequiringApproval: [...TOOLS_REQUIRING_APPROVAL, ...WORKSPACE_READ_TOOLS],
+      toolsRequiringApproval: [
+        ...TOOLS_REQUIRING_APPROVAL,
+        ...WORKSPACE_READ_TOOLS,
+        ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
+      ],
       autoCompact: autoCompactOverride,
     };
   }

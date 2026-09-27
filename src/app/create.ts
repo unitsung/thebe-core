@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
+import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
@@ -46,6 +47,7 @@ export function createThebeApp(options: {
   mcp?: McpRegistry;
   artifactStore?: ArtifactStore;
   strmRepairProvider?: StrmRepairProvider;
+  navidrome?: NavidromeProvider;
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
 }): {
   agent: ThebeAgent;
@@ -80,6 +82,7 @@ export function createThebeApp(options: {
     settingsStore: options.settingsStore,
     artifactStore: options.artifactStore,
     strmRepairProvider: options.strmRepairProvider,
+    navidrome: options.navidrome,
     backgroundTaskProviders: options.backgroundTaskProviders,
   });
   const prompt: ThebeAppPrompt = async (text) => {

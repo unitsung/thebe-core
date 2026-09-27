@@ -136,6 +136,31 @@ OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查�
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
 
+## Navidrome 音乐 provider
+
+配置完整的 Navidrome 地址、用户名和密码后，Core 会通过 Subsonic API
+注册音乐库能力：
+
+```bash
+export NAVIDROME_BASE_URL=http://127.0.0.1:4533
+export NAVIDROME_USERNAME=thebe
+export NAVIDROME_PASSWORD=your-password
+# 可选：主地址不可达时用于请求重试，并作为后续播放 URL 的基地址
+export NAVIDROME_FALLBACK_URL=https://music.example.com
+```
+
+`THEBE_NAVIDROME_BASE_URL`、`THEBE_NAVIDROME_USERNAME`、
+`THEBE_NAVIDROME_PASSWORD` 和 `THEBE_NAVIDROME_FALLBACK_URL` 是等价别名。
+缺少任一必填变量时不会暴露 Navidrome 能力。可用能力包括最近添加、最近播放、
+专辑、歌手、歌单、歌曲、搜索、歌手详情、歌词和播放队列。
+
+`navidrome.queue` 返回统一的歌曲条目，包括直接播放或转码后的流地址、封面、
+标题、艺术家、专辑和可选歌词。Core 不启动 iOS 播放器；App 消费队列后继续使用
+自己的 MPV、Now Playing 和远程控制实现。歌单创建、更新和删除属于写能力，
+只能通过 Agent 会话的运行时审批执行，直接调用 MCP 或 capability invoke 返回
+403。Navidrome 密码只保留在 Core adapter 内，不会进入工具参数或 capability
+metadata。
+
 ## Arcane 容器 provider 与活动来源
 
 Arcane 提供容器能力（`containers.list` / `containers.inspect` / `container.logs` /

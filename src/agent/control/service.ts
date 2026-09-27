@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
+import { NAVIDROME_WRITE_TOOL_NAMES } from "../capabilities/navidrome.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
@@ -43,6 +44,8 @@ import {
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
   `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
+const RUNTIME_APPROVAL_REQUIRED =
+  "This write requires runtime approval in an agent conversation";
 
 export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStore) {
   const {
@@ -112,6 +115,9 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
   async function invokeTool(name: string, args: unknown): Promise<string> {
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
+    }
+    if ((NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name)) {
+      throw httpError(403, `${name}: ${RUNTIME_APPROVAL_REQUIRED}`);
     }
     if (name === STRM_REPAIR_CAPABILITY_ID && options.strmRepairProvider) {
       const input = asStrmRepairRequest(args);
@@ -285,7 +291,10 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       input: CapabilityInvokeInput = {},
     ): Promise<CapabilityInvokeResult> {
       const capabilities = [
-        ...listCoreMcpTools({ strmRepairProvider: options.strmRepairProvider }),
+        ...listCoreMcpTools({
+          strmRepairProvider: options.strmRepairProvider,
+          navidrome: Boolean(options.navidrome),
+        }),
         ...(await mcp.listTools()),
       ].map(withProductMetadata);
       const capability = capabilities.find(
@@ -317,8 +326,14 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           );
         }
       }
-      if (capability.approval === "required" || capability.id === CONTAINER_RESTART_ACTION_ID) {
+      if (capability.id === CONTAINER_RESTART_ACTION_ID) {
         throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
+      }
+      if (capability.approval === "required") {
+        throw httpError(
+          403,
+          `${capability.id}: ${RUNTIME_APPROVAL_REQUIRED}`,
+        );
       }
       const mode = input.mode ?? CAPABILITY_INVOKE_MODE_DIRECT;
       const args = input.arguments ?? {};

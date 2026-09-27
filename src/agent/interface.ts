@@ -17,6 +17,7 @@ import type {
   ThebeSessionContext,
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
+import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
 import type { GoalEvent } from "./goals/runner.ts";
@@ -117,6 +118,8 @@ export type CreateThebeAgentOptions = {
   mcp?: McpRegistry;
   /** Optional provider-owned STRM repair write boundary. */
   strmRepairProvider?: StrmRepairProvider;
+  /** Optional Navidrome media provider exposed as Core capabilities. */
+  navidrome?: NavidromeProvider;
   /** Optional provider-native background task sources. */
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
   /** Optional Judgment Model. Absent means the Judgment Gate is off. */

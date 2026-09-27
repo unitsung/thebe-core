@@ -115,6 +115,10 @@ _Avoid_: tool code importing a panel SDK or HTTP client
 The default container capability provider. Thebe Core does not talk to docker.sock. ArcaneAdapter owns the built-in container surface; other service categories should normally arrive through their integration plugin/MCP boundary.
 _Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core into a vendor-by-vendor service implementation
 
+**NavidromeProvider**:
+Agent-owned music capability in `src/agent/capabilities/navidrome.ts`. `NavidromeAdapter` implements the Subsonic API boundary, including salt+MD5 authentication, library/search/artist/lyrics reads, playlist writes, and provider-neutral playback queues with stream/artwork URLs. Core exposes these as `navidrome.*` capabilities; the iOS App still owns MPV playback, Now Playing, and remote commands. Playlist writes require the runtime permission flow and are rejected by direct MCP or capability invocation.
+_Avoid_: exposing Subsonic credentials to the model, making Core start a mobile playback session, or creating a second player engine
+
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.
 _Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field, replacing PolicyEngine with a Judgment Model

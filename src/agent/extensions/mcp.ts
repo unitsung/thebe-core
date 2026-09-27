@@ -15,6 +15,14 @@ import {
   MEDIA_READ_TOOL_NAMES,
 } from "../capabilities/media.ts";
 import {
+  NAVIDROME_CAPABILITY_METADATA,
+  NAVIDROME_PROVIDER_ID,
+  NAVIDROME_TOOL_DESCRIPTIONS,
+  NAVIDROME_TOOL_NAMES,
+  NAVIDROME_TOOL_SCHEMAS,
+  type NavidromeToolName,
+} from "../capabilities/navidrome.ts";
+import {
   STRM_REPAIR_CAPABILITY_ID,
   STRM_REPAIR_DESCRIPTION,
   STRM_REPAIR_SCHEMA,
@@ -61,6 +69,9 @@ export const HOMELAB_RESOURCE_KINDS = {
   container: "container",
   mediaLibrary: "media_library",
   mediaItem: "media_item",
+  artist: "artist",
+  song: "song",
+  playlist: "playlist",
   strm: "strm",
   playbackSession: "playback_session",
   photo: "photo",
@@ -185,6 +196,27 @@ const MEDIA_RESOURCE_KINDS: Record<(typeof MEDIA_READ_TOOL_NAMES)[number], strin
   "immich.statistics": [HOMELAB_RESOURCE_KINDS.photo],
 };
 
+const NAVIDROME_RESOURCE_KINDS: Record<NavidromeToolName, string[]> = {
+  "navidrome.library": [
+    HOMELAB_RESOURCE_KINDS.mediaLibrary,
+    HOMELAB_RESOURCE_KINDS.artist,
+    HOMELAB_RESOURCE_KINDS.album,
+    HOMELAB_RESOURCE_KINDS.song,
+    HOMELAB_RESOURCE_KINDS.playlist,
+  ],
+  "navidrome.search": [
+    HOMELAB_RESOURCE_KINDS.artist,
+    HOMELAB_RESOURCE_KINDS.album,
+    HOMELAB_RESOURCE_KINDS.song,
+  ],
+  "navidrome.artist": [HOMELAB_RESOURCE_KINDS.artist],
+  "navidrome.lyrics": [HOMELAB_RESOURCE_KINDS.song],
+  "navidrome.queue": [HOMELAB_RESOURCE_KINDS.playbackSession],
+  "navidrome.playlist.create": [HOMELAB_RESOURCE_KINDS.playlist],
+  "navidrome.playlist.update": [HOMELAB_RESOURCE_KINDS.playlist],
+  "navidrome.playlist.delete": [HOMELAB_RESOURCE_KINDS.playlist],
+};
+
 function defaultResourceKinds(capability: HomelabCapability): string[] {
   if (capability.category === "containers") return [HOMELAB_RESOURCE_KINDS.container];
   if (capability.id.startsWith("strm.")) return [HOMELAB_RESOURCE_KINDS.strm];
@@ -202,6 +234,7 @@ function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): stri
 
 export function listCoreMcpTools(options: {
   strmRepairProvider?: StrmRepairProvider;
+  navidrome?: boolean;
 } = {}): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
 
@@ -271,6 +304,30 @@ export function listCoreMcpTools(options: {
       source: CORE_CAPABILITY_SOURCE,
       serverName: CORE_CAPABILITY_SERVER,
     }));
+  }
+
+  if (options.navidrome) {
+    for (const name of NAVIDROME_TOOL_NAMES) {
+      const meta = NAVIDROME_CAPABILITY_METADATA[name];
+      tools.push(withProductMetadata({
+        id: name,
+        name,
+        description: NAVIDROME_TOOL_DESCRIPTIONS[name],
+        inputSchema: NAVIDROME_TOOL_SCHEMAS[name],
+        category: "media",
+        permission: meta.permission,
+        effect: meta.effect,
+        risk: meta.risk,
+        approval: meta.approval,
+        service: NAVIDROME_PROVIDER_ID,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        resourceKinds: NAVIDROME_RESOURCE_KINDS[name],
+        execution: meta.effect === "write" ? "agent" : "direct",
+        background: false,
+        outputKind: name === "navidrome.queue" ? "audio_queue" : "json",
+      }));
+    }
   }
 
   if (options.strmRepairProvider) {

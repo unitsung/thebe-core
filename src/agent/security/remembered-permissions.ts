@@ -4,6 +4,7 @@ import {
   type PermissionRememberScope,
   type PermissionRequest,
 } from "../runtime/index.ts";
+import { NAVIDROME_WRITE_TOOL_NAMES } from "../capabilities/navidrome.ts";
 
 export function isHighRiskTool(
   toolName: string,
@@ -11,7 +12,8 @@ export function isHighRiskTool(
 ): boolean {
   return (
     risk === "high" ||
-    (TOOLS_REQUIRING_APPROVAL as readonly string[]).includes(toolName)
+    (TOOLS_REQUIRING_APPROVAL as readonly string[]).includes(toolName) ||
+    (NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(toolName)
   );
 }
 
