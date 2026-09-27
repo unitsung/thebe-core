@@ -110,4 +110,50 @@ describe("Navidrome agent integration", () => {
       }),
     ).rejects.toThrow("runtime approval");
   });
+
+  it("returns playback credentials but strips them from retained Artifacts", async () => {
+    const base = navidromeProvider();
+    const provider: NavidromeProvider = {
+      ...base,
+      async getPlaybackQueue() {
+        return {
+          items: [
+            {
+              queueId: "song-1",
+              streamUrl:
+                "http://navidrome.test/rest/stream.view?id=song-1&u=alice&t=secret-token&s=salt",
+              requestHeaders: {},
+              title: "Headlights",
+              artist: "Thebe",
+              album: "Night Drive",
+              artworkUrl:
+                "http://navidrome.test/rest/getCoverArt.view?id=cover-1&u=alice&t=secret-token&s=salt",
+            },
+          ],
+          startIndex: 0,
+          mode: "direct",
+        };
+      },
+    };
+    const agent = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: containerProvider(),
+      navidrome: provider,
+    });
+
+    const invoked = await agent.invokeCapability("navidrome.queue", {
+      arguments: { songIds: ["song-1"] },
+    });
+    expect(invoked.type).toBe("result");
+    if (invoked.type !== "result" || !invoked.artifactId) {
+      throw new Error("expected a direct result with an Artifact");
+    }
+    expect(JSON.stringify(invoked.result)).toContain("secret-token");
+
+    const artifact = await agent.getArtifactContent(invoked.artifactId);
+    expect(artifact?.content).toContain("Headlights");
+    expect(artifact?.content).not.toContain("secret-token");
+    expect(artifact?.content).not.toContain("u=alice");
+    expect(artifact?.content).not.toContain("s=salt");
+  });
 });

@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
-import { NAVIDROME_WRITE_TOOL_NAMES } from "../capabilities/navidrome.ts";
+import {
+  NAVIDROME_WRITE_TOOL_NAMES,
+  redactNavidromeQueueForStorage,
+} from "../capabilities/navidrome.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
 import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
@@ -430,6 +433,10 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       }
       const text = await invokeTool(capability.id, invocationArgs);
       const result = parseCapabilityResult(text);
+      const artifactResult =
+        capability.id === "navidrome.queue"
+          ? redactNavidromeQueueForStorage(result)
+          : result;
       const artifact = artifactStore
         ? await artifactStore.create({
             kind: "report",
@@ -439,7 +446,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
             content: JSON.stringify({
               version: 1,
               capabilityId: capability.id,
-              result,
+              result: artifactResult,
             }),
           })
         : undefined;

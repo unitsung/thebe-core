@@ -450,3 +450,42 @@ export const NAVIDROME_CAPABILITY_METADATA: Record<
     permission: "confirm",
   },
 };
+
+/**
+ * Direct capability results retain full provider URLs for the caller.
+ * Persisted Artifacts must not keep the reusable Subsonic auth query.
+ */
+export function redactNavidromeQueueForStorage(result: unknown): unknown {
+  if (!result || typeof result !== "object" || Array.isArray(result)) {
+    return result;
+  }
+  const queue = result as Record<string, unknown>;
+  if (!Array.isArray(queue.items)) return result;
+  return {
+    ...queue,
+    items: queue.items.map((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return value;
+      }
+      const item = value as Record<string, unknown>;
+      return {
+        ...item,
+        streamUrl: redactSubsonicAuth(item.streamUrl),
+        artworkUrl: redactSubsonicAuth(item.artworkUrl),
+      };
+    }),
+  };
+}
+
+function redactSubsonicAuth(value: unknown): unknown {
+  if (typeof value !== "string" || !value.startsWith("http")) return value;
+  try {
+    const url = new URL(value);
+    for (const key of ["u", "t", "s"]) {
+      url.searchParams.delete(key);
+    }
+    return url.toString();
+  } catch {
+    return value;
+  }
+}
