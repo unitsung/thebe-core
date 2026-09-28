@@ -58,12 +58,30 @@ export function wrapSession(
     existingListeners ?? new Set<(event: NormalizedEvent) => void>();
   let revertedLeaf: string | undefined;
   let lastCompactedAt: string | undefined;
+  function terminalModelError(): string | undefined {
+    for (let i = session.messages.length - 1; i >= 0; i--) {
+      const message = session.messages[i] as {
+        role?: string; stopReason?: string; errorMessage?: string;
+      };
+      if (message.role === "assistant") {
+        return message.stopReason === "error"
+          ? message.errorMessage || "Model request failed"
+          : undefined;
+      }
+      if (message.role === "user") return undefined;
+    }
+    return undefined;
+  }
   session.subscribe((event) => {
+    // Pi's agent_end is a turn boundary; automatic retries can follow it.
+    // Only agent_settled marks the completed request in the current SDK.
+    if ((event as { type?: string }).type === "agent_end") return;
     const mapped = mapPiEvent(event as Parameters<typeof mapPiEvent>[0]);
     if (!mapped) {
       return;
     }
     if (mapped.type === "session_end") {
+      if (terminalModelError()) return;
       mapped.text = lastAssistantText(session);
     }
     if (mapped.type === "compaction_end" && !mapped.aborted) {
@@ -127,6 +145,8 @@ export function wrapSession(
       .filter((part) => part.length > 0)
       .join("\n");
     await session.prompt(text, images.length > 0 ? { images } : undefined);
+    const failure = terminalModelError();
+    if (failure) throw new Error(failure);
   }
 
   return {

@@ -211,6 +211,9 @@ describe("Thebe agent service (fake runtime)", () => {
     const systemPrompt = createCalls[0]?.systemPrompt ?? "";
 
     expect(systemPrompt).toContain("Return ordinary answers and research results to the parent conversation buffer by default.");
+    expect(systemPrompt).toContain("thebe:gallery");
+    expect(systemPrompt).toContain('```thebe:gallery\n{"images"');
+    expect(systemPrompt).toContain("Never invent media URLs");
     expect(systemPrompt).toContain("Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.");
     expect(systemPrompt).toContain("Never create output.md, docs files, or any other file merely to display an answer.");
     expect(systemPrompt).toContain("outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.");

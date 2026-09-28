@@ -290,7 +290,11 @@ describe("GET /v1/activity", () => {
       new Request("http://127.0.0.1:8787/v1/session/provider-openlist/background-task"),
     );
     expect(await json(sessionTasks)).toEqual({
-      tasks: [expect.objectContaining({ id: "copy:task-1", status: "running" })],
+      tasks: [expect.objectContaining({
+        id: "copy:task-1", status: "running", sessionId: "provider-openlist",
+        provider: "openlist", kind: "copy",
+        resource: { kind: "file", provider: "openlist", id: "/movies/dune.mkv" },
+      })],
     });
 
     const stopped = await app.handler.handle(

@@ -6,6 +6,16 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 
 ## Shipped
 
+Session background-task queries return the same `ProductBackgroundTask` fields
+as Activity, including `sessionId`, provider/kind, errors and resource handles.
+Provider task session handles (`provider-arcane`, etc.) identify a provider's
+task collection, not a conversational transcript.
+
+Model failures reject the prompt request and publish an `error` log event.
+An upstream rejection must not become a successful assistant reply. Pi retry
+boundaries do not terminate the log stream; `session_end` is emitted once after
+the runtime settles successfully.
+
 | Surface | HTTP | Notes |
 | --- | --- | --- |
 | Capability discovery | `GET /v1/capabilities` | Product metadata: category (`files`, `media`, `downloads`, `containers`, `automation`, `diagnostics`, `compute`, `storage`, `network`, `photos`, or `other`), provider/source/service, permission, `resourceKinds`, `execution`, `background`, `destructive`, `outputKind`. The optional Navidrome provider contributes `navidrome.*` media capabilities; playlist writes are approval-gated and cannot be invoked directly. |

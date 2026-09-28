@@ -142,6 +142,7 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
       toolCallId?: string;
       isError?: boolean;
       errorMessage?: string;
+      stopReason?: string;
       args?: unknown;
       details?: unknown;
     };
@@ -162,6 +163,7 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
         role: "assistant",
         text: contentToText(message.content) || message.errorMessage || "",
         thinking: contentThinking(message.content),
+        ...(message.stopReason === "error" ? { isError: true } : {}),
         attachments: contentAttachments(message.content),
       });
       continue;

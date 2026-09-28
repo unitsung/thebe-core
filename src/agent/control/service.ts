@@ -6,7 +6,7 @@ import {
   redactNavidromeQueueForStorage,
 } from "../capabilities/navidrome.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
-import type { RuntimeExport, RuntimeModelRef, BackgroundTask, ThebeSessionContext } from "../runtime/index.ts";
+import type { RuntimeExport, RuntimeModelRef, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import type { AuditPage, AuditRecord, AuditQuery } from "../security/audit/audit-log.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
@@ -42,7 +42,6 @@ import {
   providerBackgroundTaskSessionId,
   toProductProviderBackgroundTask,
   type ProductBackgroundTask,
-  type ProviderBackgroundTask,
 } from "../background-tasks/product.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
@@ -501,15 +500,19 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     },
     async listBackgroundTasks(
       thebeSessionId: string,
-    ): Promise<BackgroundTask[]> {
+    ): Promise<ProductBackgroundTask[]> {
       const provider = backgroundTaskProviders.find(
         (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
       );
       if (provider) {
-        return (await provider.list()).map(toRuntimeBackgroundTask);
+        return (await provider.list()).map((task) =>
+          toProductProviderBackgroundTask(provider.service, task),
+        );
       }
       const opened = await openSession(thebeSessionId);
-      return opened.session.listBackgroundTasks();
+      return (await opened.session.listBackgroundTasks()).map((task) =>
+        toProductBackgroundTask(thebeSessionId, task),
+      );
     },
     async listAllBackgroundTasks(): Promise<ProductBackgroundTask[]> {
       const tasks: ProductBackgroundTask[] = [];
@@ -601,19 +604,6 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     auth() {
       return options.runtime.auth();
     },
-  };
-}
-
-function toRuntimeBackgroundTask(
-  task: ProviderBackgroundTask,
-): BackgroundTask {
-  return {
-    id: task.id,
-    ...(task.name ? { name: task.name } : {}),
-    status: task.status,
-    ...(task.startedAt ? { startedAt: task.startedAt } : {}),
-    ...(task.finishedAt ? { finishedAt: task.finishedAt } : {}),
-    ...(task.updatedAt ? { updatedAt: task.updatedAt } : {}),
   };
 }
 

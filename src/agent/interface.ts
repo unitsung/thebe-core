@@ -1,6 +1,5 @@
 import type {
   AgentRuntime,
-  BackgroundTask,
   EnabledResource,
   ForkSessionOptions,
   NormalizedEvent,
@@ -247,7 +246,7 @@ export interface ThebeAgent {
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;
-  listBackgroundTasks(thebeSessionId: string): Promise<BackgroundTask[]>;
+  listBackgroundTasks(thebeSessionId: string): Promise<ProductBackgroundTask[]>;
   listAllBackgroundTasks(): Promise<ProductBackgroundTask[]>;
   stopBackgroundTask(thebeSessionId: string, taskId: string): Promise<void>;
   stopAllBackgroundTasks(thebeSessionId: string): Promise<void>;

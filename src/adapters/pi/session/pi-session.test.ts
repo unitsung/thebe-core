@@ -68,6 +68,31 @@ async function piWithFaux(sessionDir?: string) {
 }
 
 describe("PiCodingAgentRuntime sessions", () => {
+  it("rejects a terminal model failure and allows the next turn to recover", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const agent = createThebeAgent({ runtime, provider: emptyProvider() });
+    const session = await agent.createSession();
+    const events: string[] = [];
+    agent.subscribeLog(session.thebeSessionId, (event) => events.push(event.type));
+    faux.setResponses([fauxAssistantMessage("", {
+      stopReason: "error",
+      errorMessage: "FreeTierError: free tier requires the OpenCode client",
+    })]);
+
+    await expect(agent.prompt("hello", { thebeSessionId: session.thebeSessionId }))
+      .rejects.toThrow("FreeTierError");
+    expect(events.filter((type) => type === "error")).toHaveLength(1);
+    expect(events).not.toContain("session_end");
+    expect(await agent.loadMessages(session.thebeSessionId)).toContainEqual(
+      expect.objectContaining({ role: "assistant", isError: true }),
+    );
+
+    faux.setResponses([fauxAssistantMessage("recovered")]);
+    await expect(agent.prompt("try again", { thebeSessionId: session.thebeSessionId }))
+      .resolves.toMatchObject({ text: "recovered" });
+    expect(events.filter((type) => type === "session_end")).toHaveLength(1);
+  });
+
   it("tracks and stops detached bash background tasks", async () => {
     const { faux, runtime } = await piWithFaux();
     faux.setResponses([
