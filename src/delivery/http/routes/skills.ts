@@ -19,6 +19,12 @@ export async function handleSkillRoutes(
     }
     const name = parts[2] ? decodeURIComponent(parts[2]) : "";
     if (!name) return undefined;
+    if (request.method === "GET" && parts.length === 4 && parts[3] === "content") {
+      const skill = await agent.getSkill(name);
+      if (!skill?.content) return notFound("skill content not found");
+      return json({ name: skill.name, description: skill.description,
+        content: skill.content, contentHash: skill.contentHash });
+    }
     if (request.method === "GET" && parts.length === 3) {
       const skill = await agent.getSkill(name);
       if (!skill) return notFound("skill not found");

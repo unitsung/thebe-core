@@ -7,12 +7,18 @@ import {
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
 import {
+  EMBY_LOOKUP_TOOL_NAMES,
   EMBY_TOOL_NAMES,
+  IMMICH_SEARCH_TOOL_NAMES,
+  JELLYFIN_LOOKUP_TOOL_NAMES,
   JELLYFIN_TOOL_NAMES,
+  MEDIA_LOOKUP_DESCRIPTIONS,
+  MEDIA_LOOKUP_SCHEMAS,
   MEDIA_PROVIDER_IDS,
   MEDIA_READ_DESCRIPTIONS,
   MEDIA_READ_SCHEMAS,
   MEDIA_READ_TOOL_NAMES,
+  type MediaLookupToolName,
 } from "../capabilities/media.ts";
 import {
   NAVIDROME_CAPABILITY_METADATA,
@@ -90,6 +96,9 @@ export type HomelabCapability = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  originalName?: string;
   category: HomelabCapabilityCategory;
   permission: HomelabCapabilityPermission;
   effect?: "read" | "write";
@@ -132,7 +141,15 @@ export type McpRegistry = {
   listServers(): Promise<McpServerInfo[]>;
   setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
   invokeTool(name: string, args: unknown): Promise<string | undefined>;
+  invokeToolResult?(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult>;
   close(): void;
+};
+
+/** Standard MCP payload; concrete SDK types remain in adapters. */
+export type McpCallResult = {
+  content: Array<Record<string, unknown>>;
+  structuredContent?: Record<string, unknown>;
+  isError?: boolean;
 };
 
 export function createEmptyMcpRegistry(): McpRegistry {
@@ -235,6 +252,9 @@ function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): stri
 export function listCoreMcpTools(options: {
   strmRepairProvider?: StrmRepairProvider;
   navidrome?: boolean;
+  emby?: boolean;
+  jellyfin?: boolean;
+  immich?: boolean;
 } = {}): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
 
@@ -303,6 +323,40 @@ export function listCoreMcpTools(options: {
       service: mediaServiceForTool(name),
       source: CORE_CAPABILITY_SOURCE,
       serverName: CORE_CAPABILITY_SERVER,
+    }));
+  }
+
+  const lookupNames: MediaLookupToolName[] = [
+    ...(options.emby ? EMBY_LOOKUP_TOOL_NAMES : []),
+    ...(options.jellyfin ? JELLYFIN_LOOKUP_TOOL_NAMES : []),
+    ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
+  ];
+  for (const name of lookupNames) {
+    const service = name.startsWith("emby.")
+      ? MEDIA_PROVIDER_IDS.emby
+      : name.startsWith("jellyfin.")
+        ? MEDIA_PROVIDER_IDS.jellyfin
+        : MEDIA_PROVIDER_IDS.immich;
+    tools.push(withProductMetadata({
+      id: name,
+      name,
+      description: MEDIA_LOOKUP_DESCRIPTIONS[name],
+      inputSchema: MEDIA_LOOKUP_SCHEMAS[name],
+      category: "media",
+      permission: "read",
+      effect: "read",
+      risk: "low",
+      approval: "none",
+      service,
+      source: CORE_CAPABILITY_SOURCE,
+      serverName: CORE_CAPABILITY_SERVER,
+      resourceKinds: [
+        name.startsWith("immich.")
+          ? HOMELAB_RESOURCE_KINDS.photo
+          : HOMELAB_RESOURCE_KINDS.mediaItem,
+      ],
+      execution: "direct",
+      background: false,
     }));
   }
 

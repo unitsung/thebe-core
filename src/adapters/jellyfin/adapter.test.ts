@@ -109,4 +109,38 @@ describe("JellyfinAdapter", () => {
     await adapter.listSessions();
     expect(requestedUrl).toBe("http://jellyfin.internal:8096/Sessions");
   });
+
+  it("searches with OpenAPI camelCase and reads one item", async () => {
+    const seen: { url: string; authorization: string | null }[] = [];
+    const adapter = new JellyfinAdapter({
+      baseUrl: "http://jellyfin.internal:8096",
+      apiKey: "jf-key",
+      userId: USER_ID,
+      fetch: async (input, init) => {
+        const url = String(input);
+        seen.push({ url, authorization: new Headers(init?.headers).get("Authorization") });
+        if (url.includes("searchTerm=Dune")) {
+          return jsonResponse(200, {
+            Items: [{ Name: "Dune", Id: "item-dune", Type: "Movie", ProductionYear: 2021 }],
+            TotalRecordCount: 1,
+          });
+        }
+        if (url.endsWith("/gone")) return jsonResponse(404, {});
+        return jsonResponse(200, { Name: "Dune", Id: "item-dune", Type: "Movie" });
+      },
+    });
+
+    await expect(adapter.searchItems({ query: "Dune", year: 2021 })).resolves.toMatchObject({
+      total: 1,
+      items: [{ id: "item-dune", title: "Dune", year: 2021 }],
+    });
+    const search = new URL(seen[0]!.url);
+    expect(search.pathname).toBe(`/Users/${USER_ID}/Items`);
+    expect(search.searchParams.get("searchTerm")).toBe("Dune");
+    expect(search.searchParams.get("years")).toBe("2021");
+    expect(search.searchParams.get("includeItemTypes")).toBe("Movie,Series");
+    expect(search.searchParams.has("SearchTerm")).toBe(false);
+    expect(seen[0]!.authorization).toBe('MediaBrowser Token="jf-key"');
+    await expect(adapter.getItem("gone")).resolves.toBeUndefined();
+  });
 });

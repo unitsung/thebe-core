@@ -296,6 +296,9 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         ...listCoreMcpTools({
           strmRepairProvider: options.strmRepairProvider,
           navidrome: Boolean(options.navidrome),
+          emby: Boolean(options.emby),
+          jellyfin: Boolean(options.jellyfin),
+          immich: Boolean(options.immich),
         }),
         ...(await mcp.listTools()),
       ].map(withProductMetadata);

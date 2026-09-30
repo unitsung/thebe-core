@@ -252,6 +252,24 @@ export const PI_BUILTIN_TOOLS = [
 
 export type CreateRuntimeSessionOptions = {
   customTools: CustomToolDefinition[];
+  /** Discovered schemas and execution share the product registry's connections. */
+  externalMcp?: {
+    listTools(): Promise<Array<{
+      name: string;
+      serverName?: string;
+      originalName?: string;
+      description: string;
+      inputSchema: Record<string, unknown>;
+      outputSchema?: Record<string, unknown>;
+      annotations?: Record<string, unknown>;
+      permission: "read" | "confirm" | "admin";
+    }>>;
+    callTool(name: string, args: unknown, signal?: AbortSignal): Promise<{
+      content: Array<Record<string, unknown>>;
+      structuredContent?: Record<string, unknown>;
+      isError?: boolean;
+    }>;
+  };
   builtinTools?: readonly string[];
   systemPrompt?: string;
   enabledResources?: EnabledResource[];
@@ -403,6 +421,12 @@ export interface RuntimeSession {
 
 export interface AgentRuntime {
   readonly runtimeId: string;
+  /** Optional runtime-owned parsing; product policy still owns source order and enablement. */
+  loadSkillDirectory?(directory: string): Promise<Array<{
+    name: string;
+    description: string;
+    filePath: string;
+  }>>;
   createSession(options: CreateRuntimeSessionOptions): Promise<RuntimeSession>;
   resumeSession(
     runtimeSessionId: string,

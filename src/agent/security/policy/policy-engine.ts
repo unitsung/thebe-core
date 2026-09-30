@@ -59,7 +59,7 @@ export function createPolicyEngine(options: {
   const logsByDayAndCaller = new Map<string, number>();
   const maxToolCalls = options.maxToolCalls ?? 50;
   const maxBlocks = options.maxBlocks ?? 3;
-  const allowedToolNames = options.allowedToolNames ?? CONTAINER_TOOL_NAMES;
+  const allowedToolNames = [...(options.allowedToolNames ?? CONTAINER_TOOL_NAMES)];
   // Mutable per-Run state. Hooks close over this; beginRun() resets it.
   let run: PolicyRunState = createPolicyRunState();
 
@@ -71,6 +71,9 @@ export function createPolicyEngine(options: {
   }
 
   return {
+    registerTools(names: readonly string[]): void {
+      for (const name of names) if (!allowedToolNames.includes(name)) allowedToolNames.push(name);
+    },
     beginRun(): void {
       run = createPolicyRunState();
     },

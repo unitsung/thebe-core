@@ -9,19 +9,27 @@ import {
   type McpToolInfo,
 } from "./mcp.ts";
 import { toProductEnabledResource } from "./product.ts";
-import { discoverSkills, readSkillDetails, type SkillInfo } from "./skills.ts";
+import { discoverSkills, readSkillDetails, skillContentHash, type SkillInfo } from "./skills.ts";
 import type { AgentArtifact } from "../artifacts/types.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 
 /** Skills and MCP extensions exposed through the stable Agent Interface. */
 export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactStore) {
   const { enabledResources, workspacePath, audit, openedSessions, streaming } = ctx;
+  const discover = () => discoverSkills({
+    cwd: workspacePath, enabledResources,
+    loadDirectory: ctx.options.runtime.loadSkillDirectory?.bind(ctx.options.runtime),
+  });
 
   async function reloadIdleSessions(): Promise<void> {
+    for (const id of openedSessions.keys()) ctx.resourcesNeedingReload.add(id);
     await Promise.all(
       [...openedSessions.entries()]
-        .filter(([sessionId]) => !streaming.has(sessionId))
-        .map(([, opened]) => opened.session.reloadResources?.()),
+        .filter(([sessionId]) => !streaming.has(sessionId) && !ctx.promptLocks.has(sessionId))
+        .map(async ([id, opened]) => {
+          await opened.session.reloadResources?.();
+          ctx.resourcesNeedingReload.delete(id);
+        }),
     );
   }
 
@@ -30,6 +38,9 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
       ...listCoreMcpTools({
         strmRepairProvider: ctx.options.strmRepairProvider,
         navidrome: Boolean(ctx.options.navidrome),
+        emby: Boolean(ctx.options.emby),
+        jellyfin: Boolean(ctx.options.jellyfin),
+        immich: Boolean(ctx.options.immich),
       }),
       ...(await ctx.mcp.listTools()),
     ].map(withProductMetadata)
@@ -70,24 +81,27 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
 
   return {
     async listSkills(): Promise<SkillInfo[]> {
-      return discoverSkills({ cwd: workspacePath, enabledResources });
+      return discover();
     },
     async getSkill(name: string): Promise<SkillInfo | undefined> {
-      const skills = await discoverSkills({ cwd: workspacePath, enabledResources });
+      const skills = await discover();
       const skill = skills.find((item) => item.name === name);
       if (!skill) return undefined;
-      if (skill.filePath) skill.content = await readSkillDetails(skill.filePath);
+      if (skill.filePath) {
+        skill.content = await readSkillDetails(skill.filePath);
+        skill.contentHash = skillContentHash(skill.content);
+      }
       return skill;
     },
     async enableSkill(name: string): Promise<void> {
-      const skill = (await discoverSkills({ cwd: workspacePath, enabledResources }))
+      const skill = (await discover())
         .find((item) => item.name === name);
       if (!skill) throw new Error(`unknown skill: ${name}`);
       if (skill.enabled) return;
       const resource: EnabledResource = {
         kind: "skill",
         identity: skill.name,
-        version: "1.0.0",
+        version: skillContentHash(await readSkillDetails(skill.filePath)),
         source: skill.filePath || `thebe://skills/${skill.name}`,
       };
       await putEnabledResource(resource);
@@ -125,6 +139,7 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
         identity: name,
         source: `mcp://servers/${name}`,
       });
+      await reloadIdleSessions();
       return server;
     },
     closeMcp(): void {

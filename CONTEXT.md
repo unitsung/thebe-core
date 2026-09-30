@@ -119,6 +119,14 @@ _Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core int
 Agent-owned music capability in `src/agent/capabilities/navidrome.ts`. `NavidromeAdapter` implements the Subsonic API boundary, including salt+MD5 authentication, library/search/artist/lyrics reads, playlist writes, and provider-neutral playback queues with stream/artwork URLs. Core exposes these as `navidrome.*` capabilities; the iOS App still owns MPV playback, Now Playing, and remote commands. Playlist writes require the runtime permission flow and are rejected by direct MCP or capability invocation.
 _Avoid_: exposing Subsonic credentials to the model, making Core start a mobile playback session, or creating a second player engine
 
+**MediaLibraryProvider**:
+Agent-owned Emby and Jellyfin library capability in `src/agent/capabilities/media.ts`. The adapters search and read one item when the composition root supplies the server. Core exposes `emby.search`, `emby.item`, `jellyfin.search`, and `jellyfin.item`. Built-in skills name those tools. The iOS App keeps its own library tools and playback.
+_Avoid_: handing the connection to Pi, inventing a rating the server did not return
+
+**PhotoLibraryProvider**:
+Agent-owned Immich capability in the same module. `immich.search` is semantic search through `POST /api/search/smart`. Metadata listing stays a separate read. A machine-learning failure stays an error.
+_Avoid_: treating semantic search as a filename filter, or hiding an unavailable search as an empty library
+
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.
 _Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field, replacing PolicyEngine with a Judgment Model

@@ -82,6 +82,7 @@ const operations: Operation[] = [
   { method: "post", path: `${PRODUCT_HTTP_PATH.permissions}/{id}/${PRODUCT_HTTP_SEGMENT.resolve}`, summary: "Approve or deny a pending permission", tag: "permissions", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "PermissionResolution", responseSchema: "Ok" },
   { method: "get", path: PRODUCT_HTTP_PATH.skills, summary: "List skills", tag: "skills", responseSchema: "SkillList" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Get skill metadata", tag: "skills", parameters: [idParameter("name")], responseSchema: "Skill" },
+  { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}/content`, summary: "Download skill instructions with a content hash", tag: "skills", parameters: [idParameter("name")], responseSchema: "SkillContent" },
   { method: "patch", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Enable or disable a skill", tag: "skills", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "SkillPatch", responseSchema: "Skill" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`, summary: "List MCP servers", tag: "extensions", responseSchema: "McpServerList" },
   { method: "patch", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`, summary: "Enable or disable an MCP server", tag: "extensions", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "McpServerPatch", responseSchema: "McpServer" },
@@ -733,6 +734,14 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             description: { type: "string" },
             scope: { type: "string", enum: ["project", "global", "builtin"] },
             enabled: { type: "boolean" },
+          },
+        },
+        SkillContent: {
+          type: "object",
+          required: ["name", "description", "content", "contentHash"],
+          properties: {
+            name: { type: "string" }, description: { type: "string" },
+            content: { type: "string" }, contentHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
           },
         },
         SkillList: {

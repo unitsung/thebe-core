@@ -1,5 +1,7 @@
 import { ProviderError } from "../../agent/capabilities/containers.ts";
 import {
+  clampMediaLimit,
+  clampMediaPage,
   mapPhotoAlbums,
   mapPhotoAssets,
   mapPhotoStatistics,
@@ -46,6 +48,23 @@ export class ImmichAdapter implements PhotoLibraryProvider {
   async getStatistics(): Promise<PhotoStatistics> {
     const body = await this.requestJson("/assets/statistics");
     return mapPhotoStatistics(body);
+  }
+
+  async searchSemantic(
+    query: string,
+    options: { size?: number; page?: number } = {},
+  ): Promise<PhotoAsset[]> {
+    const trimmed = query.trim();
+    if (!trimmed) throw new ProviderError("UNKNOWN", "Immich semantic search requires a query");
+    const body = await this.requestJson("/search/smart", {
+      method: "POST",
+      body: {
+        query: trimmed,
+        size: clampMediaLimit(options.size),
+        page: clampMediaPage(options.page),
+      },
+    });
+    return mapPhotoAssets(body);
   }
 
   private async requestJson(

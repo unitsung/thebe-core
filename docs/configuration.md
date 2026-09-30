@@ -161,6 +161,59 @@ export NAVIDROME_FALLBACK_URL=https://music.example.com
 403。Navidrome 密码只保留在 Core adapter 内，不会进入工具参数或 capability
 metadata。
 
+### 推荐 skill 与模型上下文预算
+
+仓库提供 `.thebe/skills/navidrome-recommend/SKILL.md`，用于个性化推荐、场景选歌
+和推荐后的播放/歌单追问。将该目录放到配置工作区的 `.thebe/skills/`，或运行
+Core 用户的 `~/.thebe/skills/` 下，再通过 App 的 Skills 设置启用
+`navidrome-recommend`（HTTP：`PATCH /v1/skills/navidrome-recommend`，正文
+`{"enabled":true}`）。容器部署需把 skill 放在挂载的工作区或持久化 HOME 中；
+仅将它放在开发仓库里不会使任意工作区或现有部署自动启用。
+
+运行时仅把启用 skill 的名称、描述和路径加入发现信息，正文按需读取。
+推荐流程不常驻系统提示词；描述负责触发选歌流程。
+
+Core 会话的 Navidrome 音乐库、搜索和歌手工具返回精简观察：保留所有返回候选
+的顺序、名称、ID、专辑/歌手关系及相关音乐信息，移除封面和音频编码等冗余字段。
+歌手简介最多 2000 字符，超过时返回 `biographyTruncated:true`。
+直接 capability 响应保持完整 schema，队列 URL、歌词和写操作回执保持完整。
+这不会截断用户输入，也不会固定缩短会话轮数；历史仍由 runtime 管理和压缩。
+
+## Emby、Jellyfin 与 Immich
+
+配置完整后，Core 注册对应的只读能力。凭据只留在 adapter 内，不进入工具参数。
+缺少必填变量时不暴露该服务的检索能力。库列表、最近添加和会话仍按原目录公布。
+
+```bash
+export EMBY_BASE_URL=http://127.0.0.1:8096
+export EMBY_API_KEY=your-emby-key
+export EMBY_USER_ID=your-user-id
+
+export JELLYFIN_BASE_URL=http://127.0.0.1:8096
+export JELLYFIN_API_KEY=your-jellyfin-key
+export JELLYFIN_USER_ID=your-user-id
+
+export IMMICH_BASE_URL=http://127.0.0.1:2283
+export IMMICH_API_KEY=your-immich-key
+```
+
+`THEBE_EMBY_*`、`THEBE_JELLYFIN_*` 和 `THEBE_IMMICH_*` 是等价别名。Emby 使用
+`X-Emby-Token` 和 `/emby` 前缀。Jellyfin 使用 `Authorization: MediaBrowser Token="…"`，
+没有 `/emby` 前缀。检索走用户条目接口：Emby 查询参数用 PascalCase，Jellyfin 用
+OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或年份返回
+条目 id；`emby.item` / `jellyfin.item` 读取简介、类型、年份、题材和演职员。
+`communityRating` 是媒体服务器自己的评分。
+
+`immich.search` 调用 `POST /api/search/smart`，按画面内容做语义检索。它不是
+文件名、日期或城市过滤；那些条件仍走既有的 metadata 列表。机器学习不可用时
+错误保持可见，不当成空库。
+
+仓库提供 `.thebe/skills/library-lookup/SKILL.md` 和
+`.thebe/skills/photo-find/SKILL.md`。放到工作区 `.thebe/skills/` 或
+`~/.thebe/skills/` 后，在 App 的 Skills 设置里启用 `library-lookup` 与
+`photo-find`。只放在开发仓库里不会让任意工作区自动启用。App 直连路由内置同一份
+说明，并把 Core 工具名改写成本机工具名。
+
 ## Arcane 容器 provider 与活动来源
 
 Arcane 提供容器能力（`containers.list` / `containers.inspect` / `container.logs` /

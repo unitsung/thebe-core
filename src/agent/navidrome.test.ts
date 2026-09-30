@@ -54,6 +54,42 @@ function navidromeProvider(): NavidromeProvider {
 }
 
 describe("Navidrome agent integration", () => {
+  it("slims session observations while preserving ordered candidates and full capability results", async () => {
+    const fake = createFakeRuntime();
+    const creates: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const songs = Array.from({ length: 30 }, (_, index) => ({
+      id: `song-${index}`, title: `Track ${index}`, artist: "Artist", albumId: "album-1",
+      bitRate: 320, samplingRate: 48000, size: 12000000, coverArt: "cover-1",
+    }));
+    const agent = createThebeAgent({
+      runtime: {
+        ...fake.runtime,
+        async createSession(create) {
+          creates.push(create);
+          return fake.runtime.createSession(create);
+        },
+      },
+      provider: containerProvider(),
+      navidrome: {
+        ...navidromeProvider(),
+        async search() { return { artists: [], albums: [], songs }; },
+      },
+    });
+    await agent.createSession();
+    const tool = creates[0]!.customTools.find((item) => item.name === "navidrome.search")!;
+    const observation = await tool.execute("search-1", { query: "Artist", limit: 30 });
+    const text = observation.content.filter((part) => part.type === "text").map((part) => part.text).join("");
+    expect(text).toContain('"id":"song-29"');
+    expect(text).toContain('"albumId":"album-1"');
+    expect(text.indexOf('"id":"song-0"')).toBeLessThan(text.indexOf('"id":"song-29"'));
+    expect(text).not.toContain("samplingRate");
+    expect(text).not.toContain("coverArt");
+    const full = await agent.invokeTool("navidrome.search", { query: "Artist", limit: 30 });
+    expect(full).toContain('"samplingRate":48000');
+    expect(full).toContain('"id":"song-29"');
+    expect(text.length).toBeLessThan(full.length);
+  });
+
   it("registers read tools, gates playlist writes, and blocks direct writes", async () => {
     const fake = createFakeRuntime();
     const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];

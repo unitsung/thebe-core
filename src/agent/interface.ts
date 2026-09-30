@@ -17,6 +17,7 @@ import type {
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
+import type { MediaLibraryProvider, PhotoLibraryProvider } from "./capabilities/media.ts";
 import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
 import type { GoalEvent } from "./goals/runner.ts";
@@ -119,6 +120,12 @@ export type CreateThebeAgentOptions = {
   strmRepairProvider?: StrmRepairProvider;
   /** Optional Navidrome media provider exposed as Core capabilities. */
   navidrome?: NavidromeProvider;
+  /** Optional Emby library. Exposes search and item detail when present. */
+  emby?: MediaLibraryProvider;
+  /** Optional Jellyfin library. Exposes search and item detail when present. */
+  jellyfin?: MediaLibraryProvider;
+  /** Optional Immich library. Exposes semantic search when present. */
+  immich?: PhotoLibraryProvider;
   /** Optional provider-native background task sources. */
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
   /** Optional Judgment Model. Absent means the Judgment Gate is off. */

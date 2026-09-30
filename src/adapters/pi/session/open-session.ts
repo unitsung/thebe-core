@@ -92,6 +92,33 @@ export async function openPiSession(
     ...(create.builtinTools ?? PI_BUILTIN_TOOLS),
     ...create.customTools.map((tool) => tool.name),
   ];
+  const externalNames = new Set<string>();
+  const externalApproval = new Set<string>();
+  async function discoverMcpTools() {
+    const external = await create.externalMcp?.listTools() ?? [];
+    externalNames.clear();
+    externalApproval.clear();
+    return external.map((tool) => {
+    const server = tool.serverName ?? "external";
+    const originalName = tool.originalName ?? tool.name;
+    const name = sdk.createMcpToolName(server, originalName,
+      (candidate: string) => externalNames.has(candidate) || tools.includes(candidate));
+    externalNames.add(name);
+    if (tool.permission !== "read") externalApproval.add(name);
+    return sdk.createMcpToolDefinition({
+      server, name, tool: { name: originalName, description: tool.description,
+        inputSchema: tool.inputSchema, outputSchema: tool.outputSchema,
+        annotations: tool.annotations } as never,
+      exposure: "deferred", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
+      getClient: async () => ({
+        callTool: async (_name: string, args: Record<string, unknown>, options: { signal?: AbortSignal }) =>
+          create.externalMcp!.callTool(tool.name, args, options.signal) as never,
+      }),
+    });
+    });
+  }
+  const mcpTools = await discoverMcpTools();
+  const hasMcp = Boolean(create.externalMcp);
   const listeners = new Set<(event: NormalizedEvent) => void>();
   const permissionHandler = create.permissionHandler
     ? {
@@ -121,6 +148,7 @@ export async function openPiSession(
         },
       }
     : undefined;
+  async function loadSessionExtensions() {
   const extensionRuntime = sdk.createExtensionRuntime();
   let permissionExtension: unknown[] = [];
   if (permissionHandler) {
@@ -139,7 +167,7 @@ export async function openPiSession(
           }) => {
             const required = new Set(create.toolsRequiringApproval ?? []);
             pi.on("tool_call", async (event) => {
-              if (!required.has(event.toolName)) {
+              if (!required.has(event.toolName) && !externalApproval.has(event.toolName)) {
                 return undefined;
               }
               const permissionId = randomUUID();
@@ -149,7 +177,7 @@ export async function openPiSession(
                 toolCallId: event.toolCallId ?? permissionId,
                 args: event.input,
                 argsSummary: summarizeArgs(event.input),
-                risk: permissionRisk(event.toolName),
+                risk: externalApproval.has(event.toolName) ? "high" as const : permissionRisk(event.toolName),
               };
               const preflight = await permissionHandler.preflight(request);
               if (preflight === "allow") {
@@ -177,12 +205,21 @@ export async function openPiSession(
       );
     }
   }
+  if (hasMcp) {
+    permissionExtension.push(await sdk.loadExtensionFromFactory(
+      sdk.createToolSearchExtension(), create.cwd ?? cwd, sdk.createEventBus(),
+      extensionRuntime, "thebe://tool-search"));
+  }
+  return { extensions: permissionExtension, runtime: extensionRuntime };
+  }
+  const loadedExtensions = await loadSessionExtensions();
   const resourceLoader = createExplicitResourceLoader({
     systemPrompt: create.systemPrompt ?? "You are Thebe.",
     enabledResources: create.enabledResources,
     sdk,
-    extensions: permissionExtension,
-    extensionRuntime,
+    extensions: loadedExtensions.extensions,
+    extensionRuntime: loadedExtensions.runtime,
+    reloadExtensions: loadSessionExtensions,
   });
   const autoCompact =
     create.autoCompact ?? loadThebeUserConfig().autoCompact ?? true;
@@ -190,6 +227,7 @@ export async function openPiSession(
     defaultProjectTrust: "always",
     retry: { enabled: false, maxRetries: 0 },
     compaction: { enabled: autoCompact },
+    ...(hasMcp ? { defaultTools: [...tools, "tool_search"] } : {}),
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
@@ -226,6 +264,7 @@ export async function openPiSession(
     },
   });
   const piCustomTools = [
+    ...mcpTools.map((tool) => abortablePiTool(tool, controllers)),
     ...create.customTools.map((tool) =>
       abortablePiTool(toPiTool(sdk, tool), controllers),
     ),
@@ -263,12 +302,16 @@ export async function openPiSession(
     // New sessions start with Thebe's explicit default. Existing sessions
     // must omit this option so Pi can restore their persisted level.
     thinkingLevel: sessionManager.getBranch().length === 0 ? "off" : undefined,
-    tools,
+    // An explicit allowlist would hide deferred tools from tool_search.
+    ...(hasMcp ? {
+      excludeTools: PI_BUILTIN_TOOLS.filter((name) => !tools.includes(name)),
+    } : { tools }),
     customTools: piCustomTools,
     resourceLoader,
     sessionManager,
     settingsManager,
   });
+  if (hasMcp) await session.bindExtensions({});
   live.set(session.sessionId, session as PiSession);
   sessionToolControllers.set(session as object, controllers);
   const wrappedSession = wrapPiSession(
@@ -283,6 +326,16 @@ export async function openPiSession(
     backgroundTasks,
     bashOperations,
   );
+  if (hasMcp) {
+    const reload = wrappedSession.reloadResources!.bind(wrappedSession);
+    wrappedSession.reloadResources = async () => {
+      const next = await discoverMcpTools();
+      const local = piCustomTools.filter((tool) => !tool.name.startsWith("mcp__"));
+      piCustomTools.splice(0, piCustomTools.length,
+        ...next.map((tool) => abortablePiTool(tool, controllers)), ...local);
+      await reload();
+    };
+  }
   if (!gondolinBash) return wrappedSession;
   // Pi's dispose is synchronous, so the Micro-VM is torn down best-effort
   // (its lifetime is the session; the VM is disposable either way).

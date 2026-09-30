@@ -174,6 +174,11 @@ export async function createPiCodingAgentRuntime(
 
   return {
     runtimeId: PI_RUNTIME_ID,
+    async loadSkillDirectory(directory) {
+      return sdk.loadSkillsFromDir({ dir: directory, source: "path" }).skills.map(
+        ({ name, description, filePath }: { name: string; description: string; filePath: string }) => ({ name, description, filePath }),
+      );
+    },
     async createSession(create) {
       const sessionManager = (create.inMemory ?? inMemory)
         ? sdk.SessionManager.inMemory(create.cwd ?? cwd)

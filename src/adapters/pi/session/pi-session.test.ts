@@ -68,6 +68,88 @@ async function piWithFaux(sessionDir?: string) {
 }
 
 describe("PiCodingAgentRuntime sessions", () => {
+  it("discovers deferred MCP schemas and calls them through native tool_search", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "remote result" }],
+      structuredContent: { items: [{ id: "verified-id" }] } }));
+    const schemas: string[][] = [];
+    faux.setResponses([
+      (context) => {
+        schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
+        return fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]);
+      },
+      (context) => {
+        schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
+        return fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]);
+      },
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"],
+      externalMcp: {
+        listTools: async () => [{ name: "mcp:fixture/catalog", serverName: "fixture", originalName: "catalog",
+          description: "Search remote catalog", permission: "read",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }],
+        callTool,
+      },
+    });
+    try {
+      await session.prompt("search remote catalog");
+      expect(schemas[0]).toEqual(["read", "tool_search"]);
+      expect(schemas[1]).toContain("mcp__fixture__catalog");
+      expect(callTool).toHaveBeenCalledWith("mcp:fixture/catalog", { query: "music" }, expect.any(AbortSignal));
+      expect(session.messages()).toContainEqual(expect.objectContaining({ role: "tool", toolName: "mcp__fixture__catalog", text: "remote result" }));
+    } finally { session.dispose(); }
+  });
+
+  it("blocks discovered MCP writes before invocation when approval is denied", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const callTool = vi.fn();
+    const request = vi.fn(async () => "deny" as const);
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "publish playlist" })]),
+      fauxAssistantMessage([fauxToolCall("mcp__fixture__publish", { id: "playlist-1" })]),
+      fauxAssistantMessage("denied"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"],
+      permissionHandler: { request }, externalMcp: {
+        listTools: async () => [{ name: "mcp:fixture/publish", serverName: "fixture", originalName: "publish",
+          description: "Publish playlist", permission: "confirm", inputSchema: { type: "object" } }], callTool,
+      },
+    });
+    try {
+      await session.prompt("publish");
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ toolName: "mcp__fixture__publish", risk: "high" }));
+      expect(callTool).not.toHaveBeenCalled();
+    } finally { session.dispose(); }
+  });
+
+  it("refreshes discovered MCP tools in an existing session after server enable and disable", async () => {
+    const { faux, runtime } = await piWithFaux();
+    let enabled = false;
+    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "live" }] }));
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], externalMcp: {
+      listTools: async () => enabled ? [{ name: "mcp:fixture/catalog", serverName: "fixture", originalName: "catalog",
+        description: "Search remote catalog", permission: "read", inputSchema: { type: "object" } }] : [],
+      callTool,
+    } });
+    try {
+      enabled = true;
+      await session.reloadResources!();
+      faux.setResponses([
+        fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog" })]),
+        fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]),
+        fauxAssistantMessage("enabled"),
+      ]);
+      await session.prompt("search");
+      expect(callTool).toHaveBeenCalledTimes(1);
+      enabled = false;
+      await session.reloadResources!();
+      faux.setResponses([fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]), fauxAssistantMessage("disabled")]);
+      await session.prompt("search again");
+      expect(callTool).toHaveBeenCalledTimes(1);
+      expect(session.toolNames()).not.toContain("mcp__fixture__catalog");
+    } finally { session.dispose(); }
+  });
   it("rejects a terminal model failure and allows the next turn to recover", async () => {
     const { faux, runtime } = await piWithFaux();
     const agent = createThebeAgent({ runtime, provider: emptyProvider() });

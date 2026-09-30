@@ -97,13 +97,18 @@ describe("external MCP client registry", () => {
     const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-http-home-"));
     await mkdir(join(cwd, ".thebe"), { recursive: true });
     const server = createServer(async (request, response) => {
+      if (request.method !== "POST") {
+        response.statusCode = 405;
+        response.end();
+        return;
+      }
       let body = "";
       for await (const chunk of request) body += chunk.toString();
       const message = JSON.parse(body) as { id?: number; method?: string; params?: { arguments?: { text?: string } } };
       response.setHeader("content-type", "application/json");
       response.setHeader("mcp-session-id", "fixture-session");
       if (message.method === "initialize") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: {} } }));
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1.0.0" } } }));
       } else if (message.method === "tools/list") {
         expect(request.headers["mcp-session-id"]).toBe("fixture-session");
         expect(request.headers["mcp-protocol-version"]).toBe("2025-06-18");
@@ -111,7 +116,7 @@ describe("external MCP client registry", () => {
       } else if (message.method === "tools/call") {
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: `http:${message.params?.arguments?.text ?? ""}` }] } }));
       } else {
-        response.statusCode = 204;
+        response.statusCode = 202;
         response.end();
       }
     });

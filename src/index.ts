@@ -92,8 +92,11 @@ export {
 } from "./adapters/arcane/tasks.ts";
 export type { ArcaneBackgroundTaskProviderOptions } from "./adapters/arcane/tasks.ts";
 export { EmbyAdapter } from "./adapters/emby/adapter.ts";
+export { createEmbyProviderFromEnv, embyOptionsFromEnv } from "./adapters/emby/env.ts";
 export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
+export { createJellyfinProviderFromEnv, jellyfinOptionsFromEnv } from "./adapters/jellyfin/env.ts";
 export { ImmichAdapter } from "./adapters/immich/adapter.ts";
+export { createImmichProviderFromEnv, immichOptionsFromEnv } from "./adapters/immich/env.ts";
 export {
   NavidromeAdapter,
   createNavidromeProviderFromEnv,

@@ -1,4 +1,5 @@
 import { join, resolve } from "node:path";
+import { realpath } from "node:fs/promises";
 import { createAuditLog, hashParameters } from "../../agent/security/audit/audit-log.ts";
 import { createPolicyEngine } from "../../agent/security/policy/policy-engine.ts";
 import {
@@ -20,7 +21,16 @@ import {
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
+import {
+  createImmichSearchTools,
+  createMediaLibraryTools,
+} from "../../agent/tools/media-library-tools.ts";
 import { CONTAINER_TOOL_NAMES } from "../capabilities/containers.ts";
+import {
+  EMBY_LOOKUP_TOOL_NAMES,
+  IMMICH_SEARCH_TOOL_NAMES,
+  JELLYFIN_LOOKUP_TOOL_NAMES,
+} from "../capabilities/media.ts";
 import {
   NAVIDROME_TOOL_NAMES,
   NAVIDROME_WRITE_TOOL_NAMES,
@@ -29,6 +39,7 @@ import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
+import { createRuntimeMcpPort } from "../tools/mcp-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createJudgmentApi } from "../judgment/service.ts";
 import {
@@ -146,6 +157,17 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   const preflight = async (
     request: PermissionRequest,
   ): Promise<PermissionPreflightDecision> => {
+    if (request.toolName === "read" && request.args && typeof request.args === "object") {
+      const path = (request.args as { path?: unknown }).path;
+      if (typeof path === "string") {
+        const candidate = await realpath(resolve(workspacePath ?? process.cwd(), path)).catch(() => undefined);
+        for (const resource of enabledResources) {
+          if (resource.kind !== "skill") continue;
+          const selected = await realpath(resource.source).catch(() => undefined);
+          if (candidate && candidate === selected) return "allow";
+        }
+      }
+    }
     if (commandGuard) {
       const guarded = commandGuardPreflight(request.toolName, request.args, {
         workspacePath,
@@ -163,6 +185,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     allowedToolNames: [
       ...CONTAINER_TOOL_NAMES,
       ...(options.navidrome ? NAVIDROME_TOOL_NAMES : []),
+      ...(options.emby ? EMBY_LOOKUP_TOOL_NAMES : []),
+      ...(options.jellyfin ? JELLYFIN_LOOKUP_TOOL_NAMES : []),
+      ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
     ],
   });
   const audit = options.auditPath
@@ -178,6 +203,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   const builtinTools = options.builtinTools ?? PI_BUILTIN_TOOLS;
   const systemPrompt = buildSystemPrompt(options.systemPrompt, workspacePath, outputDirectory);
   const eventLog = createEventLog();
+  const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
 
   const state = createSessionState({
@@ -315,7 +341,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
-  function baseTools(toolPolicy = policy, toolCallerId = callerId) {
+  function baseTools(toolPolicy = policy, toolCallerId = callerId, modelResults = false) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
       callerId: toolCallerId,
@@ -325,9 +351,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ...createNavidromeTools(options.navidrome, {
           policy: toolPolicy,
           callerId: toolCallerId,
+          modelResults,
         }),
       );
     }
+    const toolOptions = { policy: toolPolicy, callerId: toolCallerId, modelResults };
+    if (options.emby) tools.push(...createMediaLibraryTools("emby", options.emby, toolOptions));
+    if (options.jellyfin) {
+      tools.push(...createMediaLibraryTools("jellyfin", options.jellyfin, toolOptions));
+    }
+    if (options.immich) tools.push(...createImmichSearchTools(options.immich, toolOptions));
     return tools;
   }
 
@@ -345,9 +378,23 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     const isChatOnly = effectiveBuiltinTools.length === 0;
     return {
       model: sessionModel ?? options.model,
+      ...(!isChatOnly && sessionCallerId === callerId && mcp.invokeToolResult ? {
+        externalMcp: createRuntimeMcpPort(mcp, {
+          policy: sessionPolicy, audit, toolWatchdogMs: options.toolWatchdogMs,
+          sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
+          onEvent: (event) => {
+            const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
+            if (sid) eventLog.appendEvent(sid, event);
+          },
+          onStop: sessionStop ?? (() => {
+            const sid = eventSessionId ?? explicitSessionId ?? getActive()?.meta.thebeSessionId;
+            if (sid) void state.openedSessions.get(sid)?.session.abort();
+          }),
+        }),
+      } : {}),
       customTools: isChatOnly
         ? []
-        : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId), {
+        : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId, true), {
             policy: sessionPolicy,
             audit,
             toolWatchdogMs: options.toolWatchdogMs,
@@ -427,6 +474,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       }
       if (promptOptions.nonInteractive) permissions.nonInteractiveRuns.add(sid);
       const queueOnly = (mode === "steer" || mode === "followUp") && state.streaming.has(sid);
+      if (!queueOnly && resourcesNeedingReload.has(sid)) {
+        await opened.session.reloadResources?.();
+        resourcesNeedingReload.delete(sid);
+      }
       if (!queueOnly) {
         policy.beginRun();
         eventLog.lastEvents.length = 0;
@@ -538,6 +589,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     get requestStop() { return registry.requestStop; },
     set requestStop(value: () => void | Promise<void>) { registry.requestStop = value; },
     checkNotQuiesced,
+    resourcesNeedingReload,
     baseTools,
     sessionOptions,
     runPrompt,

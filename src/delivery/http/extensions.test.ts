@@ -69,6 +69,13 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     expect(got.name).toBe("demo-skill");
     expect(got).not.toHaveProperty("content");
     expect(JSON.stringify(got)).not.toContain("secret skill body");
+    const content = await json(await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/skills/demo-skill/content"),
+    ));
+    expect(content).toMatchObject({ name: "demo-skill", content: expect.stringContaining("secret skill body") });
+    expect(content.contentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(content).not.toHaveProperty("filePath");
+    expect((await app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills/unknown/content"))).status).toBe(404);
 
     const patched = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/skills/demo-skill", {

@@ -27,7 +27,12 @@ out/
 # Runtime / data
 /data/
 /sessions/
-/.thebe/
+/.thebe/*
+!/.thebe/skills/
+/.thebe/skills/*
+!/.thebe/skills/navidrome-recommend/
+!/.thebe/skills/library-lookup/
+!/.thebe/skills/photo-find/
 *.sqlite
 *.sqlite3
 *.db

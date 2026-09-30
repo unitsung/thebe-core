@@ -10,6 +10,7 @@ import {
 } from "../capabilities/navidrome.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
+import { navidromeModelResult } from "./navidrome-model-result.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 
@@ -18,6 +19,7 @@ export function createNavidromeTools(
   options: {
     policy: Policy;
     callerId: string;
+    modelResults?: boolean;
   },
 ): CustomToolDefinition[] {
   const run = (name: NavidromeToolName) =>
@@ -107,7 +109,7 @@ export function createNavidromeTools(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(result ?? null),
+            text: JSON.stringify(options.modelResults ? navidromeModelResult(name, result) : result ?? null),
           },
         ],
         details: {},

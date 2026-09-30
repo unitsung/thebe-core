@@ -91,4 +91,37 @@ describe("ImmichAdapter", () => {
       ]),
     );
   });
+
+  it("posts semantic search to /search/smart and leaves failures visible", async () => {
+    const bodies: unknown[] = [];
+    const adapter = new ImmichAdapter({
+      baseUrl: "https://immich.internal:2283",
+      apiKey: "immich-key",
+      fetch: async (input, init) => {
+        const url = String(input);
+        bodies.push(init?.body ? JSON.parse(String(init.body)) : undefined);
+        if (url.endsWith("/search/smart") && init?.method === "POST") {
+          const requested = JSON.parse(String(init.body)) as { query?: string };
+          if (requested.query === "broken") return jsonResponse(500, { message: "ml down" });
+          return jsonResponse(200, {
+            assets: {
+              items: [{ id: "asset-1", originalFileName: "beach.jpg", type: "IMAGE" }],
+            },
+          });
+        }
+        return jsonResponse(404, {});
+      },
+    });
+
+    await expect(adapter.searchSemantic("red bicycle", { size: 80, page: 0 })).resolves.toEqual([
+      { id: "asset-1", title: "beach.jpg", type: "IMAGE" },
+    ]);
+    expect(bodies[0]).toEqual({ query: "red bicycle", size: 40, page: 1 });
+    await expect(adapter.searchSemantic("broken")).rejects.toMatchObject({
+      message: "Immich HTTP 500",
+    });
+    await expect(adapter.searchSemantic("  ")).rejects.toMatchObject({
+      message: "Immich semantic search requires a query",
+    });
+  });
 });

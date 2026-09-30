@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import type { EnabledResource } from "../runtime/index.ts";
 
 export type SkillInfo = {
@@ -10,6 +11,7 @@ export type SkillInfo = {
   scope: "project" | "global" | "builtin";
   enabled: boolean;
   content?: string;
+  contentHash?: string;
 };
 
 export function parseSkillFrontmatter(content: string): {
@@ -87,10 +89,15 @@ export async function discoverSkills(options?: {
   cwd?: string;
   homeDir?: string;
   enabledResources?: EnabledResource[];
+  loadDirectory?: (directory: string) => Promise<Array<Pick<SkillInfo, "name" | "description" | "filePath">>>;
 }): Promise<SkillInfo[]> {
   const cwd = options && "cwd" in options ? options.cwd : process.cwd();
   const home = options?.homeDir ?? homedir();
   const enabledResources = options?.enabledResources ?? [];
+  const collect = options?.loadDirectory
+    ? async (directory: string, scope: "project" | "global"): Promise<SkillInfo[]> =>
+        (await options.loadDirectory!(directory)).map((skill) => ({ ...skill, scope, enabled: false }))
+    : collectSkillsFromDir;
 
   const [projectSkills, globalSkills] = await Promise.all([
     cwd
@@ -98,22 +105,22 @@ export async function discoverSkills(options?: {
           [
             join(cwd, ".thebe", "skills"),
             join(cwd, ".pi", "skills"),
-          ].map((dir) => collectSkillsFromDir(dir, "project")),
+          ].map((dir) => collect(dir, "project")),
         ).then((groups) => groups.flat())
       : Promise.resolve([]),
     Promise.all(
       [
         join(home, ".thebe", "skills"),
         join(home, ".pi", "agent", "skills"),
-      ].map((dir) => collectSkillsFromDir(dir, "global")),
+      ].map((dir) => collect(dir, "global")),
     ).then((groups) => groups.flat()),
   ]);
 
   const skillMap = new Map<string, SkillInfo>();
-  for (const s of globalSkills) {
+  for (const s of [...globalSkills].reverse()) {
     skillMap.set(s.name, s);
   }
-  for (const s of projectSkills) {
+  for (const s of [...projectSkills].reverse()) {
     skillMap.set(s.name, s);
   }
 
@@ -139,9 +146,9 @@ export async function discoverSkills(options?: {
 }
 
 export async function readSkillDetails(filePath: string): Promise<string> {
-  try {
-    return await readFile(filePath, "utf8");
-  } catch (err) {
-    return `Unable to read skill file: ${err instanceof Error ? err.message : String(err)}`;
-  }
+  return readFile(filePath, "utf8");
+}
+
+export function skillContentHash(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }

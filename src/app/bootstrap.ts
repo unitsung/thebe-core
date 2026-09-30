@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
+import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
+import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
+import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
 import {
   arcaneEnvironmentIdFromEnv,
   createArcaneBackgroundTaskProviderFromEnv,
@@ -142,6 +145,9 @@ export async function bootstrapThebe(
       : stubProvider();
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
   const navidrome = createNavidromeProviderFromEnv();
+  const emby = createEmbyProviderFromEnv();
+  const jellyfin = createJellyfinProviderFromEnv();
+  const immich = createImmichProviderFromEnv();
   const openListBackgroundTaskProvider = createOpenListBackgroundTaskProviderFromEnv();
   const arcaneBackgroundTaskProvider = createArcaneBackgroundTaskProviderFromEnv();
 
@@ -191,6 +197,9 @@ export async function bootstrapThebe(
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     strmRepairProvider,
     navidrome,
+    emby,
+    jellyfin,
+    immich,
     backgroundTaskProviders: [
       ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
       ...(openListBackgroundTaskProvider ? [openListBackgroundTaskProvider] : []),

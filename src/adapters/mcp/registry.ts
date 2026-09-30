@@ -6,6 +6,7 @@ import type {
   McpServerInfo,
   McpServerState,
   McpToolInfo,
+  McpCallResult,
 } from "../../agent/extensions/mcp.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -75,11 +76,12 @@ function inferCategory(name: string, description: string): HomelabCapabilityCate
   return "other";
 }
 
-function inferPermission(name: string, description: string): HomelabCapabilityPermission {
+function inferPermission(name: string, description: string, annotations?: Record<string, unknown>): HomelabCapabilityPermission {
+  if (annotations?.destructiveHint === true) return "admin";
   const value = `${name} ${description}`.toLowerCase();
   if (/(delete|remove|destroy|admin|credential|permission|shutdown)/.test(value)) return "admin";
   if (/(create|update|write|save|submit|download|move|copy|rename|restart|start|stop|pause|resume|schedule|run)/.test(value)) return "confirm";
-  return "read";
+  return annotations?.readOnlyHint === true ? "read" : "confirm";
 }
 
 function serverDisabled(
@@ -114,8 +116,11 @@ async function loadStateTools(
         name,
         description,
         inputSchema: asRecord(raw.inputSchema) ?? { type: "object" },
+        outputSchema: asRecord(raw.outputSchema),
+        annotations: asRecord(raw.annotations),
+        originalName: raw.name,
         category: state.config.category ?? inferCategory(raw.name, description),
-        permission: state.config.permission ?? inferPermission(raw.name, description),
+        permission: state.config.permission ?? inferPermission(raw.name, description, asRecord(raw.annotations)),
         service: state.config.service ?? state.config.name,
         source: "external" as const,
         serverName: state.config.name,
@@ -224,8 +229,8 @@ export function createMcpClientRegistry(options: {
         status: state.status,
       };
     },
-    async invokeTool(name: string, args: unknown): Promise<string | undefined> {
-      if (!name.startsWith("mcp:")) return undefined;
+    async invokeToolResult(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult> {
+      if (!name.startsWith("mcp:")) throw new Error(`invalid MCP tool name: ${name}`);
       await sync();
       const rest = name.slice("mcp:".length);
       const separator = rest.indexOf("/");
@@ -249,7 +254,14 @@ export function createMcpClientRegistry(options: {
       if (!state.bindings.some((binding) => binding.originalName === originalName)) {
         throw new Error(`unknown MCP tool: ${name}`);
       }
-      return state.client.callTool(originalName, args);
+      return state.client.callToolResult(originalName, args, signal);
+    },
+    async invokeTool(name: string, args: unknown): Promise<string | undefined> {
+      if (!name.startsWith("mcp:")) return undefined;
+      const result = await registry.invokeToolResult(name, args);
+      const text = result.content.map((block) => block.type === "text" ? String(block.text) : JSON.stringify(block)).join("\n");
+      if (result.isError) throw new Error(text || "MCP tool failed");
+      return text || JSON.stringify(result.structuredContent ?? result);
     },
     close,
   };

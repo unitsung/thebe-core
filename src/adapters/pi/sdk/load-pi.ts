@@ -83,7 +83,15 @@ export async function loadPiSdk() {
   const source = await import(piDistUrl("core/source-info.js"));
   const eventBus = await import(piDistUrl("core/event-bus.js"));
   const bash = await import(piDistUrl("core/tools/bash.js"));
+  const skills = await import(piDistUrl("core/skills.js"));
+  const mcpTools = await import(piDistUrl("extensions/mcp/tools.js"));
+  const toolSearch = await import(piDistUrl("extensions/tool-search/index.js"));
   return {
+    createMcpToolDefinition: mcpTools.createMcpToolDefinition as typeof mcpTools.createMcpToolDefinition,
+    createMcpToolName: mcpTools.createMcpToolName as typeof mcpTools.createMcpToolName,
+    createToolSearchExtension: toolSearch.createToolSearchExtension as typeof toolSearch.createToolSearchExtension,
+    loadSkills: skills.loadSkills as typeof skills.loadSkills,
+    loadSkillsFromDir: skills.loadSkillsFromDir as typeof skills.loadSkillsFromDir,
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,
     createBashTool: bash.createBashTool as typeof bash.createBashTool,
     createLocalBashOperations:

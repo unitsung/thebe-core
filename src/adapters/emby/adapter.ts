@@ -1,11 +1,18 @@
 import { ProviderError } from "../../agent/capabilities/containers.ts";
 import {
+  mapMediaItemDetail,
   mapMediaItems,
   mapMediaLibraries,
+  mapMediaSearch,
   mapMediaSessions,
+  mediaItemPathSegment,
+  mediaLibrarySearchQuery,
   type MediaItem,
+  type MediaItemDetail,
   type MediaLibrary,
   type MediaLibraryProvider,
+  type MediaSearchPage,
+  type MediaSearchQuery,
   type MediaSession,
 } from "../../agent/capabilities/media.ts";
 
@@ -50,6 +57,25 @@ export class EmbyAdapter implements MediaLibraryProvider {
     return mapMediaSessions(body);
   }
 
+  async searchItems(query: MediaSearchQuery): Promise<MediaSearchPage> {
+    const body = await this.requestJson(
+      `/emby/Users/${this.userId}/Items?${mediaLibrarySearchQuery(query, "emby")}`,
+    );
+    return mapMediaSearch(body);
+  }
+
+  async getItem(id: string): Promise<MediaItemDetail | undefined> {
+    try {
+      const body = await this.requestJson(
+        `/emby/Users/${this.userId}/Items/${mediaItemPathSegment(id)}`,
+      );
+      return mapMediaItemDetail(body);
+    } catch (error) {
+      if (error instanceof ProviderError && error.code === "NOT_FOUND") return undefined;
+      throw error;
+    }
+  }
+
   private async requestJson(path: string): Promise<Json | unknown[]> {
     let response: Response;
     try {
@@ -67,7 +93,9 @@ export class EmbyAdapter implements MediaLibraryProvider {
       throw new ProviderError(
         response.status === 401 || response.status === 403
           ? "UNAUTHORIZED"
-          : "UNKNOWN",
+          : response.status === 404
+            ? "NOT_FOUND"
+            : "UNKNOWN",
         `Emby HTTP ${response.status}`,
       );
     }

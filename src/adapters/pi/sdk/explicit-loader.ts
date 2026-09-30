@@ -1,4 +1,3 @@
-import { dirname } from "node:path";
 import type { EnabledResource } from "../../../agent/runtime/interface.ts";
 import type { PiSdk } from "./load-pi.ts";
 
@@ -22,40 +21,28 @@ export function createExplicitResourceLoader(options: {
   sdk: PiSdk;
   extensions?: unknown[];
   extensionRuntime?: unknown;
+  reloadExtensions?: () => Promise<{ extensions: unknown[]; runtime: unknown }>;
 }): ResourceLoader {
-  const getSkillBaseDir = (source: string): string =>
-    source.includes("://") ? source : dirname(source);
-
-  const loadEnabledSkills = () =>
-    (options.enabledResources ?? [])
+  const loadEnabledSkills = () => options.sdk.loadSkills({
+    cwd: process.cwd(),
+    agentDir: process.cwd(),
+    includeDefaults: false,
+    skillPaths: (options.enabledResources ?? [])
       .filter((resource) => resource.kind === "skill")
-      .map((resource) => {
-        const baseDir = getSkillBaseDir(resource.source);
-        return {
-          name: resource.identity,
-          description: resource.identity,
-          filePath: resource.source,
-          baseDir,
-          sourceInfo: options.sdk.createSyntheticSourceInfo(resource.source, {
-            source: resource.source,
-            scope: "temporary",
-            origin: "top-level",
-            baseDir,
-          }),
-          disableModelInvocation: false,
-        };
-      });
+      .map((resource) => resource.source),
+  });
 
   let skills = loadEnabledSkills();
+  let extensions = options.extensions ?? [];
+  let runtime = options.extensionRuntime ?? options.sdk.createExtensionRuntime();
 
   return {
     getExtensions: () => ({
-      extensions: options.extensions ?? [],
+      extensions,
       errors: [],
-      runtime:
-        options.extensionRuntime ?? options.sdk.createExtensionRuntime(),
+      runtime,
     }),
-    getSkills: () => ({ skills, diagnostics: [] }),
+    getSkills: () => skills,
     getPrompts: () => ({ prompts: [], diagnostics: [] }),
     getThemes: () => ({ themes: [], diagnostics: [] }),
     getAgentsFiles: () => ({ agentsFiles: [] }),
@@ -66,6 +53,11 @@ export function createExplicitResourceLoader(options: {
     extendResources: () => {},
     reload: async () => {
       skills = loadEnabledSkills();
+      if (options.reloadExtensions) {
+        const loaded = await options.reloadExtensions();
+        extensions = loaded.extensions;
+        runtime = loaded.runtime;
+      }
     },
   };
 }
