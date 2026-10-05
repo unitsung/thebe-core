@@ -6,6 +6,32 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 
 ## Shipped
 
+Optional general web search (2026-10-06): the composition root supplies
+`web_search`, allowing model-selected queries on any topic. Create or PATCH a
+session with labels containing `"thebe.webSearch": "true"` to enable it;
+missing/false values deny execution before contacting the search provider.
+Permission is read on each execution, so disabling it preserves conversation
+history. Preserve other session labels when updating this value. App clients
+synchronize their saved switch before submitting a prompt. Explicit false also
+blocks built-in music research; older sessions without the label retain their
+previous music-research behavior.
+
+By default the adapter reads the public Bing RSS feed (no supported-API uptime
+guarantee). Set `THEBE_WEB_SEARCH_URL` to a SearXNG instance URL with JSON output
+enabled; a root URL uses `/search?q=…&format=json`. Results contain bounded
+titles, excerpts, source URLs and retrieval time. Remote content is untrusted,
+and failed searches are surfaced as tool errors. This switch does not change
+independently configured MCP permissions or model-provider network access.
+
+Verification: 667 unit tests passed (one skipped), typecheck/build passed, and
+62 Pi/Core fixture checks passed, including live session permission changes and
+search evidence reaching the model context. Native App adapter checks also
+verified the public feed with an actual network request. A real ClinePass/MiMo
+session invoked `web_search`, received public search evidence and cited Apple
+official documentation URLs; disabling the permission on that session produced
+an explicit disabled-search response. This verifies that provider, not every
+model/provider combination.
+
 Local verification update (2026-10-06): provider configuration supports
 credential-redacted GET, PUT and DELETE at `/v1/provider/{providerId}/config`.
 Model discovery with `/v1/model?provider=…&refresh=true` queries that configured

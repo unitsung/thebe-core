@@ -1,0 +1,36 @@
+import { describe, expect, it, vi } from "vitest";
+import { createWebSearchProvider } from "./client.ts";
+
+describe("general web search", () => {
+  it("preserves source evidence, decodes RSS and drops duplicate or unsafe links", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response('<rss><channel><item><title>A &amp; B</title><link>https://example.org/a?q=x&amp;b=y</link><description><![CDATA[Useful <b>evidence</b>]]></description></item><item><title>Duplicate</title><link>https://example.org/a?q=x&amp;b=y</link></item><item><link>javascript:alert(1)</link></item></channel></rss>'));
+    const result = await createWebSearchProvider({ fetch: request }).search("音乐 & album") as { results: unknown[]; retrieved_at: string };
+    expect(result.results).toEqual([{ title: "A & B", url: "https://example.org/a?q=x&b=y", excerpt: "Useful  evidence" }]);
+    expect(result.retrieved_at).toBeTruthy();
+    expect(new URL(String(request.mock.calls[0]![0])).searchParams.get("q")).toBe("音乐 & album");
+  });
+  it("uses the configured SearXNG endpoint and bounds evidence size", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({ results: Array.from({ length: 20 }, (_, i) => ({ title: "Title", url: `https://example.org/${i}`, content: "x".repeat(2000) })) })));
+    const result = await createWebSearchProvider({ endpoint: "https://search.example.org/", fetch: request }).search("topic") as { results: Array<{ excerpt: string }> };
+    const url = new URL(String(request.mock.calls[0]![0]));
+    expect(url.pathname).toBe("/search"); expect(url.searchParams.get("format")).toBe("json");
+    expect(result.results).toHaveLength(8); expect(result.results[0]!.excerpt).toHaveLength(1200);
+  });
+  it("rejects invalid input before network access", async () => {
+    const request = vi.fn<typeof fetch>(); const provider = createWebSearchProvider({ fetch: request });
+    await expect(provider.search(" ")).rejects.toThrow("query");
+    await expect(provider.search("x".repeat(501))).rejects.toThrow("query");
+    await expect(createWebSearchProvider({ endpoint: "file:///etc/passwd", fetch: request }).search("topic")).rejects.toThrow("endpoint");
+    expect(request).not.toHaveBeenCalled();
+  });
+  it("reports unavailable and malformed services instead of fabricated results", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("blocked", { status: 403 })).mockResolvedValueOnce(new Response("<html>challenge</html>"));
+    const provider = createWebSearchProvider({ fetch: request });
+    await expect(provider.search("topic")).rejects.toThrow("403");
+    await expect(provider.search("topic")).rejects.toThrow("Invalid search response");
+  });
+  it("returns an empty successful result honestly", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response("<rss><channel></channel></rss>"));
+    expect(await createWebSearchProvider({ fetch: request }).search("unknown")).toMatchObject({ results: [] });
+  });
+});

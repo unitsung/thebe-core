@@ -12,7 +12,14 @@ const records = [];
 const checks = [];
 const token = "foundation-fixture";
 let requestCount = 0;
+let searchRequests = 0;
 const modelServer = createServer(async (req, res) => {
+  if (req.method === "GET" && req.url.startsWith("/search?")) {
+    searchRequests++;
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ results: [{ title: "Fixture web evidence", url: "https://example.org/verified", content: "Verified general-topic evidence" }] }));
+    return;
+  }
   if (req.method === "GET" && req.url === "/v1/models") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ data: [{ id: "service-discovered" }] }));
@@ -39,10 +46,10 @@ const modelServer = createServer(async (req, res) => {
     res.on("close", () => clearTimeout(timer));
     return;
   }
-  const toolName = text?.includes("FIXTURE_WRITE") ? "write" : text?.includes("FIXTURE_READ") ? "read" : text?.includes("FIXTURE_EVENTS") ? "list_core_events" : undefined;
+  const toolName = text?.includes("FIXTURE_WEB") ? "web_search" : text?.includes("FIXTURE_WRITE") ? "write" : text?.includes("FIXTURE_READ") ? "read" : text?.includes("FIXTURE_EVENTS") ? "list_core_events" : undefined;
   const last = messages.at(-1);
   if (toolName && last?.role !== "tool") {
-    const args = toolName === "list_core_events" ? { limit: 50 } : toolName === "write"
+    const args = toolName === "web_search" ? { query: "arbitrary topic" } : toolName === "list_core_events" ? { limit: 50 } : toolName === "write"
       ? { path: "foundation-output.txt", content: "approved-once" }
       : { path: "fixture-input.txt" };
     emit({ role: "assistant", tool_calls: [{ index: 0, id: "fixture-call", type: "function", function: { name: toolName, arguments: JSON.stringify(args) } }] }, "tool_calls");
@@ -67,6 +74,7 @@ const base = `http://127.0.0.1:${port}`;
 const env = {
   PATH: process.env.PATH, HOME: dirs.home, NODE_ENV: "production",
   THEBE_HOST: "127.0.0.1", THEBE_PORT: String(port), THEBE_TOKEN: token, THEBE_ALLOWED_HOSTS: "127.0.0.1",
+  THEBE_WEB_SEARCH_URL: `http://127.0.0.1:${modelPort}/search`,
   THEBE_CONFIG_DIR: dirs.config, THEBE_AGENT_DIR: dirs.agent, THEBE_AGENT_STORE_DIR: dirs.store,
   THEBE_SESSION_DIR: join(dirs.root, "sessions"), THEBE_WORKSPACE_DIR: dirs.workspace, THEBE_OUTPUT_DIR: dirs.outputs,
 };
@@ -94,6 +102,16 @@ async function createSession() {
 try {
   await waitFor(async () => { try { return await request("/v1/health"); } catch { return null; } }, r => r?.status === 200);
   const models = await request("/v1/model?provider=opencode");
+  const webSession = await createSession();
+  await request(`/v1/session/${webSession}/prompt`, { text: "FIXTURE_WEB disabled" });
+  check(searchRequests === 0, "disabled web search sends no query");
+  await request(`/v1/session/${webSession}`, { labels: { "thebe.webSearch": "true" } }, "PATCH");
+  await request(`/v1/session/${webSession}/prompt`, { text: "FIXTURE_WEB enabled" });
+  check(searchRequests === 1, "enabled web search reaches configured service");
+  check(records.some(r => r.messages?.some(m => m.role === "tool" && typeof m.content === "string" && m.content.includes("https://example.org/verified"))), "web evidence returns to model context");
+  await request(`/v1/session/${webSession}`, { labels: { "thebe.webSearch": "false" } }, "PATCH");
+  await request(`/v1/session/${webSession}/prompt`, { text: "FIXTURE_WEB disabled again" });
+  check(searchRequests === 1, "disabling search on existing session takes effect without losing conversation");
   check(models.data.models.some(m => m.available === true), "real runtime model availability");
   const providerPath = "/v1/provider/integration-provider/config";
   const provider = { name: "Integration provider", baseUrl: `http://127.0.0.1:${modelPort}/v1`, api: "openai-completions", apiKey: "private-fixture-key", models: [{ id: "original" }, { id: "remove-me" }] };

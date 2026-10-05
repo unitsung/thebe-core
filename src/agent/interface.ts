@@ -19,6 +19,7 @@ import type {
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
+import type { WebSearchProvider } from "./capabilities/web-search.ts";
 import type { MediaLibraryProvider, PhotoLibraryProvider } from "./capabilities/media.ts";
 import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
@@ -123,6 +124,7 @@ export type CreateThebeAgentOptions = {
   /** Optional Navidrome media provider exposed as Core capabilities. */
   navidrome?: NavidromeProvider;
   musicResearch?: MusicResearchProvider;
+  webSearch?: WebSearchProvider;
   /** Optional Emby library. Exposes search and item detail when present. */
   emby?: MediaLibraryProvider;
   /** Optional Jellyfin library. Exposes search and item detail when present. */

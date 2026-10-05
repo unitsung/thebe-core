@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
+import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
 import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
@@ -201,6 +202,7 @@ export async function bootstrapThebe(
     strmRepairProvider,
     navidrome,
     musicResearch: createMusicResearchProvider(),
+    webSearch: createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL }),
     emby,
     jellyfin,
     immich,

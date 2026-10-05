@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
 import type { MusicResearchProvider } from "../agent/capabilities/music-research.ts";
+import type { WebSearchProvider } from "../agent/capabilities/web-search.ts";
 import type { MediaLibraryProvider, PhotoLibraryProvider } from "../agent/capabilities/media.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
@@ -51,6 +52,7 @@ export function createThebeApp(options: {
   strmRepairProvider?: StrmRepairProvider;
   navidrome?: NavidromeProvider;
   musicResearch?: MusicResearchProvider;
+  webSearch?: WebSearchProvider;
   emby?: MediaLibraryProvider;
   jellyfin?: MediaLibraryProvider;
   immich?: PhotoLibraryProvider;
@@ -90,6 +92,7 @@ export function createThebeApp(options: {
     strmRepairProvider: options.strmRepairProvider,
     navidrome: options.navidrome,
     musicResearch: options.musicResearch,
+    webSearch: options.webSearch,
     emby: options.emby,
     jellyfin: options.jellyfin,
     immich: options.immich,
