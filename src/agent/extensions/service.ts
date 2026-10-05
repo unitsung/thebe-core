@@ -38,6 +38,7 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
       ...listCoreMcpTools({
         strmRepairProvider: ctx.options.strmRepairProvider,
         navidrome: Boolean(ctx.options.navidrome),
+        musicResearch: Boolean(ctx.options.musicResearch),
         emby: Boolean(ctx.options.emby),
         jellyfin: Boolean(ctx.options.jellyfin),
         immich: Boolean(ctx.options.immich),

@@ -290,9 +290,11 @@ export async function openPiSession(
       requestedModel.modelId,
     );
   }
-  resolvedModel ??= args.defaultModel
-    ? args.defaultModel
-    : args.resolveModelRef("opencode", "muse-spark-1.3-free");
+  if (!resolvedModel && !requestedModel) {
+    resolvedModel = (await args.modelRuntime.getAvailable()).find((model: { provider: string; id: string }) =>
+      !(model.provider === "opencode" && model.id.endsWith("-free")));
+  }
+  if (!resolvedModel) throw new Error("No configured model is available. Configure a provider and select a model.");
 
   const { session } = await sdk.createAgentSession({
     cwd: create.cwd ?? cwd,

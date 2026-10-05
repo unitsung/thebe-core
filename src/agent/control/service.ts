@@ -6,14 +6,13 @@ import {
   redactNavidromeQueueForStorage,
 } from "../capabilities/navidrome.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
-import type { RuntimeExport, RuntimeModelRef, ThebeSessionContext } from "../runtime/index.ts";
+import type { RuntimeExport, RuntimeModelRef, RuntimeProviderConfiguration, ThebeSessionContext } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import type { AuditPage, AuditRecord, AuditQuery } from "../security/audit/audit-log.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
-  DIAGNOSE_FROM_EVENTS_TOOL,
-  LIST_CORE_EVENTS_TOOL,
+  CORE_EVENT_TOOLS,
   listCoreMcpTools,
   withProductMetadata,
 } from "../extensions/mcp.ts";
@@ -54,8 +53,6 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     options,
     audit,
     openSession,
-    lastEvents,
-    sessionLog,
     policy,
     baseTools,
     mcp,
@@ -148,33 +145,13 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     const params = (args ?? {}) as Record<string, unknown>;
     const external = await mcp.invokeTool(name, params);
     if (external !== undefined) return external;
-    if (name === LIST_CORE_EVENTS_TOOL) {
-      const sid =
-        typeof params.sessionId === "string"
-          ? params.sessionId
-          : ctx.active?.meta.thebeSessionId;
-      const events = sid ? sessionLog(sid).events : lastEvents;
-      const limit =
-        typeof params.limit === "number" && params.limit > 0
-          ? params.limit
-          : 50;
-      return JSON.stringify(events.slice(-limit), null, 2);
-    }
-    if (name === DIAGNOSE_FROM_EVENTS_TOOL) {
-      const events = lastEvents;
-      const errors = events.filter(
-        (event) => event.type === "error" || event.type === "interrupted",
-      );
-      return JSON.stringify(
-        {
-          category: params.category ?? "all",
-          totalEvents: events.length,
-          errors: errors.length,
-          lastError: errors.at(-1) ?? null,
-        },
-        null,
-        2,
-      );
+    if (name in CORE_EVENT_TOOLS) {
+      // Preserve the JSON control-plane contract. Conversation calls still go
+      // through the untrusted-output wrapper and session policy.
+      const tool = baseTools().find(item => item.name === name);
+      if (!tool) throw new Error(`unknown tool: ${name}`);
+      const result = await tool.execute("mcp", params);
+      return result.content.map(block => block.text).join("\n");
     }
     const tools = wrapCustomTools(baseTools(), { policy, audit });
     const tool = tools.find((item) => item.name === name);
@@ -205,7 +182,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     updateAgentSettings(patch: import("../settings/product.ts").AgentSettingsPatch) {
       return ctx.updateAgentSettings(patch);
     },
-    async listModels(query?: { all?: boolean; providerId?: string }) {
+    async listModels(query?: { all?: boolean; providerId?: string; refresh?: boolean }) {
       return options.runtime.listModels(query);
     },
     /**
@@ -273,7 +250,18 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       return options.runtime.listAvailableModels(query);
     },
     async listProviders(query?: { all?: boolean }) {
-      return options.runtime.listProviders(query);
+        return options.runtime.listProviders(query);
+    },
+    async providerConfiguration(providerId: string) {
+      return options.runtime.providerConfiguration?.(providerId);
+    },
+    async saveProviderConfiguration(configuration: RuntimeProviderConfiguration, apiKey?: string) {
+      if (!options.runtime.saveProviderConfiguration) throw httpError(501, "Runtime does not support provider configuration");
+      await options.runtime.saveProviderConfiguration(configuration, apiKey);
+    },
+    async deleteProviderConfiguration(providerId: string) {
+      if (!options.runtime.deleteProviderConfiguration) throw httpError(501, "Runtime does not support provider configuration");
+      await options.runtime.deleteProviderConfiguration(providerId);
     },
     async exportSession(
       thebeSessionId?: string,
@@ -296,6 +284,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         ...listCoreMcpTools({
           strmRepairProvider: options.strmRepairProvider,
           navidrome: Boolean(options.navidrome),
+          musicResearch: Boolean(options.musicResearch),
           emby: Boolean(options.emby),
           jellyfin: Boolean(options.jellyfin),
           immich: Boolean(options.immich),

@@ -60,6 +60,8 @@ export function createSubagentApi(
     maxConcurrent: options.maxSubagentConcurrency,
     maxPerParent: options.maxSubagentsPerParent,
     createSession: async ({ runId, parentSessionId, profile }) => {
+      const parent = await ctx.openSession(parentSessionId);
+      const childModel = profile.model ?? parent.session.currentModel?.();
       const childTools = (profile.tools ?? []).filter(
         (name) => !RESERVED_SUBAGENT_TOOLS.has(name) &&
           (profile.allowWrites || !SUBAGENT_WRITE_TOOLS.has(name)),
@@ -71,17 +73,13 @@ export function createSubagentApi(
       });
       childPolicy.beginRun();
       let stopChild: (() => Promise<void>) | undefined;
+      const childOptions = sessionOptions(
+        runId, childTools, childModel, parentSessionId, runId,
+        childPolicy, `${ctx.callerId}:subagent:${runId}`, () => stopChild?.(),
+      );
       const session = await options.runtime.createSession({
-        ...sessionOptions(
-          runId,
-          childTools,
-          profile.model,
-          parentSessionId,
-          undefined,
-          childPolicy,
-          `${ctx.callerId}:subagent:${runId}`,
-          () => stopChild?.(),
-        ),
+        ...childOptions,
+        customTools: childOptions.customTools.filter(tool => childTools.includes(tool.name)),
         inMemory: true,
         autoCompact: false,
         systemPrompt: [

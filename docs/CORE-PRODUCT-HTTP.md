@@ -6,6 +6,19 @@ This page records the product HTTP surfaces shipped on `dev`. Delivery still onl
 
 ## Shipped
 
+Local verification update (2026-10-06): provider configuration supports
+credential-redacted GET, PUT and DELETE at `/v1/provider/{providerId}/config`.
+Model discovery with `/v1/model?provider=…&refresh=true` queries that configured
+provider's model endpoint. Explicit custom definitions remain editable, and
+deleting a custom provider removes its stored credentials and legacy overrides.
+
+The composition root supplies the read-only `music_research` capability even
+without a local music server. Agent tools, capability discovery and invocation
+share its contract. MusicBrainz and Wikipedia adapters return bounded candidate
+metadata, introductions, links and partial-source errors. Remote text remains
+untrusted evidence; the prompt requires matching artist/recording identity and
+does not authorize playback from a request for an introduction.
+
 Session background-task queries return the same `ProductBackgroundTask` fields
 as Activity, including `sessionId`, provider/kind, errors and resource handles.
 Provider task session handles (`provider-arcane`, etc.) identify a provider's

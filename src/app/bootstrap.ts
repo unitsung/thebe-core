@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
+import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
 import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
 import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
@@ -97,15 +98,12 @@ export async function bootstrapThebe(
 
   if (openCodeKey) {
     primaryApiKey = { providerId: "opencode", key: openCodeKey };
-    defaultModel ??= { providerId: "opencode", modelId: "muse-spark-1.3-free" };
   } else if (openaiKey) {
     primaryApiKey = { providerId: "openai", key: openaiKey };
     defaultModel ??= { providerId: "openai", modelId: "gpt-4o" };
   } else if (anthropicKey) {
     primaryApiKey = { providerId: "anthropic", key: anthropicKey };
     defaultModel ??= { providerId: "anthropic", modelId: "claude-sonnet-4" };
-  } else {
-    defaultModel ??= { providerId: "opencode", modelId: "muse-spark-1.3-free" };
   }
 
   const agentDir =
@@ -132,6 +130,11 @@ export async function bootstrapThebe(
   }
   if (anthropicKey) {
     await applyThebeApiKey(runtime.auth(), "anthropic", anthropicKey);
+  }
+  if (!defaultModel) {
+    const available = await runtime.listAvailableModels();
+    const selected = available.find(model => !(model.providerId === "opencode" && model.modelId.endsWith("-free")));
+    if (selected) defaultModel = { providerId: selected.providerId, modelId: selected.modelId };
   }
 
   const arcaneEnvironmentId = arcaneEnvironmentIdFromEnv();
@@ -197,6 +200,7 @@ export async function bootstrapThebe(
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     strmRepairProvider,
     navidrome,
+    musicResearch: createMusicResearchProvider(),
     emby,
     jellyfin,
     immich,

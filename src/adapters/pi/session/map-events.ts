@@ -215,12 +215,14 @@ function contentAttachments(
     const row = block as {
       type?: unknown;
       mediaType?: unknown;
+      mimeType?: unknown;
       image_url?: unknown;
       source?: unknown;
     };
     const mediaType =
       typeof row.mediaType === "string"
         ? row.mediaType
+        : typeof row.mimeType === "string" ? row.mimeType
         : typeof row.source === "object" && row.source !== null
           ? (row.source as { mediaType?: unknown }).mediaType
           : undefined;

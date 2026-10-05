@@ -618,9 +618,13 @@ describe("PiCodingAgentRuntime sessions", () => {
       expires: Date.now() + 60_000,
     });
     await runtime.auth().setApiKey("faux", "sk-test");
-    expect(setSpy).toHaveBeenCalledWith("faux", "sk-test");
+    expect(setSpy).not.toHaveBeenCalled();
+    expect(loginSpy).toHaveBeenCalledWith("faux", "apiKey", expect.any(Object));
+    const apiKeyInteraction = loginSpy.mock.calls[0]?.[2];
+    if (!apiKeyInteraction || typeof apiKeyInteraction !== "object" || !("prompt" in apiKeyInteraction) || typeof apiKeyInteraction.prompt !== "function") throw new Error("missing API key prompt");
+    expect(await apiKeyInteraction.prompt({ message: "API key" })).toBe("sk-test");
     await runtime.auth().loginOAuth("faux", { type: "oauth" });
-    expect(loginSpy).toHaveBeenCalled();
+    expect(loginSpy).toHaveBeenLastCalledWith("faux", "oauth", expect.any(Object));
     const src = [
       await readFile(
         new URL("../runtime.ts", import.meta.url),

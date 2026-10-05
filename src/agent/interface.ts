@@ -12,11 +12,13 @@ import type {
   RuntimeModel,
   RuntimeModelRef,
   RuntimeProvider,
+  RuntimeProviderConfiguration,
   RuntimeThinkingInfo,
   ThebeSessionContext,
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
+import type { MusicResearchProvider } from "./capabilities/music-research.ts";
 import type { MediaLibraryProvider, PhotoLibraryProvider } from "./capabilities/media.ts";
 import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
@@ -120,6 +122,7 @@ export type CreateThebeAgentOptions = {
   strmRepairProvider?: StrmRepairProvider;
   /** Optional Navidrome media provider exposed as Core capabilities. */
   navidrome?: NavidromeProvider;
+  musicResearch?: MusicResearchProvider;
   /** Optional Emby library. Exposes search and item detail when present. */
   emby?: MediaLibraryProvider;
   /** Optional Jellyfin library. Exposes search and item detail when present. */
@@ -227,10 +230,13 @@ export interface ThebeAgent {
   updatePermissionMode(mode: PermissionMode): Promise<PermissionMode>;
   getAgentSettings(): AgentSettings;
   updateAgentSettings(patch: AgentSettingsPatch): Promise<AgentSettings>;
-  listModels(query?: { all?: boolean; providerId?: string }): Promise<RuntimeModel[]>;
+  listModels(query?: { all?: boolean; providerId?: string; refresh?: boolean }): Promise<RuntimeModel[]>;
   testModel(model: RuntimeModelRef, query?: { timeoutMs?: number }): Promise<{ providerId: string; modelId: string; text: string; latencyMs: number }>;
   listAvailableModels(query?: { providerId?: string }): Promise<RuntimeModel[]>;
   listProviders(query?: { all?: boolean }): Promise<RuntimeProvider[]>;
+  providerConfiguration(providerId: string): Promise<RuntimeProviderConfiguration | undefined>;
+  saveProviderConfiguration(configuration: RuntimeProviderConfiguration, apiKey?: string): Promise<void>;
+  deleteProviderConfiguration(providerId: string): Promise<void>;
   exportSession(thebeSessionId?: string): Promise<RuntimeExport>;
   invokeTool(name: string, args: unknown): Promise<string>;
   invokeCapability(id: string, input?: CapabilityInvokeInput): Promise<CapabilityInvokeResult>;

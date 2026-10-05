@@ -6,6 +6,7 @@ import {
   CONTAINER_TOOL_NAMES,
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
+import { MUSIC_RESEARCH_DESCRIPTION, MUSIC_RESEARCH_SCHEMA } from "../capabilities/music-research.ts";
 import {
   EMBY_LOOKUP_TOOL_NAMES,
   EMBY_TOOL_NAMES,
@@ -162,7 +163,7 @@ export function createEmptyMcpRegistry(): McpRegistry {
   };
 }
 
-const CORE_EVENT_TOOLS: Record<
+export const CORE_EVENT_TOOLS: Record<
   typeof LIST_CORE_EVENTS_TOOL | typeof DIAGNOSE_FROM_EVENTS_TOOL,
   { description: string; schema: Record<string, unknown> }
 > = {
@@ -171,7 +172,6 @@ const CORE_EVENT_TOOLS: Record<
     schema: {
       type: "object",
       properties: {
-        since: { type: "string", description: "ISO timestamp cutoff" },
         limit: { type: "number", description: "Max events to return" },
         sessionId: { type: "string", description: "Filter by session ID" },
       },
@@ -252,11 +252,13 @@ function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): stri
 export function listCoreMcpTools(options: {
   strmRepairProvider?: StrmRepairProvider;
   navidrome?: boolean;
+  musicResearch?: boolean;
   emby?: boolean;
   jellyfin?: boolean;
   immich?: boolean;
 } = {}): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
+  if (options.musicResearch) tools.push(withProductMetadata({ id: "music_research", name: "music_research", description: MUSIC_RESEARCH_DESCRIPTION, inputSchema: MUSIC_RESEARCH_SCHEMA, category: "media", permission: "read", service: "public-music", source: CORE_CAPABILITY_SOURCE, serverName: CORE_CAPABILITY_SERVER }));
 
   for (const name of CONTAINER_TOOL_NAMES) {
     const meta = CONTAINER_CAPABILITY_METADATA[name];

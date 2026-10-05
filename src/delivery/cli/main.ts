@@ -28,7 +28,7 @@ if (command.kind === "tui" && (!process.stdin.isTTY || !process.stdout.isTTY)) {
   process.exit(0);
 }
 
-const { agent, workspacePath } = await bootstrapThebe({ fromDir: here });
+const { agent, workspacePath, model: bootModel } = await bootstrapThebe({ fromDir: here });
 
 const userConfig = await loadThebeConfig();
 const resolvedTuiMode =
@@ -46,7 +46,7 @@ const code = await runCliCommand(agent, command, {
       model:
         command.kind === "tui" && command.model
           ? `${command.model.providerId}/${command.model.modelId}`
-          : "opencode/muse-spark-1.3-free",
+          : bootModel ? `${bootModel.providerId}/${bootModel.modelId}` : undefined,
       tuiMode: resolvedTuiMode,
     });
   },

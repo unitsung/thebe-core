@@ -107,13 +107,13 @@ export function wrapSession(
           file.mediaType.startsWith("image/"),
       )
       .map((file) => ({
-        type: "image",
-        source: {
-          type: "base64",
-          mediaType: file.mediaType,
-          data: file.data!,
-        },
+        type: "image" as const,
+        mimeType: file.mediaType,
+        data: file.data!,
       }));
+    if (images.length > 0 && !session.model?.input?.includes("image")) {
+      throw new Error("The selected model does not support image input. Select a vision model before sending images.");
+    }
     const inlined = (prompt.files ?? [])
       .filter(isInlineTextAttachment)
       .map(renderInlineTextFile)
@@ -195,6 +195,9 @@ export function wrapSession(
     },
     exportSession: () => exportPiSession(session as never),
     messages: () => mapPiMessages(session.messages),
+    currentModel: () => session.model
+      ? { providerId: session.model.provider, modelId: session.model.id }
+      : undefined,
     getThinkingInfo(): RuntimeThinkingInfo {
       const available: RuntimeThinkingInfo["availableLevels"] = (
         session.getAvailableThinkingLevels?.() ?? ["off"]

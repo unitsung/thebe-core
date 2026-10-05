@@ -3,7 +3,7 @@ export type PiSession = {
   prompt: (
     text: string,
     options?: {
-      images?: unknown[];
+      images?: Array<{ type: "image"; mimeType: string; data: string }>;
       streamingBehavior?: "steer" | "followUp";
     },
   ) => Promise<void>;
@@ -14,6 +14,7 @@ export type PiSession = {
   compact: (customInstructions?: string) => Promise<unknown>;
   dispose: () => void;
   messages: unknown[];
+  model?: { provider: string; id: string; input?: string[] };
   setModel: (model: unknown) => Promise<void>;
   setThinkingLevel: (level: string) => void;
   thinkingLevel?: string;

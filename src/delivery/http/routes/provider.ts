@@ -13,6 +13,46 @@ export async function handleProviderModelAuth(
   if (!agent) {
     return undefined;
   }
+  const [version, resource, encodedProviderId, operation, ...remainingSegments] = parts;
+  if (version === "v1" && resource === "provider" && operation === "config" && remainingSegments.length === 0) {
+    let providerId: string;
+    try { providerId = decodeURIComponent(encodedProviderId ?? ""); }
+    catch { return json({ error: "invalid provider ID encoding" }, 400); }
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(providerId)) return json({ error: "invalid provider ID" }, 400);
+    if (request.method === "GET") {
+      const configuration = await agent.providerConfiguration(providerId);
+      return configuration ? json(configuration) : json({ error: "no editable provider configuration" }, 404);
+    }
+    if (request.method === "PUT" || request.method === "DELETE") {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      if (request.method === "DELETE") {
+        if (!await agent.providerConfiguration(providerId)) return json({ error: "no custom configuration to delete" }, 404);
+        await agent.deleteProviderConfiguration(providerId);
+        return json({ ok: true });
+      }
+      const body = await readJson(request);
+      const apis = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"] as const;
+      const api = apis.find(value => value === body.api);
+      let endpoint: URL;
+      try { endpoint = new URL(String(body.baseUrl ?? "")); } catch { return json({ error: "invalid baseUrl" }, 400); }
+      if (!["http:", "https:"].includes(endpoint.protocol) || endpoint.username || endpoint.password || !api) return json({ error: "invalid endpoint or API" }, 400);
+      if (!Array.isArray(body.models) || !body.models.length || body.models.length > 500) return json({ error: "models must contain 1–500 entries" }, 400);
+      const ids = new Set<string>();
+      const models = [];
+      for (const raw of body.models) {
+        if (!raw || typeof raw !== "object" || typeof raw.id !== "string" || !raw.id.trim() || ids.has(raw.id.trim())) return json({ error: "model IDs must be non-empty and unique" }, 400);
+        ids.add(raw.id.trim());
+        if (raw.input !== undefined && (!Array.isArray(raw.input) || !raw.input.includes("text") || raw.input.some((value: unknown) => value !== "text" && value !== "image") || new Set(raw.input).size !== raw.input.length)) return json({ error: "input must contain text and optionally image" }, 400);
+        for (const field of ["contextWindow", "maxTokens"] as const) {
+          if (raw[field] !== undefined && (!Number.isSafeInteger(raw[field]) || raw[field] <= 0)) return json({ error: `${field} must be a positive integer` }, 400);
+        }
+        models.push({ id: raw.id.trim(), name: typeof raw.name === "string" ? raw.name : undefined, contextWindow: raw.contextWindow, maxTokens: raw.maxTokens, reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : undefined, input: raw.input });
+      }
+      await agent.saveProviderConfiguration({ providerId, name: typeof body.name === "string" ? body.name : undefined, baseUrl: endpoint.toString().replace(/\/$/, ""), api, models }, typeof body.apiKey === "string" ? body.apiKey : undefined);
+      return json(await agent.providerConfiguration(providerId));
+    }
+  }
   if (request.method === "GET" && path === "/v1/provider") {
     const all = url.searchParams.get("all") === "true";
     const providers = await agent.listProviders({ all });
@@ -39,8 +79,10 @@ export async function handleProviderModelAuth(
   if (request.method === "GET" && path === "/v1/model") {
     const all = url.searchParams.get("all") === "true";
     const providerId = url.searchParams.get("provider") ?? undefined;
-    const models = all
-      ? await agent.listModels({ all: true, providerId })
+    const refresh = url.searchParams.get("refresh") === "true";
+    if (refresh && !providerId) return json({ error: "provider is required for model discovery" }, 400);
+    const models = all || refresh
+      ? await agent.listModels({ all, providerId, refresh })
       : await agent.listAvailableModels({ providerId });
     return json({ models });
   }

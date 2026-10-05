@@ -8,6 +8,8 @@ export const RESERVED_SUBAGENT_TOOLS = new Set<string>([
   "delete_session",
   "quiesce",
   "unquiesce",
+  "list_core_events",
+  "diagnose_from_events",
 ]);
 
 export type BuiltinSubagentProfile = {

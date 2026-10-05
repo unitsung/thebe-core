@@ -20,7 +20,7 @@ type PendingOAuthLogin = {
 type ModelRuntimeAuth = {
   login: (
     providerId: string,
-    method: "oauth",
+    method: "oauth" | "apiKey",
     opts: {
       prompt: () => Promise<string>;
       notify: (event: {
@@ -33,7 +33,7 @@ type ModelRuntimeAuth = {
         expiresInSeconds?: number;
       }) => void;
     },
-  ) => Promise<void>;
+  ) => Promise<unknown>;
   setRuntimeApiKey: (providerId: string, apiKey: string) => Promise<void>;
   refresh: (opts: { allowNetwork: boolean }) => Promise<unknown>;
   checkAuth: (providerId: string) => Promise<unknown>;
@@ -130,8 +130,11 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
 
   return {
     async setApiKey(providerId, apiKey) {
-      await modelRuntime.setRuntimeApiKey(providerId, apiKey);
-      await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+      await modelRuntime.login(providerId, "apiKey", {
+        prompt: async () => apiKey,
+        notify: () => {},
+      });
+      await modelRuntime.refresh({ allowNetwork: false });
     },
     async loginOAuth(providerId, interaction) {
       const entry = ensureOAuthLogin(providerId, interaction?.openUrl);

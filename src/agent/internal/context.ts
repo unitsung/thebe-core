@@ -21,6 +21,7 @@ import {
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
+import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
@@ -35,11 +36,12 @@ import {
   NAVIDROME_TOOL_NAMES,
   NAVIDROME_WRITE_TOOL_NAMES,
 } from "../capabilities/navidrome.ts";
-import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
+import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import { createRuntimeMcpPort } from "../tools/mcp-tools.ts";
+import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createJudgmentApi } from "../judgment/service.ts";
 import {
@@ -183,6 +185,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     maxToolCalls: options.maxToolCalls,
     maxBlocks: options.maxBlocks,
     allowedToolNames: [
+      ...Object.keys(CORE_EVENT_TOOLS),
+      ...(options.musicResearch ? ["music_research"] : []),
       ...CONTAINER_TOOL_NAMES,
       ...(options.navidrome ? NAVIDROME_TOOL_NAMES : []),
       ...(options.emby ? EMBY_LOOKUP_TOOL_NAMES : []),
@@ -341,7 +345,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
-  function baseTools(toolPolicy = policy, toolCallerId = callerId, modelResults = false) {
+  function baseTools(toolPolicy = policy, toolCallerId = callerId, modelResults = false, scopeId?: string) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
       callerId: toolCallerId,
@@ -356,11 +360,17 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       );
     }
     const toolOptions = { policy: toolPolicy, callerId: toolCallerId, modelResults };
+    if (options.musicResearch) tools.push(...createMusicResearchTools(options.musicResearch, toolPolicy, toolCallerId));
     if (options.emby) tools.push(...createMediaLibraryTools("emby", options.emby, toolOptions));
     if (options.jellyfin) {
       tools.push(...createMediaLibraryTools("jellyfin", options.jellyfin, toolOptions));
     }
     if (options.immich) tools.push(...createImmichSearchTools(options.immich, toolOptions));
+    tools.push(...createCoreEventTools(requestedId => {
+      if (scopeId && requestedId && requestedId !== scopeId) throw new Error("Event access is limited to this session");
+      const sid = scopeId ?? requestedId ?? getActive()?.meta.thebeSessionId;
+      return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
+    }));
     return tools;
   }
 
@@ -394,7 +404,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       } : {}),
       customTools: isChatOnly
         ? []
-        : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId, true), {
+        : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId, true, eventSessionId), {
             policy: sessionPolicy,
             audit,
             toolWatchdogMs: options.toolWatchdogMs,
@@ -621,6 +631,8 @@ function buildSystemPrompt(
   outputDirectory: string | undefined,
 ): string {
   const defaults = [
+    "When introducing songs, local metadata and lyrics are a starting point. Use music_research or available web tools for artist, album and recording background; verify identity/version and cite evidence. Explain style and meaning when useful, distinguish interpretation from verified facts, and do not invent missing sources. Research does not imply playback unless requested.",
+    "Attribute a claim to a source only if a returned excerpt about the correct song, artist or album supports it. A link or similarly named search hit is not verification. Label relevant general knowledge separately when the search does not establish it.",
     "You are Thebe.",
     workspacePath
       ? `Your configured workspace is ${workspacePath}. Use only this directory as the default scope for file tools.`

@@ -77,6 +77,11 @@ describe("mapPiEvent", () => {
 });
 
 describe("mapPiMessages", () => {
+  it("preserves the SDK image MIME type without exposing its base64 data", () => {
+    const messages = mapPiMessages([{ role: "user", content: [{ type: "image", mimeType: "image/png", data: "private-image-bytes" }] }]);
+    expect(messages[0]?.attachments).toEqual([{ mediaType: "image/png" }]);
+    expect(JSON.stringify(messages)).not.toContain("private-image-bytes");
+  });
   it("keeps stable ids and surfaces image attachments", async () => {
     const messages = mapPiMessages([
       { id: "m1", role: "user", content: "hello" },

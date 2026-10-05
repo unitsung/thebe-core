@@ -16,13 +16,15 @@ import {
   loadAntigravityPiAi,
 } from "../google/antigravity-provider.ts";
 import {
-  ensureOpencodeFreeAlias,
   modelKey,
   resolveModelRef as resolvePiModel,
   toRuntimeModel,
   type PiModelShape,
 } from "./config/model-shape.ts";
 import { syncAgentModelsFile } from "./config/agent-dir.ts";
+import { createProviderConfigurationStore } from "./config/provider-store.ts";
+import { thebeUserConfigPath } from "./config/user-config.ts";
+import { discoverProviderModels } from "./config/provider-discovery.ts";
 import { loadPiSdk, piAiDistUrl, type PiSdk } from "./sdk/load-pi.ts";
 import { openPiSession, toolControllersFor } from "./session/open-session.ts";
 import { wrapSession as wrapPiSession } from "./session/wrap-session.ts";
@@ -110,6 +112,7 @@ export async function createPiCodingAgentRuntime(
     endpoint: antigravityEndpoint,
   });
   const auth = withAntigravityAuth(createPiRuntimeAuth(modelRuntime), antigravity);
+  const providerConfigurations = createProviderConfigurationStore(antigravityAgentDir, thebeUserConfigPath());
   // Pi dropped its built-in Antigravity provider, so Core registers one on the
   // same ModelRuntime the sessions use: `provider: "google-antigravity"` then
   // resolves, lists, and streams like any Pi provider, with auth and models
@@ -271,8 +274,39 @@ export async function createPiCodingAgentRuntime(
     async listBackgroundTasksForSession(runtimeSessionId: string) {
       return backgroundTasksFor(runtimeSessionId).list();
     },
-    async listModels(query?: { all?: boolean; providerId?: string }) {
+    async listModels(query?: { all?: boolean; providerId?: string; refresh?: boolean }) {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+      if (query?.refresh && query.providerId && query.providerId !== antigravity.providerId) {
+        const providerId = query.providerId;
+        const sample = modelRuntime.getModels(providerId)[0];
+        const saved = await providerConfigurations.get(providerId);
+        const api = saved?.api ?? sample?.api;
+        const baseUrl = saved?.baseUrl ?? sample?.baseUrl;
+        if (!baseUrl || !api || !["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"].includes(api)) {
+          throw new Error("This provider does not expose a supported model discovery endpoint");
+        }
+        const configuration = saved ?? {
+          providerId, baseUrl, api: api as import("../../agent/runtime/interface.ts").RuntimeProviderConfiguration["api"],
+          models: (modelRuntime.getModels(providerId) as PiModelShape[]).map(model => ({ id: model.id, name: model.name,
+            contextWindow: model.contextWindow, maxTokens: model.maxTokens, reasoning: model.reasoning })),
+        };
+        const resolved = await modelRuntime.getAuth(providerId);
+        const discovered = await discoverProviderModels(configuration, resolved?.auth ?? {});
+        // An empty service list remains empty; never substitute the shared catalogue.
+        if (!discovered.length) return [];
+        const discoveredIds = new Set(discovered.map(model => model.id));
+        // Explicitly configured aliases can be callable even when the service
+        // omits them from discovery. Retain them for existing sessions.
+        await providerConfigurations.save({ ...configuration, models: [
+          ...configuration.models.filter(model => !discoveredIds.has(model.id)), ...discovered,
+        ] });
+        await modelRuntime.refresh({ allowNetwork: false });
+        const keys = await availableKeys(providerId);
+        return discovered.map(model => {
+          const registered = modelRuntime.getModel(providerId, model.id);
+          return toRuntimeModel(registered ?? { ...model, provider: providerId }, keys);
+        });
+      }
       if (query?.providerId === antigravity.providerId) {
         // An explicit model listing is the one place Core may reach the network
         // for models: it refreshes the account's real Antigravity list (login,
@@ -296,9 +330,6 @@ export async function createPiCodingAgentRuntime(
           ? models.filter((model) => keys.has(modelKey(model)))
           : models;
       const list = filtered.map((model) => toRuntimeModel(model, keys));
-      if (!query?.providerId || query.providerId === "opencode") {
-        ensureOpencodeFreeAlias(list);
-      }
       return list;
     },
     async listAvailableModels(query?: { providerId?: string }) {
@@ -308,14 +339,25 @@ export async function createPiCodingAgentRuntime(
       )) as PiModelShape[];
       const keys = new Set(available.map(modelKey));
       const list = available.map((model) => toRuntimeModel(model, keys));
-      if (!query?.providerId || query.providerId === "opencode") {
-        ensureOpencodeFreeAlias(list);
-      }
       return list;
     },
     async listProviders() {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       return auth.listProviders();
+    },
+    async providerConfiguration(providerId) {
+      return providerConfigurations.get(providerId);
+    },
+    async saveProviderConfiguration(configuration, apiKey) {
+      await providerConfigurations.save(configuration);
+      await modelRuntime.refresh({ allowNetwork: false });
+      if (apiKey?.trim()) await auth.setApiKey(configuration.providerId, apiKey.trim());
+      await modelRuntime.refresh({ allowNetwork: false });
+    },
+    async deleteProviderConfiguration(providerId) {
+      await providerConfigurations.delete(providerId);
+      await auth.logout(providerId);
+      await modelRuntime.refresh({ allowNetwork: false });
     },
     async forkSession(runtimeSessionId, create, fork) {
       const parent = live.get(runtimeSessionId);

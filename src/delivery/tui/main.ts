@@ -39,12 +39,12 @@ const {
   workspacePath,
 } = await bootstrapThebe({ fromDir: here });
 
-const defaultModelRef: { providerId: string; modelId: string } =
+const defaultModelRef =
   flags.kind === "tui" && flags.model
     ? flags.model
-    : bootModel ?? { providerId: "opencode", modelId: "muse-spark-1.3-free" };
+    : bootModel;
 
-const modelRef = `${defaultModelRef.providerId}/${defaultModelRef.modelId}`;
+const modelRef = defaultModelRef ? `${defaultModelRef.providerId}/${defaultModelRef.modelId}` : undefined;
 
 let resolvedSessionId = sessionId;
 if (continueLast && !resolvedSessionId) {

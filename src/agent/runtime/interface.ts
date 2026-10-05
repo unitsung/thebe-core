@@ -154,6 +154,7 @@ export type RuntimeModel = RuntimeModelRef & {
   contextWindow?: number;
   maxOutputTokens?: number;
   supportsThinking?: boolean;
+  supportsImages?: boolean;
   available?: boolean;
 };
 
@@ -163,6 +164,14 @@ export type RuntimeProvider = {
   authMethods?: Array<"apiKey" | "oauth">;
   authStatus?: "connected" | "missing" | "error";
   oauthPending?: boolean;
+};
+
+export type RuntimeProviderConfiguration = {
+  providerId: string;
+  name?: string;
+  baseUrl: string;
+  api: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
+  models: Array<{ id: string; name?: string; contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: Array<"text" | "image"> }>;
 };
 
 export type PermissionDecision = {
@@ -398,6 +407,8 @@ export interface RuntimeSession {
   autoCompactionEnabled?(): boolean;
   exportSession(): Promise<RuntimeExport>;
   messages(): RuntimeMessage[];
+  /** Effective model identity only; exposes no parent transcript to child runs. */
+  currentModel?(): RuntimeModelRef | undefined;
   setModel(model: RuntimeModelRef): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): Promise<void>;
   getThinkingInfo(): RuntimeThinkingInfo;
@@ -445,11 +456,15 @@ export interface AgentRuntime {
   listModels(options?: {
     all?: boolean;
     providerId?: string;
+    refresh?: boolean;
   }): Promise<RuntimeModel[]>;
   listAvailableModels(options?: {
     providerId?: string;
   }): Promise<RuntimeModel[]>;
   listProviders(options?: { all?: boolean }): Promise<RuntimeProvider[]>;
+  providerConfiguration?(providerId: string): Promise<RuntimeProviderConfiguration | undefined>;
+  saveProviderConfiguration?(configuration: RuntimeProviderConfiguration, apiKey?: string): Promise<void>;
+  deleteProviderConfiguration?(providerId: string): Promise<void>;
   auth(): RuntimeAuth;
   quiesce(): Promise<void>;
   unquiesce(): Promise<void>;
