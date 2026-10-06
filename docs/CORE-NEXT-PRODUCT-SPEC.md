@@ -1,8 +1,8 @@
 # Core durable product contract
 
-Updated: 2026-09-22.
+Updated: 2026-10-06.
 
-Status: in progress — Agent settings, enabled-resource durability, operation-receipt/Diagnosis/resource-list/Goal-report/Worker-report Artifacts, Goal/Worker recovery, and Capability Run/Worker Activity items implemented; broader unified read model remains
+Status: in progress — settings, Artifacts, recovery, and the current Activity feed are shipped and consumed by the iOS client. Remaining work is another provider-native background-task source, and an Artifact kind for that task's own output. OpenList and Arcane tasks are not a recovery gap: each Activity read asks the provider again.
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -29,44 +29,43 @@ runtime adapters and provider integrations remain behind that seam.
 ## Problem Statement
 
 Thebe Core already owns sessions, Goals, Workers, capabilities, permissions,
-resources, and audit. The remaining gaps are at the boundary where an App must
-inspect and trust those objects:
+resources, and audit. The remaining gaps are provider task sources that are not on the
+background-task seam yet:
 
-- the effective Agent settings query/update contract is shipped, but client
-  adoption and contract hardening continue;
-- capability runs, Goals, Workers, and Core-owned background tasks have durable
-  recovery semantics, while OpenList and Arcane provider tasks are read from
-  their own durable source and further provider-native task sources remain
-  optional;
-- the bounded Artifact contract has operation-receipt, Diagnosis, resource-list,
-  direct/background Capability result, Goal report, and Worker report producers,
-  while provider-native Artifact producers remain future work;
-- Activity now includes read-only diagnoses, capability runs, Workers, and
-  Core-owned detached Bash tasks with bounded cursor pagination plus
-  source/status/time filters; it
-  remains a partial product-wide feed until additional producers and App clients
-  are covered;
-- enabled resources and permission mode now persist through the configuration
-  boundary; broader cross-repository read-model adoption and provider coverage
-  remain incomplete.
+- Agent settings, enabled resources, and permission mode are shipped.
+  `ThebeCoreClient` reads and updates them.
+- Capability runs, Goals, Workers, and Core-owned detached Bash tasks keep
+  durable snapshots. An older active snapshot is `interrupted` and is not
+  replayed. OpenList and Arcane tasks are listed from the provider on every
+  read, so a Core restart does not drop them and they do not carry a Core
+  `recovery` field.
+- Artifact kinds stay `diagnosis`, `report`, `resource_list`, and
+  `operation_receipt`. Direct and background capability results, including
+  provider capabilities such as Navidrome, are stored as redacted `report`
+  Artifacts. A provider task still has no Artifact kind of its own.
+- Activity already unions approvals, receipts, diagnoses, Goals, capability
+  runs, Workers, and background tasks, with cursor pagination and
+  source/status/time filters. The iOS client consumes that feed. Another
+  provider-native task producer would extend the same feed.
+- Emby, Jellyfin, Immich, and Navidrome remain library adapters. They are not
+  background-task providers. The contract does not name the next task source.
 
-For the remaining provider-native and cross-repository surfaces, a product
-client still cannot reliably answer: “what did this run produce?”, “what
-survived restart?”, and “what work is active or completed?” without knowing
-runtime-specific details.
+For a provider that is not on that seam, a product client still cannot answer
+“what work is active?” without a provider-specific call. Shipped sources do
+not have that gap.
 
 ## Solution
 
 Complete the remaining durable product-contract work in three compatible tracks:
 
-1. Harden the shipped settings, Artifact, recovery, and OpenAPI contracts and
-   finish the remaining App client adoption.
-2. Add provider-native Artifact and background-task producers without moving
-   lifecycle ownership out of their source adapters.
-3. Expand the durable read model for long-running work. Preserve each source
-   lifecycle, but expose stable status, timestamps, recovery state, and a
-   normalized Activity view without creating a second Agent loop or a second
-   lifecycle owner.
+1. Keep the shipped settings, Artifact, recovery, and OpenAPI contracts aligned
+   with `ThebeCoreClient`. The current App already covers those surfaces.
+2. Add further provider-native background-task producers, and an Artifact kind
+   for a task's own output, without moving lifecycle ownership out of their
+   source adapters. Capability results stay `report` Artifacts.
+3. When a new producer is added, expose it through the existing Activity read
+   model. OpenList and Arcane already do this by live provider reads. Do not
+   create a second Agent loop or a second lifecycle owner.
 
 The existing `/v1/settings/permissions`, `/v1/permissions`, `/v1/activity`,
 Goal routes, Worker routes, capability routes, and raw `/mcp` compatibility
@@ -259,17 +258,18 @@ Implementation status and remaining order:
 1. ✅ Agent settings read model and safe persistence;
 2. ✅ enabled-resource and permission-mode durability;
 3. ✅ Artifact model/store with operation-receipt, Diagnosis, enabled-resource
-   snapshot, direct/background Capability result, terminal Goal report, and
-   terminal Worker report producers; ✅ OpenList provider task discovery/control
-   and Arcane provider activity discovery/control; 🟡 additional provider-native
-   task producers remain;
-4. ✅ capability/Goal/Worker recovery normalization for the current sources;
-   🟡 provider-native task recovery remains;
-5. 🟡 unified Activity read model and OpenAPI/client contract hardening; the
-   current slice includes capability runs, Workers, Core-owned detached Bash
-   Background Tasks, OpenList and Arcane provider tasks, cursor pagination, and
-   source/status/time filters. Broader App adoption and additional producers
-   remain.
+   snapshot, direct/background Capability result (including provider
+   capabilities, stored as `report`), terminal Goal report, and terminal Worker
+   report producers; ✅ OpenList provider task discovery/control and Arcane
+   provider activity discovery/control; 🟡 another provider-native task
+   producer, and an Artifact kind for that task's own output, remain;
+4. ✅ capability/Goal/Worker recovery for the current sources. OpenList and
+   Arcane tasks are re-read from the provider, so they have no Core `recovery`
+   field and do not need a snapshot restore;
+5. ✅ Activity read model, OpenAPI schemas, and the iOS client for the current
+   sources: capability runs, Workers, Core-owned detached Bash tasks, OpenList
+   and Arcane provider tasks, cursor pagination, and source/status/time
+   filters. A new producer is an extension of this feed, not a missing client.
 
 The current capability-run store is the reference for atomic bounded snapshots,
 but its “old active run becomes interrupted” behavior must remain visible in the

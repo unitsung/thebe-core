@@ -1,6 +1,6 @@
 # Core product HTTP — shipped vs leftover
 
-Date: 2026-09-24.
+Date: 2026-10-06.
 
 This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
@@ -80,8 +80,8 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 
 These are **not** deferred accidentally. They are out of this slice:
 
-- **Remaining App contract adoption** is limited to broader cross-product hardening and future provider-specific surfaces. The current App client covers capabilities and runs, Activity, Goals, Workers, pending permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent settings, Artifacts, audit detail, and push-device registration management.
-- **Additional provider-native background-task sources** — OpenList task discovery/control and Arcane activity discovery/control are now implemented at the Core adapter seam; further provider-native task sources remain future producers. Operation receipts, Diagnosis runs, enabled-resource snapshots, direct/background Capability results, Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery remain implemented sources.
+- **App contract adoption for the shipped surfaces is done.** `ThebeCoreClient` covers capabilities and runs, Activity (including source/status/time filters and cursors), Goals, Workers, pending permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent settings, Artifacts, audit detail, background-task stop, and push-device registration. Empty protocol defaults in that file are test doubles and the disconnected-client fallback. A future provider-specific screen is new work, not a hole in this client.
+- **Provider-native background tasks.** OpenList task discovery/control and Arcane activity discovery/control are wired in `bootstrap.ts`. Each Activity read calls `provider.list()`, so a Core restart does not drop those tasks and they do not use the capability-run `recovery` field. Emby, Jellyfin, Immich, and Navidrome stay library adapters. Another task producer is the remaining source, and the contract does not name it. Direct and background capability results, including provider capabilities, are redacted `report` Artifacts. A provider task still has no Artifact kind for its own output. Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery for Core-owned snapshots remain implemented.
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
 - **Skill file editing**.
