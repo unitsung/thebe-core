@@ -167,3 +167,27 @@ export const PIPELINE_TOOL_DESCRIPTIONS: Record<PipelineToolName, string> = {
   "library.scan": "Ask Emby or Jellyfin to scan its library folders for new files. Requires approval. Scanning is asynchronous; verify with emby.search / jellyfin.search afterwards.",
   "library.refresh_item": "Re-scrape metadata and images for one library item. Requires approval. Use after files were renamed or identified wrongly.",
 };
+
+export type ReleaseCandidate = {
+  title: string;
+  indexer?: string;
+  sizeBytes?: number;
+  seeders?: number;
+  leechers?: number;
+  publishedAt?: string;
+  /** magnet: or http(s) .torrent address ready for download.add. */
+  downloadUrl: string;
+  infoUrl?: string;
+  /** Parsed from the title when recognisable. */
+  quality?: string;
+};
+
+/** Torrent search across the indexers the downloader side already trusts (Prowlarr). */
+export interface ReleaseSearchProvider {
+  readonly service: string;
+  search(input: { query: string; type?: "movie" | "tv" | "music" | "any"; limit?: number }): Promise<ReleaseCandidate[]>;
+}
+
+export const RESOURCE_SEARCH_TOOL_NAME = "resource.search" as const;
+export const PIPELINE_JOB_TOOL_NAMES = ["pipeline.acquire", "pipeline.advance", "pipeline.status"] as const;
+export const PIPELINE_JOB_WRITE_TOOL_NAMES = ["pipeline.acquire"] as const;

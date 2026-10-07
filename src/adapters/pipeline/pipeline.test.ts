@@ -134,3 +134,26 @@ describe("pipeline tools", () => {
     expect(libraries[0]!.scan).not.toHaveBeenCalled();
   });
 });
+
+import { ProwlarrSearchProvider, parseQuality } from "./prowlarr-search.ts";
+
+describe("Prowlarr search", () => {
+  it("ranks by seeders, drops results without a download address and reads quality", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      expect(String(input)).toContain("categories=2000");
+      expect(new Headers(init?.headers).get("x-api-key")).toBe("k");
+      return Response.json([
+        { title: "Dune 2021 1080p WEB-DL", seeders: 5, size: 3, magnetUrl: "magnet:?xt=urn:btih:" + "a".repeat(40), indexer: "A" },
+        { title: "Dune 2021 2160p Remux HDR10", seeders: 90, downloadUrl: "https://x/dl.torrent" },
+        { title: "No link", seeders: 999 },
+        { title: "Dune 2021 1080p WEB-DL", seeders: 1, magnetUrl: "magnet:?xt=urn:btih:" + "b".repeat(40) },
+      ]);
+    });
+    const provider = new ProwlarrSearchProvider({ baseUrl: "https://p.example/", apiKey: "k", fetch: fetchImpl });
+    const rows = await provider.search({ query: "Dune", type: "movie" });
+    expect(rows.map(row => row.seeders)).toEqual([90, 5]);
+    expect(rows[0]?.quality).toBe("2160p Remux HDR");
+    expect(parseQuality("Album FLAC")).toBe("FLAC");
+    await expect(provider.search({ query: "  " })).rejects.toThrow("query");
+  });
+});

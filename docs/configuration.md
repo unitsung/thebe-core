@@ -131,7 +131,9 @@ export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 # With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
 # Core exposes the acquisition pipeline tools: download.add/list/status, files.list/mkdir/copy/move/offline_download,
-# library.scan and library.refresh_item. Writes need approval; the system prompt carries the find → download → place → scrape playbook.
+# library.scan and library.refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource.search,
+# and pipeline.acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
+# persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
 ```
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过

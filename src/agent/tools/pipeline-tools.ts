@@ -6,6 +6,9 @@ import {
   type LibraryRefreshProvider,
   type PipelineToolName,
 } from "../capabilities/pipeline.ts";
+import { RESOURCE_SEARCH_TOOL_NAME, type ReleaseSearchProvider } from "../capabilities/pipeline.ts";
+import type { MediaLibraryProvider } from "../capabilities/media.ts";
+import { createJobBook, type JobStore } from "../pipeline/job-runner.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 
@@ -15,7 +18,13 @@ export type PipelineProviders = {
   downloads?: DownloadProvider;
   files?: FilesProvider;
   libraries?: LibraryRefreshProvider[];
+  search?: ReleaseSearchProvider;
+  /** Media server lookups used to verify that a finished job really landed in the library. */
+  media?: Partial<Record<"emby" | "jellyfin", MediaLibraryProvider>>;
+  jobStore?: JobStore;
 };
+
+const canRunJobs = (providers: PipelineProviders) => !!(providers.downloads && providers.files);
 
 /** Names of the pipeline tools that the configured providers actually back. */
 export function availablePipelineTools(providers: PipelineProviders): PipelineToolName[] {
@@ -26,11 +35,94 @@ export function availablePipelineTools(providers: PipelineProviders): PipelineTo
   return names;
 }
 
+/** Every pipeline-related tool the configured providers back, including search and jobs. */
+export function allPipelineToolNames(providers: PipelineProviders): string[] {
+  return [
+    ...availablePipelineTools(providers),
+    ...(providers.search ? [RESOURCE_SEARCH_TOOL_NAME] : []),
+    ...(canRunJobs(providers) ? ["pipeline.acquire", "pipeline.advance", "pipeline.status"] : []),
+  ];
+}
+
+const JOB_SCHEMAS: Record<string, Record<string, unknown>> = {
+  [RESOURCE_SEARCH_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      query: { type: "string", description: "Title, optionally with year, e.g. 'Dune Part Two 2024'." },
+      type: { type: "string", enum: ["movie", "tv", "music", "any"] },
+      limit: { type: "integer", minimum: 1, maximum: 30 },
+    },
+    required: ["query"],
+  },
+  "pipeline.acquire": {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Title to look for in the media server afterwards." },
+      year: { type: "integer" },
+      magnet: { type: "string", description: "magnet: link of the release the user chose (needs a btih info-hash)." },
+      savePath: { type: "string", description: "Downloader-side save directory." },
+      category: { type: "string" },
+      filesSourceDir: { type: "string", description: "Where the downloader's output appears in the file manager." },
+      libraryDir: { type: "string", description: "Folder the media server watches, e.g. /media/Movies." },
+      mediaServer: { type: "string", enum: ["emby", "jellyfin"] },
+    },
+    required: ["title", "magnet", "filesSourceDir", "libraryDir"],
+  },
+  "pipeline.advance": {
+    type: "object",
+    properties: { jobId: { type: "string" } },
+    required: ["jobId"],
+  },
+  "pipeline.status": { type: "object", properties: { jobId: { type: "string", description: "Omit to list all jobs." } } },
+};
+
+const JOB_DESCRIPTIONS: Record<string, string> = {
+  [RESOURCE_SEARCH_TOOL_NAME]: "Search torrent indexers (Prowlarr) for a title. Returns ranked releases with size, seeders, quality and a downloadUrl. Search never downloads; show the best few to the user and let them choose.",
+  "pipeline.acquire": "Start a deterministic acquisition job for the chosen release: download, copy into the library folder, scan the media server and verify the item appears. Requires approval once for the whole plan. The job advances itself with fixed, bounded retries; call pipeline.advance to move it forward and pipeline.status to inspect it.",
+  "pipeline.advance": "Advance a job by performing whatever step is possible now (never blocks). Call it repeatedly until stage is done or failed. A failed job carries a reason and advice; fix the cause, then advance again to resume.",
+  "pipeline.status": "Show jobs, their stage, attempt counts, log and any failure advice. Read-only.",
+};
+
 export function createPipelineTools(
   providers: PipelineProviders,
   options: { policy: Policy; callerId: string },
 ): CustomToolDefinition[] {
-  return availablePipelineTools(providers).map(name => ({
+  const book = canRunJobs(providers)
+    ? createJobBook({ downloads: providers.downloads!, files: providers.files!, libraries: providers.libraries, media: providers.media }, providers.jobStore)
+    : undefined;
+  const extra: CustomToolDefinition[] = [];
+  const define = (name: string, run: (args: Record<string, unknown>) => Promise<unknown> | unknown) => extra.push({
+    name, label: name, description: JOB_DESCRIPTIONS[name]!, parameters: JOB_SCHEMAS[name],
+    execute: async (_id: string, params: unknown) => {
+      const decision = options.policy.allow(name, options.callerId);
+      if (!decision.ok) throw new Error(decision.reason);
+      return textResult(await run(asObject(params)));
+    },
+  });
+  if (providers.search) {
+    define(RESOURCE_SEARCH_TOOL_NAME, async args => ({
+      releases: await providers.search!.search({
+        query: requiredString(args.query, "query"),
+        type: args.type === "movie" || args.type === "tv" || args.type === "music" ? args.type : "any",
+        limit: integer(args.limit),
+      }),
+    }));
+  }
+  if (book) {
+    define("pipeline.acquire", async args => view(await book.acquire({
+      title: requiredString(args.title, "title"),
+      year: integer(args.year),
+      magnet: requiredString(args.magnet, "magnet"),
+      savePath: optionalString(args.savePath),
+      category: optionalString(args.category),
+      filesSourceDir: requiredString(args.filesSourceDir, "filesSourceDir"),
+      libraryDir: requiredString(args.libraryDir, "libraryDir"),
+      mediaServer: args.mediaServer === "emby" || args.mediaServer === "jellyfin" ? args.mediaServer : undefined,
+    })));
+    define("pipeline.advance", async args => view(await book.advance(requiredString(args.jobId, "jobId"))));
+    define("pipeline.status", args => ({ jobs: book.status(optionalString(args.jobId)).map(view) }));
+  }
+  return [...extra, ...availablePipelineTools(providers).map(name => ({
     name,
     label: name,
     description: PIPELINE_TOOL_DESCRIPTIONS[name],
@@ -41,7 +133,15 @@ export function createPipelineTools(
       const args = asObject(params);
       return textResult(await run(name, args, providers));
     },
-  }));
+  }))];
+}
+
+function view(job: import("../pipeline/job-runner.ts").Job) {
+  return {
+    jobId: job.id, title: job.title, stage: job.stage, failure: job.failure, attempts: job.attempts,
+    recent: job.log.slice(-6),
+    next: job.stage === "done" ? "Finished. Report the result." : job.stage === "failed" ? "Fix the cause in failure.advice, then call pipeline.advance." : "Call pipeline.advance later to continue.",
+  };
 }
 
 async function run(name: PipelineToolName, args: Record<string, unknown>, providers: PipelineProviders): Promise<unknown> {

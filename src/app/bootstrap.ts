@@ -8,6 +8,8 @@ import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
 import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
+import { createFileJobStore } from "../agent/pipeline/job-store.ts";
+import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowlarr-search.ts";
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
 import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
 import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
@@ -210,6 +212,9 @@ export async function bootstrapThebe(
       downloads: createQBittorrentDownloadProviderFromEnv(),
       files: createOpenListFilesProviderFromEnv(),
       libraries: createLibraryRefreshProvidersFromEnv(),
+      search: createProwlarrSearchProviderFromEnv(),
+      media: { ...(emby ? { emby } : {}), ...(jellyfin ? { jellyfin } : {}) },
+      jobStore: createFileJobStore(join(agentStoreDir, "pipeline-jobs.json")),
     },
     musicResearch: createMusicResearchProvider(),
     webSearch: createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL }),

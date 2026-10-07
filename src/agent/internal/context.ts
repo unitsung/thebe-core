@@ -24,7 +24,7 @@ import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
 import { createServiceAPITools } from "../tools/service-api-tools.ts";
-import { availablePipelineTools, createPipelineTools } from "../tools/pipeline-tools.ts";
+import { allPipelineToolNames, availablePipelineTools, createPipelineTools } from "../tools/pipeline-tools.ts";
 import { PIPELINE_WRITE_TOOL_NAMES } from "../capabilities/pipeline.ts";
 import { SERVICE_API_TOOL_NAMES, SERVICE_API_WRITE_TOOL_NAME } from "../capabilities/service-api.ts";
 import {
@@ -199,7 +199,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       ...(options.jellyfin ? JELLYFIN_LOOKUP_TOOL_NAMES : []),
       ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
       ...(options.serviceAPIProviders?.length ? SERVICE_API_TOOL_NAMES : []),
-      ...(options.pipeline ? availablePipelineTools(options.pipeline) : []),
+      ...(options.pipeline ? allPipelineToolNames(options.pipeline) : []),
     ],
   });
   const audit = options.auditPath
@@ -213,7 +213,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   });
   const enabledResources: EnabledResource[] = [...(options.enabledResources ?? [])];
   const builtinTools = options.builtinTools ?? PI_BUILTIN_TOOLS;
-  const systemPrompt = buildSystemPrompt(options.systemPrompt, workspacePath, outputDirectory, options.pipeline ? availablePipelineTools(options.pipeline) : []);
+  const systemPrompt = buildSystemPrompt(options.systemPrompt, workspacePath, outputDirectory, options.pipeline ? allPipelineToolNames(options.pipeline) : []);
   const eventLog = createEventLog();
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
@@ -449,7 +449,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ...WORKSPACE_READ_TOOLS,
         ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
         ...(options.serviceAPIProviders?.length ? [SERVICE_API_WRITE_TOOL_NAME] : []),
-        ...(options.pipeline ? PIPELINE_WRITE_TOOL_NAMES.filter(name => availablePipelineTools(options.pipeline!).includes(name)) : []),
+        ...(options.pipeline ? [...PIPELINE_WRITE_TOOL_NAMES.filter(name => availablePipelineTools(options.pipeline!).includes(name)), ...(allPipelineToolNames(options.pipeline).includes("pipeline.acquire") ? ["pipeline.acquire"] : [])] : []),
       ],
       autoCompact: autoCompactOverride,
     };
@@ -647,6 +647,7 @@ function promptResult(
 function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
   const has = (name: string) => tools.includes(name);
   return [
+    ...(tools.includes("pipeline.acquire") ? ["Preferred route: resource.search → let the user choose a release → ONE pipeline.acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline.advance until done or failed → act on failure.advice. Use the individual download.*/files.*/library.* tools only for manual repair or when no job fits."] : []),
     "Acquisition pipeline (find → download → place in library → scrape → verify). Work it as an explicit plan: state the steps once, then execute them, keeping a running checklist of what is done, pending and blocked. Writes are approved one by one, so batch related arguments (several URLs, several names) into one call and never repeat a step that already succeeded.",
     "1. Find: use navidrome.search / emby.search / jellyfin.search first to learn what already exists, and web_search, music_research or service_api_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
     has("download.add")
