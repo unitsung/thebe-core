@@ -18,6 +18,8 @@ export type ProviderBackgroundTask = {
   updatedAt?: string;
   error?: string;
   resource?: ProviderBackgroundTaskResource;
+  /** Provider-produced bounded result; never included directly in Activity. */
+  output?: { content: string; contentType?: string };
 };
 
 export type ProductBackgroundTaskProvider = {
@@ -46,6 +48,7 @@ export type ProductBackgroundTask = {
   updatedAt: string;
   error?: string;
   resource?: ProductBackgroundTaskResource;
+  artifactId?: string;
 };
 
 export function toProductBackgroundTask(

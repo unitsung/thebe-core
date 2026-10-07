@@ -52,6 +52,13 @@ const queryParameter = (name: string, schema: Record<string, unknown> = { type: 
 });
 
 const operations: Operation[] = [
+  { method: "get", path: "/v1/schedules", summary: "List durable Goal schedules", tag: "goal", responseSchema: "GoalScheduleList" },
+  { method: "post", path: "/v1/schedules", summary: "Create a durable Goal schedule", tag: "goal", response: 201, requestBody: { required: true }, requestSchema: "GoalScheduleInput", responseSchema: "GoalSchedule" },
+  { method: "get", path: "/v1/schedules/{id}", summary: "Read a Goal schedule", tag: "goal", parameters: [idParameter()], responseSchema: "GoalSchedule" },
+  { method: "put", path: "/v1/schedules/{id}", summary: "Edit a Goal schedule", tag: "goal", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "GoalScheduleInput", responseSchema: "GoalSchedule" },
+  { method: "patch", path: "/v1/schedules/{id}", summary: "Pause or resume scheduling", tag: "goal", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "GoalScheduleEnabled", responseSchema: "GoalSchedule" },
+  { method: "delete", path: "/v1/schedules/{id}", summary: "Delete a schedule without stopping its Goal", tag: "goal", parameters: [idParameter()], responseSchema: "Ok" },
+  { method: "post", path: "/v1/schedules/{id}/run", summary: "Run now through the normal Goal lifecycle", tag: "goal", parameters: [idParameter()], responseSchema: "GoalSchedule" },
   { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
   { method: "get", path: "/v1/events", summary: "Recent process events", tag: "system" },
   { method: "get", path: "/v1/event", summary: "Recent process events (singular compatibility alias)", tag: "system" },
@@ -91,7 +98,7 @@ const operations: Operation[] = [
   { method: "post", path: `${PRODUCT_HTTP_PATH.enabledResources}/artifact`, summary: "Capture enabled resources as an Artifact", tag: "resources", responseSchema: "AgentArtifact" },
   { method: "put", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Put an enabled resource", tag: "resources", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "EnabledResourceWrite", responseSchema: "EnabledResource" },
   { method: "delete", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Remove an enabled resource", tag: "resources", parameters: [idParameter()], responseSchema: "Ok" },
-  { method: "get", path: PRODUCT_HTTP_PATH.artifacts, summary: "List bounded product Artifacts", tag: "artifacts", parameters: [queryParameter("kind", { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt"] }), queryParameter("sessionId"), queryParameter("runId"), queryParameter("createdAfter"), queryParameter("createdBefore"), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 })], responseSchema: "ArtifactList" },
+  { method: "get", path: PRODUCT_HTTP_PATH.artifacts, summary: "List bounded product Artifacts", tag: "artifacts", parameters: [queryParameter("kind", { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt", "task_output"] }), queryParameter("sessionId"), queryParameter("runId"), queryParameter("createdAfter"), queryParameter("createdBefore"), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 })], responseSchema: "ArtifactList" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}`, summary: "Read Artifact metadata", tag: "artifacts", parameters: [idParameter()], responseSchema: "AgentArtifact" },
   { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}/content`, summary: "Read bounded Artifact content", tag: "artifacts", parameters: [idParameter()], responseSchema: "ArtifactContent" },
   { method: "get", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Read permission mode", tag: "settings", responseSchema: "PermissionModeSettings" },
@@ -614,6 +621,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             finishedAt: { type: "string" },
             updatedAt: { type: "string" },
             error: { type: "string" },
+            artifactId: { type: "string" },
             resource: { $ref: "#/components/schemas/ProductBackgroundTaskResource" },
           },
         },
@@ -838,7 +846,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           required: ["artifactId", "kind", "title", "createdAt", "updatedAt", "contentType", "sizeBytes"],
           properties: {
             artifactId: { type: "string" },
-            kind: { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt"] },
+            kind: { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt", "task_output"] },
             title: { type: "string" },
             sessionId: { type: "string" },
             runId: { type: "string" },
@@ -967,6 +975,30 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
           },
         },
+        GoalScheduleInput: {
+          type: "object", required: ["title", "goal", "startAt"],
+          properties: {
+            title: { type: "string", minLength: 1, maxLength: 200 },
+            goal: { type: "string", minLength: 1, maxLength: 16000 },
+            startAt: { type: "string", format: "date-time" },
+            intervalMinutes: { type: "integer", minimum: 5, maximum: 525600, description: "Fixed elapsed minutes; omitted means one shot. Missed intervals are not replayed." },
+            criteria: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 2000 } },
+            maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+          },
+        },
+        GoalSchedule: {
+          allOf: [{ $ref: "#/components/schemas/GoalScheduleInput" }, {
+            type: "object", required: ["id", "enabled", "createdAt", "updatedAt"],
+            properties: {
+              id: { type: "string" }, enabled: { type: "boolean" },
+              createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" },
+              nextRunAt: { type: "string", format: "date-time" }, lastRunAt: { type: "string", format: "date-time" },
+              lastSessionId: { type: "string" }, lastError: { type: "string" }, dispatching: { type: "boolean" },
+            },
+          }],
+        },
+        GoalScheduleEnabled: { type: "object", required: ["enabled"], properties: { enabled: { type: "boolean" } } },
+        GoalScheduleList: { type: "object", required: ["schedules"], properties: { schedules: { type: "array", items: { $ref: "#/components/schemas/GoalSchedule" } } } },
         ProductGoalList: {
           type: "object",
           required: ["goals"],

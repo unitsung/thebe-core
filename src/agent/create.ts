@@ -11,6 +11,7 @@ import { createExtensionApi } from "./extensions/service.ts";
 import { createSessionApi } from "./sessions/service.ts";
 import { createSubagentApi } from "./subagents/api.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
+import { createScheduleApi } from "./schedules/service.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -31,6 +32,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   };
   const sessions = createSessionApi(ctx, restoreSessionState);
   const prompts = createPromptApi(ctx);
+  const schedules = createScheduleApi({
+    dir: options.agentStoreDir ? join(options.agentStoreDir, "schedules") : undefined,
+    now: ctx.now,
+    goals: { ...sessions, ...goals },
+    checkWritable: ctx.checkNotQuiesced,
+    isQuiesced: () => options.runtime.isQuiesced(),
+  });
+  schedules.start();
   const activityStore = createActivityStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "activity")
@@ -65,6 +74,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...extensions,
     ...subagents,
     ...createControlApi(ctx, artifactStore),
+    listSchedules: schedules.listSchedules,
+    getSchedule: schedules.getSchedule,
+    createSchedule: schedules.createSchedule,
+    updateSchedule: schedules.updateSchedule,
+    setScheduleEnabled: schedules.setScheduleEnabled,
+    deleteSchedule: schedules.deleteSchedule,
+    runSchedule: schedules.runSchedule,
+    async quiesce() { await schedules.stop(); await options.runtime.quiesce(); },
+    async unquiesce() { await options.runtime.unquiesce(); schedules.start(); },
     ...diagnosis,
     ...actions,
     async listArtifacts(query) {

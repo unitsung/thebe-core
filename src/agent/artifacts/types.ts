@@ -3,6 +3,7 @@ export const ARTIFACT_KINDS = [
   "report",
   "resource_list",
   "operation_receipt",
+  "task_output",
 ] as const;
 
 export type ArtifactKind = (typeof ARTIFACT_KINDS)[number];

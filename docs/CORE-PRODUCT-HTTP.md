@@ -2,6 +2,42 @@
 
 Date: 2026-10-06.
 
+## Current workspace additions (2026-10-06)
+
+Durable Goal schedules now expose `GET/POST /v1/schedules`,
+`GET/PUT/PATCH/DELETE /v1/schedules/{id}` and `POST .../{id}/run`.
+Create/edit accepts `title`, `goal`, ISO `startAt`, optional `criteria`,
+`maxIterations` (1–32) and `intervalMinutes` (5–525600). Omit the interval
+for a one-shot schedule. PATCH accepts `{ enabled: boolean }`. Dates include
+a timezone; recurrence uses elapsed minutes, not calendar-day or DST rules.
+The App has native create/edit, pause/resume, delete, run-now and linked Goal/log
+navigation. Run-now does not change the next scheduled occurrence. Schedule
+deletion does not delete or cancel the resulting Goal.
+
+Schedules persist atomically under `{agentStoreDir}/schedules/schedules.json`
+(maximum 200). Bootstrap provides a store directory; library embedders that
+omit it have an in-memory schedule store. The Agent owns the scheduler; HTTP
+never owns a timer or an execution loop. Each occurrence creates a fresh session
+and goes through the existing Goal/subagent lifecycle, including approvals.
+Quiesce stops the scheduler. Core downtime dispatches at most one due occurrence
+and skips backlog; active or paused prior Goals prevent overlap. A reservation
+is persisted before dispatch. Interrupted reservations are surfaced for manual
+inspection and never replayed automatically. One Core process must own a given
+store directory. This does not add multi-process scheduling or remote push.
+
+qBittorrent is an additional native task source. Configure
+`THEBE_QBITTORRENT_URL`, `THEBE_QBITTORRENT_USERNAME` and
+`THEBE_QBITTORRENT_PASSWORD` in the Core environment. The adapter retains its
+authenticated cookie internally, lists up to 100 recent torrents, and uses v4
+pause/v5 stop for explicit task control. Finished downloads produce an
+allow-listed completion result, excluding save paths and credentials.
+`task_output` is now an Artifact kind. Terminal provider task outputs are
+redacted, bounded and persisted once per provider/session task identity; task
+snapshots expose `artifactId`, never raw output. The App supports filtering this
+kind and opening its content from task details. Existing Artifact retention
+limits still apply. Authorization/Proxy-Authorization Bearer and Basic tokens
+are redacted in logs and Artifact content.
+
 This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
 
 ## Shipped
@@ -81,7 +117,7 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App contract adoption for the shipped surfaces is done.** `ThebeCoreClient` covers capabilities and runs, Activity (including source/status/time filters and cursors), Goals, Workers, pending permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent settings, Artifacts, audit detail, background-task stop, and push-device registration. Empty protocol defaults in that file are test doubles and the disconnected-client fallback. A future provider-specific screen is new work, not a hole in this client.
-- **Provider-native background tasks.** OpenList task discovery/control and Arcane activity discovery/control are wired in `bootstrap.ts`. Each Activity read calls `provider.list()`, so a Core restart does not drop those tasks and they do not use the capability-run `recovery` field. Emby, Jellyfin, Immich, and Navidrome stay library adapters. Another task producer is the remaining source, and the contract does not name it. Direct and background capability results, including provider capabilities, are redacted `report` Artifacts. A provider task still has no Artifact kind for its own output. Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal reports, Worker reports, Pi detached Bash discovery, and runtime-recreation recovery for Core-owned snapshots remain implemented.
+- **Provider-native background tasks.** OpenList, Arcane and qBittorrent discovery/control are wired in `bootstrap.ts`. Each Activity read calls `provider.list()`, so Core recreation does not drop provider tasks. They do not use the capability-run `recovery` field. Terminal providers can supply their own output through the bounded `task_output` Artifact seam. Direct/background capability results remain `report` Artifacts. Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal/Worker reports, Pi detached Bash discovery, and runtime-recreation recovery for Core-owned snapshots remain implemented. qBittorrent completion output and the additional task source close the two previously identified code gaps in issue #4; deployment and real-provider acceptance are separate checks.
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
 - **Skill file editing**.
@@ -90,7 +126,60 @@ These are **not** deferred accidentally. They are out of this slice:
 - Session-scoped background-task HTTP is unchanged and is not a Worker product.
 - Media/Emby/Immich **App** connections. Core already has media read capabilities and adapters.
 
-## How to tell the two approval objects apart
+## Composable service APIs (2026-10-07)
+
+The execution primitives are `service_api_discover`, `service_api_read` and
+`service_api_write`, alongside Core's `bash`, `read`, `edit`, `write` and dynamic
+MCP tools. There is no compiled service operation catalog or fixed workflow.
+New services require connection configuration, and new operations come from the
+service's schema rather than new tool implementation code.
+
+Set `THEBE_SERVICE_APIS` to a JSON array:
+
+```json
+[{"id":"any-service","baseURL":"http://service:8080","openapiPath":"/openapi.json","headersEnv":{"X-API-Key":"SERVICE_API_KEY"},"readOperations":["GET /jobs/{id}"]}]
+```
+
+`baseURL` is the API request root (including a reverse-proxy or API prefix).
+`openapiPath` is appended to that root. Omit it to probe `/openapi.json`,
+`/swagger.json`, `/api/openapi.json`, and `/swagger/v1/swagger.json`. JSON OpenAPI
+3.x and Swagger 2.0 are supported. `headersEnv` maps HTTP header names to existing
+environment variables; for Bearer authentication the variable's value includes
+the `Bearer ` prefix. Credentials stay in the adapter. Existing
+`THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` and CloudSaver equivalents remain
+connection shortcuts; explicit generic entries override same-named shortcuts.
+App connections are independent and are not automatically copied to Core.
+
+Discovery searches live operation IDs, paths, descriptions and tags using `query`,
+pages with `offset`/`limit`, and loads parameters, request bodies and response
+schemas with `operation_id`. Internal JSON `$ref` references are resolved with
+cycle/depth/expansion bounds. `refresh:true` reloads a changed schema immediately;
+otherwise the cache lasts five minutes. Each service reports its own discovery
+failure, so an unavailable service does not hide other connections. API descriptions
+are untrusted data; schema server URLs do not override the operator's base URL.
+
+Approved requests support arbitrary relative paths and JSON/text/form bodies
+(`body`, `content_type`). A missing OpenAPI does not disable approved requests:
+the agent can inspect vendor docs or code with Core coding/MCP tools, generate
+a script, and execute it through the existing runtime. It must not invent request
+schemas, execution results or task completion. API calls are not limited to a
+particular service name, `/api` prefix, or named runbook.
+
+Sensitive response values become opaque references. `privateValueReferences`
+contains JSON pointers and reference IDs; later request bodies can reuse them as
+`{"$thebeValueRef":"reference"}`. The adapter substitutes the private value just
+before sending, binds it to the same connection, caps retained references and
+expires them after ten minutes. This supports chained authentication/transfer
+operations without bespoke token-handling code for each vendor.
+
+New operations require runtime approval unless trusted operator `readOperations`
+marks their operation ID or `METHOD /path/template` read-only. Remote schema
+annotations cannot grant approval. Arbitrary hosts, traversal and redirects are
+blocked. Direct HTTP/MCP `invokeTool` writes are rejected; use an agent session
+and its pending permission flow. Remembered write approvals default to the exact
+arguments. Core permission modes remain `ask`, `read-only`, and `full-access`.
+
+### How to tell the two approval objects apart
 
 | Object | HTTP | Origin |
 | --- | --- | --- |

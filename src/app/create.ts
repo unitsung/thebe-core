@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
+import type { ServiceAPIProvider } from "../agent/capabilities/service-api.ts";
 import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
 import type { MusicResearchProvider } from "../agent/capabilities/music-research.ts";
 import type { WebSearchProvider } from "../agent/capabilities/web-search.ts";
@@ -57,6 +58,7 @@ export function createThebeApp(options: {
   jellyfin?: MediaLibraryProvider;
   immich?: PhotoLibraryProvider;
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
+  serviceAPIProviders?: readonly ServiceAPIProvider[];
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -97,6 +99,7 @@ export function createThebeApp(options: {
     jellyfin: options.jellyfin,
     immich: options.immich,
     backgroundTaskProviders: options.backgroundTaskProviders,
+    serviceAPIProviders: options.serviceAPIProviders,
   });
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);

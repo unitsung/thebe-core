@@ -181,7 +181,7 @@ describe("Artifact product HTTP", () => {
     expect(invalid.status).toBe(400);
     expect(await json(invalid)).toEqual({
       ok: false,
-      error: "kind must be diagnosis, report, resource_list, operation_receipt",
+      error: "kind must be diagnosis, report, resource_list, operation_receipt, task_output",
       code: "invalid_body",
     });
   });

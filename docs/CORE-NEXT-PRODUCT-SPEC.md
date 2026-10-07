@@ -2,7 +2,7 @@
 
 Updated: 2026-10-06.
 
-Status: in progress — settings, Artifacts, recovery, and the current Activity feed are shipped and consumed by the iOS client. Remaining work is another provider-native background-task source, and an Artifact kind for that task's own output. OpenList and Arcane tasks are not a recovery gap: each Activity read asks the provider again.
+Status: current workspace closes the remaining code gaps with qBittorrent native tasks and bounded `task_output` Artifacts. Settings, Artifacts, recovery, and the Activity feed are consumed by the iOS client. Provider acceptance and deployment are separate verification steps; OpenList, Arcane and qBittorrent tasks are re-read from their providers.
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
 
@@ -249,7 +249,9 @@ must not call Pi, MCP, or providers directly.
   the runtime's native session persistence.
 - A new global Goal identity or `GET /v1/goals/{id}/runs` unless separately
   decided; current Goal identity remains the parent session id.
-- Resource graph, relations, triggers, and scheduled automation.
+- Resource graph, relations, and general triggers. Fixed-interval and one-shot
+  Goal schedules were subsequently authorized and implemented on 2026-10-06;
+  see CORE-PRODUCT-HTTP.md for the current schedule contract.
 
 ## Further Notes
 
@@ -261,8 +263,9 @@ Implementation status and remaining order:
    snapshot, direct/background Capability result (including provider
    capabilities, stored as `report`), terminal Goal report, and terminal Worker
    report producers; ✅ OpenList provider task discovery/control and Arcane
-   provider activity discovery/control; 🟡 another provider-native task
-   producer, and an Artifact kind for that task's own output, remain;
+   provider activity discovery/control; ✅ current workspace adds qBittorrent
+   native download tasks and the `task_output` Artifact kind for terminal
+   provider-owned output;
 4. ✅ capability/Goal/Worker recovery for the current sources. OpenList and
    Arcane tasks are re-read from the provider, so they have no Core `recovery`
    field and do not need a snapshot restore;

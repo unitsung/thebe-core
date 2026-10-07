@@ -5,6 +5,7 @@ import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
 import { createWebSearchProvider } from "../adapters/web-search/client.ts";
+import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
 import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
@@ -28,6 +29,7 @@ import {
   createOpenListBackgroundTaskProviderFromEnv,
   createOpenListStrmRepairProviderFromEnv,
 } from "../adapters/openlist/index.ts";
+import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbittorrent/tasks.ts";
 import { readJudgmentGate } from "../agent/judgment/gate.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 
@@ -206,7 +208,9 @@ export async function bootstrapThebe(
     emby,
     jellyfin,
     immich,
+    serviceAPIProviders: createServiceAPIProvidersFromEnv(),
     backgroundTaskProviders: [
+      ...(() => { const provider = createQBittorrentBackgroundTaskProviderFromEnv(); return provider ? [provider] : []; })(),
       ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
       ...(openListBackgroundTaskProvider ? [openListBackgroundTaskProvider] : []),
     ],

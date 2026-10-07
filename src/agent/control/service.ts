@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
+import { SERVICE_API_WRITE_TOOL_NAME } from "../capabilities/service-api.ts";
 import {
   NAVIDROME_WRITE_TOOL_NAMES,
   redactNavidromeQueueForStorage,
@@ -40,6 +41,7 @@ import {
   toProductBackgroundTask,
   providerBackgroundTaskSessionId,
   toProductProviderBackgroundTask,
+  type ProviderBackgroundTask,
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 
@@ -60,6 +62,28 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     listMetas,
   } = ctx;
   const backgroundTaskProviders = options.backgroundTaskProviders ?? [];
+  const taskArtifactFlights = new Map<string, Promise<ProductBackgroundTask>>();
+  async function productProviderTask(service: string, task: ProviderBackgroundTask): Promise<ProductBackgroundTask> {
+    const product = toProductProviderBackgroundTask(service, task);
+    if (!artifactStore || !task.output || task.status === "running") return product;
+    const key = `${product.sessionId}:${task.id}`;
+    const pending = taskArtifactFlights.get(key);
+    if (pending) return pending;
+    const flight = (async () => {
+      const existing = (await artifactStore.list({ kind: "task_output", sessionId: product.sessionId, runId: task.id, limit: 1 }))[0];
+      const artifact = existing ?? await artifactStore.create({
+        kind: "task_output", title: task.name ?? task.id,
+        sessionId: product.sessionId, runId: task.id,
+        resource: task.resource,
+        content: task.output!.content, contentType: task.output!.contentType,
+      });
+      return { ...product, artifactId: artifact.artifactId };
+    })();
+    taskArtifactFlights.set(key, flight);
+    try { return await flight; }
+    catch { return { ...product, error: [product.error, "Task output could not be retained"].filter(Boolean).join("; ") }; }
+    finally { taskArtifactFlights.delete(key); }
+  }
   const capabilityRuns = new Map<string, CapabilityRun>();
   const capabilityRunListeners = new Map<string, Set<(run: CapabilityRun) => void>>();
   const capabilityRunStore = createCapabilityRunStore({
@@ -115,7 +139,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
     }
-    if ((NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name)) {
+    if ((NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) || name === SERVICE_API_WRITE_TOOL_NAME) {
       throw httpError(403, `${name}: ${RUNTIME_APPROVAL_REQUIRED}`);
     }
     if (name === STRM_REPAIR_CAPABILITY_ID && options.strmRepairProvider) {
@@ -497,9 +521,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
       );
       if (provider) {
-        return (await provider.list()).map((task) =>
-          toProductProviderBackgroundTask(provider.service, task),
-        );
+        return Promise.all((await provider.list()).map(task => productProviderTask(provider.service, task)));
       }
       const opened = await openSession(thebeSessionId);
       return (await opened.session.listBackgroundTasks()).map((task) =>
@@ -524,9 +546,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       for (const provider of backgroundTaskProviders) {
         try {
           tasks.push(
-            ...(await provider.list()).map((task) =>
-              toProductProviderBackgroundTask(provider.service, task),
-            ),
+            ...await Promise.all((await provider.list()).map(task => productProviderTask(provider.service, task))),
           );
         } catch {
           // A provider outage should not hide runtime tasks or other providers.

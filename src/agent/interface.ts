@@ -17,6 +17,8 @@ import type {
   ThebeSessionContext,
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
+import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
+import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
 import type { WebSearchProvider } from "./capabilities/web-search.ts";
@@ -133,6 +135,7 @@ export type CreateThebeAgentOptions = {
   immich?: PhotoLibraryProvider;
   /** Optional provider-native background task sources. */
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
+  serviceAPIProviders?: readonly ServiceAPIProvider[];
   /** Optional Judgment Model. Absent means the Judgment Gate is off. */
   judgment?: JudgmentModel;
   /** Which catalog Sites may call the model. Default all when a model is present. */
@@ -216,6 +219,13 @@ export interface ThebeAgent {
   createEnabledResourceArtifact(): Promise<AgentArtifact>;
 
   startGoal(input: { thebeSessionId: string; goal: string; criteria?: string[]; maxIterations?: number }): Promise<GoalRun>;
+  listSchedules(): Promise<GoalSchedule[]>;
+  getSchedule(id: string): Promise<GoalSchedule>;
+  createSchedule(input: GoalScheduleInput): Promise<GoalSchedule>;
+  updateSchedule(id: string, input: GoalScheduleInput): Promise<GoalSchedule>;
+  setScheduleEnabled(id: string, enabled: boolean): Promise<GoalSchedule>;
+  deleteSchedule(id: string): Promise<void>;
+  runSchedule(id: string): Promise<GoalSchedule>;
   getGoal(thebeSessionId: string): GoalRun | undefined;
   listGoals(): Promise<GoalRun[]>;
   goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }>;
