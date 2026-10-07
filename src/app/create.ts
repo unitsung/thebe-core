@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import type { ServiceAPIProvider } from "../agent/capabilities/service-api.ts";
 import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
+import type { PipelineProviders } from "../agent/tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "../agent/capabilities/music-research.ts";
 import type { WebSearchProvider } from "../agent/capabilities/web-search.ts";
 import type { MediaLibraryProvider, PhotoLibraryProvider } from "../agent/capabilities/media.ts";
@@ -52,6 +53,7 @@ export function createThebeApp(options: {
   artifactStore?: ArtifactStore;
   strmRepairProvider?: StrmRepairProvider;
   navidrome?: NavidromeProvider;
+  pipeline?: PipelineProviders;
   musicResearch?: MusicResearchProvider;
   webSearch?: WebSearchProvider;
   emby?: MediaLibraryProvider;
@@ -93,6 +95,7 @@ export function createThebeApp(options: {
     artifactStore: options.artifactStore,
     strmRepairProvider: options.strmRepairProvider,
     navidrome: options.navidrome,
+    pipeline: options.pipeline,
     musicResearch: options.musicResearch,
     webSearch: options.webSearch,
     emby: options.emby,

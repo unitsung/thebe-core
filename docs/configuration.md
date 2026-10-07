@@ -129,6 +129,9 @@ OpenList 地址和 token 后，能力会自动出现在 Core capability catalog�
 ```bash
 export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
+# With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
+# Core exposes the acquisition pipeline tools: download.add/list/status, files.list/mkdir/copy/move/offline_download,
+# library.scan and library.refresh_item. Writes need approval; the system prompt carries the find → download → place → scrape playbook.
 ```
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过

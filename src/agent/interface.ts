@@ -20,6 +20,7 @@ import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
 import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
+import type { PipelineProviders } from "./tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
 import type { WebSearchProvider } from "./capabilities/web-search.ts";
 import type { MediaLibraryProvider, PhotoLibraryProvider } from "./capabilities/media.ts";
@@ -125,6 +126,8 @@ export type CreateThebeAgentOptions = {
   strmRepairProvider?: StrmRepairProvider;
   /** Optional Navidrome media provider exposed as Core capabilities. */
   navidrome?: NavidromeProvider;
+  /** Optional download → files → library providers exposed as pipeline tools. */
+  pipeline?: PipelineProviders;
   musicResearch?: MusicResearchProvider;
   webSearch?: WebSearchProvider;
   /** Optional Emby library. Exposes search and item detail when present. */

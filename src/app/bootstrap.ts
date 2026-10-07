@@ -6,6 +6,9 @@ import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
 import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
+import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
+import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
+import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
 import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
 import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
@@ -203,6 +206,11 @@ export async function bootstrapThebe(
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     strmRepairProvider,
     navidrome,
+    pipeline: {
+      downloads: createQBittorrentDownloadProviderFromEnv(),
+      files: createOpenListFilesProviderFromEnv(),
+      libraries: createLibraryRefreshProvidersFromEnv(),
+    },
     musicResearch: createMusicResearchProvider(),
     webSearch: createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL }),
     emby,
