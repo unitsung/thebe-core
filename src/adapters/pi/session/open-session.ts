@@ -109,7 +109,7 @@ export async function openPiSession(
       server, name, tool: { name: originalName, description: tool.description,
         inputSchema: tool.inputSchema, outputSchema: tool.outputSchema,
         annotations: tool.annotations } as never,
-      exposure: "deferred", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
+      exposure: "direct", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
       getClient: async () => ({
         callTool: async (_name: string, args: Record<string, unknown>, options: { signal?: AbortSignal }) =>
           create.externalMcp!.callTool(tool.name, args, options.signal) as never,
@@ -205,11 +205,6 @@ export async function openPiSession(
       );
     }
   }
-  if (hasMcp) {
-    permissionExtension.push(await sdk.loadExtensionFromFactory(
-      sdk.createToolSearchExtension(), create.cwd ?? cwd, sdk.createEventBus(),
-      extensionRuntime, "thebe://tool-search"));
-  }
   return { extensions: permissionExtension, runtime: extensionRuntime };
   }
   const loadedExtensions = await loadSessionExtensions();
@@ -227,7 +222,7 @@ export async function openPiSession(
     defaultProjectTrust: "always",
     retry: { enabled: false, maxRetries: 0 },
     compaction: { enabled: autoCompact },
-    ...(hasMcp ? { defaultTools: [...tools, "tool_search"] } : {}),
+    ...(hasMcp ? { defaultTools: [...tools, ...mcpTools.map(tool => tool.name)] } : {}),
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
@@ -304,7 +299,7 @@ export async function openPiSession(
     // New sessions start with Thebe's explicit default. Existing sessions
     // must omit this option so Pi can restore their persisted level.
     thinkingLevel: sessionManager.getBranch().length === 0 ? "off" : undefined,
-    // An explicit allowlist would hide deferred tools from tool_search.
+    // Newly enabled MCP tools must remain registerable when the session reloads.
     ...(hasMcp ? {
       excludeTools: PI_BUILTIN_TOOLS.filter((name) => !tools.includes(name)),
     } : { tools }),

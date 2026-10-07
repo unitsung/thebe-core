@@ -31,6 +31,44 @@ function emptyProvider(): ContainerInfoProvider {
 }
 
 describe("Thebe agent service (fake runtime)", () => {
+  it("does not send an already approved or denied command to the approval UI", async () => {
+    const fake = createFakeRuntime();
+    let handler: Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"];
+    const agent = createThebeAgent({
+      runtime: { ...fake.runtime, async createSession(options) {
+        handler = options.permissionHandler;
+        return fake.runtime.createSession(options);
+      } },
+      provider: emptyProvider(),
+      permissionMode: "full-access",
+    });
+    const session = await agent.createSession();
+    const request = { permissionId: "p", toolCallId: "c", toolName: "bash", args: { command: "ls" } };
+    expect(await handler!.preflight!(request)).toBe("allow");
+    await agent.patchSession(session.thebeSessionId, { rememberedPermissions: { bash: "deny" } });
+    expect(await handler!.preflight!(request)).toBe("deny");
+    await agent.patchSession(session.thebeSessionId, { rememberedPermissions: { bash: "allow" } });
+    agent.setPermissionMode("ask");
+    expect(await handler!.preflight!(request)).toBe("allow");
+    agent.setPermissionMode("read-only");
+    expect(await handler!.preflight!(request)).toBe("deny");
+    agent.setPermissionMode("full-access");
+    expect(await handler!.preflight!({ ...request, args: { command: "zpool destroy tank" } })).toBe("deny");
+  });
+
+  it("refreshes an existing conversation when a resource is enabled, updated or removed", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider: emptyProvider() });
+    const session = await agent.createSession();
+    const resource = { kind: "skill" as const, identity: "demo", source: "thebe://skills/demo", version: "1" };
+    await agent.enableResource(resource);
+    expect(fake.snapshot(session.runtimeSessionId).resourceReloads).toBe(1);
+    await agent.putEnabledResource({ ...resource, version: "2" });
+    expect(fake.snapshot(session.runtimeSessionId).resourceReloads).toBe(2);
+    await agent.removeEnabledResource("demo");
+    expect(fake.snapshot(session.runtimeSessionId).resourceReloads).toBe(3);
+  });
+
   it("uses a two-minute idle default for automatic summaries", () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({

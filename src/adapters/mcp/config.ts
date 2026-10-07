@@ -1,11 +1,61 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { HOMELAB_CAPABILITY_CATEGORIES } from "../../agent/extensions/mcp.ts";
 import type {
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,
+  McpServerRegistration,
 } from "../../agent/extensions/mcp.ts";
+
+export function validateMcpRegistration(input: McpServerRegistration): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.name)) throw new Error("Invalid MCP server name");
+  if (Boolean(input.url) === Boolean(input.command)) throw new Error("Provide either a URL or a command");
+  if (input.url) {
+    const url = new URL(input.url);
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) {
+      throw new Error("MCP URL must use HTTP or HTTPS without embedded credentials");
+    }
+  }
+  if (input.command !== undefined && !input.command.trim()) throw new Error("MCP command is empty");
+  if (input.args !== undefined && (!Array.isArray(input.args) || input.args.some((arg) => typeof arg !== "string"))) {
+    throw new Error("MCP arguments must be strings");
+  }
+  for (const map of [input.env, input.headers]) {
+    if (map !== undefined && (!map || typeof map !== "object" || Array.isArray(map) || Object.values(map).some((value) => typeof value !== "string"))) {
+      throw new Error("MCP environment and headers must contain string values");
+    }
+  }
+}
+
+/** Persist a new disabled server while preserving unrelated configuration. */
+export async function addConfiguredMcpServer(input: McpServerRegistration, options: { cwd?: string; homeDir?: string }): Promise<void> {
+  validateMcpRegistration(input);
+  if ((await listConfiguredMcpServers(options)).some((server) => server.name === input.name)) throw new Error("MCP server already exists");
+  const root = await realpath(options.cwd ?? options.homeDir ?? homedir());
+  const directory = join(root, ".thebe");
+  await mkdir(directory, { recursive: true });
+  if (relative(root, await realpath(directory)) !== ".thebe") throw new Error("MCP configuration must be inside its root directory");
+  const path = join(directory, "mcp.json");
+  let config: Record<string, unknown> = {};
+  try {
+    config = JSON.parse(await readFile(path, "utf8"));
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid MCP configuration");
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("Invalid MCP configuration JSON");
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const servers = config.mcpServers ?? config.servers ?? {};
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) throw new Error("Invalid MCP server configuration");
+  const { name, ...connection } = input;
+  config.mcpServers = { ...servers, [name]: { ...connection, disabled: true } };
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
+}
 
 export type McpServerConfig = {
   name: string;

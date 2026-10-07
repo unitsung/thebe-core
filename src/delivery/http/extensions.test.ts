@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +34,47 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 }
 
 describe("skills / MCP / resources / permission-mode product HTTP", () => {
+  it("imports disabled skills, preserves them across recreation, and refuses traversal or replacement", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-skill-import-"));
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
+    const content = "---\nname: nas-check\ndescription: Read-only NAS inspection\n---\nInspect status without making changes.\n";
+    const post = (text: string) => app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text }),
+    }));
+    expect(await json(await post(content))).toMatchObject({ name: "nas-check", enabled: false, scope: "project" });
+    expect((await post(content.replace("Read-only NAS inspection", "Changed"))).status).toBe(400);
+    expect((await post(content.replace("nas-check", "../escape"))).status).toBe(400);
+    expect((await post("x".repeat(1_048_577))).status).toBe(400);
+    expect(await readFile(join(dir, ".thebe", "skills", "nas-check.md"), "utf8")).toBe(content);
+    const recreated = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
+    expect(await recreated.agent.getSkill("nas-check")).toMatchObject({ name: "nas-check", enabled: false, content });
+    await app.agent.quiesce();
+    expect((await post(content.replace("nas-check", "another"))).status).toBe(503);
+    app.agent.closeMcp(); recreated.agent.closeMcp();
+  });
+
+  it("adds durable disabled MCP servers without leaking credentials or replacing existing configuration", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-add-"));
+    await mkdir(join(dir, ".thebe"));
+    await writeFile(join(dir, ".thebe", "mcp.json"), JSON.stringify({ note: "preserved", mcpServers: { existing: { url: "http://127.0.0.1:1/mcp", disabled: true } } }));
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
+    const post = (body: unknown) => app.handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    }));
+    const response = await post({ name: "notes", url: "http://127.0.0.1:2/mcp", headers: { Authorization: "Bearer fixture-secret" } });
+    expect(response.status).toBe(201);
+    const result = await json(response);
+    expect(result).toMatchObject({ name: "notes", status: "disabled", disabled: true });
+    expect(JSON.stringify(result)).not.toContain("fixture-secret");
+    expect(JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))).toMatchObject({ note: "preserved", mcpServers: { existing: { disabled: true }, notes: { disabled: true } } });
+    expect((await post({ name: "notes", command: "unused" })).status).toBe(400);
+    expect((await post({ name: "../escape", command: "unused" })).status).toBe(400);
+    expect((await post({ name: "invalid", url: "file:///tmp/test" })).status).toBe(400);
+    expect((await post({ name: "invalid", command: "unused", args: [42] })).status).toBe(400);
+    const recreated = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
+    expect(await recreated.agent.listMcpServers()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "notes", disabled: true })]));
+    app.agent.closeMcp(); recreated.agent.closeMcp();
+  });
   it("lists, gets, and patches skills without exposing file editing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-skills-http-"));
     await mkdir(join(dir, ".thebe", "skills", "demo-skill"), { recursive: true });

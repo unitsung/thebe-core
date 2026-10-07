@@ -13,6 +13,16 @@ export async function handleSkillRoutes(
   if (!context.agent) return agentUnavailable();
   const { request, parts, agent } = context;
   try {
+    if (request.method === "POST" && parts.length === 2) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const body = await readJson(request);
+      if (typeof body.content !== "string" || !body.content.trim() || Buffer.byteLength(body.content, "utf8") > 1_048_576) {
+        return invalidBody("content must be non-empty SKILL.md text of at most 1 MB");
+      }
+      try { return json(toProductSkill(await agent.importSkill(body.content)), 201); }
+      catch (error) { return invalidBody(error instanceof Error ? error.message : "Skill import failed"); }
+    }
     if (request.method === "GET" && parts.length === 2) {
       const skills = (await agent.listSkills()).map(toProductSkill);
       return json({ skills });

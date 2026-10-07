@@ -137,7 +137,17 @@ export type McpServerState = {
 };
 
 /** Agent-facing MCP capability port. Implementations belong to integrations. */
+export type McpServerRegistration = {
+  name: string;
+  url?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+};
+
 export type McpRegistry = {
+  addServer?(input: McpServerRegistration): Promise<McpServerInfo>;
   listTools(): Promise<McpToolInfo[]>;
   listServers(): Promise<McpServerInfo[]>;
   setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;

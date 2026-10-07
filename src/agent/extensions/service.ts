@@ -9,7 +9,8 @@ import {
   type McpToolInfo,
 } from "./mcp.ts";
 import { toProductEnabledResource } from "./product.ts";
-import { discoverSkills, readSkillDetails, skillContentHash, type SkillInfo } from "./skills.ts";
+import { SERVICE_API_TOOL_NAMES } from "../capabilities/service-api.ts";
+import { discoverSkills, importProjectSkill, parseSkillFrontmatter, readSkillDetails, skillContentHash, type SkillInfo } from "./skills.ts";
 import type { AgentArtifact } from "../artifacts/types.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 
@@ -43,6 +44,14 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
         jellyfin: Boolean(ctx.options.jellyfin),
         immich: Boolean(ctx.options.immich),
       }),
+      ...ctx.baseTools()
+        .filter(tool => (SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name))
+        .map((tool): HomelabCapability => ({
+          id: tool.name, name: tool.name, description: tool.description,
+          inputSchema: tool.parameters as Record<string, unknown>, category: "other", source: "core",
+          serverName: "thebe-core", execution: "agent",
+          permission: tool.name === "service_api_write" ? "confirm" : "read",
+        })),
       ...(await ctx.mcp.listTools()),
     ].map(withProductMetadata)
   );
@@ -64,6 +73,7 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
       version: resource.version,
       source: resource.source,
     });
+    await reloadIdleSessions();
     return resource;
   }
 
@@ -77,10 +87,29 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
     );
     await ctx.options.settingsStore?.save({ enabledResources: nextResources });
     enabledResources.splice(0, enabledResources.length, ...nextResources);
+    await reloadIdleSessions();
     return true;
   }
 
   return {
+    async importSkill(content: string): Promise<SkillInfo> {
+      ctx.checkNotQuiesced();
+      if (!workspacePath) throw new Error("Configure a workspace before importing skills");
+      const name = parseSkillFrontmatter(content).name;
+      if ((await discover()).some((skill) => skill.name === name)) throw new Error("Skill already exists");
+      const skill = await importProjectSkill(workspacePath, content);
+      await audit?.append({ method: "skill.import", parameterHash: skillContentHash(content),
+        responseBytes: 0, budgetConsumed: 0, redactionFired: false, identity: skill.name });
+      return skill;
+    },
+    async addMcpServer(input: import("./mcp.ts").McpServerRegistration): Promise<McpServerInfo> {
+      ctx.checkNotQuiesced();
+      if (!ctx.mcp.addServer) throw new Error("MCP registration is unavailable");
+      const server = await ctx.mcp.addServer(input);
+      await audit?.append({ method: "mcp.server.add", parameterHash: hashParameters(input),
+        responseBytes: 0, budgetConsumed: 0, redactionFired: false, identity: server.name });
+      return server;
+    },
     async listSkills(): Promise<SkillInfo[]> {
       return discover();
     },
@@ -106,7 +135,6 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
         source: skill.filePath || `thebe://skills/${skill.name}`,
       };
       await putEnabledResource(resource);
-      await reloadIdleSessions();
     },
     async disableSkill(name: string): Promise<void> {
       const index = enabledResources.findIndex(
@@ -114,7 +142,6 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
       );
       if (index < 0) return;
       await removeEnabledResource(name);
-      await reloadIdleSessions();
     },
     listCapabilities,
     async listMcpTools(): Promise<McpToolInfo[]> { return listCapabilities(); },

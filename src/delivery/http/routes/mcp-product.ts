@@ -17,6 +17,19 @@ export async function handleMcpProductRoutes(
   if (!context.agent) return agentUnavailable();
   const { request, parts, agent } = context;
   try {
+    if (request.method === "POST" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.servers) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const body = await readJson(request);
+      if (typeof body.name !== "string" || (body.url !== undefined && typeof body.url !== "string") || (body.command !== undefined && typeof body.command !== "string")) {
+        return invalidBody("name, url and command must be strings");
+      }
+      const input = { name: body.name, url: body.url as string | undefined, command: body.command as string | undefined,
+        args: body.args as string[] | undefined, env: body.env as Record<string, string> | undefined,
+        headers: body.headers as Record<string, string> | undefined };
+      try { return json(toProductMcpServer(await agent.addMcpServer(input)), 201); }
+      catch (error) { return invalidBody(error instanceof Error ? error.message : "MCP registration failed"); }
+    }
     if (request.method === "GET" && parts.length === 4 && parts[3] === PRODUCT_HTTP_SEGMENT.servers) {
       const servers = (await agent.listMcpServers()).map(toProductMcpServer);
       return json({ servers });

@@ -55,7 +55,8 @@ node_modules/.bin/vitest run
 ```
 
 Start without a container (development, or a host service on a machine you
-already harden):
+already harden). `pnpm start` now starts the existing build immediately; use
+`pnpm start:build` when source changes must be compiled first:
 
 ```bash
 node_modules/.bin/vite build        # produce dist/ first (or run the release check)

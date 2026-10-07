@@ -1,6 +1,6 @@
-import { readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import type { EnabledResource } from "../runtime/index.ts";
 
@@ -13,6 +13,25 @@ export type SkillInfo = {
   content?: string;
   contentHash?: string;
 };
+
+/** Import a new, disabled project skill; never replace an existing file. */
+export async function importProjectSkill(cwd: string, content: string): Promise<SkillInfo> {
+  if (Buffer.byteLength(content, "utf8") > 1_048_576) throw new Error("Skill exceeds 1 MB");
+  const parsed = parseSkillFrontmatter(content);
+  if (!parsed.name || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(parsed.name)) {
+    throw new Error("Skill name must contain 1–64 letters, numbers, underscores or hyphens");
+  }
+  if (!parsed.description || !parsed.body.trim()) throw new Error("Skill requires a description and instructions");
+  const root = await realpath(cwd);
+  const directory = join(root, ".thebe", "skills");
+  await mkdir(directory, { recursive: true });
+  if (relative(root, await realpath(directory)) !== join(".thebe", "skills")) {
+    throw new Error("Skill directory must be inside the workspace");
+  }
+  const filePath = join(directory, `${parsed.name}.md`);
+  await writeFile(filePath, content, { flag: "wx", mode: 0o600 });
+  return { name: parsed.name, description: parsed.description, filePath, scope: "project", enabled: false };
+}
 
 export function parseSkillFrontmatter(content: string): {
   name?: string;

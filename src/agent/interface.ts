@@ -194,6 +194,8 @@ export interface ThebeAgent {
   getThinkingInfo(thebeSessionId: string): Promise<RuntimeThinkingInfo>;
 
   listSkills(): Promise<SkillInfo[]>;
+  importSkill(content: string): Promise<SkillInfo>;
+  addMcpServer(input: import("./extensions/mcp.ts").McpServerRegistration): Promise<McpServerInfo>;
   getSkill(name: string): Promise<SkillInfo | undefined>;
   enableSkill(name: string): Promise<void>;
   disableSkill(name: string): Promise<void>;

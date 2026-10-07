@@ -58,7 +58,20 @@ export function createPermissionControl(input: {
 
   function permissionHandler(explicitSessionId?: string) {
     return {
-      preflight: input.preflight,
+      async preflight(request: PermissionRequest): Promise<PermissionPreflightDecision> {
+        const policy = await input.preflight(request);
+        if (policy === "deny") return "deny";
+        const thebeSessionId = explicitSessionId ?? input.active()?.meta.thebeSessionId;
+        const remembered = rememberedDecision(
+          thebeSessionId ? await input.lookupRemembered(thebeSessionId) : input.active()?.meta.rememberedPermissions,
+          request,
+        );
+        if (remembered === "deny") return "deny";
+        if (mode === "read-only" && !input.workspaceReadTools.includes(request.toolName)) return "deny";
+        if (policy === "allow" || mode === "full-access" || remembered === "allow") return "allow";
+        if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId)) return "deny";
+        return "ask";
+      },
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
         const thebeSessionId = explicitSessionId ?? input.active()?.meta.thebeSessionId;
         const remembered = rememberedDecision(

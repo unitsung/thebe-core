@@ -18,8 +18,10 @@
   },
   "scripts": {
     "build": "vite build",
-    "start": "pnpm build && node dist/serve.js",
-    "start:lan": "pnpm build && node scripts/start-lan.mjs",
+    "start": "node dist/serve.js",
+    "start:build": "pnpm build && node dist/serve.js",
+    "start:lan": "node scripts/start-lan.mjs",
+    "start:lan:build": "pnpm build && node scripts/start-lan.mjs",
     "docs": "pnpm start",
     "tui": "vite build && node dist/tui.js",
     "test": "vitest run",
@@ -31,16 +33,16 @@
   },
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.0.0",
-    "@earendil-works/pi-ai": "0.99.1",
+    "@earendil-works/pi-ai": "1.0.4",
     "@types/node": "22.20.2",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "5.0.0"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.99.1",
-    "@earendil-works/pi-server": "0.99.1",
-    "@earendil-works/pi-tui": "0.99.1",
+    "@earendil-works/pi-coding-agent": "1.0.4",
+    "@earendil-works/pi-server": "1.0.4",
+    "@earendil-works/pi-tui": "1.0.4",
     "@modelcontextprotocol/sdk": "1.31.0",
     "chalk": "6.0.0",
     "swagger-ui-dist": "5.32.15"

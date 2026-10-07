@@ -68,16 +68,12 @@ async function piWithFaux(sessionDir?: string) {
 }
 
 describe("PiCodingAgentRuntime sessions", () => {
-  it("discovers deferred MCP schemas and calls them through native tool_search", async () => {
+  it("exposes enabled MCP schemas immediately without a tool search step", async () => {
     const { faux, runtime } = await piWithFaux();
     const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "remote result" }],
       structuredContent: { items: [{ id: "verified-id" }] } }));
     const schemas: string[][] = [];
     faux.setResponses([
-      (context) => {
-        schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
-        return fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]);
-      },
       (context) => {
         schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
         return fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]);
@@ -94,8 +90,8 @@ describe("PiCodingAgentRuntime sessions", () => {
     });
     try {
       await session.prompt("search remote catalog");
-      expect(schemas[0]).toEqual(["read", "tool_search"]);
-      expect(schemas[1]).toContain("mcp__fixture__catalog");
+      expect(schemas[0]).toEqual(expect.arrayContaining(["read", "mcp__fixture__catalog"]));
+      expect(schemas[0]).not.toContain("tool_search");
       expect(callTool).toHaveBeenCalledWith("mcp:fixture/catalog", { query: "music" }, expect.any(AbortSignal));
       expect(session.messages()).toContainEqual(expect.objectContaining({ role: "tool", toolName: "mcp__fixture__catalog", text: "remote result" }));
     } finally { session.dispose(); }
@@ -106,7 +102,6 @@ describe("PiCodingAgentRuntime sessions", () => {
     const callTool = vi.fn();
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "publish playlist" })]),
       fauxAssistantMessage([fauxToolCall("mcp__fixture__publish", { id: "playlist-1" })]),
       fauxAssistantMessage("denied"),
     ]);
@@ -133,11 +128,20 @@ describe("PiCodingAgentRuntime sessions", () => {
       callTool,
     } });
     try {
+      faux.setResponses([(context) => {
+        expect(getCurrentTools(context.messages).map(tool => tool.name)).not.toContain("tool_search");
+        return fauxAssistantMessage("no MCP configured");
+      }]);
+      await session.prompt("list available tools");
       enabled = true;
       await session.reloadResources!();
       faux.setResponses([
-        fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog" })]),
-        fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]),
+        (context) => {
+          const names = getCurrentTools(context.messages).map(tool => tool.name);
+          expect(names).toContain("mcp__fixture__catalog");
+          expect(names).not.toContain("tool_search");
+          return fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]);
+        },
         fauxAssistantMessage("enabled"),
       ]);
       await session.prompt("search");

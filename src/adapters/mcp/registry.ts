@@ -1,4 +1,4 @@
-import { listConfiguredMcpServers, type McpServerConfig } from "./config.ts";
+import { addConfiguredMcpServer, listConfiguredMcpServers, type McpServerConfig } from "./config.ts";
 import { McpTransport } from "./transport.ts";
 import type {
   HomelabCapabilityCategory,
@@ -7,6 +7,7 @@ import type {
   McpServerState,
   McpToolInfo,
   McpCallResult,
+  McpServerRegistration,
 } from "../../agent/extensions/mcp.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -144,6 +145,7 @@ export function createMcpClientRegistry(options: {
   serverStates?: readonly McpServerState[];
 } = {}) {
   const states = new Map<string, ServerState>();
+  let registrationQueue: Promise<void> = Promise.resolve();
   const serverOverrides = new Map(
     (options.serverStates ?? []).map((state) => [state.name, state.enabled]),
   );
@@ -186,6 +188,16 @@ export function createMcpClientRegistry(options: {
     unregisterExitCleanup = undefined;
   };
   const registry = {
+    async addServer(input: McpServerRegistration): Promise<McpServerInfo> {
+      const operation = registrationQueue.then(async () => {
+        await addConfiguredMcpServer(input, options);
+        serverOverrides.set(input.name, false);
+        await sync();
+      });
+      registrationQueue = operation.catch(() => {});
+      await operation;
+      return { name: input.name, command: input.command, url: input.url, status: "disabled", disabled: true };
+    },
     async listTools(): Promise<McpToolInfo[]> {
       await sync();
       const tools: McpToolInfo[] = [];

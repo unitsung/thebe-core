@@ -100,8 +100,8 @@ the runtime settles successfully.
 | Goals | `GET/POST /v1/goals`, `GET /v1/goals/{id}`, `POST .../pause`, `POST .../resume`, `POST .../stop`, `GET .../log` | Durable ProductGoal attached to one parent session. A terminal Goal with an isolated worker/reviewer report links a bounded `report` Artifact through `artifactId`; Goal state and report Artifacts survive Core recreation. `updatedAt` advances with lifecycle events so Activity ordering and time filters remain useful while work is running. |
 | Workers | `GET/POST /v1/subagents`, `GET /v1/subagents/profiles`, `GET /v1/subagents/{runId}`, `POST .../cancel`, `GET .../log` | Product object is `ProductWorker` mapped from `SubagentRun`. No parent transcript. The log route returns bounded JSON activity by default or sanitized `worker_update` SSE snapshots when `Accept: text/event-stream` is requested. |
 | Runtime pending permissions | `GET /v1/permissions`, `GET /v1/permissions/{id}`, `POST /v1/permissions/{id}/resolve` | Redacted tool input. Remember scopes: request/tool/conversation. **Not** Activity Approvals. Session `POST /v1/session/{id}/permission/{permissionId}` remains. |
-| Skills | `GET /v1/skills`, `GET/PATCH /v1/skills/{name}` | List/get/enable/disable. No skill-file body, no editor. |
-| MCP inventory and lifecycle | `GET/PATCH /v1/extensions/mcp/servers/{name}`, `GET /v1/extensions/mcp/tools` | External tools only. Server enable/disable state persists through the Thebe config and is applied when the MCP registry is recreated. Raw `/mcp` stays for integrations; advertised Core capabilities remain callable there through the Agent seam with the same typed-resource validation. |
+| Skills | `GET/POST /v1/skills`, `GET/PATCH /v1/skills/{name}`, `GET /v1/skills/{name}/content` | List/get/enable/disable and import a new workspace skill from SKILL.md content. Imports start disabled, cannot overwrite an existing name, and are bounded to 1 MiB. Existing files cannot be edited. |
+| MCP inventory and lifecycle | `GET/POST /v1/extensions/mcp/servers`, `PATCH /v1/extensions/mcp/servers/{name}`, `GET /v1/extensions/mcp/tools` | Add a new HTTP or executable server to the workspace config in a disabled state, then enable it explicitly. Names cannot overwrite existing servers; responses omit credentials. Server configuration and enable/disable state persist when the registry is recreated. Raw `/mcp` stays for integrations; advertised Core capabilities remain callable there through the Agent seam with the same typed-resource validation. |
 | Enabled resources | `GET /v1/resources/enabled`, `PUT/DELETE /v1/resources/enabled/{id}`, `POST /v1/resources/enabled/artifact` | Agent context resources (`skill` / `extension` / `prompt`), not an App Resource DB. Selections persist through the Thebe config across Core recreation; the explicit POST captures a bounded `resource_list` Artifact. |
 | Permission mode | `GET/PATCH /v1/settings/permissions` | `ask` \| `read-only` \| `full-access`. |
 | Agent settings | `GET/PATCH /v1/settings/agent` | Effective auto-compact/summary settings, bounded delay, permission mode, concurrency limits, and guarded paths. Mutable fields are auto-compact/summary/delay; concurrency changes report `409 restart_required`. Each value includes a `sources` entry and the response reports `persistence.enabled`. |
@@ -149,6 +149,24 @@ the `Bearer ` prefix. Credentials stay in the adapter. Existing
 `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` and CloudSaver equivalents remain
 connection shortcuts; explicit generic entries override same-named shortcuts.
 App connections are independent and are not automatically copied to Core.
+
+Configured service API tools also appear in the capability/MCP tool inventory,
+with read versus confirmation permissions. Skill/resource enable, update and
+remove refresh idle conversations immediately; busy conversations pick up the
+new resources before their next prompt. MCP server toggles use the same reload
+boundary. No new conversation is required.
+
+Enabled MCP tools are declared directly to the model, including their input
+schemas. There is no `tool_search` discovery call or empty-search result in the
+execution flow. Enabling or disabling a server updates this direct tool set at
+the existing session reload boundary; write approvals remain in effect.
+
+Permission preflight applies remembered decisions and the current permission
+mode before emitting approval events. Full-access and remembered approvals do
+not produce transient approval cards; explicit denials, read-only restrictions
+and critical command policy still win. Ask mode continues to request approval
+for commands that have not been approved. To approve Bash for the conversation,
+use the tool-scoped remembered decision rather than approving each command.
 
 Discovery searches live operation IDs, paths, descriptions and tags using `query`,
 pages with `offset`/`limit`, and loads parameters, request bodies and response

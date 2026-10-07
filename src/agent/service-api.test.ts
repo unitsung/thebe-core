@@ -41,6 +41,11 @@ describe("service API session integration", () => {
     expect(creates[0]!.builtinTools).toEqual(expect.arrayContaining(["bash", "read", "edit", "write"]));
     expect(creates[0]!.customTools.map(tool => tool.name)).toEqual(expect.arrayContaining(["service_api_discover", "service_api_read", "service_api_write"]));
     expect(creates[0]!.toolsRequiringApproval).toContain("service_api_write");
+    expect(await agent.listCapabilities()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "service_api_discover", permission: "read" }),
+      expect.objectContaining({ name: "service_api_read", permission: "read" }),
+      expect.objectContaining({ name: "service_api_write", permission: "confirm" }),
+    ]));
     expect(await agent.invokeTool("service_api_discover", {})).toContain("openlist");
     expect(await agent.invokeTool("service_api_discover", {})).toContain("https://fox.oplist.org/");
     await agent.invokeTool("service_api_read", { service: "openlist", method: "POST", path: "/api/fs/list", body: { path: "/" } });
