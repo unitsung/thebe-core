@@ -95,7 +95,7 @@ describe("acquisition job", () => {
     const job = createJob(spec, new Date());
     job.stage = "download";
     (deps.libraries![0]!.scan as any).mockImplementation(async () => { state.scans++; });
-    for (let i = 0; i < 12 && job.stage !== "failed"; i++) await advanceJob(job, deps);
+    for (let i = 0; i < 12 && (job.stage as string) !== "failed"; i++) await advanceJob(job, deps);
     expect(job.stage).toBe("failed");
     expect(job.failure?.advice).toContain("refresh_item");
     expect(state.scans).toBe(3);
