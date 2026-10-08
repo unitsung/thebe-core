@@ -48,7 +48,11 @@ const modelServer = createServer(async (req, res) => {
   }
   const toolName = text?.includes("FIXTURE_WEB") ? "web_search" : text?.includes("FIXTURE_WRITE") ? "write" : text?.includes("FIXTURE_READ") ? "read" : text?.includes("FIXTURE_EVENTS") ? "list_core_events" : undefined;
   const last = messages.at(-1);
-  if (toolName && last?.role !== "tool") {
+  const lastTool = last?.role === "tool" ? messages.findLast(message => message.role === "assistant" && message.tool_calls?.length)?.tool_calls.at(-1)?.function?.name : undefined;
+  const advertised = body.tools?.some(tool => tool.function?.name === toolName);
+  if (toolName && !advertised && lastTool !== toolName) {
+    emit({ role: "assistant", tool_calls: [{ index: 0, id: "fixture-discovery", type: "function", function: { name: "tool_search", arguments: JSON.stringify({ query: toolName, limit: 1 }) } }] }, "tool_calls");
+  } else if (toolName && lastTool !== toolName) {
     const args = toolName === "web_search" ? { query: "arbitrary topic" } : toolName === "list_core_events" ? { limit: 50 } : toolName === "write"
       ? { path: "foundation-output.txt", content: "approved-once" }
       : { path: "fixture-input.txt" };
@@ -64,7 +68,7 @@ const modelServer = createServer(async (req, res) => {
 modelServer.listen(0, "127.0.0.1");
 await once(modelServer, "listening");
 const modelPort = modelServer.address().port;
-await writeFile(join(dirs.agent, "models.json"), JSON.stringify({ providers: { opencode: {
+await writeFile(join(dirs.agent, "models.json"), JSON.stringify({ providers: { "foundation-fixture": {
   baseUrl: `http://127.0.0.1:${modelPort}/v1`, api: "openai-completions", apiKey: "fixture",
   models: ["fixture-model"].map(id => ({ id, contextWindow: 128000, maxTokens: 2048, reasoning: true, thinkingLevelMap: { off: "none" }, input: ["text", "image"] })),
 } } }));
@@ -95,13 +99,18 @@ async function waitFor(load, predicate, timeout = 12000) {
   throw new Error("timed out waiting for state");
 }
 async function createSession() {
-  const r = await request("/v1/session", { title: "Foundation verification", model: { providerId: "opencode", modelId: "fixture-model" }, builtinTools: ["read", "write"] });
+  const r = await request("/v1/session", { title: "Foundation verification", model: { providerId: "foundation-fixture", modelId: "fixture-model" }, builtinTools: ["read", "write"] });
   if (r.status !== 201) throw new Error(JSON.stringify(r));
   return r.data.thebeSessionId;
 }
 try {
   await waitFor(async () => { try { return await request("/v1/health"); } catch { return null; } }, r => r?.status === 200);
-  const models = await request("/v1/model?provider=opencode");
+  const models = await request("/v1/model?provider=foundation-fixture");
+  const compactSession = await createSession();
+  const compactStart = records.length;
+  await request(`/v1/session/${compactSession}/prompt`, { text: "FIXTURE_PLAIN" });
+  const initialTools = records[compactStart].tools.map(tool => tool.function.name);
+  check(initialTools.includes("tool_search") && !initialTools.includes("list_core_events") && !initialTools.includes("web_search"), "ordinary turn exposes discovery and workspace tools without homelab schemas");
   const webSession = await createSession();
   await request(`/v1/session/${webSession}/prompt`, { text: "FIXTURE_WEB disabled" });
   check(searchRequests === 0, "disabled web search sends no query");

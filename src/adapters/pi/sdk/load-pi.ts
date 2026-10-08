@@ -85,7 +85,9 @@ export async function loadPiSdk() {
   const bash = await import(piDistUrl("core/tools/bash.js"));
   const skills = await import(piDistUrl("core/skills.js"));
   const mcpTools = await import(piDistUrl("extensions/mcp/tools.js"));
+  const toolSearch = await import(piDistUrl("extensions/tool-search/index.js"));
   return {
+    createToolSearchExtension: toolSearch.createToolSearchExtension as typeof toolSearch.createToolSearchExtension,
     createMcpToolDefinition: mcpTools.createMcpToolDefinition as typeof mcpTools.createMcpToolDefinition,
     createMcpToolName: mcpTools.createMcpToolName as typeof mcpTools.createMcpToolName,
     loadSkills: skills.loadSkills as typeof skills.loadSkills,

@@ -10,6 +10,7 @@ export function toPiTool(sdk: PiSdk, tool: CustomToolDefinition) {
     description: tool.description,
     parameters: tool.parameters as never,
     executionMode: "sequential",
+    exposure: "deferred",
     execute: async (
       toolCallId: string,
       params: unknown,

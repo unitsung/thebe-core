@@ -109,7 +109,7 @@ export async function openPiSession(
       server, name, tool: { name: originalName, description: tool.description,
         inputSchema: tool.inputSchema, outputSchema: tool.outputSchema,
         annotations: tool.annotations } as never,
-      exposure: "direct", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
+      exposure: "deferred", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
       getClient: async () => ({
         callTool: async (_name: string, args: Record<string, unknown>, options: { signal?: AbortSignal }) =>
           create.externalMcp!.callTool(tool.name, args, options.signal) as never,
@@ -119,6 +119,7 @@ export async function openPiSession(
   }
   const mcpTools = await discoverMcpTools();
   const hasMcp = Boolean(create.externalMcp);
+  const hasDiscovery = hasMcp || create.customTools.length > 0;
   const listeners = new Set<(event: NormalizedEvent) => void>();
   const permissionHandler = create.permissionHandler
     ? {
@@ -205,6 +206,12 @@ export async function openPiSession(
       );
     }
   }
+  if (hasDiscovery) {
+    permissionExtension.push(await sdk.loadExtensionFromFactory(
+      sdk.createToolSearchExtension(), create.cwd ?? cwd,
+      sdk.createEventBus(), extensionRuntime, "thebe://tool-discovery",
+    ));
+  }
   return { extensions: permissionExtension, runtime: extensionRuntime };
   }
   const loadedExtensions = await loadSessionExtensions();
@@ -222,7 +229,7 @@ export async function openPiSession(
     defaultProjectTrust: "always",
     retry: { enabled: false, maxRetries: 0 },
     compaction: { enabled: autoCompact },
-    ...(hasMcp ? { defaultTools: [...tools, ...mcpTools.map(tool => tool.name)] } : {}),
+    ...(hasDiscovery ? { defaultTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS), "tool_search"] } : {}),
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
@@ -286,8 +293,7 @@ export async function openPiSession(
     );
   }
   if (!resolvedModel && !requestedModel) {
-    resolvedModel = (await args.modelRuntime.getAvailable()).find((model: { provider: string; id: string }) =>
-      !(model.provider === "opencode" && model.id.endsWith("-free")));
+    resolvedModel = (await args.modelRuntime.getAvailable())[0];
   }
   if (!resolvedModel) throw new Error("No configured model is available. Configure a provider and select a model.");
 
@@ -300,7 +306,7 @@ export async function openPiSession(
     // must omit this option so Pi can restore their persisted level.
     thinkingLevel: sessionManager.getBranch().length === 0 ? "off" : undefined,
     // Newly enabled MCP tools must remain registerable when the session reloads.
-    ...(hasMcp ? {
+    ...(hasDiscovery ? {
       excludeTools: PI_BUILTIN_TOOLS.filter((name) => !tools.includes(name)),
     } : { tools }),
     customTools: piCustomTools,
