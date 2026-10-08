@@ -2,6 +2,9 @@
 
 Updated: 2026-10-06.
 
+Documentation reconciliation: 2026-10-08. Artifact kinds below reflect the current
+source/OpenAPI contract; this edit adds no deployment or real-provider acceptance evidence.
+
 Status: current workspace closes the remaining code gaps with qBittorrent native tasks and bounded `task_output` Artifacts. Settings, Artifacts, recovery, and the Activity feed are consumed by the iOS client. Provider acceptance and deployment are separate verification steps; OpenList, Arcane and qBittorrent tasks are re-read from their providers.
 
 Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
@@ -39,10 +42,12 @@ background-task seam yet:
   replayed. OpenList and Arcane tasks are listed from the provider on every
   read, so a Core restart does not drop them and they do not carry a Core
   `recovery` field.
-- Artifact kinds stay `diagnosis`, `report`, `resource_list`, and
-  `operation_receipt`. Direct and background capability results, including
+- Artifact kinds are `diagnosis`, `report`, `resource_list`,
+  `operation_receipt`, and `task_output`. Direct and background capability results, including
   provider capabilities such as Navidrome, are stored as redacted `report`
-  Artifacts. A provider task still has no Artifact kind of its own.
+  Artifacts. Completed provider task output can be persisted as a bounded,
+  redacted `task_output` Artifact linked to the task; this is not a general
+  file-export or upload contract. Persistence failure does not hide the task.
 - Activity already unions approvals, receipts, diagnoses, Goals, capability
   runs, Workers, and background tasks, with cursor pagination and
   source/status/time filters. The iOS client consumes that feed. Another
@@ -180,8 +185,8 @@ must not call Pi, MCP, or providers directly.
 - Store Artifact metadata and content separately from AgentStore, using atomic
   writes, safe identifiers, bounded retention, and server-side redaction.
   Artifact retrieval must never expose an arbitrary host path.
-- Start with a small allow-list of Artifact kinds: diagnosis, report,
-  resource list, and operation receipt. Do not build an arbitrary filesystem
+- Keep the explicit Artifact kinds: `diagnosis`, `report`, `resource_list`,
+  `operation_receipt`, and `task_output`. Do not build an arbitrary filesystem
   browser or upload system.
 - Allow capability runs and other product objects to reference Artifact ids.
   Keep small bounded result payloads inline when useful, but do not make an
