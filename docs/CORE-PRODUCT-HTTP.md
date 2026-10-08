@@ -2,6 +2,24 @@
 
 Date: 2026-10-06.
 
+## Runtime loading updates (2026-10-08)
+
+Service tools and MCP schemas are registered with deferred exposure. Sessions
+start with their configured workspace tools plus `tool_search`; matching schemas
+are activated by discovery and existing approvals still gate execution. Skills
+remain metadata-first resources. This does not require an MCP server for built-in
+capabilities.
+
+Custom `.thebe/agents/*.md` profiles may declare `allowWrites: true` alongside
+`tools: [write, edit]`. The default remains false and writes still request parent
+session approval. Workers reaching their turn limit without a completed result
+are failed, not completed. Provider configuration rejects `maxTokens` larger than
+`contextWindow` when both are supplied.
+
+CLI session creation follows the configured model and no longer supplies a fixed
+OpenCode fallback. OpenCode-specific environment bootstrap and model shorthand
+are removed; explicit provider/model references use the generic provider path.
+
 ## Current workspace additions (2026-10-06)
 
 Durable Goal schedules now expose `GET/POST /v1/schedules`,
