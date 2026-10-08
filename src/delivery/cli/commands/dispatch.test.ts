@@ -29,6 +29,20 @@ const provider: ContainerInfoProvider = {
 };
 
 describe("runCliCommand", () => {
+  it("uses the operator-configured model when creating a session", async () => {
+    const fake = createFakeRuntime();
+    const runtime = { ...fake.runtime, createSession: async (options: Parameters<typeof fake.runtime.createSession>[0]) => {
+      if (options.model?.providerId !== "fake" || options.model?.modelId !== "fake-2") {
+        throw new Error("Only the operator-configured model is available");
+      }
+      return fake.runtime.createSession(options);
+    } };
+    const agent = createThebeAgent({ runtime, provider,
+      model: { providerId: "fake", modelId: "fake-2" } });
+    const lines: string[] = [];
+    expect(await runCliCommand(agent, { kind: "session-create" }, { log: line => lines.push(line) })).toBe(0);
+    expect((await agent.getSession(lines.at(-1)!)).thebeSessionId).toBe(lines.at(-1));
+  });
   it("does not create a session when opening an empty TUI", async () => {
     const fake = createFakeRuntime();
     const dir = await mkdtemp(join(tmpdir(), "thebe-cli-empty-tui-"));

@@ -78,16 +78,14 @@ describe("parseCliArgs", () => {
     });
   });
 
-  it("supports muse-spark shorthand without provider", () => {
+  it("does not infer a removed OpenCode provider from a bare model ID", () => {
     expect(
       parseCliArgs(["-p", "hi", "--model", "muse-spark-1.3-free"]),
     ).toMatchObject({
-      kind: "print",
-      model: { providerId: "opencode", modelId: "muse-spark-1.3-free" },
+      kind: "error",
     });
     expect(parseCliArgs(["--model", "muse-spark-1.3-free"])).toMatchObject({
-      kind: "tui",
-      model: { providerId: "opencode", modelId: "muse-spark-1.3-free" },
+      kind: "error",
     });
   });
 

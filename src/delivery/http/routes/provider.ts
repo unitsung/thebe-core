@@ -47,6 +47,9 @@ export async function handleProviderModelAuth(
         for (const field of ["contextWindow", "maxTokens"] as const) {
           if (raw[field] !== undefined && (!Number.isSafeInteger(raw[field]) || raw[field] <= 0)) return json({ error: `${field} must be a positive integer` }, 400);
         }
+        if (raw.contextWindow !== undefined && raw.maxTokens !== undefined && raw.maxTokens > raw.contextWindow) {
+          return json({ error: "maxTokens must not exceed contextWindow" }, 400);
+        }
         models.push({ id: raw.id.trim(), name: typeof raw.name === "string" ? raw.name : undefined, contextWindow: raw.contextWindow, maxTokens: raw.maxTokens, reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : undefined, input: raw.input });
       }
       await agent.saveProviderConfiguration({ providerId, name: typeof body.name === "string" ? body.name : undefined, baseUrl: endpoint.toString().replace(/\/$/, ""), api, models }, typeof body.apiKey === "string" ? body.apiKey : undefined);

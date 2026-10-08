@@ -46,6 +46,21 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 }
 
 describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
+  it("rejects a model output limit larger than its context window before saving", async () => {
+    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const fake = createFakeRuntime();
+    fake.runtime.saveProviderConfiguration = async () => {};
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const response = await app.handler.handle(new Request("http://127.0.0.1:8787/v1/provider/local/config", {
+      method: "PUT", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ baseUrl: "http://127.0.0.1:11434/v1", api: "openai-completions",
+        models: [{ id: "local-model", contextWindow: 4096, maxTokens: 8192 }] }),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "maxTokens must not exceed contextWindow" });
+  });
+
   it("GET /v1/health returns ok and version", async () => {
     const res = await handler().handle(
       new Request("http://127.0.0.1:8787/v1/health"),

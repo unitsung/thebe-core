@@ -125,13 +125,9 @@ export async function runCliCommand(
       return 0;
     }
     case "session-create": {
-      const defaultModel = command.model ?? {
-        providerId: "opencode",
-        modelId: "muse-spark-1.3-free",
-      };
       const meta = await agent.createSession({
         title: command.title,
-        model: defaultModel,
+        model: command.model,
       });
       log(meta.thebeSessionId);
       return 0;
@@ -286,13 +282,9 @@ async function resolveSessionId(
     return active;
   }
   if (opts.createIfMissing) {
-    const defaultModel = opts.model ?? {
-      providerId: "opencode",
-      modelId: "muse-spark-1.3-free",
-    };
     const meta = await agent.createSession({
       title: opts.title,
-      model: defaultModel,
+      model: opts.model,
     });
     return meta.thebeSessionId;
   }

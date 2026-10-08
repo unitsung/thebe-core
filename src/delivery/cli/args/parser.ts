@@ -268,15 +268,6 @@ function parseModel(value: string | undefined): CliModel | undefined | "invalid"
   }
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1) {
-    if (
-      value === "muse-spark-1.3-free" ||
-      value === "muse-spark-1.3-contributor-free"
-    ) {
-      return {
-        providerId: "opencode",
-        modelId: value,
-      };
-    }
     return "invalid";
   }
   return {

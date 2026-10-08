@@ -93,7 +93,6 @@ export async function bootstrapThebe(
   const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
   const arcaneKey = process.env.ARCANE_API_KEY;
-  const openCodeKey = process.env.OPENCODE_API_KEY;
   const openaiKey = process.env.OPENAI_API_KEY;
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
 
@@ -104,9 +103,7 @@ export async function bootstrapThebe(
   let defaultModel = options?.model;
   let primaryApiKey: { providerId: string; key: string } | undefined;
 
-  if (openCodeKey) {
-    primaryApiKey = { providerId: "opencode", key: openCodeKey };
-  } else if (openaiKey) {
+  if (openaiKey) {
     primaryApiKey = { providerId: "openai", key: openaiKey };
     defaultModel ??= { providerId: "openai", modelId: "gpt-4o" };
   } else if (anthropicKey) {
@@ -130,9 +127,6 @@ export async function bootstrapThebe(
     model: defaultModel,
   });
 
-  if (openCodeKey) {
-    await applyThebeApiKey(runtime.auth(), "opencode", openCodeKey);
-  }
   if (openaiKey) {
     await applyThebeApiKey(runtime.auth(), "openai", openaiKey);
   }
@@ -141,7 +135,7 @@ export async function bootstrapThebe(
   }
   if (!defaultModel) {
     const available = await runtime.listAvailableModels();
-    const selected = available.find(model => !(model.providerId === "opencode" && model.modelId.endsWith("-free")));
+    const selected = available[0];
     if (selected) defaultModel = { providerId: selected.providerId, modelId: selected.modelId };
   }
 
