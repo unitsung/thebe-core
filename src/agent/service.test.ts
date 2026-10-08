@@ -1194,7 +1194,7 @@ describe("Thebe agent service (fake runtime)", () => {
       const completed = await agent.waitSubagent(run.runId);
 
       expect(completed).toMatchObject({
-        status: "completed",
+        status: "failed",
         turns: 1,
         maxTurns: 1,
       });

@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -35,6 +35,49 @@ afterEach(() => {
 });
 
 describe("subagent/worker product HTTP", () => {
+  it("allows an operator-defined worker to request a write through the parent approval flow", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "thebe-custom-worker-"));
+    await mkdir(join(workspace, ".thebe", "agents"), { recursive: true });
+    await writeFile(join(workspace, ".thebe", "agents", "custom-editor.md"),
+      "---\nname: custom-editor\ndescription: Edit an explicitly requested file\ntools: [write]\nallowWrites: true\n---\nPerform the explicit task and report the result.\n");
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "write", args: { path: join(workspace, "requested.txt"), content: "requested content" } }] },
+      { kind: "text", text: "approved worker result" },
+    ]);
+    // The external runtime requires write to be enabled before it can request approval.
+    const runtime = { ...fake.runtime, createSession: async (options: Parameters<typeof fake.runtime.createSession>[0]) => {
+      const session = await fake.runtime.createSession(options);
+      if (options.inMemory && !session.toolNames().includes("write")) {
+        throw new Error("Worker runtime does not have write capability");
+      }
+      return session;
+    } };
+    const app = createThebeApp({ runtime, provider: provider(), workspacePath: workspace });
+    const parent = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })));
+    const worker = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/subagents", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ profileName: "custom-editor", task: "Create the requested file", parentSessionId: parent.thebeSessionId }),
+    })));
+    let permissionId = "";
+    try {
+      await vi.waitFor(async () => {
+        const pending = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/permissions")));
+        const permissions = pending.permissions as Array<Record<string, unknown>>;
+        expect(permissions).toHaveLength(1);
+        expect(permissions[0]).toMatchObject({ toolName: "write", sessionId: parent.thebeSessionId });
+        permissionId = String(permissions[0]!.id);
+      });
+      const resolved = await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/permissions/${permissionId}/resolve`, {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ response: "allow" }),
+      }));
+      expect(resolved.status).toBe(200);
+      await app.agent.waitSubagent(String(worker.runId));
+      const detail = await json(await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}`)));
+      expect(detail).toMatchObject({ status: "completed", result: "approved worker result" });
+    } finally { await app.agent.cancelSubagent(String(worker.runId)); }
+  });
+
   it("lists builtin profiles without host file paths", async () => {
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,

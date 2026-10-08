@@ -72,12 +72,16 @@ export async function executeSubagentRun(
     run.result = session.lastAssistantText().trim();
     run.responseText = run.responseText || run.result || undefined;
     run.status = run.cancelRequested ? "cancelled" : "completed";
-    if (maxTurnsReached && !run.result) run.error = `subagent reached its ${run.maxTurns}-turn limit`;
+    if (maxTurnsReached && !run.result && !run.cancelRequested) {
+      run.status = "failed";
+      run.error = `subagent reached its ${run.maxTurns}-turn limit`;
+    }
   } catch (error) {
     if (run.cancelRequested) run.status = "cancelled";
     else if (maxTurnsReached) {
-      run.status = "completed";
+      run.status = "failed";
       run.result = session?.lastAssistantText().trim() || undefined;
+      run.error = `subagent reached its ${run.maxTurns}-turn limit`;
     } else {
       run.status = "failed";
       run.error = error instanceof Error ? error.message : String(error);

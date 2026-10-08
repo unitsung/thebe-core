@@ -12,7 +12,7 @@ export type SubagentProfile = {
   model?: RuntimeModelRef;
   tools?: string[];
   maxTurns?: number;
-  /** Allow this built-in role to request edit/write tools through normal approval. */
+  /** Allow this role to request edit/write tools through normal approval. */
   allowWrites?: boolean;
   /** Retained for profile compatibility; agent runs never inherit context. */
   inheritContext?: boolean;
@@ -25,6 +25,7 @@ export function parseSubagentFrontmatter(content: string): {
   model?: string;
   tools?: string[];
   maxTurns?: number;
+  allowWrites?: boolean;
   inheritContext?: boolean;
   body: string;
 } {
@@ -39,6 +40,7 @@ export function parseSubagentFrontmatter(content: string): {
   let model: string | undefined;
   let tools: string[] | undefined;
   let maxTurns: number | undefined;
+  let allowWrites: boolean | undefined;
   let inheritContext: boolean | undefined;
 
   for (const line of header.split(/\r?\n/)) {
@@ -71,9 +73,13 @@ export function parseSubagentFrontmatter(content: string): {
     if (inheritMatch) {
       inheritContext = inheritMatch[1]?.trim().toLowerCase() === "true";
     }
+    const writesMatch = line.match(/^allowWrites:\s*(.+)$/i);
+    if (writesMatch) {
+      allowWrites = writesMatch[1]?.trim().toLowerCase() === "true";
+    }
   }
 
-  return { name, description, model, tools, maxTurns, inheritContext, body };
+  return { name, description, model, tools, maxTurns, allowWrites, inheritContext, body };
 }
 
 async function collectProfilesFromDir(
@@ -98,6 +104,7 @@ async function collectProfilesFromDir(
             model: parseModelRef(parsed.model),
             tools: parsed.tools,
             maxTurns: parsed.maxTurns,
+            allowWrites: parsed.allowWrites,
             inheritContext: parsed.inheritContext,
             systemPrompt: parsed.body,
           });
