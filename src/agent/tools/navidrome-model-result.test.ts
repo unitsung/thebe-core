@@ -23,8 +23,24 @@ describe("navidromeModelResult", () => {
     expect(result.biographyTruncated).toBe(true);
   });
 
-  it("leaves playback queues untouched because cards need their URLs", () => {
-    const queue = { items: [{ queueId: "q", streamUrl: "http://x" }] };
-    expect(navidromeModelResult("navidrome.queue", queue)).toBe(queue);
+  it("turns a queue into a receipt with no stream URLs or auth parameters", () => {
+    const items = Array.from({ length: 25 }, (_, i) => ({
+      queueId: `q${i}`, title: `T${i}`, artist: "A", album: "Al",
+      streamUrl: `http://nas/rest/stream.view?u=admin&t=SECRET&s=SALT&id=q${i}`,
+      artworkUrl: "http://nas/rest/getCoverArt.view?t=SECRET", requestHeaders: {}, artworkHeaders: {},
+    }));
+    const receipt = navidromeModelResult(
+      "navidrome.queue",
+      { items, startIndex: 2, mode: "direct" },
+      { songIds: items.map((item) => item.queueId), startIndex: 2 },
+    ) as { queued: number; request: { songIds: string[]; startIndex: number }; tracks: unknown[]; tracksOmitted: number };
+    const text = JSON.stringify(receipt);
+    expect(text).not.toContain("SECRET");
+    expect(text).not.toContain("stream.view");
+    expect(receipt.queued).toBe(25);
+    expect(receipt.request.songIds).toHaveLength(25);
+    expect(receipt.request.startIndex).toBe(2);
+    expect(receipt.tracks).toHaveLength(10);
+    expect(receipt.tracksOmitted).toBe(15);
   });
 });

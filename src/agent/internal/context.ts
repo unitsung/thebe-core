@@ -20,6 +20,7 @@ import {
 } from "../security/command-risk.ts";
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
+import { MODEL_RESULT_CHAR_LIMIT } from "../tools/model-output-limit.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
@@ -425,6 +426,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             policy: sessionPolicy,
             audit,
             toolWatchdogMs: options.toolWatchdogMs,
+            modelResultLimit: MODEL_RESULT_CHAR_LIMIT,
             sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
             onEvent: (event) => {
               const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
@@ -682,7 +684,7 @@ function buildSystemPrompt(
       : "No workspace is configured. Do not read or write host files until the user configures a workspacePath or THEBE_WORKSPACE_DIR.",
     "Return ordinary answers and research results to the parent conversation buffer by default.",
     'For rich replies requested by the user, Thebe clients support Markdown images and fenced JSON cards: thebe:gallery {"images":["https://..."],"caption":"..."}; thebe:player {"title":"...","url":"https://...","isAudio":true|false}; thebe:stats {"title":"...","items":[{"label":"...","value":"..."}]}; thebe:table {"headers":["..."],"rows":[["..."]]}; thebe:link {"title":"...","url":"https://..."}; thebe:todo {"items":[{"text":"...","checked":false}]}. Use one useful card rather than decorative clutter. Never invent media URLs, credentials or completed operations; use only accessible URLs returned by tools or supplied by the user. Ordinary answers remain concise Markdown.',
-    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false.',
+    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome.queue, so never make player cards or URLs for them.',
     "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
     "Never create output.md, docs files, or any other file merely to display an answer.",
     "outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.",

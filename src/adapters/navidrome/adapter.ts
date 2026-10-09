@@ -23,7 +23,8 @@ const SUBSONIC_API_VERSION = "1.16.1";
 const SUBSONIC_CLIENT_NAME = "Thebe";
 const DEFAULT_LIMIT = 30;
 const DEFAULT_TRANSCODE_BIT_RATE = 320;
-const MAX_QUEUE_ITEMS = 500;
+const DEFAULT_QUEUE_ITEMS = 100;
+const MAX_QUEUE_ITEMS = 200;
 
 export type NavidromeAdapterOptions = {
   baseUrl: string;
@@ -197,7 +198,7 @@ export class NavidromeAdapter implements NavidromeProvider {
       mode === "transcode"
         ? normalizeBitRate(input.maxBitRate ?? DEFAULT_TRANSCODE_BIT_RATE)
         : undefined;
-    const limit = clampInteger(input.limit, 1, MAX_QUEUE_ITEMS, songs.length);
+    const limit = clampInteger(input.limit, 1, MAX_QUEUE_ITEMS, Math.min(songs.length, DEFAULT_QUEUE_ITEMS));
     const selected = songs.slice(0, limit);
     const authorization = this.authorizationItems();
     const lyrics = input.includeLyrics

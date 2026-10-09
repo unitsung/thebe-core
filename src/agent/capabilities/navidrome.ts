@@ -324,8 +324,8 @@ export const NAVIDROME_TOOL_SCHEMAS: Record<
       limit: {
         type: "integer",
         minimum: 1,
-        maximum: 500,
-        description: "Maximum queue items. Defaults to the complete source.",
+        maximum: 200,
+        description: "Maximum queue items. Defaults to 100, at most 200.",
       },
       includeLyrics: {
         type: "boolean",

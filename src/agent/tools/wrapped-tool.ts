@@ -2,6 +2,7 @@ import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { REDACTED, redactToolOutput } from "../security/redaction.ts";
+import { limitModelOutput, MODEL_RESULT_CHAR_LIMIT } from "./model-output-limit.ts";
 import type { CustomToolDefinition, CustomToolResult, NormalizedEvent } from "../runtime/index.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
@@ -16,8 +17,11 @@ export function wrapCustomTools(
     onEvent?: (event: NormalizedEvent) => void;
     onStop?: () => void | Promise<void>;
     sessionId?: () => string | undefined;
+    /** Cap on the text one result adds to the model's context. Omit for callers that need the full result. */
+    modelResultLimit?: number;
   },
 ): CustomToolDefinition[] {
+  const limit = options.modelResultLimit;
   return tools.map((tool) => ({
     ...tool,
     execute: async (toolCallId, params, signal) => {
@@ -39,7 +43,7 @@ export function wrapCustomTools(
         if (await options.policy.shouldStopAfterTurn()) {
           await options.onStop?.();
         }
-        return wrapResult(tool.name, {
+        return wrapResult(tool.name, limit, {
           isError: true,
           content: [
             {
@@ -79,7 +83,7 @@ export function wrapCustomTools(
         } else {
           result = await executePromise;
         }
-        const wrapped = wrapResult(tool.name, result);
+        const wrapped = wrapResult(tool.name, limit, result);
         const text = wrapped.content.map((block) => block.text).join("\n");
         await options.audit?.append({
           method: tool.name,
@@ -106,7 +110,7 @@ export function wrapCustomTools(
           result: "error",
           durationMs: Date.now() - started,
         });
-        return wrapResult(tool.name, {
+        return wrapResult(tool.name, limit, {
           isError: true,
           content: [{ type: "text", text: message }],
           details: timedOut ? { watchdogTimeout: true } : {},
@@ -116,13 +120,13 @@ export function wrapCustomTools(
   }));
 }
 
-function wrapResult(toolName: string, result: CustomToolResult): CustomToolResult {
+function wrapResult(toolName: string, limit: number | undefined, result: CustomToolResult): CustomToolResult {
   return {
     isError: result.isError,
     details: result.details ?? {},
     content: result.content.map((block) => ({
       type: "text" as const,
-      text: `<tool_output tool="${toolName}">\n${redactToolOutput(block.text)}\n</tool_output>`,
+      text: `<tool_output tool="${toolName}">\n${limit === undefined ? redactToolOutput(block.text) : limitModelOutput(redactToolOutput(block.text), limit)}\n</tool_output>`,
     })),
   };
 }

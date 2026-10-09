@@ -109,7 +109,7 @@ export function createNavidromeTools(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(options.modelResults ? navidromeModelResult(name, result) : result ?? null),
+            text: JSON.stringify(options.modelResults ? navidromeModelResult(name, result, args) : result ?? null),
           },
         ],
         details: {},
