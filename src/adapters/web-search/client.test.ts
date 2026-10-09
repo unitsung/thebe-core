@@ -14,7 +14,7 @@ describe("general web search", () => {
     const result = await createWebSearchProvider({ endpoint: "https://search.example.org/", fetch: request }).search("topic") as { results: Array<{ excerpt: string }> };
     const url = new URL(String(request.mock.calls[0]![0]));
     expect(url.pathname).toBe("/search"); expect(url.searchParams.get("format")).toBe("json");
-    expect(result.results).toHaveLength(8); expect(result.results[0]!.excerpt).toHaveLength(1200);
+    expect(result.results).toHaveLength(5); expect(result.results[0]!.excerpt).toHaveLength(500);
   });
   it("rejects invalid input before network access", async () => {
     const request = vi.fn<typeof fetch>(); const provider = createWebSearchProvider({ fetch: request });

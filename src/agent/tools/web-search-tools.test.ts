@@ -26,3 +26,16 @@ it("rejects malformed queries and enforces tool policy", async () => {
   await expect(denied.execute("3", { query: "topic" })).rejects.toThrow();
   expect(search).not.toHaveBeenCalled();
 });
+
+it("stops fetching after the answer's search budget and never repeats a query", async () => {
+  const { createResearchBudget } = await import("./research-budget.ts");
+  const search = vi.fn().mockResolvedValue({ results: [] });
+  const policy = createPolicyEngine({ now: () => new Date(), allowedToolNames: ["web_search"] });
+  const tool = createWebSearchTools({ search }, policy, "test", async () => true, createResearchBudget(() => 0))[0]!;
+  for (const query of ["a", "b", "c"]) await tool.execute(query, { query });
+  const repeated = await tool.execute("r", { query: "A" });
+  const over = await tool.execute("d", { query: "d" });
+  expect(search).toHaveBeenCalledTimes(3);
+  expect(JSON.stringify(repeated)).toContain("already searched");
+  expect(JSON.stringify(over)).toContain("budget");
+});

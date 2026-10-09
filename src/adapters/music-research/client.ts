@@ -6,9 +6,9 @@ export function createMusicResearchProvider(request: typeof fetch = fetch): Musi
     nextRequest = Math.max(Date.now(), nextRequest) + 1_000;
     if (delay) await new Promise(resolve => setTimeout(resolve, delay));
     const music = new URL(`https://musicbrainz.org/ws/2/${entity}/`);
-    music.search = new URLSearchParams({ query, fmt: "json", limit: "5" }).toString();
+    music.search = new URLSearchParams({ query, fmt: "json", limit: "3" }).toString();
     const wiki = new URL(`https://${language}.wikipedia.org/w/api.php`);
-    wiki.search = new URLSearchParams({ action: "query", generator: "search", gsrsearch: query, gsrlimit: "3", prop: "extracts|info", inprop: "url", exintro: "1", explaintext: "1", exchars: "1800", format: "json" }).toString();
+    wiki.search = new URLSearchParams({ action: "query", generator: "search", gsrsearch: query, gsrlimit: "2", prop: "extracts|info", inprop: "url", exintro: "1", explaintext: "1", exchars: "900", format: "json" }).toString();
     const sources: Record<string, unknown>[] = [], source_errors: string[] = [];
     for (const [provider, url] of [["MusicBrainz", music], ["Wikipedia", wiki]] as const) {
       try {
@@ -20,15 +20,15 @@ export function createMusicResearchProvider(request: typeof fetch = fetch): Musi
         if (!data || typeof data !== "object" || data.error) throw new Error("invalid source response");
         if (provider === "MusicBrainz") {
           const rows = data[`${entity}s`];
-          for (const row of Array.isArray(rows) ? rows.slice(0, 5) : []) {
+          for (const row of Array.isArray(rows) ? rows.slice(0, 3) : []) {
             if (!row || typeof row !== "object") continue;
             const item = Object.fromEntries(Object.entries(row).filter(([key]) => ["id", "title", "name", "score", "disambiguation", "country", "date", "first-release-date", "artist-credit", "life-span", "tags"].includes(key)));
-            if (Array.isArray(row.releases)) item.releases = row.releases.slice(0, 5).map((release: Record<string, unknown>) => Object.fromEntries(Object.entries(release).filter(([key]) => ["id", "title", "date", "country"].includes(key))));
+            if (Array.isArray(row.releases)) item.releases = row.releases.slice(0, 3).map((release: Record<string, unknown>) => Object.fromEntries(Object.entries(release).filter(([key]) => ["id", "title", "date", "country"].includes(key))));
             if (typeof row.id === "string") item.url = `https://musicbrainz.org/${entity}/${encodeURIComponent(row.id)}`;
             sources.push({ ...item, provider });
           }
         } else {
-          for (const page of Object.values(data.query?.pages ?? {}).slice(0, 3) as Record<string, unknown>[]) sources.push({ provider, title: page.title ?? "", text: page.extract ?? "", url: page.fullurl ?? "" });
+          for (const page of Object.values(data.query?.pages ?? {}).slice(0, 2) as Record<string, unknown>[]) sources.push({ provider, title: page.title ?? "", text: page.extract ?? "", url: page.fullurl ?? "" });
         }
       } catch (error) { source_errors.push(`${provider}: ${error instanceof Error ? error.message : "source unavailable"}`); }
     }

@@ -77,6 +77,8 @@ titles, excerpts, source URLs and retrieval time. Remote content is untrusted,
 and failed searches are surfaced as tool errors. This switch does not change
 independently configured MCP permissions or model-provider network access.
 
+Research is budgeted per answer because every result is resent on later turns: at most 5 results of 500 characters per `web_search`, and within a three-minute window at most 3 `web_search` and 2 `music_research` lookups (4 combined), never the same query twice. Beyond that the tool returns a note telling the model to answer from the evidence it has and say what is unverified.
+
 Verification: 667 unit tests passed (one skipped), typecheck/build passed, and
 62 Pi/Core fixture checks passed, including live session permission changes and
 search evidence reaching the model context. Native App adapter checks also

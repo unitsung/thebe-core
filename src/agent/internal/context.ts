@@ -45,6 +45,7 @@ import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
+import { createResearchBudget } from "../../agent/tools/research-budget.ts";
 import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
@@ -368,14 +369,15 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       );
     }
     const toolOptions = { policy: toolPolicy, callerId: toolCallerId, modelResults };
-    if (options.musicResearch) tools.push(...createMusicResearchTools(options.musicResearch, toolPolicy, toolCallerId).map(tool => ({
+    const researchBudget = createResearchBudget();
+    if (options.musicResearch) tools.push(...createMusicResearchTools(options.musicResearch, toolPolicy, toolCallerId, researchBudget).map(tool => ({
       ...tool, async execute(...args: Parameters<typeof tool.execute>) {
         if (scopeId && (await state.lookup(scopeId)).labels?.["thebe.webSearch"] === "false") throw new Error("Web search is disabled for this session.");
         return tool.execute(...args);
       },
     })));
     if (options.webSearch) tools.push(...createWebSearchTools(options.webSearch, toolPolicy, toolCallerId,
-      async () => !!scopeId && (await state.lookup(scopeId)).labels?.["thebe.webSearch"] === "true"));
+      async () => !!scopeId && (await state.lookup(scopeId)).labels?.["thebe.webSearch"] === "true", researchBudget));
     if (options.emby) tools.push(...createMediaLibraryTools("emby", options.emby, toolOptions));
     if (options.jellyfin) {
       tools.push(...createMediaLibraryTools("jellyfin", options.jellyfin, toolOptions));
