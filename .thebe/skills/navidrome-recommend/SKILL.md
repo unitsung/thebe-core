@@ -18,7 +18,7 @@ Use Core's `navidrome.*` tools. The App owns playback; `navidrome.queue` supplie
 
 - Apply the user's stated preferences, exclusions, mood, and requested track count. Treat loaded album summaries as a partial library view.
 - For personalization, read a small sample of `navidrome.library` with `recently_played`, `frequent`, or `starred`. Use `random` or `recommended` for discovery. Recently added albums alone are not listening preferences.
-- Set each read's `limit` to the candidates needed for the request. For exploration, start with a small sample and expand only when it lacks suitable candidates. Search specific artists or titles to resolve playable songs. Page library results with `offset` when the requested selection exceeds one response; a per-call limit is not a limit on playlist length.
+- Set each read's `limit` to the candidates needed for the request. For exploration, start with a small sample and expand only when it lacks suitable candidates. One `navidrome.search` returns songs, albums, and artists together, so search an artist or title once and take IDs from that result; do not search song by song or repeat a query already answered. Page library results with `offset` when the requested selection exceeds one response; a per-call limit is not a limit on playlist length.
 - Use `navidrome.artist` for similarity when useful. Verify suggested artists and tracks in the library; separate outside-library suggestions from available music. If listening history is empty, use the supplied mood or ask one useful preference question.
 - Explain selection using observed library facts and clearly identified musical judgment. Library membership alone does not establish that the user likes a track.
 
@@ -26,7 +26,7 @@ Use Core's `navidrome.*` tools. The App owns playback; `navidrome.queue` supplie
 
 Present a concise ordered selection with title, artist, short reason, and exact song ID from tools. Include those identities in ordinary Markdown so later references such as “play the second one” remain resolvable. Keep the user's requested count; do not fill gaps with invented songs or IDs.
 
-For a playback request, pass the selected IDs in the same order to `navidrome.queue`. Follow the host tool schema for parameter names and supported target types. Use returned stream URLs for audio cards. For album playback, use a verified album ID when the host supports it; otherwise resolve that album's verified song IDs first. Resolve ambiguous earlier references before queuing.
+For "play <artist>" with no named songs, search the artist once and queue songs or an album ID from that result; do not recall famous titles and verify them one by one. For a playback request, pass the selected IDs in the same order to `navidrome.queue`. Follow the host tool schema for parameter names and supported target types. Use returned stream URLs for audio cards. For album playback, use a verified album ID when the host supports it; otherwise resolve that album's verified song IDs first. Resolve ambiguous earlier references before queuing.
 
 Create or update a playlist only when requested and through the runtime approval flow. Honor playback requested in the same instruction. A recommendation alone does not authorize playback or playlist changes. Describe completion only after a successful tool result; if creation fails, report that failure rather than claiming the playlist exists.
 

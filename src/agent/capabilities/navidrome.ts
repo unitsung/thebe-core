@@ -265,7 +265,7 @@ export const NAVIDROME_TOOL_SCHEMAS: Record<
         type: "integer",
         minimum: 1,
         maximum: 60,
-        description: "Maximum matches per result type. Defaults to 20.",
+        description: "Maximum matches per result type. Defaults to 10; raise it only when the results lack the needed matches.",
       },
     },
     required: ["query"],

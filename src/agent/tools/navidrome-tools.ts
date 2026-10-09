@@ -42,7 +42,7 @@ export function createNavidromeTools(
         case "navidrome.search":
           result = await provider.search(
             requiredString(args.query, "query"),
-            integer(args.limit, 20),
+            integer(args.limit, 10),
           );
           break;
         case "navidrome.artist":

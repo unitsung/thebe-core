@@ -1,7 +1,10 @@
 import type { NavidromeToolName } from "../capabilities/navidrome.ts";
 
 // Project model observations only. Product capability responses keep their full schema.
-// Keep every returned candidate and its identity so follow-up playback stays grounded.
+// Keep every returned candidate and its identity so follow-up playback stays grounded;
+// drop fields a selection never needs (cross-reference ids repeated per row, track numbers, genre).
+const BIOGRAPHY_LIMIT = 800;
+
 export function navidromeModelResult(name: NavidromeToolName, result: unknown): unknown {
   const value = object(result);
   if (!value) return result ?? null;
@@ -19,9 +22,9 @@ export function navidromeModelResult(name: NavidromeToolName, result: unknown): 
       return {
         artist: artist(value.artist),
         biography: typeof value.biography === "string"
-          ? value.biography.slice(0, 2000)
+          ? value.biography.slice(0, BIOGRAPHY_LIMIT)
           : undefined,
-        biographyTruncated: typeof value.biography === "string" && value.biography.length > 2000,
+        biographyTruncated: typeof value.biography === "string" && value.biography.length > BIOGRAPHY_LIMIT,
         similarArtists: Array.isArray(value.similarArtists) ? value.similarArtists.map(artist) : [],
       };
     default:
@@ -43,11 +46,11 @@ function fields(value: unknown, keys: string[]): unknown {
 }
 
 function song(value: unknown): unknown {
-  return fields(value, ["id", "title", "artist", "artistId", "album", "albumId", "duration", "track", "discNumber", "year"]);
+  return fields(value, ["id", "title", "artist", "album", "albumId", "duration"]);
 }
 
 function album(value: unknown): unknown {
-  return fields(value, ["id", "name", "artist", "artistId", "songCount", "duration", "year", "genre"]);
+  return fields(value, ["id", "name", "artist", "songCount", "year"]);
 }
 
 function artist(value: unknown): unknown {
