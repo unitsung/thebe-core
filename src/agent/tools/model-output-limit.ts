@@ -1,7 +1,20 @@
 // Hard cap on what one tool result may add to the model's context.
 // Applies to the model-facing text only; capability and MCP callers keep the full result.
 
+/** Suggested value when the cap is enabled. The cap is off unless the operator turns it on. */
 export const MODEL_RESULT_CHAR_LIMIT = 12_000;
+const MIN_LIMIT = 2_000;
+
+/**
+ * `THEBE_MODEL_RESULT_LIMIT`: opt-in cap on the characters one custom tool result may add to the
+ * context. Unset, empty, "0", "off", "none" or an invalid value means no cap, so Core behaves as
+ * the Pi agent does. A positive value below the floor is raised to it so results stay usable.
+ */
+export function resolveModelResultLimit(raw: string | undefined): number {
+  const parsed = Number(raw?.trim());
+  if (!raw?.trim() || !Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.max(MIN_LIMIT, Math.trunc(parsed));
+}
 const STRING_LIMIT = 600;
 
 /** Bound `text` to about `limit` characters, keeping JSON valid and saying what was left out. */

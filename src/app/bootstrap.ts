@@ -1,3 +1,4 @@
+import { resolveModelResultLimit } from "../agent/tools/model-output-limit.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -183,6 +184,7 @@ export async function bootstrapThebe(
     provider,
     version,
     token: process.env.THEBE_TOKEN,
+    modelResultLimit: resolveModelResultLimit(process.env.THEBE_MODEL_RESULT_LIMIT),
     agentStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,

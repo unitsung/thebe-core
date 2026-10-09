@@ -38,6 +38,7 @@ export function createThebeApp(options: {
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
   allowedHosts?: string[];
   sessionIdleTimeoutMs?: number;
+  modelResultLimit?: number;
   autoCompact?: boolean;
   autoSummary?: boolean;
   autoSummaryDelayMs?: number;
@@ -77,6 +78,7 @@ export function createThebeApp(options: {
     callerId: options.callerId,
     model: options.model,
     sessionIdleTimeoutMs: options.sessionIdleTimeoutMs,
+    modelResultLimit: options.modelResultLimit,
     autoCompact: options.autoCompact,
     autoSummary: options.autoSummary,
     autoSummaryDelayMs: options.autoSummaryDelayMs,

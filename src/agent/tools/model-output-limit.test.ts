@@ -28,3 +28,18 @@ describe("limitModelOutput", () => {
     expect(out.startsWith("[… ")).toBe(true);
   });
 });
+
+import { resolveModelResultLimit, MODEL_RESULT_CHAR_LIMIT } from "./model-output-limit.ts";
+
+describe("resolveModelResultLimit", () => {
+  it("is off by default and only an explicit positive number turns it on", () => {
+    expect(resolveModelResultLimit(undefined)).toBe(0);
+    expect(resolveModelResultLimit("  ")).toBe(0);
+    expect(resolveModelResultLimit("off")).toBe(0);
+    expect(resolveModelResultLimit("0")).toBe(0);
+    expect(resolveModelResultLimit("lots")).toBe(0);
+    expect(resolveModelResultLimit("30000")).toBe(30_000);
+    expect(resolveModelResultLimit("50")).toBe(2_000);
+    expect(MODEL_RESULT_CHAR_LIMIT).toBe(12_000);
+  });
+});

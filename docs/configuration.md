@@ -117,6 +117,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_DIR` 单独改变 Pi agent 文件目录。
 - `THEBE_AGENT_STORE_DIR` 单独改变 Thebe 的会话与 Goal/子代理元数据目录；不存储 Pi transcript。
 - `THEBE_WORKSPACE_DIR` 在未设置配置文件 `workspacePath` 时提供 Thebe 文件工具和 TUI 的工作区；两者都未设置时 Thebe 拒绝启动，不会回退到进程启动目录。
+- `THEBE_MODEL_RESULT_LIMIT` 可选，默认不限制，Core 与 Pi agent 行为一致。设置为正整数（最小 `2000`，建议 `12000`）后，限制单次自定义工具结果进入模型上下文的字符数：JSON 保留靠前条目并标明省略数量，日志和纯文本保留末尾；只影响给模型的文本，capability 与 MCP 调用方仍拿完整结果，Pi 内置工具（`read`、`bash` 等）不受影响。
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 

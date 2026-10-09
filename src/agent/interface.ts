@@ -107,6 +107,8 @@ export type CreateThebeAgentOptions = {
   idleMs?: number;
   watchdogMs?: number;
   toolWatchdogMs?: number;
+  /** Opt-in cap on characters one custom tool result may add to the model context. Unset or 0: no cap. */
+  modelResultLimit?: number;
   sessionIdleTimeoutMs?: number;
   systemPrompt?: string;
   builtinTools?: readonly string[];

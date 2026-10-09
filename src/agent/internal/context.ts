@@ -20,7 +20,6 @@ import {
 } from "../security/command-risk.ts";
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
-import { MODEL_RESULT_CHAR_LIMIT } from "../tools/model-output-limit.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
@@ -426,7 +425,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             policy: sessionPolicy,
             audit,
             toolWatchdogMs: options.toolWatchdogMs,
-            modelResultLimit: MODEL_RESULT_CHAR_LIMIT,
+            modelResultLimit: options.modelResultLimit && options.modelResultLimit > 0
+              ? options.modelResultLimit
+              : undefined,
             sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
             onEvent: (event) => {
               const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
