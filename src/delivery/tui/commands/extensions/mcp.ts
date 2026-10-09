@@ -9,7 +9,7 @@ function serverLines(agent: ThebeAgent): Promise<string[]> {
       const status = server.status === "ready" ? "[ready]"
         : server.status === "error" ? "[error]"
           : server.disabled ? "[disabled]" : "[configured]";
-      return `${status} ${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}${server.toolCount ? ` · ${server.toolCount} tools` : ""}${server.error ? ` · ${server.error}` : ""}`;
+      return `${status} ${server.name}${server.command ? ` · ${server.command}` : ""}${server.url ? ` · ${server.url}` : ""}`;
     }));
 }
 

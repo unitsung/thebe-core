@@ -45,7 +45,7 @@ import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
 import { createAgentStore, type AgentSessionMeta } from "../store.ts";
 import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
-import { createRuntimeMcpPort } from "../tools/mcp-tools.ts";
+import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createJudgmentApi } from "../judgment/service.ts";
@@ -405,9 +405,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     const isChatOnly = effectiveBuiltinTools.length === 0;
     return {
       model: sessionModel ?? options.model,
-      ...(!isChatOnly && sessionCallerId === callerId && mcp.invokeToolResult ? {
-        externalMcp: createRuntimeMcpPort(mcp, {
-          policy: sessionPolicy, audit, toolWatchdogMs: options.toolWatchdogMs,
+      ...(!isChatOnly && sessionCallerId === callerId ? (() => {
+        const runtimeMcp = createRuntimeMcpOptions(mcp, {
+          policy: sessionPolicy, audit,
           sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
           onEvent: (event) => {
             const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
@@ -417,8 +417,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             const sid = eventSessionId ?? explicitSessionId ?? getActive()?.meta.thebeSessionId;
             if (sid) void state.openedSessions.get(sid)?.session.abort();
           }),
-        }),
-      } : {}),
+        });
+        return runtimeMcp ? { mcp: runtimeMcp } : {};
+      })() : {}),
       customTools: isChatOnly
         ? []
         : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId, true, eventSessionId), {

@@ -37,7 +37,7 @@ _Avoid_: depending on Pi types outside `src/adapters/pi`, wrapping the Pi CLI
 _Avoid_: bumping one Pi package alone, importing pi-ai outside `src/adapters/pi`, reading `context.systemPrompt` in a provider
 
 **MCP Integration**:
-External capability Adapter in `src/adapters/mcp`. It discovers and invokes configured command- or URL-based MCP servers; the Agent owns the stable MCP extension Interface in `src/agent/extensions/mcp`, and HTTP/TUI expose it through `src/delivery`.
+External MCP servers (command- or URL-based) are configured in `.thebe/mcp.json`. A model session connects them through the Pi runtime's built-in MCP extension and `codemode`, with Core supplying configuration and the policy, approval, audit and redaction hooks (`src/adapters/pi/session/mcp-extension.ts`); Core writes no second MCP client for model calls. `src/adapters/mcp` is the product inventory outside a session (configured servers, tool lists, capability calls) and uses Pi's `@earendil-works/pi-mcp` client. The Agent owns the stable MCP extension Interface in `src/agent/extensions/mcp`, and HTTP/TUI expose it through `src/delivery`.
 _Avoid_: putting Agent runtime, HTTP routes, TUI commands, or homelab business state inside the MCP Adapter; treating server names as the product API
 
 **HomelabCapability**:

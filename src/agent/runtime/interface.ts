@@ -259,26 +259,41 @@ export const PI_BUILTIN_TOOLS = [
   "bash",
 ] as const;
 
+export type RuntimeMcpServer = {
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  /** Disabled servers stay listed but are not connected. */
+  enabled: boolean;
+  /** One sentence for the model's server list. */
+  description?: string;
+  /** Tool visibility for the model; the runtime's default is `codemode`. */
+  exposure?: "codemode" | "deferred" | "direct" | "hidden";
+  /** Calls beyond `read` need approval. Without it the tool's own annotations decide. */
+  permission?: "read" | "confirm" | "admin";
+};
+
+export type RuntimeMcpCall = { toolName: string; toolCallId: string; input: unknown };
+
+export type RuntimeMcpOptions = {
+  /** Read on session start and on every reload. */
+  servers(): RuntimeMcpServer[];
+  /** Runs before every MCP call, including calls made from a codemode script. */
+  beforeCall(call: RuntimeMcpCall): Promise<{ block: string } | undefined>;
+  /** Runs after every MCP call that was not blocked. */
+  afterCall(call: RuntimeMcpCall, outcome: { bytes: number; isError: boolean; redacted: boolean; durationMs: number }): Promise<void>;
+};
+
 export type CreateRuntimeSessionOptions = {
   customTools: CustomToolDefinition[];
-  /** Discovered schemas and execution share the product registry's connections. */
-  externalMcp?: {
-    listTools(): Promise<Array<{
-      name: string;
-      serverName?: string;
-      originalName?: string;
-      description: string;
-      inputSchema: Record<string, unknown>;
-      outputSchema?: Record<string, unknown>;
-      annotations?: Record<string, unknown>;
-      permission: "read" | "confirm" | "admin";
-    }>>;
-    callTool(name: string, args: unknown, signal?: AbortSignal): Promise<{
-      content: Array<Record<string, unknown>>;
-      structuredContent?: Record<string, unknown>;
-      isError?: boolean;
-    }>;
-  };
+  /**
+   * External MCP servers for the runtime's own MCP client. The runtime connects them, so Core
+   * supplies configuration and guards, not a second client.
+   */
+  mcp?: RuntimeMcpOptions;
   builtinTools?: readonly string[];
   systemPrompt?: string;
   enabledResources?: EnabledResource[];

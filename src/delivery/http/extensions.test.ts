@@ -175,7 +175,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         ];
       },
       async listServers() {
-        return [{ name: "notes", command: "notes-mcp", toolCount: 1 }];
+        return [{ name: "notes", command: "notes-mcp" }];
       },
       async setServerEnabled(name: string, enabled: boolean) {
         return { name, status: enabled ? "configured" : "disabled", disabled: !enabled };
@@ -468,7 +468,6 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/capabilities/runs",
       "/v1/capabilities/runs/{runId}",
       "/v1/capabilities/runs/{runId}/log",
-      "/v1/extensions/mcp/servers/{name}/check",
       "/v1/subagents",
       "/v1/subagents/profiles",
       "/v1/subagents/{runId}",
@@ -550,45 +549,26 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     );
   });
 
-  it("POST check probes one MCP server and never returns credentials", async () => {
-    const checked: string[] = [];
+  it("never returns MCP credentials or a probe result in the server list", async () => {
     const mcp = {
       async listTools() { return []; },
-      async listServers() { return []; },
-      async setServerEnabled() { return undefined; },
-      async checkServer(name: string) {
-        checked.push(name);
-        if (name !== "notes") return undefined;
-        return {
-          name,
-          command: "notes-mcp",
-          env: { API_KEY: "must-not-leak" },
-          headers: { authorization: "Bearer must-not-leak" },
-          status: "ready",
-          toolCount: 0,
-          checkedAt: "2026-10-09T10:00:00.000Z",
-        } as never;
+      async listServers() {
+        return [{
+          name: "notes", command: "notes-mcp", env: { API_KEY: "must-not-leak" },
+          headers: { authorization: "Bearer must-not-leak" }, status: "configured",
+        } as never];
       },
+      async setServerEnabled() { return undefined; },
       async invokeTool() { return "ok"; },
       close() {},
     };
     const agent = createThebeAgent({ runtime: createFakeRuntime().runtime, provider: provider(), mcp });
     const handler = createThebeHttpHandler({ version: "0.1.0", agent });
-    const url = (name: string) => `http://127.0.0.1:8787/v1/extensions/mcp/servers/${name}/check`;
-
-    const ok = await handler.handle(new Request(url("notes"), { method: "POST" }));
-    expect(ok.status).toBe(200);
-    const body = await ok.text();
-    expect(JSON.parse(body)).toEqual({
-      name: "notes", command: "notes-mcp", status: "ready", toolCount: 0, checkedAt: "2026-10-09T10:00:00.000Z",
-    });
+    const response = await handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers"));
+    const body = await response.text();
+    expect(JSON.parse(body)).toEqual({ servers: [{ name: "notes", command: "notes-mcp", status: "configured" }] });
     expect(body).not.toContain("must-not-leak");
-
-    expect((await handler.handle(new Request(url("missing"), { method: "POST" }))).status).toBe(404);
-    expect(checked).toEqual(["notes", "missing"]);
-
-    await agent.quiesce();
-    expect((await handler.handle(new Request(url("notes"), { method: "POST" }))).status).toBe(503);
-    expect(checked).toEqual(["notes", "missing"]);
+    const check = await handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers/notes/check", { method: "POST" }));
+    expect(check.status).toBe(404);
   });
 });

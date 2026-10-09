@@ -151,6 +151,22 @@ OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查�
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
 
+## MCP 服务器
+
+外部 MCP 服务器写在 `.thebe/mcp.json`（`mcpServers`，也读全局 `~/.thebe/mcp.json` 和 `.mcp.json`）。模型会话由 Pi 自带的 MCP 扩展
+连接这些服务器，Core 不自己维护 MCP 连接；工具名为 `mcp__<server>__<tool>`。
+
+```json
+{ "mcpServers": { "notes": { "command": "notes-mcp", "args": ["--stdio"], "env": { "API_KEY": "..." },
+  "description": "Search and read notes", "exposure": "codemode", "permission": "confirm", "disabled": true } } }
+```
+
+- `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
+- `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
+- 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
+- stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
+- 新添加的服务器默认禁用；启用、禁用、删除走 `/v1/extensions/mcp/servers`，会话在下次 reload 时生效。
+
 ## Navidrome 音乐 provider
 
 配置完整的 Navidrome 地址、用户名和密码后，Core 会通过 Subsonic API

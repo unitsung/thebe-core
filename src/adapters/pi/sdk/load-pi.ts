@@ -84,12 +84,18 @@ export async function loadPiSdk() {
   const eventBus = await import(piDistUrl("core/event-bus.js"));
   const bash = await import(piDistUrl("core/tools/bash.js"));
   const skills = await import(piDistUrl("core/skills.js"));
-  const mcpTools = await import(piDistUrl("extensions/mcp/tools.js"));
+  const mcp = await import(piDistUrl("extensions/mcp/index.js"));
+  const mcpRuntime = await import(piDistUrl("extensions/mcp/runtime.js"));
+  const mcpServers = await import(piDistUrl("core/mcp-servers.js"));
+  const codemode = await import(piDistUrl("extensions/codemode/index.js"));
   const toolSearch = await import(piDistUrl("extensions/tool-search/index.js"));
   return {
     createToolSearchExtension: toolSearch.createToolSearchExtension as typeof toolSearch.createToolSearchExtension,
-    createMcpToolDefinition: mcpTools.createMcpToolDefinition as typeof mcpTools.createMcpToolDefinition,
-    createMcpToolName: mcpTools.createMcpToolName as typeof mcpTools.createMcpToolName,
+    createDefaultMcpTransport: mcpRuntime.createDefaultTransport as typeof mcpRuntime.createDefaultTransport,
+    createMcpExtension: mcp.createMcpExtension as typeof mcp.createMcpExtension,
+    createCodemodeExtension: codemode.createCodemodeExtension as typeof codemode.createCodemodeExtension,
+    isMcpToolName: mcpServers.isMcpToolName as typeof mcpServers.isMcpToolName,
+    mcpNamespace: mcpServers.mcpNamespace as typeof mcpServers.mcpNamespace,
     loadSkills: skills.loadSkills as typeof skills.loadSkills,
     loadSkillsFromDir: skills.loadSkillsFromDir as typeof skills.loadSkillsFromDir,
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,

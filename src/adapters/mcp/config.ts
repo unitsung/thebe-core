@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -113,7 +114,13 @@ export type McpServerConfig = {
   service?: string;
   category?: HomelabCapabilityCategory;
   permission?: HomelabCapabilityPermission;
+  /** Passed to the runtime's MCP client: how the model reaches this server's tools. */
+  exposure?: McpExposure;
+  description?: string;
 };
+
+export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
+const EXPOSURES: readonly string[] = ["codemode", "deferred", "direct", "hidden"];
 
 function stringMap(value: unknown): Record<string, string> | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -126,10 +133,10 @@ function stringMap(value: unknown): Record<string, string> | undefined {
   return result;
 }
 
-export async function listConfiguredMcpServers(options?: {
+export function listConfiguredMcpServersSync(options?: {
   cwd?: string;
   homeDir?: string;
-}): Promise<McpServerConfig[]> {
+}): McpServerConfig[] {
   const cwd = options && "cwd" in options ? options.cwd : process.cwd();
   const home = options?.homeDir ?? homedir();
   const configs = new Map<string, McpServerConfig>();
@@ -141,16 +148,14 @@ export async function listConfiguredMcpServers(options?: {
 
   for (const file of candidateFiles) {
     try {
-      const raw = await readFile(file, "utf8");
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      const servers = (parsed.mcpServers || parsed.servers || {}) as Record<
-        string,
-        unknown
-      >;
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      const servers = (parsed.mcpServers || parsed.servers || {}) as Record<string, unknown>;
       for (const [name, val] of Object.entries(servers)) {
         if (typeof val === "object" && val !== null) {
           const s = val as Record<string, unknown>;
-          const config: McpServerConfig = {
+          // Project configuration intentionally overrides a same-named global
+          // server, matching how skills and most MCP clients resolve scope.
+          configs.set(name, {
             name,
             command: typeof s.command === "string" ? s.command : undefined,
             args: Array.isArray(s.args)
@@ -163,10 +168,9 @@ export async function listConfiguredMcpServers(options?: {
             service: typeof s.service === "string" ? s.service : undefined,
             category: isCapabilityCategory(s.category) ? s.category : undefined,
             permission: isCapabilityPermission(s.permission) ? s.permission : undefined,
-          };
-          // Project configuration intentionally overrides a same-named global
-          // server, matching how skills and most MCP clients resolve scope.
-          configs.set(name, config);
+            exposure: typeof s.exposure === "string" && EXPOSURES.includes(s.exposure) ? s.exposure as McpExposure : undefined,
+            description: typeof s.description === "string" ? s.description : undefined,
+          });
         }
       }
     } catch {
@@ -175,6 +179,13 @@ export async function listConfiguredMcpServers(options?: {
   }
 
   return [...configs.values()];
+}
+
+export async function listConfiguredMcpServers(options?: {
+  cwd?: string;
+  homeDir?: string;
+}): Promise<McpServerConfig[]> {
+  return listConfiguredMcpServersSync(options);
 }
 
 function isCapabilityCategory(value: unknown): value is HomelabCapabilityCategory {

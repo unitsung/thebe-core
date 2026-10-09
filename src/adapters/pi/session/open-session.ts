@@ -16,6 +16,7 @@ import { resolveScenarioSettings } from "../../../agent/security/scenario-profil
 import { createGondolinBashOperations } from "../../gondolin/bash-operations.ts";
 import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
+import { createMcpGuardExtension, createMcpTransportFactory, toPiMcpConfig } from "./mcp-extension.ts";
 import { toPiTool } from "./pi-tools.ts";
 import { wrapSession as wrapPiSession } from "./wrap-session.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
@@ -92,33 +93,7 @@ export async function openPiSession(
     ...(create.builtinTools ?? PI_BUILTIN_TOOLS),
     ...create.customTools.map((tool) => tool.name),
   ];
-  const externalNames = new Set<string>();
-  const externalApproval = new Set<string>();
-  async function discoverMcpTools() {
-    const external = await create.externalMcp?.listTools() ?? [];
-    externalNames.clear();
-    externalApproval.clear();
-    return external.map((tool) => {
-    const server = tool.serverName ?? "external";
-    const originalName = tool.originalName ?? tool.name;
-    const name = sdk.createMcpToolName(server, originalName,
-      (candidate: string) => externalNames.has(candidate) || tools.includes(candidate));
-    externalNames.add(name);
-    if (tool.permission !== "read") externalApproval.add(name);
-    return sdk.createMcpToolDefinition({
-      server, name, tool: { name: originalName, description: tool.description,
-        inputSchema: tool.inputSchema, outputSchema: tool.outputSchema,
-        annotations: tool.annotations } as never,
-      exposure: "deferred", namespace: { name: `mcp__${server}` }, timeoutMs: 15_000,
-      getClient: async () => ({
-        callTool: async (_name: string, args: Record<string, unknown>, options: { signal?: AbortSignal }) =>
-          create.externalMcp!.callTool(tool.name, args, options.signal) as never,
-      }),
-    });
-    });
-  }
-  const mcpTools = await discoverMcpTools();
-  const hasMcp = Boolean(create.externalMcp);
+  const hasMcp = Boolean(create.mcp);
   const hasDiscovery = hasMcp || create.customTools.length > 0;
   const listeners = new Set<(event: NormalizedEvent) => void>();
   const permissionHandler = create.permissionHandler
@@ -168,7 +143,7 @@ export async function openPiSession(
           }) => {
             const required = new Set(create.toolsRequiringApproval ?? []);
             pi.on("tool_call", async (event) => {
-              if (!required.has(event.toolName) && !externalApproval.has(event.toolName)) {
+              if (!required.has(event.toolName)) {
                 return undefined;
               }
               const permissionId = randomUUID();
@@ -178,7 +153,7 @@ export async function openPiSession(
                 toolCallId: event.toolCallId ?? permissionId,
                 args: event.input,
                 argsSummary: summarizeArgs(event.input),
-                risk: externalApproval.has(event.toolName) ? "high" as const : permissionRisk(event.toolName),
+                risk: permissionRisk(event.toolName),
               };
               const preflight = await permissionHandler.preflight(request);
               if (preflight === "allow") {
@@ -205,6 +180,17 @@ export async function openPiSession(
         `failed to install permission gate: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+  if (create.mcp) {
+    const mcp = create.mcp;
+    const load = (factory: Parameters<typeof sdk.loadExtensionFromFactory>[0], path: string) =>
+      sdk.loadExtensionFromFactory(factory, create.cwd ?? cwd, sdk.createEventBus(), extensionRuntime, path);
+    permissionExtension.push(
+      await load(createMcpGuardExtension(sdk, mcp, permissionHandler) as never, "thebe://mcp-guard"),
+      await load(sdk.createMcpExtension({ loadConfig: () => toPiMcpConfig(mcp.servers()), createTransport: createMcpTransportFactory(sdk) }), "thebe://mcp"),
+      // Scripts run in Pi's QuickJS sandbox and reach tools only through the guarded pipeline.
+      await load(sdk.createCodemodeExtension({ mode: "on", models: false }), "thebe://codemode"),
+    );
   }
   if (hasDiscovery) {
     permissionExtension.push(await sdk.loadExtensionFromFactory(
@@ -266,7 +252,6 @@ export async function openPiSession(
     },
   });
   const piCustomTools = [
-    ...mcpTools.map((tool) => abortablePiTool(tool, controllers)),
     ...create.customTools.map((tool) =>
       abortablePiTool(toPiTool(sdk, tool), controllers),
     ),
@@ -314,7 +299,8 @@ export async function openPiSession(
     sessionManager,
     settingsManager,
   });
-  if (hasMcp) await session.bindExtensions({});
+  // A bound error listener makes `reload()` start the extensions again, so a changed server list takes effect.
+  if (hasMcp) await session.bindExtensions({ onError: () => {} });
   live.set(session.sessionId, session as PiSession);
   sessionToolControllers.set(session as object, controllers);
   const wrappedSession = wrapPiSession(
@@ -329,16 +315,6 @@ export async function openPiSession(
     backgroundTasks,
     bashOperations,
   );
-  if (hasMcp) {
-    const reload = wrappedSession.reloadResources!.bind(wrappedSession);
-    wrappedSession.reloadResources = async () => {
-      const next = await discoverMcpTools();
-      const local = piCustomTools.filter((tool) => !tool.name.startsWith("mcp__"));
-      piCustomTools.splice(0, piCustomTools.length,
-        ...next.map((tool) => abortablePiTool(tool, controllers)), ...local);
-      await reload();
-    };
-  }
   if (!gondolinBash) return wrappedSession;
   // Pi's dispose is synchronous, so the Micro-VM is torn down best-effort
   // (its lifetime is the session; the VM is disposable either way).

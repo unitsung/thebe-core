@@ -1,51 +1,57 @@
-import type { McpRegistry, McpCallResult } from "../extensions/mcp.ts";
-import type { CreateRuntimeSessionOptions } from "../runtime/interface.ts";
-import { redactToolOutput } from "../security/redaction.ts";
-import { wrapCustomTools } from "./wrapped-tool.ts";
+import { hashParameters } from "../security/audit/audit-log.ts";
+import type { createAuditLog } from "../security/audit/audit-log.ts";
+import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
+import type { McpRegistry } from "../extensions/mcp.ts";
+import type { NormalizedEvent, RuntimeMcpOptions } from "../runtime/interface.ts";
 
-function redactValue(value: unknown): unknown {
-  if (typeof value === "string") return redactToolOutput(value);
-  if (Array.isArray(value)) return value.map(redactValue);
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
-      /^(password|token|secret|api_?key|credential)$/i.test(key) ? "***REDACTED***" : redactValue(item)]));
-  }
-  return value;
-}
+type Policy = ReturnType<typeof createPolicyEngine>;
+type Audit = ReturnType<typeof createAuditLog>;
 
-/** One adapter for any discovered MCP schema, with the same audit/budget boundary. */
-export function createRuntimeMcpPort(registry: McpRegistry,
-  options: Parameters<typeof wrapCustomTools>[1] & {
-    policy: Parameters<typeof wrapCustomTools>[1]["policy"];
-  }): NonNullable<CreateRuntimeSessionOptions["externalMcp"]> {
-  const executors = new Map<string, ReturnType<typeof wrapCustomTools>[number]>();
+/** Pi names a server's tools `mcp__<server>__<tool>`, with `-` in the server name written as `_`. */
+const serverPrefix = (name: string): string => `mcp__${name.replace(/[^A-Za-z0-9_]/g, "_")}__`;
+
+/**
+ * What the runtime's own MCP client needs from Core: the configured servers and the policy and audit
+ * boundary every call crosses. Core opens no MCP connection for a model call.
+ */
+export function createRuntimeMcpOptions(
+  registry: McpRegistry,
+  options: {
+    policy: Policy;
+    audit?: Audit;
+    sessionId?: () => string | undefined;
+    onEvent?: (event: NormalizedEvent) => void;
+    onStop?: () => void | Promise<void>;
+  },
+): RuntimeMcpOptions | undefined {
+  if (!registry.runtimeServers) return undefined;
+  const runtimeServers = registry.runtimeServers.bind(registry);
+  const owns = (toolName: string) =>
+    runtimeServers().some((server) => toolName.startsWith(serverPrefix(server.name)));
+  const record = (toolName: string, input: unknown, fields: Pick<Parameters<NonNullable<Audit>["append"]>[0], "responseBytes" | "redactionFired" | "result" | "durationMs">) =>
+    options.audit?.append({
+      method: toolName, parameterHash: hashParameters(input), budgetConsumed: 0,
+      sessionId: options.sessionId?.(), ...fields,
+    });
   return {
-    async listTools() {
-      const tools = await registry.listTools();
-      options.policy.registerTools(tools.map((tool) => tool.name));
-      executors.clear();
-      for (const tool of tools) {
-        const [wrapped] = wrapCustomTools([{
-          name: tool.name, label: tool.name, description: tool.description,
-          parameters: tool.inputSchema,
-          async execute(_id, args, signal) {
-            if (!registry.invokeToolResult) throw new Error("MCP registry does not support structured calls");
-            const result = redactValue(await registry.invokeToolResult(tool.name, args, signal)) as McpCallResult;
-            return { content: [{ type: "text", text: JSON.stringify(result) }],
-              details: { mcpResult: result }, isError: result.isError };
-          },
-        }], options);
-        executors.set(tool.name, wrapped!);
-      }
-      return tools;
+    servers: runtimeServers,
+    async beforeCall(call) {
+      // Resource tools (list/read) are not a server's own tools and only read.
+      if (!owns(call.toolName)) return undefined;
+      options.policy.registerTools([call.toolName]);
+      const decision = await options.policy.beforeToolCall({ toolCall: { name: call.toolName } });
+      if (!decision.block) return undefined;
+      await record(call.toolName, call.input, {
+        responseBytes: 0, redactionFired: false, result: "denied", durationMs: 0,
+      });
+      if (await options.policy.shouldStopAfterTurn()) await options.onStop?.();
+      return { block: decision.reason ?? "denied" };
     },
-    async callTool(name, args, signal) {
-      const executor = executors.get(name);
-      if (!executor) throw new Error(`MCP tool is not registered: ${name}`);
-      const result = await executor.execute(crypto.randomUUID(), args, signal);
-      return (result.details?.mcpResult as McpCallResult | undefined) ?? {
-        content: result.content, isError: true,
-      };
+    async afterCall(call, outcome) {
+      await record(call.toolName, call.input, {
+        responseBytes: outcome.bytes, redactionFired: outcome.redacted,
+        result: outcome.isError ? "error" : "ok", durationMs: outcome.durationMs,
+      });
     },
   };
 }

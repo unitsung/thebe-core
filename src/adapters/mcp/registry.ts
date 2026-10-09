@@ -1,7 +1,5 @@
-import { addConfiguredMcpServer, listConfiguredMcpServers, removeConfiguredMcpServer, type McpServerConfig } from "./config.ts";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
-import { redactToolOutput } from "../../agent/security/redaction.ts";
-import { McpTransport } from "./transport.ts";
+import { addConfiguredMcpServer, listConfiguredMcpServersSync, removeConfiguredMcpServer, type McpServerConfig } from "./config.ts";
+import { McpConnection } from "./connection.ts";
 import type {
   HomelabCapabilityCategory,
   HomelabCapabilityPermission,
@@ -11,6 +9,7 @@ import type {
   McpCallResult,
   McpServerRegistration,
 } from "../../agent/extensions/mcp.ts";
+import type { RuntimeMcpServer } from "../../agent/runtime/interface.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const activeRegistryCleanups = new Set<() => void>();
@@ -27,34 +26,19 @@ function registerExitCleanup(cleanup: () => void): () => void {
   return () => activeRegistryCleanups.delete(cleanup);
 }
 
-type ExternalBinding = {
-  qualifiedName: string;
-  originalName: string;
-  tool: McpToolInfo;
-};
+/** A server's configured state. Whether it is reachable is the runtime's connection, not this record. */
+export type McpServerStatus = "disabled" | "configured";
 
-export type McpServerStatus = "disabled" | "configured" | "ready" | "error";
-
-export type McpServerView = McpServerConfig & {
-  status: McpServerStatus;
-  error?: string;
-  toolCount?: number;
-  checkedAt?: string;
-};
+export type McpServerView = McpServerConfig & { status: McpServerStatus };
 
 type ServerState = {
   config: McpServerConfig;
   configKey: string;
-  client: McpTransport;
-  status: McpServerStatus;
-  error?: string;
-  checkedAt?: string;
-  bindings: ExternalBinding[];
+  connection: McpConnection;
+  tools: McpToolInfo[];
 };
 
-function configKey(config: McpServerConfig): string {
-  return JSON.stringify(config);
-}
+const configKey = (config: McpServerConfig): string => JSON.stringify(config);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -62,20 +46,7 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function qualifiedName(serverName: string, toolName: string): string {
-  return `mcp:${serverName}/${toolName}`;
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-const HEALTH_ERROR_LIMIT = 300;
-
-/** Stored server errors can echo URLs, headers or env from the failing transport. */
-function healthError(error: unknown): string {
-  return redactToolOutput(errorText(error)).slice(0, HEALTH_ERROR_LIMIT);
-}
+const qualifiedName = (serverName: string, toolName: string): string => `mcp:${serverName}/${toolName}`;
 
 function inferCategory(name: string, description: string): HomelabCapabilityCategory {
   const value = `${name} ${description}`.toLowerCase();
@@ -96,82 +67,15 @@ function inferPermission(name: string, description: string, annotations?: Record
   return annotations?.readOnlyHint === true ? "read" : "confirm";
 }
 
-function serverDisabled(
-  config: McpServerConfig,
-  overrides: Map<string, boolean>,
-): boolean {
+function serverDisabled(config: McpServerConfig, overrides: Map<string, boolean>): boolean {
   const enabled = overrides.get(config.name);
   return enabled === undefined ? config.disabled === true : !enabled;
 }
 
-async function loadStateTools(
-  state: ServerState,
-  overrides: Map<string, boolean>,
-): Promise<ExternalBinding[]> {
-  if (serverDisabled(state.config, overrides)) {
-    state.status = "disabled";
-    state.bindings = [];
-    return [];
-  }
-  if (!state.config.command && !state.config.url) {
-    throw new Error("MCP server must define command or url");
-  }
-  const client = state.client;
-  const rawTools = await client.listTools();
-  // setServerEnabled swaps the client and resets state while this probe is in flight.
-  if (state.client !== client || serverDisabled(state.config, overrides)) return [];
-  state.bindings = rawTools.map((raw) => ({
-    qualifiedName: qualifiedName(state.config.name, raw.name),
-    originalName: raw.name,
-    tool: (() => {
-      const name = qualifiedName(state.config.name, raw.name);
-      const description = raw.description ?? `Tool ${raw.name} from ${state.config.name}`;
-      return {
-        id: name,
-        name,
-        description,
-        inputSchema: asRecord(raw.inputSchema) ?? { type: "object" },
-        outputSchema: asRecord(raw.outputSchema),
-        annotations: asRecord(raw.annotations),
-        originalName: raw.name,
-        category: state.config.category ?? inferCategory(raw.name, description),
-        permission: state.config.permission ?? inferPermission(raw.name, description, asRecord(raw.annotations)),
-        service: state.config.service ?? state.config.name,
-        source: "external" as const,
-        serverName: state.config.name,
-      };
-    })(),
-  }));
-  state.status = "ready";
-  state.error = undefined;
-  state.checkedAt = new Date().toISOString();
-  return state.bindings;
-}
-
 /**
- * Whether a failed tool call shows that the server is unreachable. A JSON-RPC
- * error means the server answered, and a timeout is ambiguous (the tool may just
- * be slow), so neither changes health. A cancelled call says nothing either.
- */
-function indicatesUnreachableServer(error: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) return false;
-  if (error instanceof McpError) return error.code === ErrorCode.ConnectionClosed;
-  return true;
-}
-
-/** Records a failed probe unless the server was reconfigured while it ran. */
-function markError(state: ServerState, client: McpTransport, error: unknown): void {
-  if (state.client !== client) return;
-  state.status = "error";
-  state.error = healthError(error);
-  state.checkedAt = new Date().toISOString();
-  state.bindings = [];
-}
-
-/**
- * Keeps external MCP configuration synchronized with live transports.
- * Agent code consumes this registry as a capability port; process and HTTP
- * details stay inside the integrations boundary.
+ * Product-side MCP inventory: configured servers, and tool lists for screens and capability calls
+ * that run outside a session. A model call never goes through here; the runtime connects its own
+ * servers from `runtimeServers()`.
  */
 export function createMcpClientRegistry(options: {
   cwd?: string;
@@ -184,18 +88,16 @@ export function createMcpClientRegistry(options: {
   const serverOverrides = new Map(
     (options.serverStates ?? []).map((state) => [state.name, state.enabled]),
   );
-  const createClient = (config: McpServerConfig): McpTransport => new McpTransport(
-    config,
-    options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    options.cwd,
+  const createConnection = (config: McpServerConfig): McpConnection => new McpConnection(
+    config, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.cwd,
   );
 
-  async function sync(): Promise<McpServerConfig[]> {
-    const configs = await listConfiguredMcpServers(options);
+  function sync(): McpServerConfig[] {
+    const configs = listConfiguredMcpServersSync(options);
     const activeNames = new Set(configs.map((config) => config.name));
     for (const [name, state] of states) {
       if (!activeNames.has(name)) {
-        state.client.close();
+        state.connection.close();
         states.delete(name);
       }
     }
@@ -203,21 +105,15 @@ export function createMcpClientRegistry(options: {
       const key = configKey(config);
       const previous = states.get(config.name);
       if (previous && previous.configKey === key) continue;
-      previous?.client.close();
-      states.set(config.name, {
-        config,
-        configKey: key,
-        client: createClient(config),
-        status: serverDisabled(config, serverOverrides) ? "disabled" : "configured",
-        bindings: [],
-      });
+      previous?.connection.close();
+      states.set(config.name, { config, configKey: key, connection: createConnection(config), tools: [] });
     }
     return configs;
   }
 
   let unregisterExitCleanup: (() => void) | undefined;
   const close = (): void => {
-    for (const state of states.values()) state.client.close();
+    for (const state of states.values()) state.connection.close();
     states.clear();
     unregisterExitCleanup?.();
     unregisterExitCleanup = undefined;
@@ -225,17 +121,44 @@ export function createMcpClientRegistry(options: {
   const serverView = (state: ServerState): McpServerView => ({
     ...state.config,
     disabled: serverDisabled(state.config, serverOverrides),
-    status: state.status,
-    error: state.error,
-    toolCount: state.status === "ready" ? state.bindings.length : undefined,
-    checkedAt: state.checkedAt,
+    status: serverDisabled(state.config, serverOverrides) ? "disabled" : "configured",
   });
+
+  async function loadTools(state: ServerState): Promise<McpToolInfo[]> {
+    if (serverDisabled(state.config, serverOverrides)) return [];
+    if (!state.config.command && !state.config.url) throw new Error("MCP server must define command or url");
+    const connection = state.connection;
+    const raw = await connection.listTools();
+    // A reconfiguration swaps the connection while this list is in flight.
+    if (state.connection !== connection) return [];
+    state.tools = raw.map((tool) => {
+      const name = qualifiedName(state.config.name, tool.name);
+      const description = tool.description ?? `Tool ${tool.name} from ${state.config.name}`;
+      const annotations = asRecord(tool.annotations);
+      return {
+        id: name,
+        name,
+        description,
+        inputSchema: asRecord(tool.inputSchema) ?? { type: "object" },
+        outputSchema: asRecord(tool.outputSchema),
+        annotations,
+        originalName: tool.name,
+        category: state.config.category ?? inferCategory(tool.name, description),
+        permission: state.config.permission ?? inferPermission(tool.name, description, annotations),
+        service: state.config.service ?? state.config.name,
+        source: "external" as const,
+        serverName: state.config.name,
+      };
+    });
+    return state.tools;
+  }
+
   const registry = {
     async addServer(input: McpServerRegistration): Promise<McpServerInfo> {
       const operation = registrationQueue.then(async () => {
         await addConfiguredMcpServer(input, options);
         serverOverrides.set(input.name, false);
-        await sync();
+        sync();
       });
       registrationQueue = operation.catch(() => {});
       await operation;
@@ -245,65 +168,52 @@ export function createMcpClientRegistry(options: {
       const operation = registrationQueue.then(async () => {
         const removed = await removeConfiguredMcpServer(name, options);
         serverOverrides.delete(name);
-        await sync();
+        sync();
         return removed;
       });
       registrationQueue = operation.then(() => {}, () => {});
       return operation;
     },
+    /** Server list for the runtime's own MCP client: configuration plus the saved enabled state. */
+    runtimeServers(): RuntimeMcpServer[] {
+      return sync().map((config) => ({
+        name: config.name,
+        command: config.command,
+        args: config.args,
+        env: config.env,
+        url: config.url,
+        headers: config.headers,
+        enabled: !serverDisabled(config, serverOverrides),
+        description: config.description,
+        exposure: config.exposure,
+        permission: config.permission,
+      }));
+    },
     async listTools(): Promise<McpToolInfo[]> {
-      await sync();
+      sync();
       const tools: McpToolInfo[] = [];
       for (const state of states.values()) {
-        const client = state.client;
-        try {
-          tools.push(...(await loadStateTools(state, serverOverrides)).map((binding) => binding.tool));
-        } catch (error) {
-          markError(state, client, error);
-        }
+        try { tools.push(...await loadTools(state)); } catch { /* an unreachable server lists no tools */ }
       }
       return tools;
     },
     async listServers(): Promise<McpServerView[]> {
-      await sync();
+      sync();
       return [...states.values()].map(serverView);
     },
-    /** Probes one enabled server. A disabled server is reported without being started. */
-    async checkServer(name: string): Promise<McpServerView | undefined> {
-      await sync();
-      const state = states.get(name);
-      if (!state) return undefined;
-      if (serverDisabled(state.config, serverOverrides)) {
-        state.status = "disabled";
-        return serverView(state);
-      }
-      const client = state.client;
-      try {
-        await loadStateTools(state, serverOverrides);
-      } catch (error) {
-        markError(state, client, error);
-      }
-      return serverView(state);
-    },
-    async setServerEnabled(
-      name: string,
-      enabled: boolean,
-    ): Promise<McpServerInfo | undefined> {
-      await sync();
+    async setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined> {
+      sync();
       const state = states.get(name);
       if (!state) return undefined;
       serverOverrides.set(name, enabled);
-      state.client.close();
-      state.client = createClient(state.config);
-      state.status = enabled ? "configured" : "disabled";
-      state.error = undefined;
-      state.checkedAt = undefined;
-      state.bindings = [];
+      state.connection.close();
+      state.connection = createConnection(state.config);
+      state.tools = [];
       return serverView(state);
     },
     async invokeToolResult(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult> {
       if (!name.startsWith("mcp:")) throw new Error(`invalid MCP tool name: ${name}`);
-      await sync();
+      sync();
       const rest = name.slice("mcp:".length);
       const separator = rest.indexOf("/");
       if (separator <= 0) throw new Error(`invalid MCP tool name: ${name}`);
@@ -311,28 +221,10 @@ export function createMcpClientRegistry(options: {
       const originalName = rest.slice(separator + 1);
       const state = states.get(serverName);
       if (!state) throw new Error(`unknown MCP server: ${serverName}`);
-      if (serverDisabled(state.config, serverOverrides)) {
-        throw new Error(`MCP server disabled: ${serverName}`);
-      }
-      if (!state.bindings.some((binding) => binding.originalName === originalName)) {
-        const client = state.client;
-        try {
-          await loadStateTools(state, serverOverrides);
-        } catch (error) {
-          markError(state, client, error);
-          throw error;
-        }
-      }
-      if (!state.bindings.some((binding) => binding.originalName === originalName)) {
-        throw new Error(`unknown MCP tool: ${name}`);
-      }
-      const client = state.client;
-      try {
-        return await client.callToolResult(originalName, args, signal);
-      } catch (error) {
-        if (indicatesUnreachableServer(error, signal)) markError(state, client, error);
-        throw error;
-      }
+      if (serverDisabled(state.config, serverOverrides)) throw new Error(`MCP server disabled: ${serverName}`);
+      if (!state.tools.some((tool) => tool.originalName === originalName)) await loadTools(state);
+      if (!state.tools.some((tool) => tool.originalName === originalName)) throw new Error(`unknown MCP tool: ${name}`);
+      return await state.connection.callToolResult(originalName, args, signal) as unknown as McpCallResult;
     },
     async invokeTool(name: string, args: unknown): Promise<string | undefined> {
       if (!name.startsWith("mcp:")) return undefined;

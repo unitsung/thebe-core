@@ -18,7 +18,6 @@ export const PRODUCT_HTTP_SEGMENT = {
   profiles: "profiles",
   log: "log",
   cancel: "cancel",
-  check: "check",
   resolve: "resolve",
   servers: "servers",
   tools: "tools",

@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,11 +68,61 @@ async function piWithFaux(sessionDir?: string) {
   return { faux, runtime, modelRuntime };
 }
 
+/** A stdio MCP server speaking the wire protocol directly, with a read-only and a write tool. */
+function mcpFixture(initial: { block?: string; enabled?: boolean; exposure?: "codemode" | "deferred" } = {}) {
+  const script = [
+    "const fs = require('node:fs');",
+    "const rl = require('node:readline').createInterface({ input: process.stdin });",
+    "rl.on('line', (line) => {",
+    "  const m = JSON.parse(line);",
+    "  if (m.id === undefined) return;",
+    "  let result = {};",
+    "  if (m.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } };",
+    "  if (m.method === 'tools/list') result = { tools: [",
+    "    { name: 'catalog', description: 'Search remote catalog', inputSchema: { type: 'object', properties: { query: { type: 'string' } } }, annotations: { readOnlyHint: true } },",
+    "    { name: 'publish', description: 'Publish playlist', inputSchema: { type: 'object', properties: { id: { type: 'string' } } } },",
+    "    { name: 'leak', description: 'Return a secret leak', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } },",
+    "    { name: 'env', description: 'Report environment', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } },",
+    "  ] };",
+    "  if (m.method === 'tools/call') {",
+    "    fs.appendFileSync(process.env.CALL_LOG, m.params.name + '\\n');",
+    "    const text = m.params.name === 'leak' ? 'key sk-live-abcdefghijklmnopqrstuvwxyz'",
+    "      : m.params.name === 'env' ? 'env-checked ' + (process.env.THEBE_TEST_SECRET || 'absent') + ' ' + (process.env.SERVER_ONLY || '')",
+    "      : 'remote:' + ((m.params.arguments || {}).query || '');",
+    "    result = { content: [{ type: 'text', text }] };",
+    "  }",
+    "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');",
+    "});",
+  ].join("\n");
+  const log = join(mkdtempSync(join(tmpdir(), "thebe-mcp-calls-")), "calls.log");
+  writeFileSync(log, "");
+  let enabled = initial.enabled ?? true;
+  const before: Array<{ toolName: string }> = [];
+  const after: Array<{ toolName: string; isError: boolean; redacted: boolean }> = [];
+  const options = {
+    servers: () => [{
+      name: "fixture", command: process.execPath, args: ["-e", script], enabled, exposure: initial.exposure ?? "deferred",
+      env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
+    }],
+    async beforeCall(call: { toolName: string }) {
+      before.push(call);
+      return initial.block ? { block: initial.block } : undefined;
+    },
+    async afterCall(call: { toolName: string }, outcome: { isError: boolean; redacted: boolean }) {
+      after.push({ toolName: call.toolName, ...outcome });
+    },
+  };
+  return {
+    options, before, after,
+    setEnabled(value: boolean) { enabled = value; },
+    calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
+  };
+}
+
 describe("PiCodingAgentRuntime sessions", () => {
-  it("loads MCP schemas only after discovery and can invoke the loaded tool", async () => {
+  it("connects MCP servers through the runtime's own client and loads schemas only after discovery", async () => {
     const { faux, runtime } = await piWithFaux();
-    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "remote result" }],
-      structuredContent: { items: [{ id: "verified-id" }] } }));
+    const mcp = mcpFixture();
     const schemas: string[][] = [];
     faux.setResponses([
       (context) => {
@@ -84,83 +135,145 @@ describe("PiCodingAgentRuntime sessions", () => {
       },
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"],
-      externalMcp: {
-        listTools: async () => [{ name: "mcp:fixture/catalog", serverName: "fixture", originalName: "catalog",
-          description: "Search remote catalog", permission: "read",
-          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }],
-        callTool,
-      },
-    });
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
     try {
       await session.prompt("search remote catalog");
-      expect(schemas[0]).toEqual(["read", "tool_search"]);
+      expect(schemas[0]).toEqual(expect.arrayContaining(["read", "tool_search"]));
+      expect(schemas[0]).not.toContain("mcp__fixture__catalog");
       expect(schemas[1]).toContain("mcp__fixture__catalog");
-      expect(callTool).toHaveBeenCalledWith("mcp:fixture/catalog", { query: "music" }, expect.any(AbortSignal));
-      expect(session.messages()).toContainEqual(expect.objectContaining({ role: "tool", toolName: "mcp__fixture__catalog", text: "remote result" }));
+      expect(session.messages()).toContainEqual(expect.objectContaining({ role: "tool", toolName: "mcp__fixture__catalog", text: expect.stringContaining("remote:music") }));
+      expect(mcp.before.map((call) => call.toolName)).toEqual(["mcp__fixture__catalog"]);
+      expect(mcp.after).toEqual([expect.objectContaining({ toolName: "mcp__fixture__catalog", isError: false })]);
     } finally { session.dispose(); }
   });
 
-  it("blocks discovered MCP writes before invocation when approval is denied", async () => {
+  it("redacts MCP results and fences them as untrusted output", async () => {
     const { faux, runtime } = await piWithFaux();
-    const callTool = vi.fn();
+    const mcp = mcpFixture();
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "secret leak", limit: 1 })]),
+      fauxAssistantMessage([fauxToolCall("mcp__fixture__leak", {})]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    try {
+      await session.prompt("leak");
+      const text = JSON.stringify(session.messages());
+      expect(text).toContain('<tool_output tool=\\"mcp__fixture__leak\\">');
+      expect(text).not.toContain("sk-live-abcdefghijklmnopqrstuvwxyz");
+      expect(mcp.after[0]).toMatchObject({ redacted: true });
+    } finally { session.dispose(); }
+  });
+
+  it("blocks a policy-denied MCP call before it reaches the server", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const mcp = mcpFixture({ block: "budget exhausted" });
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
+      fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]),
+      fauxAssistantMessage("blocked"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    try {
+      await session.prompt("search");
+      expect(JSON.stringify(session.messages())).toContain("budget exhausted");
+      expect(JSON.stringify(session.messages())).not.toContain("remote:music");
+      expect(mcp.after).toEqual([]);
+    } finally { session.dispose(); }
+  });
+
+  it("asks before a server's write tool runs and does not run it when denied", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const mcp = mcpFixture();
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "publish", limit: 1 })]),
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "publish playlist", limit: 1 })]),
       fauxAssistantMessage([fauxToolCall("mcp__fixture__publish", { id: "playlist-1" })]),
       fauxAssistantMessage("denied"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"],
-      permissionHandler: { request }, externalMcp: {
-        listTools: async () => [{ name: "mcp:fixture/publish", serverName: "fixture", originalName: "publish",
-          description: "Publish playlist", permission: "confirm", inputSchema: { type: "object" } }], callTool,
-      },
-    });
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
     try {
       await session.prompt("publish");
       expect(request).toHaveBeenCalledWith(expect.objectContaining({ toolName: "mcp__fixture__publish", risk: "high" }));
-      expect(callTool).not.toHaveBeenCalled();
+      expect(mcp.calls()).not.toContain("publish");
     } finally { session.dispose(); }
   });
 
-  it("refreshes discovered MCP tools in an existing session after server enable and disable", async () => {
+  it("does not ask for a tool the server marks read-only", async () => {
     const { faux, runtime } = await piWithFaux();
-    let enabled = false;
-    const callTool = vi.fn(async () => ({ content: [{ type: "text", text: "live" }] }));
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], externalMcp: {
-      listTools: async () => enabled ? [{ name: "mcp:fixture/catalog", serverName: "fixture", originalName: "catalog",
-        description: "Search remote catalog", permission: "read", inputSchema: { type: "object" } }] : [],
-      callTool,
-    } });
+    const mcp = mcpFixture();
+    const request = vi.fn(async () => "deny" as const);
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
+      fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
     try {
-      faux.setResponses([(context) => {
-        expect(getCurrentTools(context.messages).map(tool => tool.name)).toEqual(["read", "tool_search"]);
-        return fauxAssistantMessage("no MCP configured");
-      }]);
+      await session.prompt("search");
+      expect(request).not.toHaveBeenCalled();
+    } finally { session.dispose(); }
+  });
+
+  it("refreshes MCP servers in an existing session after enable and disable", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const mcp = mcpFixture({ enabled: false });
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    try {
+      faux.setResponses([fauxAssistantMessage("no MCP enabled")]);
       await session.prompt("list available tools");
-      enabled = true;
+      expect(session.toolNames()).not.toContain("mcp__fixture__catalog");
+      mcp.setEnabled(true);
       await session.reloadResources!();
       faux.setResponses([
-        (context) => {
-          const names = getCurrentTools(context.messages).map(tool => tool.name);
-          expect(names).not.toContain("mcp__fixture__catalog");
-          return fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]);
-        },
-        (context) => {
-          expect(getCurrentTools(context.messages).map(tool => tool.name)).toContain("mcp__fixture__catalog");
-          return fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]);
-        },
+        fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
+        fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "x" })]),
         fauxAssistantMessage("enabled"),
       ]);
       await session.prompt("search");
-      expect(callTool).toHaveBeenCalledTimes(1);
-      enabled = false;
+      expect(mcp.calls()).toContain("catalog");
+      mcp.setEnabled(false);
       await session.reloadResources!();
-      faux.setResponses([fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", {})]), fauxAssistantMessage("disabled")]);
-      await session.prompt("search again");
-      expect(callTool).toHaveBeenCalledTimes(1);
       expect(session.toolNames()).not.toContain("mcp__fixture__catalog");
     } finally { session.dispose(); }
+  });
+
+  it("keeps approval, policy and redaction on calls a codemode script makes", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const mcp = mcpFixture({ exposure: "codemode" });
+    const request = vi.fn(async () => "deny" as const);
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("codemode", { code: "const r = await tools.mcp__fixture__leak({}); text(JSON.stringify(r)); try { await tools.mcp__fixture__publish({ id: 'p' }); } catch (e) { text('publish failed: ' + e.message); }" })]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
+    try {
+      await session.prompt("script");
+      const text = JSON.stringify(session.messages());
+      expect(text).not.toContain("sk-live-abcdefghijklmnopqrstuvwxyz");
+      expect(request).toHaveBeenCalledWith(expect.objectContaining({ toolName: "mcp__fixture__publish" }));
+      expect(mcp.calls()).toEqual(["leak"]);
+      expect(mcp.before.map((call) => call.toolName)).toEqual(["mcp__fixture__leak", "mcp__fixture__publish"]);
+    } finally { session.dispose(); }
+  });
+
+  it("starts stdio servers without Core's own environment", async () => {
+    const { faux, runtime } = await piWithFaux();
+    process.env.THEBE_TEST_SECRET = "must-not-reach-mcp";
+    const mcp = mcpFixture();
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("tool_search", { query: "environment", limit: 1 })]),
+      fauxAssistantMessage([fauxToolCall("mcp__fixture__env", {})]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    try {
+      await session.prompt("env");
+      const text = JSON.stringify(session.messages());
+      expect(text).toContain("env-checked");
+      expect(text).not.toContain("must-not-reach-mcp");
+      expect(text).toContain("server-only");
+    } finally { delete process.env.THEBE_TEST_SECRET; session.dispose(); }
   });
   it("rejects a terminal model failure and allows the next turn to recover", async () => {
     const { faux, runtime } = await piWithFaux();

@@ -1,3 +1,4 @@
+import type { RuntimeMcpServer } from "../runtime/interface.ts";
 import {
   CONTAINER_CAPABILITY_METADATA,
   CONTAINER_RESTART_ACTION_ID,
@@ -126,10 +127,6 @@ export type McpServerInfo = {
   category?: HomelabCapabilityCategory;
   permission?: HomelabCapabilityPermission;
   status?: string;
-  error?: string;
-  toolCount?: number;
-  /** ISO time of the last probe that reached a verdict; absent until the server is first checked. */
-  checkedAt?: string;
   disabled?: boolean;
 };
 
@@ -155,8 +152,8 @@ export type McpRegistry = {
   setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
   /** Deletes a server Thebe registered. Resolves false when no such server exists. */
   removeServer?(name: string): Promise<boolean>;
-  /** Probes one server now. A disabled server is reported without being started. */
-  checkServer?(name: string): Promise<McpServerInfo | undefined>;
+  /** Servers for the runtime's own MCP client. Synchronous because the runtime reads it on session start. */
+  runtimeServers?(): RuntimeMcpServer[];
   invokeTool(name: string, args: unknown): Promise<string | undefined>;
   invokeToolResult?(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult>;
   close(): void;

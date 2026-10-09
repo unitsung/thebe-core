@@ -11,6 +11,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.4
         version: 1.0.4(@aws-sdk/credential-provider-node@3.972.83)(@modelcontextprotocol/sdk@1.31.0(zod@4.6.5))(@smithy/signature-v4@5.7.3)(ws@8.21.3)(zod@4.6.5)
+      '@earendil-works/pi-mcp':
+        specifier: 1.0.4
+        version: 1.0.4
       '@earendil-works/pi-server':
         specifier: 1.0.4
         version: 1.0.4
