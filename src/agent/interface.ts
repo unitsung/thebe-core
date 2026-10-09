@@ -208,6 +208,10 @@ export interface ThebeAgent {
   listMcpTools(): Promise<McpToolInfo[]>;
   listMcpServers(): Promise<McpServerInfo[]>;
   setMcpServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
+  /** Probes one MCP server and returns its refreshed state; undefined when it is unknown. */
+  checkMcpServer(name: string): Promise<McpServerInfo | undefined>;
+  /** Deletes a server registered through Thebe; false when it does not exist. */
+  removeMcpServer(name: string): Promise<boolean>;
   closeMcp(): void;
   listSubagentProfiles(): Promise<SubagentProfile[]>;
   spawnSubagent(input: { profileName: string; taskPrompt: string; parentSessionId: string }): Promise<SubagentRun>;

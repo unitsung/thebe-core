@@ -57,6 +57,51 @@ export async function addConfiguredMcpServer(input: McpServerRegistration, optio
   } finally { await rm(temporary, { force: true }); }
 }
 
+/** A removal the caller cannot perform, reported with an HTTP-style status. */
+export class McpConfigurationConflict extends Error {
+  readonly status = 409;
+  readonly code = "mcp_server_not_removable";
+}
+
+/**
+ * Removes a server from the file that registration writes. A server defined only
+ * in another configuration file (global, `.mcp.json`) is not ours to edit and is
+ * refused rather than silently left in place. Returns whether anything was removed.
+ */
+export async function removeConfiguredMcpServer(name: string, options: { cwd?: string; homeDir?: string }): Promise<boolean> {
+  const root = await realpath(options.cwd ?? options.homeDir ?? homedir());
+  const path = join(root, ".thebe", "mcp.json");
+  let config: Record<string, unknown>;
+  try {
+    config = JSON.parse(await readFile(path, "utf8"));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error("Invalid MCP configuration JSON");
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return failIfConfiguredElsewhere(name, options);
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid MCP configuration");
+  const key = (["mcpServers", "servers"] as const).find((candidate) => {
+    const group = config[candidate];
+    return group && typeof group === "object" && !Array.isArray(group) && Object.hasOwn(group, name);
+  });
+  if (!key) return failIfConfiguredElsewhere(name, options);
+  const { [name]: _removed, ...rest } = config[key] as Record<string, unknown>;
+  config[key] = rest;
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(config, null, 2) + "\n", { flag: "wx", mode: 0o600 });
+    await rename(temporary, path);
+  } finally { await rm(temporary, { force: true }); }
+  return true;
+}
+
+async function failIfConfiguredElsewhere(name: string, options: { cwd?: string; homeDir?: string }): Promise<false> {
+  if ((await listConfiguredMcpServers(options)).some((server) => server.name === name)) {
+    throw new McpConfigurationConflict("MCP server is defined outside Thebe's configuration file and cannot be removed here");
+  }
+  return false;
+}
+
 export type McpServerConfig = {
   name: string;
   command?: string;

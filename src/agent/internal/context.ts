@@ -656,6 +656,12 @@ function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
     has("download.add")
       ? "2. Download: download.add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download.status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
       : "2. Download: no downloader tool is configured; use service_api_discover to find a download operation, or tell the user which connection is missing.",
+    ...(has("download.delete")
+      ? ["Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download.pause otherwise."]
+      : []),
+    ...(has("download.pause") || has("download.resume")
+      ? ["Hold or restart a named download with download.pause / download.resume (hashes from download.list). Neither deletes the task or its files; confirm the new state with download.status."]
+      : []),
     has("files.copy")
       ? "3. Place: files.list the finished folder and the library folder, files.mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files.copy (prefer copy; use files.move only after a verified copy). These are asynchronous: confirm with files.list that the files arrived."
       : "3. Place: move or copy the finished files into the library folder with the available file tools.",

@@ -128,6 +128,8 @@ export type McpServerInfo = {
   status?: string;
   error?: string;
   toolCount?: number;
+  /** ISO time of the last probe that reached a verdict; absent until the server is first checked. */
+  checkedAt?: string;
   disabled?: boolean;
 };
 
@@ -151,6 +153,10 @@ export type McpRegistry = {
   listTools(): Promise<McpToolInfo[]>;
   listServers(): Promise<McpServerInfo[]>;
   setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
+  /** Deletes a server Thebe registered. Resolves false when no such server exists. */
+  removeServer?(name: string): Promise<boolean>;
+  /** Probes one server now. A disabled server is reported without being started. */
+  checkServer?(name: string): Promise<McpServerInfo | undefined>;
   invokeTool(name: string, args: unknown): Promise<string | undefined>;
   invokeToolResult?(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult>;
   close(): void;

@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { access } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createMcpClientRegistry } from "./index.ts";
 
@@ -135,5 +136,148 @@ describe("external MCP client registry", () => {
       registry.close();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  });
+
+  describe("server health checks", () => {
+    const stdioScript = (toolsResponse: string) => [
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "rl.on('line', (line) => {",
+      "  const m = JSON.parse(line);",
+      "  if (m.id === undefined) return;",
+      "  if (m.method === 'initialize') return process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'f', version: '1' } } }) + '\\n');",
+      `  if (m.method === 'tools/list') return process.stdout.write(JSON.stringify(${toolsResponse}) + '\\n');`,
+      "});",
+    ].join("\n");
+
+    async function workspace(servers: Record<string, unknown>) {
+      const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-health-cwd-"));
+      const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-health-home-"));
+      await mkdir(join(cwd, ".thebe"), { recursive: true });
+      await writeFile(join(cwd, ".thebe", "mcp.json"), JSON.stringify({ mcpServers: servers }));
+      return { cwd, homeDir };
+    }
+
+    it("reports a ready server with checkedAt and a zero tool count", async () => {
+      const dirs = await workspace({
+        empty: { command: process.execPath, args: ["-e", stdioScript("{ jsonrpc: '2.0', id: m.id, result: { tools: [] } }")] },
+      });
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 5_000 });
+      try {
+        const [before] = await registry.listServers();
+        expect(before).toEqual(expect.objectContaining({ name: "empty", status: "configured" }));
+        expect(before?.checkedAt).toBeUndefined();
+        expect(before?.toolCount).toBeUndefined();
+
+        const checked = await registry.checkServer("empty");
+        expect(checked).toEqual(expect.objectContaining({ name: "empty", status: "ready", toolCount: 0 }));
+        expect(Number.isNaN(Date.parse(checked?.checkedAt ?? ""))).toBe(false);
+        await expect(registry.listServers()).resolves.toEqual([
+          expect.objectContaining({ status: "ready", toolCount: 0, checkedAt: checked?.checkedAt }),
+        ]);
+      } finally { registry.close(); }
+    });
+
+    it("records a redacted, bounded error when the probe fails", async () => {
+      const secret = "supersecretvalue";
+      const message = `upstream rejected TOKEN=${secret} ${"x".repeat(1000)}`;
+      const dirs = await workspace({
+        broken: { command: process.execPath, args: ["-e", stdioScript(`{ jsonrpc: '2.0', id: m.id, error: { code: -32000, message: ${JSON.stringify(message)} } }`)] },
+      });
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 5_000 });
+      try {
+        const checked = await registry.checkServer("broken");
+        expect(checked?.status).toBe("error");
+        expect(checked?.checkedAt).toBeDefined();
+        expect(checked?.toolCount).toBeUndefined();
+        expect(checked?.error).toContain("upstream rejected");
+        expect(checked?.error).not.toContain(secret);
+        expect(checked?.error?.length).toBeLessThanOrEqual(300);
+      } finally { registry.close(); }
+    });
+
+    it("never starts a disabled server when checking it", async () => {
+      const dirs = await workspace({});
+      const marker = join(dirs.cwd, "started");
+      await writeFile(
+        join(dirs.cwd, ".thebe", "mcp.json"),
+        JSON.stringify({ mcpServers: { idle: {
+          command: process.execPath,
+          args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(marker)}, '1'); setTimeout(() => {}, 5000)`],
+          disabled: true,
+        } } }),
+      );
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 1_000 });
+      try {
+        await expect(registry.checkServer("idle")).resolves.toEqual(
+          expect.objectContaining({ name: "idle", status: "disabled", disabled: true }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await expect(access(marker)).rejects.toThrow();
+      } finally { registry.close(); }
+    });
+
+    const callScript = (onCall: string) => [
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');",
+      "rl.on('line', (line) => {",
+      "  const m = JSON.parse(line);",
+      "  if (m.id === undefined) return;",
+      "  if (m.method === 'initialize') return send({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'f', version: '1' } } });",
+      "  if (m.method === 'tools/list') return send({ jsonrpc: '2.0', id: m.id, result: { tools: [{ name: 'act', inputSchema: { type: 'object' } }] } });",
+      `  if (m.method === 'tools/call') { ${onCall} }`,
+      "});",
+    ].join("\n");
+
+    it("marks a server unreachable when it dies during a tool call", async () => {
+      const dirs = await workspace({
+        crashy: { command: process.execPath, args: ["-e", callScript("process.exit(1);")] },
+      });
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 5_000 });
+      try {
+        await registry.listTools();
+        await expect(registry.listServers()).resolves.toEqual([
+          expect.objectContaining({ status: "ready", toolCount: 1 }),
+        ]);
+        await expect(registry.invokeTool("mcp:crashy/act", {})).rejects.toThrow();
+        const [after] = await registry.listServers();
+        expect(after).toEqual(expect.objectContaining({ name: "crashy", status: "error" }));
+        expect(after?.error).toBeTruthy();
+        expect(after?.checkedAt).toBeDefined();
+        expect(after?.toolCount).toBeUndefined();
+      } finally { registry.close(); }
+    });
+
+    it("keeps a server ready when it answers a tool call with a JSON-RPC error", async () => {
+      const dirs = await workspace({
+        picky: { command: process.execPath, args: ["-e", callScript("send({ jsonrpc: '2.0', id: m.id, error: { code: -32602, message: 'bad params' } });")] },
+      });
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 5_000 });
+      try {
+        await registry.listTools();
+        await expect(registry.invokeTool("mcp:picky/act", {})).rejects.toThrow(/bad params/);
+        await expect(registry.listServers()).resolves.toEqual([
+          expect.objectContaining({ name: "picky", status: "ready", toolCount: 1 }),
+        ]);
+      } finally { registry.close(); }
+    });
+
+    it("returns undefined for an unknown server and clears the verdict on re-enable", async () => {
+      const dirs = await workspace({
+        one: { command: process.execPath, args: ["-e", stdioScript("{ jsonrpc: '2.0', id: m.id, result: { tools: [] } }")] },
+      });
+      const registry = createMcpClientRegistry({ ...dirs, timeoutMs: 5_000 });
+      try {
+        await expect(registry.checkServer("missing")).resolves.toBeUndefined();
+        await registry.checkServer("one");
+        await registry.setServerEnabled("one", false);
+        await registry.setServerEnabled("one", true);
+        const [after] = await registry.listServers();
+        expect(after).toEqual(expect.objectContaining({ status: "configured" }));
+        expect(after?.checkedAt).toBeUndefined();
+        expect(after?.toolCount).toBeUndefined();
+      } finally { registry.close(); }
+    });
   });
 });

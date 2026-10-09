@@ -33,6 +33,9 @@ out/
 !/.thebe/skills/navidrome-recommend/
 !/.thebe/skills/library-lookup/
 !/.thebe/skills/photo-find/
+!/.thebe/skills/container-triage/
+!/.thebe/skills/download-monitor/
+!/.thebe/skills/media-acquire/
 *.sqlite
 *.sqlite3
 *.db

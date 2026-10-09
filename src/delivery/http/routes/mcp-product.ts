@@ -57,6 +57,32 @@ export async function handleMcpProductRoutes(
       if (!server) return notFound("MCP server not found");
       return json(toProductMcpServer(server));
     }
+    if (
+      request.method === "DELETE" &&
+      parts.length === 5 &&
+      parts[3] === PRODUCT_HTTP_SEGMENT.servers
+    ) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const name = decodeURIComponent(parts[4] ?? "");
+      if (!name) return undefined;
+      if (!(await agent.removeMcpServer(name))) return notFound("MCP server not found");
+      return json({ ok: true });
+    }
+    if (
+      request.method === "POST" &&
+      parts.length === 6 &&
+      parts[3] === PRODUCT_HTTP_SEGMENT.servers &&
+      parts[5] === PRODUCT_HTTP_SEGMENT.check
+    ) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const name = decodeURIComponent(parts[4] ?? "");
+      if (!name) return undefined;
+      const server = await agent.checkMcpServer(name);
+      if (!server) return notFound("MCP server not found");
+      return json(toProductMcpServer(server));
+    }
     return undefined;
   } catch (error) {
     return agentError(error);

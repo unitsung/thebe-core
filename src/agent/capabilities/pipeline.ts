@@ -30,6 +30,12 @@ export interface DownloadProvider {
   add(input: { urls: string[]; savePath?: string; category?: string; paused?: boolean }): Promise<{ submitted: number }>;
   list(input: { filter?: "all" | "downloading" | "completed" | "paused" | "errored"; category?: string; limit?: number }): Promise<DownloadItem[]>;
   get(hash: string): Promise<DownloadItem | undefined>;
+  /** Optional. Providers without it simply do not expose download.pause. */
+  pause?(hashes: string[]): Promise<void>;
+  /** Optional. Providers without it simply do not expose download.resume. */
+  resume?(hashes: string[]): Promise<void>;
+  /** Optional and irreversible. Removes the tasks; deleteFiles also removes downloaded data. */
+  remove?(hashes: string[], deleteFiles: boolean): Promise<void>;
 }
 
 export type FileEntry = {
@@ -61,6 +67,9 @@ export const PIPELINE_READ_TOOL_NAMES = ["download.list", "download.status", "fi
 
 export const PIPELINE_WRITE_TOOL_NAMES = [
   "download.add",
+  "download.pause",
+  "download.resume",
+  "download.delete",
   "files.mkdir",
   "files.copy",
   "files.move",
@@ -84,6 +93,24 @@ export const PIPELINE_TOOL_SCHEMAS: Record<PipelineToolName, Record<string, unkn
       paused: { type: "boolean", description: "Add stopped so the user can review it." },
     },
     required: ["urls"],
+  },
+  "download.pause": {
+    type: "object",
+    properties: { hashes: stringArray("Torrent info-hashes from download.list or download.status. Always name the downloads; there is no pause-all.") },
+    required: ["hashes"],
+  },
+  "download.resume": {
+    type: "object",
+    properties: { hashes: stringArray("Torrent info-hashes from download.list or download.status. Always name the downloads; there is no resume-all.") },
+    required: ["hashes"],
+  },
+  "download.delete": {
+    type: "object",
+    properties: {
+      hashes: stringArray("Torrent info-hashes from download.list or download.status. Always name the downloads; there is no delete-all."),
+      deleteFiles: { type: "boolean", description: "Required. true also deletes the downloaded files from disk and cannot be undone; false removes only the task and keeps the files." },
+    },
+    required: ["hashes", "deleteFiles"],
   },
   "download.list": {
     type: "object",
@@ -157,6 +184,9 @@ export const PIPELINE_TOOL_SCHEMAS: Record<PipelineToolName, Record<string, unkn
 
 export const PIPELINE_TOOL_DESCRIPTIONS: Record<PipelineToolName, string> = {
   "download.add": "Submit magnet or .torrent URLs to the configured downloader. Requires approval. Afterwards poll download.status until it completes; submission is not completion.",
+  "download.pause": "Pause the named downloads without deleting them or their files. Requires approval. Afterwards confirm with download.status that state is paused.",
+  "download.delete": "Remove the named downloads from the downloader. Irreversible and requires approval. deleteFiles must be stated: false keeps the downloaded files, true deletes them too. Prefer download.pause unless the user asked to delete. Afterwards confirm with download.list.",
+  "download.resume": "Resume the named paused downloads. Requires approval. A finished download resumes as seeding. Afterwards confirm with download.status.",
   "download.list": "List downloader tasks with progress and state. Read-only.",
   "download.status": "Get one download by info-hash: progress, state, save path and content path. Read-only.",
   "files.list": "List a directory in the file manager (OpenList). Read-only. Use it to inspect a share or the library folder before copying.",

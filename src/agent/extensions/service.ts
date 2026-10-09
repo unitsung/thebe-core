@@ -170,6 +170,31 @@ export function createExtensionApi(ctx: AgentContext, artifactStore: ArtifactSto
       await reloadIdleSessions();
       return server;
     },
+    async checkMcpServer(name: string): Promise<McpServerInfo | undefined> {
+      ctx.checkNotQuiesced();
+      if (!ctx.mcp.checkServer) throw new Error("MCP health check is unavailable");
+      const server = await ctx.mcp.checkServer(name);
+      if (!server) return undefined;
+      await audit?.append({ method: "mcp.server.check", parameterHash: hashParameters({ name }),
+        responseBytes: 0, budgetConsumed: 0, redactionFired: false, identity: name,
+        source: `mcp://servers/${name}` });
+      return server;
+    },
+    async removeMcpServer(name: string): Promise<boolean> {
+      ctx.checkNotQuiesced();
+      if (!ctx.mcp.removeServer) throw new Error("MCP removal is unavailable");
+      const removed = await ctx.mcp.removeServer(name);
+      if (!removed) return false;
+      const states = ctx.options.settingsStore?.load().mcpServerStates ?? [];
+      if (states.some((state) => state.name === name)) {
+        await ctx.options.settingsStore?.save({ mcpServerStates: states.filter((state) => state.name !== name) });
+      }
+      await audit?.append({ method: "mcp.server.remove", parameterHash: hashParameters({ name }),
+        responseBytes: 0, budgetConsumed: 0, redactionFired: false, identity: name,
+        source: `mcp://servers/${name}` });
+      await reloadIdleSessions();
+      return true;
+    },
     closeMcp(): void {
       ctx.mcp.close();
     },

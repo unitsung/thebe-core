@@ -34,6 +34,7 @@ export function toProductMcpServer(server: McpServerInfo): McpServerInfo {
     status: server.status,
     error: server.error,
     toolCount: server.toolCount,
+    checkedAt: server.checkedAt,
     disabled: server.disabled,
   };
 }

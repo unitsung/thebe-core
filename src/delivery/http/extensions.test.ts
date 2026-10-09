@@ -75,6 +75,34 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     expect(await recreated.agent.listMcpServers()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "notes", disabled: true })]));
     app.agent.closeMcp(); recreated.agent.closeMcp();
   });
+  it("removes a Thebe-registered MCP server durably and refuses ones it does not own", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-remove-"));
+    await mkdir(join(dir, ".thebe"));
+    await writeFile(join(dir, ".thebe", "mcp.json"), JSON.stringify({ note: "preserved", mcpServers: {
+      notes: { url: "http://127.0.0.1:2/mcp", disabled: true }, keep: { url: "http://127.0.0.1:3/mcp", disabled: true },
+    } }));
+    await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { external: { url: "http://127.0.0.1:4/mcp", disabled: true } } }));
+    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
+    const remove = (name: string) => app.handler.handle(new Request(`http://127.0.0.1:8787/v1/extensions/mcp/servers/${name}`, { method: "DELETE" }));
+
+    expect(await json(await remove("notes"))).toEqual({ ok: true });
+    expect(JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))).toEqual({
+      note: "preserved", mcpServers: { keep: { url: "http://127.0.0.1:3/mcp", disabled: true } },
+    });
+    const names = (await app.agent.listMcpServers()).map((server) => server.name);
+    expect(names).toContain("keep");
+    expect(names).not.toContain("notes");
+    expect((await remove("notes")).status).toBe(404);
+
+    const refused = await remove("external");
+    expect(refused.status).toBe(409);
+    expect(await json(refused)).toMatchObject({ code: "mcp_server_not_removable" });
+    expect(JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")).mcpServers).toHaveProperty("external");
+
+    await app.agent.quiesce();
+    expect((await remove("keep")).status).toBe(503);
+    app.agent.closeMcp();
+  });
   it("lists, gets, and patches skills without exposing file editing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-skills-http-"));
     await mkdir(join(dir, ".thebe", "skills", "demo-skill"), { recursive: true });
@@ -440,6 +468,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       "/v1/capabilities/runs",
       "/v1/capabilities/runs/{runId}",
       "/v1/capabilities/runs/{runId}/log",
+      "/v1/extensions/mcp/servers/{name}/check",
       "/v1/subagents",
       "/v1/subagents/profiles",
       "/v1/subagents/{runId}",
@@ -501,6 +530,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       expect.objectContaining({ type: "string" }),
     );
     expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.patch).toBeDefined();
+    expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.delete).toBeDefined();
     expect(schemas.McpServerPatch).toEqual(
       expect.objectContaining({ required: ["enabled"] }),
     );
@@ -518,5 +548,47 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     expect(capability.properties?.category?.enum).toEqual(
       expect.arrayContaining(["compute", "storage", "network", "photos"]),
     );
+  });
+
+  it("POST check probes one MCP server and never returns credentials", async () => {
+    const checked: string[] = [];
+    const mcp = {
+      async listTools() { return []; },
+      async listServers() { return []; },
+      async setServerEnabled() { return undefined; },
+      async checkServer(name: string) {
+        checked.push(name);
+        if (name !== "notes") return undefined;
+        return {
+          name,
+          command: "notes-mcp",
+          env: { API_KEY: "must-not-leak" },
+          headers: { authorization: "Bearer must-not-leak" },
+          status: "ready",
+          toolCount: 0,
+          checkedAt: "2026-10-09T10:00:00.000Z",
+        } as never;
+      },
+      async invokeTool() { return "ok"; },
+      close() {},
+    };
+    const agent = createThebeAgent({ runtime: createFakeRuntime().runtime, provider: provider(), mcp });
+    const handler = createThebeHttpHandler({ version: "0.1.0", agent });
+    const url = (name: string) => `http://127.0.0.1:8787/v1/extensions/mcp/servers/${name}/check`;
+
+    const ok = await handler.handle(new Request(url("notes"), { method: "POST" }));
+    expect(ok.status).toBe(200);
+    const body = await ok.text();
+    expect(JSON.parse(body)).toEqual({
+      name: "notes", command: "notes-mcp", status: "ready", toolCount: 0, checkedAt: "2026-10-09T10:00:00.000Z",
+    });
+    expect(body).not.toContain("must-not-leak");
+
+    expect((await handler.handle(new Request(url("missing"), { method: "POST" }))).status).toBe(404);
+    expect(checked).toEqual(["notes", "missing"]);
+
+    await agent.quiesce();
+    expect((await handler.handle(new Request(url("notes"), { method: "POST" }))).status).toBe(503);
+    expect(checked).toEqual(["notes", "missing"]);
   });
 });

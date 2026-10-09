@@ -245,8 +245,9 @@ must not call Pi, MCP, or providers directly.
 
 - iOS/App DTOs, SwiftUI screens, native provider clients, and App-side caching.
 - Replacing raw MCP for integration clients. Product-level MCP server
-  enable/disable is exposed through the durable Agent/config seam; arbitrary
-  MCP configuration editing remains out of scope.
+  enable/disable and removal of Thebe-registered servers are exposed through the
+  durable Agent/config seam; editing an existing server's connection remains out
+  of scope.
 - Skill file editing or arbitrary extension code editing.
 - Arbitrary filesystem browsing, uploads, or unrestricted Artifact paths.
 - Automatic replay of an unknown or write-capable active run.

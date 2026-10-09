@@ -30,6 +30,9 @@ const canRunJobs = (providers: PipelineProviders) => !!(providers.downloads && p
 export function availablePipelineTools(providers: PipelineProviders): PipelineToolName[] {
   const names: PipelineToolName[] = [];
   if (providers.downloads) names.push("download.add", "download.list", "download.status");
+  if (providers.downloads?.pause) names.push("download.pause");
+  if (providers.downloads?.resume) names.push("download.resume");
+  if (providers.downloads?.remove) names.push("download.delete");
   if (providers.files) names.push("files.list", "files.mkdir", "files.copy", "files.move", "files.offline_download");
   if (providers.libraries?.length) names.push("library.scan", "library.refresh_item");
   return names;
@@ -154,6 +157,19 @@ async function run(name: PipelineToolName, args: Record<string, unknown>, provid
         paused: args.paused === true,
       });
       return { ...submitted, note: "Submitted, not finished. Poll download.list or download.status for progress." };
+    }
+    case "download.pause":
+    case "download.resume": {
+      const hashes = stringArray(args.hashes, "hashes");
+      const verb = name === "download.pause" ? "pause" : "resume";
+      await providers.downloads![verb]!(hashes);
+      return { requested: hashes.length, hashes, note: `Requested ${verb}. Confirm with download.status.` };
+    }
+    case "download.delete": {
+      const hashes = stringArray(args.hashes, "hashes");
+      if (typeof args.deleteFiles !== "boolean") throw new Error("deleteFiles must be stated as true or false");
+      await providers.downloads!.remove!(hashes, args.deleteFiles);
+      return { requested: hashes.length, hashes, deleteFiles: args.deleteFiles, note: "Requested removal. Confirm with download.list." };
     }
     case "download.list":
       return {

@@ -60,6 +60,40 @@ export class QBittorrentDownloadProvider implements DownloadProvider {
     return { submitted: urls.length };
   }
 
+  private major?: number;
+
+  /** qBittorrent 5 renamed pause/resume to stop/start. */
+  private async verb(kind: "pause" | "resume"): Promise<string> {
+    this.major ??= Number.parseInt((await (await this.request("app/version")).text()).trim().replace(/^v/, ""), 10);
+    if (this.major >= 5) return kind === "pause" ? "stop" : "start";
+    return kind;
+  }
+
+  /** qBittorrent ignores unknown hashes silently, so check them first rather than report a false success. */
+  private async knownHashes(hashes: string[]): Promise<string[]> {
+    const unique = [...new Set(hashes.map(hash => hash.trim().toLowerCase()))];
+    if (unique.length === 0 || unique.length > 20) throw new ProviderError("UNKNOWN", "Provide between 1 and 20 torrent hashes");
+    if (unique.some(hash => !HASH.test(hash))) throw new ProviderError("UNKNOWN", "Invalid torrent hash");
+    const data: unknown = await (await this.request(`torrents/info?hashes=${unique.join("|")}`)).json();
+    const known = new Set(Array.isArray(data) ? data.flatMap(row => toItem(row)?.hash ?? []) : []);
+    const missing = unique.filter(hash => !known.has(hash));
+    if (missing.length > 0) throw new ProviderError("UNKNOWN", `Unknown torrent: ${missing.map(hash => hash.slice(0, 8)).join(", ")}`);
+    return unique;
+  }
+
+  private async act(kind: "pause" | "resume", hashes: string[]): Promise<void> {
+    const unique = await this.knownHashes(hashes);
+    await this.request(`torrents/${await this.verb(kind)}`, new URLSearchParams({ hashes: unique.join("|") }));
+  }
+
+  async remove(hashes: string[], deleteFiles: boolean): Promise<void> {
+    const unique = await this.knownHashes(hashes);
+    await this.request("torrents/delete", new URLSearchParams({ hashes: unique.join("|"), deleteFiles: String(deleteFiles) }));
+  }
+
+  pause(hashes: string[]): Promise<void> { return this.act("pause", hashes); }
+  resume(hashes: string[]): Promise<void> { return this.act("resume", hashes); }
+
   async list(input: { filter?: string; category?: string; limit?: number }): Promise<DownloadItem[]> {
     const query = new URLSearchParams({ sort: "added_on", reverse: "true", limit: String(Math.min(Math.max(input.limit ?? 30, 1), 100)) });
     const filter = ({ downloading: "downloading", completed: "completed", paused: "paused", errored: "errored" } as Record<string, string>)[input.filter ?? ""];

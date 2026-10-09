@@ -44,6 +44,138 @@ describe("qBittorrent downloads", () => {
   });
 });
 
+describe("qBittorrent pause and resume", () => {
+  function qbitControl(version: string, known: string[] = [hash]) {
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? String(init.body) : undefined });
+      if (url.endsWith("auth/login")) return new Response("Ok.", { headers: { "set-cookie": "SID=s; Path=/" } });
+      if (url.endsWith("app/version")) return new Response(version);
+      if (url.includes("torrents/info")) return Response.json(known.map(value => ({ hash: value, name: "T", state: "downloading", progress: 0.1 })));
+      return new Response("");
+    });
+    const provider = new QBittorrentDownloadProvider({ baseUrl: "https://q.example/", username: "u", password: "p", fetch: fetchImpl });
+    const actions = () => calls.filter(call => /torrents\/(stop|start|pause|resume)$/.test(call.url)).map(call => ({ path: call.url.split("/api/v2/")[1], body: call.body }));
+    return { provider, calls, actions };
+  }
+
+  it("uses stop and start on qBittorrent 5", async () => {
+    const { provider, actions } = qbitControl("v5.0.1");
+    await provider.pause([hash]);
+    await provider.resume([hash.toUpperCase()]);
+    expect(actions()).toEqual([
+      { path: "torrents/stop", body: `hashes=${hash}` },
+      { path: "torrents/start", body: `hashes=${hash}` },
+    ]);
+  });
+
+  it("uses pause and resume on qBittorrent 4 and reads the version once", async () => {
+    const { provider, actions, calls } = qbitControl("v4.6.7");
+    await provider.pause([hash]);
+    await provider.resume([hash]);
+    expect(actions().map(action => action.path)).toEqual(["torrents/pause", "torrents/resume"]);
+    expect(calls.filter(call => call.url.endsWith("app/version"))).toHaveLength(1);
+  });
+
+  it("joins several hashes once, without duplicates", async () => {
+    const other = "b".repeat(40);
+    const { provider, actions } = qbitControl("v5.0.0", [hash, other]);
+    await provider.pause([hash, other, hash]);
+    expect(actions()).toEqual([{ path: "torrents/stop", body: `hashes=${hash}%7C${other}` }]);
+  });
+
+  it("rejects unknown, malformed, and oversized requests without sending an action", async () => {
+    const { provider, actions } = qbitControl("v5.0.0");
+    await expect(provider.pause(["c".repeat(40)])).rejects.toThrow("Unknown torrent: cccccccc");
+    await expect(provider.resume([hash, "d".repeat(40)])).rejects.toThrow("Unknown torrent: dddddddd");
+    await expect(provider.pause(["nope"])).rejects.toThrow("Invalid torrent hash");
+    await expect(provider.pause([])).rejects.toThrow("between 1 and 20");
+    await expect(provider.pause(Array.from({ length: 21 }, (_, index) => index.toString(16).padStart(40, "0")))).rejects.toThrow("between 1 and 20");
+    expect(actions()).toEqual([]);
+  });
+
+  it("exposes the tools only when the provider supports them, and routes to it", async () => {
+    const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
+    expect(availablePipelineTools({ downloads: base })).not.toContain("download.pause");
+    const pause = vi.fn(async () => {});
+    const resume = vi.fn(async () => {});
+    const downloads = { ...base, pause, resume };
+    const names = availablePipelineTools({ downloads });
+    expect(names).toEqual(expect.arrayContaining(["download.pause", "download.resume"]));
+    expect(PIPELINE_WRITE_TOOL_NAMES).toEqual(expect.arrayContaining(["download.pause", "download.resume"]));
+
+    const allow = { allow: () => ({ ok: true }) } as any;
+    const tools = createPipelineTools({ downloads }, { policy: allow, callerId: "c" });
+    const result = await tools.find(tool => tool.name === "download.pause")!.execute("1", { hashes: [hash] });
+    expect(pause).toHaveBeenCalledWith([hash]);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ requested: 1, hashes: [hash] });
+    await tools.find(tool => tool.name === "download.resume")!.execute("2", { hashes: [hash] });
+    expect(resume).toHaveBeenCalledWith([hash]);
+    await expect(tools.find(tool => tool.name === "download.pause")!.execute("3", { hashes: [] })).rejects.toThrow("must not be empty");
+    expect(pause).toHaveBeenCalledTimes(1);
+
+    const deny = { allow: () => ({ ok: false, reason: "blocked" }) } as any;
+    const blocked = createPipelineTools({ downloads }, { policy: deny, callerId: "c" }).find(tool => tool.name === "download.resume")!;
+    await expect(blocked.execute("4", { hashes: [hash] })).rejects.toThrow("blocked");
+    expect(resume).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("qBittorrent delete", () => {
+  function qbitDelete(known: string[] = [hash]) {
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      calls.push({ url, body: init?.body ? String(init.body) : undefined });
+      if (url.endsWith("auth/login")) return new Response("Ok.", { headers: { "set-cookie": "SID=s; Path=/" } });
+      if (url.includes("torrents/info")) return Response.json(known.map(value => ({ hash: value, name: "T", state: "downloading", progress: 0.1 })));
+      return new Response("");
+    });
+    const provider = new QBittorrentDownloadProvider({ baseUrl: "https://q.example/", username: "u", password: "p", fetch: fetchImpl });
+    const deletes = () => calls.filter(call => call.url.endsWith("torrents/delete")).map(call => call.body);
+    return { provider, deletes };
+  }
+
+  it("sends deleteFiles exactly as stated", async () => {
+    const { provider, deletes } = qbitDelete();
+    await provider.remove([hash], false);
+    await provider.remove([hash], true);
+    expect(deletes()).toEqual([`hashes=${hash}&deleteFiles=false`, `hashes=${hash}&deleteFiles=true`]);
+  });
+
+  it("rejects unknown and malformed hashes without deleting anything", async () => {
+    const { provider, deletes } = qbitDelete();
+    await expect(provider.remove(["c".repeat(40)], true)).rejects.toThrow("Unknown torrent: cccccccc");
+    await expect(provider.remove(["nope"], true)).rejects.toThrow("Invalid torrent hash");
+    await expect(provider.remove([], false)).rejects.toThrow("between 1 and 20");
+    expect(deletes()).toEqual([]);
+  });
+
+  it("is exposed only with provider support, needs an explicit deleteFiles, and is policy-gated", async () => {
+    const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
+    expect(availablePipelineTools({ downloads: base })).not.toContain("download.delete");
+    const remove = vi.fn(async () => {});
+    const downloads = { ...base, remove };
+    expect(availablePipelineTools({ downloads })).toContain("download.delete");
+    expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download.delete");
+
+    const allow = { allow: () => ({ ok: true }) } as any;
+    const tool = createPipelineTools({ downloads }, { policy: allow, callerId: "c" }).find(item => item.name === "download.delete")!;
+    await expect(tool.execute("1", { hashes: [hash] })).rejects.toThrow("deleteFiles");
+    await expect(tool.execute("2", { hashes: [hash], deleteFiles: "yes" })).rejects.toThrow("deleteFiles");
+    expect(remove).not.toHaveBeenCalled();
+    const result = await tool.execute("3", { hashes: [hash], deleteFiles: false });
+    expect(remove).toHaveBeenCalledWith([hash], false);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ requested: 1, deleteFiles: false });
+
+    const deny = { allow: () => ({ ok: false, reason: "blocked" }) } as any;
+    const blocked = createPipelineTools({ downloads }, { policy: deny, callerId: "c" }).find(item => item.name === "download.delete")!;
+    await expect(blocked.execute("4", { hashes: [hash], deleteFiles: true })).rejects.toThrow("blocked");
+    expect(remove).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("OpenList files", () => {
   function openlist(payload: unknown) {
     const calls: Array<{ url: string; body: any; auth: string | null }> = [];

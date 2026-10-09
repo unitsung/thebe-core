@@ -131,11 +131,20 @@ OpenList 地址和 token 后，能力会自动出现在 Core capability catalog�
 export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 # With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
-# Core exposes the acquisition pipeline tools: download.add/list/status, files.list/mkdir/copy/move/offline_download,
+# Core exposes the acquisition pipeline tools: download.add/list/status/pause/resume, files.list/mkdir/copy/move/offline_download,
 # library.scan and library.refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource.search,
 # and pipeline.acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
 # persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
 ```
+
+`download.pause` / `download.resume` 按 `hashes`（1–20 个 info-hash，没有"全部暂停"）暂停或恢复
+下载，不删除任务和文件，需要审批。qBittorrent 5 使用 `stop`/`start`，4.x 使用 `pause`/`resume`，
+Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBittorrent 自身会忽略未知 hash）。下载器若不
+支持这两个操作，对应工具不会出现。
+
+`download.delete` 同样按 `hashes` 工作（1–20 个，没有"全部删除"），不可撤销，需要审批。`deleteFiles`
+必须明确给出 true 或 false：false 只移除任务并保留已下载文件，true 连同磁盘上的文件一起删除；缺省或
+非布尔值会被拒绝，不会默认删除。未知 hash 同样会被拒绝。下载器不支持时该工具不会出现。
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
@@ -219,6 +228,19 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 `~/.thebe/skills/` 后，在 App 的 Skills 设置里启用 `library-lookup` 与
 `photo-find`。只放在开发仓库里不会让任意工作区自动启用。App 直连路由内置同一份
 说明，并把 Core 工具名改写成本机工具名。
+
+### 运维类 skill
+
+仓库还提供三个围绕 homelab 运维的 skill，放置和启用方式与上面相同：
+
+- `container-triage`：只读排查容器状态和日志（`container.*`），重启不由模型调用，
+  仍走诊断审批流程。需要配置容器 provider（如 Arcane）。
+- `download-monitor`：用 `download.*`、`pipeline.status` / `pipeline.advance`、
+  `files.list` 查看下载与入库任务进度，定位卡住或失败的环节。
+- `media-acquire`：`resource.search` 找片源，由用户选定后用 `pipeline.acquire`
+  下载入库；后两者需要配置索引器、下载器、文件管理器和媒体服务器。
+
+对应工具未配置时，skill 会照实报告而不是编造结果。
 
 ## Arcane 容器 provider 与活动来源
 
