@@ -249,6 +249,9 @@ describe("Thebe agent service (fake runtime)", () => {
     const systemPrompt = createCalls[0]?.systemPrompt ?? "";
 
     expect(systemPrompt).toContain("Return ordinary answers and research results to the parent conversation buffer by default.");
+    expect(systemPrompt).toContain("Reply style: put the answer or result in the first sentence");
+    expect(systemPrompt).toContain("never show instance or item UUIDs, error codes");
+    expect(systemPrompt).toContain("thebe:suggest");
     expect(systemPrompt).toContain("thebe:gallery");
     expect(systemPrompt).toContain('```thebe:gallery\n{"images"');
     expect(systemPrompt).toContain("Never invent media URLs");
