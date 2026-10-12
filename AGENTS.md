@@ -2,7 +2,7 @@
 
 ## Mission
 
-Build and maintain Thebe Core: a terminal-first coding and homelab agent whose conversation loop is supplied by a replaceable runtime. Deliver the requested behavior completely, preserve unrelated user work, and leave the tree easier to understand than you found it.
+Build and maintain Thebe Core: a terminal-first coding and homelab agent whose conversation loop is supplied by the Pi runtime behind the `AgentRuntime` interface. Deliver the requested behavior completely, preserve unrelated user work, and leave the tree easier to understand than you found it.
 
 `CONTEXT.md` is the authoritative vocabulary and architecture reference. Read it before changing an unfamiliar subsystem. Read the relevant document in `docs/` before changing configuration, sessions, summaries, security, MCP, skills, or subagents.
 

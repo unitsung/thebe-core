@@ -1,6 +1,6 @@
 # Thebe Core
 
-The homelab Agent and capability plane. A replaceable agent runtime owns the reasoning loop; this repo does not write a second one. Core turns user intent into discoverable homelab capabilities, normalized events, safe operations, and auditable task results. Service-specific behavior belongs in built-in adapters or external plugins/MCP integrations.
+The homelab Agent and capability plane. The Pi runtime owns the reasoning loop behind the `AgentRuntime` interface; this repo does not write a second one. Core turns user intent into discoverable homelab capabilities, normalized events, safe operations, and auditable task results. Service-specific behavior belongs in built-in adapters or external plugins/MCP integrations.
 
 ## Language
 
@@ -9,7 +9,7 @@ This repository and the Agent it is. Package and repo name are `thebe-core`.
 _Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, a dashboard proxy with no Agent
 
 **AgentRuntime**:
-Agent-owned replaceable runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; concrete runtime Adapters implement this boundary.
+Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. It is a structural seam, not a claim that a second runtime is integrated.
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code
 
 **CommandRisk**:

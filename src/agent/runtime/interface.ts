@@ -1,10 +1,11 @@
 /**
  * The Thebe-owned runtime seam.
  *
- * Agent and delivery code depend on these contracts, while concrete
- * runtimes adapt their own session, model, and event representations here.
- * Keep this module dependency-free so replacing the Pi adapter does not
- * change the contract seen by callers.
+ * Agent and delivery code depend on these contracts, while runtimes adapt
+ * their own session, model, and event representations here. Pi is the only
+ * runtime; keep this module dependency-free so the Pi implementation stays
+ * behind this boundary and tests or a Pi version upgrade do not change the
+ * contract seen by callers.
  */
 export const PI_RUNTIME_ID = "pi-coding-agent";
 
