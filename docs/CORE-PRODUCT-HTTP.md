@@ -56,7 +56,7 @@ kind and opening its content from task details. Existing Artifact retention
 limits still apply. Authorization/Proxy-Authorization Bearer and Basic tokens
 are redacted in logs and Artifact content.
 
-This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. Remaining durable product work is tracked in [Core issue #4](https://github.com/unitsung/thebe-core/issues/4).
+This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. The durable product contract is described in `docs/CORE-NEXT-PRODUCT-SPEC.md`.
 
 ## Shipped
 
@@ -137,7 +137,7 @@ OpenAPI named schemas (not generic objects) for the new product types: `HomelabC
 These are **not** deferred accidentally. They are out of this slice:
 
 - **App contract adoption for the shipped surfaces is done.** `ThebeCoreClient` covers capabilities and runs, Activity (including source/status/time filters and cursors), Goals, Workers, pending permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent settings, Artifacts, audit detail, background-task stop, and push-device registration. Empty protocol defaults in that file are test doubles and the disconnected-client fallback. A future provider-specific screen is new work, not a hole in this client.
-- **Provider-native background tasks.** OpenList, Arcane and qBittorrent discovery/control are wired in `bootstrap.ts`. Each Activity read calls `provider.list()`, so Core recreation does not drop provider tasks. They do not use the capability-run `recovery` field. Terminal providers can supply their own output through the bounded `task_output` Artifact seam. Direct/background capability results remain `report` Artifacts. Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal/Worker reports, Pi detached Bash discovery, and runtime-recreation recovery for Core-owned snapshots remain implemented. qBittorrent completion output and the additional task source close the two previously identified code gaps in issue #4; deployment and real-provider acceptance are separate checks.
+- **Provider-native background tasks.** OpenList, Arcane and qBittorrent discovery/control are wired in `bootstrap.ts`. Each Activity read calls `provider.list()`, so Core recreation does not drop provider tasks. They do not use the capability-run `recovery` field. Terminal providers can supply their own output through the bounded `task_output` Artifact seam. Direct/background capability results remain `report` Artifacts. Operation receipts, Diagnosis runs, enabled-resource snapshots, Goal/Worker reports, Pi detached Bash discovery, and runtime-recreation recovery for Core-owned snapshots remain implemented. qBittorrent completion output and the additional task source close the two previously identified code gaps; deployment and real-provider acceptance are separate checks.
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
 - **Skill file editing**.

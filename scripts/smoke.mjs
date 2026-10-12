@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Release smoke test for a Core deployment (thebe-core issue #5).
+ * Release smoke test for a Core deployment.
  *
  * Default mode spawns `dist/serve.js` with a throwaway data directory and checks:
  *   - `GET /v1/health` answers ok with the token

@@ -1,6 +1,6 @@
 # Core deployment and operator runbook
 
-Status: supported path for a self-hosted Thebe Core (thebe-core issue #5).
+Status: supported path for a self-hosted Thebe Core.
 Shape: **one container** that runs `node dist/serve.js` against a mounted data
 directory (see `docs/adr/0002-core-ships-as-a-container.md`). A host service is
 possible for development, but the container is the supported release shape.
@@ -42,7 +42,7 @@ operate on that one directory.
 | Install | `pnpm install --frozen-lockfile`; runtime images add `--prod` |
 
 `pnpm --version` / `pnpm typecheck` can hang in some release environments
-(issue #5, P1). The release check therefore calls the local binaries directly:
+The release check therefore calls the local binaries directly:
 
 ```bash
 bash scripts/release-check.sh              # typecheck + build + tests + smoke

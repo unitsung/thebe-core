@@ -9,7 +9,6 @@
 > - `unitsung/thebe/docs/PRODUCT-THESIS.md`
 > - `unitsung/thebe/docs/AGENT-NAS-DESIGN-PRINCIPLES.md`
 > - `unitsung/thebe/docs/AGENT-NATIVE-REFACTOR.md`
-> - `unitsung/thebe-core/docs/CORE-ITERATION-PLAN.md`
 
 
 
@@ -29,7 +28,7 @@ The following HTTP product objects are implemented on `dev` and are the current 
 - **Audit log:** `GET /v1/audit` returns bounded, newest-first, redacted audit records with optional `sessionId`, `method`, `result`, and cursor filters; `GET /v1/audit/{id}` reads one stable record. It never returns raw tool parameters.
 - **Push device registration:** `GET /v1/devices` lists token-redacted registrations, `POST /v1/devices` upserts an iOS registration, and `DELETE /v1/devices/{registrationId}` removes one. The iOS settings surface now exposes list and remove management; APNs delivery remains an optional external relay.
 
-Leftover: another provider-native background-task source beyond OpenList and Arcane, and an Artifact kind for that task's own output. The iOS client already covers the shipped product HTTP. Still explicitly out of scope: a Goal `/runs` identity rewrite, replacing raw `/mcp`, and a competing `/v1/approvals` Activity feed. Authoritative leftover list: `docs/CORE-PRODUCT-HTTP.md`; tracking issue: [thebe-core#4](https://github.com/unitsung/thebe-core/issues/4). Deployment runbook: `docs/DEPLOYMENT.md` and [thebe-core#5](https://github.com/unitsung/thebe-core/issues/5).
+Provider-native background tasks (OpenList, Arcane, qBittorrent) and the `task_output` Artifact kind are shipped. The iOS client already covers the shipped product HTTP. Still explicitly out of scope: a Goal `/runs` identity rewrite, replacing raw `/mcp`, and a competing `/v1/approvals` Activity feed. Authoritative surface list: `docs/CORE-PRODUCT-HTTP.md`. Deployment runbook: `docs/DEPLOYMENT.md`.
 
 The App must not call raw MCP `tools/call` for these workflows.
 

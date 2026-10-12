@@ -4,7 +4,7 @@
 #
 # It calls the local binaries directly instead of going through pnpm, because
 # `pnpm --version` / `pnpm typecheck` can hang in some release environments
-# (see thebe-core issue #5, P1). CI runs the same three checks plus the smoke
+# (see docs/DEPLOYMENT.md). CI runs the same three checks plus the smoke
 # test, so an operator can reproduce a release gate on a clean host.
 #
 # usage: bash scripts/release-check.sh [--no-smoke]

@@ -7,8 +7,6 @@ source/OpenAPI contract; this edit adds no deployment or real-provider acceptanc
 
 Status: current workspace closes the remaining code gaps with qBittorrent native tasks and bounded `task_output` Artifacts. Settings, Artifacts, recovery, and the Activity feed are consumed by the iOS client. Provider acceptance and deployment are separate verification steps; OpenList, Arcane and qBittorrent tasks are re-read from their providers.
 
-Tracking issue: [#4](https://github.com/unitsung/thebe-core/issues/4)
-
 The Agent settings slice is now available through `ThebeAgent.getAgentSettings()` /
 `updateAgentSettings()` and `GET/PATCH /v1/settings/agent`. It persists the
 mutable values through the existing Thebe config boundary, keeps permission

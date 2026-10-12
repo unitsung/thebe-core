@@ -9,7 +9,7 @@ to over HTTP. Self-hosters run it on a NAS or a homelab host next to dozens of
 other services. Thebe Core itself supplies no OS sandbox: the command guard,
 workspace boundary, and audit layer are application-level, and Pi's sandbox
 backends (`bwrap`, Gondolin) are host feature-dependent. The release task
-(thebe-core issue #5) asked for **one** supported deployment shape, a reproducible
+The release-readiness work asked for **one** supported deployment shape, a reproducible
 install path, and a documented isolation boundary.
 
 Options considered: a packaged Node distribution (tarball + systemd unit), a
