@@ -298,6 +298,7 @@ Pi 在 0.71 移除了内置的 Gemini CLI / Antigravity provider，所以 Core �
 - **传输**：`v1internal:streamGenerateContent?alt=sse` + Cloud Code Assist 信封，
   消息/工具转换复用 pi-ai 的 Gemini 实现（Claude 模型自动改用 `parameters` 字段）。
   `THEBE_ANTIGRAVITY_ENDPOINT` 可把端点指到本机代理/测试服务器（默认 Google）。
+  OAuth 客户端密钥不随代码发布：登录和刷新令牌前需设置 `THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET`（Antigravity）或 `THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET`（Gemini CLI），未设置时报明确错误。
 
 Headless 登录流程（TUI 设置页与移动端都用这一套）：
 

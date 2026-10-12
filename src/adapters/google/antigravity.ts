@@ -41,12 +41,19 @@ type ClientConfig = {
   userAgent: string;
 };
 
-/** Public installed-application credentials (Google does not treat these as secrets). */
+/**
+ * OAuth client ids for the Cloud Code Assist backends. The client secret is not
+ * bundled: supply it through `THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET` or
+ * `THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET`. Without one, sign-in and refresh fail
+ * with a clear error.
+ */
 export const ANTIGRAVITY_CLIENTS: Record<AntigravityClientKind, ClientConfig> = {
   antigravity: {
     clientId:
       "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-    clientSecret: "REDACTED",
+    get clientSecret() {
+      return process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET ?? "";
+    },
     scopes: [
       "https://www.googleapis.com/auth/cloud-platform",
       "https://www.googleapis.com/auth/userinfo.email",
@@ -59,7 +66,9 @@ export const ANTIGRAVITY_CLIENTS: Record<AntigravityClientKind, ClientConfig> = 
   "gemini-cli": {
     clientId:
       "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-    clientSecret: "REDACTED",
+    get clientSecret() {
+      return process.env.THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET ?? "";
+    },
     scopes: [
       "https://www.googleapis.com/auth/cloud-platform",
       "https://www.googleapis.com/auth/userinfo.email",
@@ -68,6 +77,12 @@ export const ANTIGRAVITY_CLIENTS: Record<AntigravityClientKind, ClientConfig> = 
     userAgent: "gemini-cli/0.1.0 thebe-core",
   },
 };
+
+function requireClientSecret(client: ClientConfig, kind: AntigravityClientKind): void {
+  if (client.clientSecret) return;
+  const name = kind === "antigravity" ? "ANTIGRAVITY" : "GEMINI_CLI";
+  throw new Error(`Google OAuth client secret is not configured (set THEBE_GOOGLE_${name}_CLIENT_SECRET)`);
+}
 
 export const CLIENT_METADATA = JSON.stringify({
   ideType: "IDE_UNSPECIFIED",
@@ -198,6 +213,7 @@ export async function exchangeAuthorizationCode(
   },
 ): Promise<AntigravityCredential> {
   const client = ANTIGRAVITY_CLIENTS[options.kind];
+  requireClientSecret(client, options.kind);
   const response = await fetchImpl(TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -226,6 +242,7 @@ export async function refreshCredential(
   const refreshToken = credential.refreshToken;
   if (!refreshToken) throw new Error("no refresh token stored");
   const client = ANTIGRAVITY_CLIENTS[credential.kind];
+  requireClientSecret(client, credential.kind);
   const response = await fetchImpl(TOKEN_ENDPOINT, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },

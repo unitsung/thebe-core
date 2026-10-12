@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import type {
   OAuthAuthorizeResult,
   RuntimeAuth,
@@ -26,6 +26,11 @@ import {
   withAntigravityAuth,
   type AntigravityCredential,
 } from "./antigravity.ts";
+
+beforeEach(() => {
+  process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET = "test-antigravity-secret";
+  process.env.THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET = "test-gemini-cli-secret";
+});
 
 /** `authorizeOAuth` only carries a URL while the login is still pending. */
 function pendingUrl(result: { pending?: boolean; url?: string }): string | undefined {
@@ -348,5 +353,18 @@ describe("withAntigravityAuth", () => {
     expect(await auth.check(ANTIGRAVITY_PROVIDER_ID)).toEqual({ ok: false });
     expect((await auth.testProvider("openai")).message).toBe("base");
     await expect(auth.setApiKey(ANTIGRAVITY_PROVIDER_ID, "key")).rejects.toThrow("Google OAuth");
+  });
+});
+
+describe("OAuth client secret", () => {
+  it("fails with a clear error when no client secret is configured", async () => {
+    delete process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET;
+    await expect(
+      exchangeAuthorizationCode(async () => new Response("{}"), {
+        kind: "antigravity",
+        code: "c",
+        verifier: "v",
+      }),
+    ).rejects.toThrow("THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET");
   });
 });
