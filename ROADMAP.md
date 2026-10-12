@@ -1,0 +1,133 @@
+# Thebe Core — Roadmap
+
+> 中文速览：这是 Core 的路线图。已交付见 **Shipped**；内测前待办见 **Next**；内测后见
+> **Later**；已识别但未排期的方向见 **Candidate directions**——其中包含**目前完全没有的
+> web 端**；明确不做见 **Not planned**。Core 目前是 API-first：客户端是闭源 Apple App，
+> 加上终端 / HTTP / MCP，没有任何 web 页面。
+
+Status: living document. It reflects what `dev` contains and the remaining work
+named in `docs/CORE-NEXT-PRODUCT-SPEC.md`, `docs/CORE-PRODUCT-HTTP.md`, and the
+App-side `../ui/docs/DEVELOPMENT-PLAN.md`. It is a plan, not a commitment, and
+nothing here is scheduled to a date. There is no tagged release yet.
+
+Clients: the closed-source Thebe app for iOS/iPadOS is the only graphical client,
+and its source is not published. Anyone using this open-source Core has the
+terminal, the HTTP API, and MCP, and no other UI.
+
+## Shipped (on `dev`)
+
+**Runtime and delivery**
+
+- The reasoning loop is `pi-coding-agent`, reached through the `AgentRuntime`
+  interface; Core ships no second loop.
+- Delivery surfaces: terminal TUI (`node dist/tui.js`), a one-shot CLI, the HTTP
+  `/v1` API, and an MCP endpoint `/mcp`.
+
+**Conversations and durable work**
+
+- Sessions (create, resume, fork, compact, export, steer, follow-up, model
+  selection, revert), prompts, Goals, Workers/subagents, schedules, and
+  normalized events.
+- Product HTTP: capability runs, Activity feed, Goals, Workers, pending
+  permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent
+  settings, Artifacts, audit, push device registration, and provider OAuth
+  renewal, each with OpenAPI schemas.
+
+**Capabilities and integrations**
+
+- Arcane (containers), Emby/Jellyfin (media search), Immich (photos), Navidrome
+  (music), OpenList (files and offline download), and qBittorrent (downloads).
+- Prowlarr release search, used inside the acquisition pipeline
+  (`adapters/pipeline/prowlarr-search.ts`) rather than as a standalone adapter.
+- Generic HTTP services defined by an OpenAPI 3 / Swagger 2 document, through
+  `service_api_discover` / `service_api_read` / `service_api_write`.
+- Session web search and `music_research`.
+- Skills (from `.thebe/skills/`) and external MCP servers (from `.thebe/mcp.json`,
+  plus the global config and `.mcp.json`).
+
+**Safety**
+
+- Approval / permission flow (`ask` / `read-only` / `full-access`), `CommandRisk`
+  grading, workspace confinement, Docker command and API guards, `bwrap` and
+  Gondolin micro-VM sandbox options, ScenarioProfiles, output redaction before
+  the model and before disk, and an append-only audit log.
+
+**Product contract**
+
+- Diagnosis `POST /v1/diagnosis` and `ActionReceipt` (slice 02: `container.restart`).
+- Durable Artifacts (`diagnosis`, `report`, `resource_list`, `operation_receipt`,
+  `task_output`), capability-run / Goal / Worker recovery, and the Activity read
+  model with cursor and source/status/time filters.
+- Opt-in Judgment Model behind a Judgment Gate (ADR 0001); first adapter Jev.
+
+**Deployment**
+
+- One container (ADR 0002), backup / restore / upgrade on `/data`, host TLS paths
+  (Tailscale or a reverse proxy), `scripts/smoke.mjs`, `scripts/release-check.sh`,
+  and CI.
+
+## Next
+
+Work named for the first beta, not yet complete in this checkout.
+
+- **Core full-access preset.** A named preset combining `full-access` with the
+  command guard and sandbox off. Default off, only allowed from host config, per
+  session, and not inherited by `/mcp` callers, schedules, or background goals;
+  audit stays on and the App shows a persistent indicator. Bounds and acceptance
+  in `docs/FULL-ACCESS-DESIGN.md`; the `full-access` permission mode itself
+  already ships.
+- **Network-drive transfer task type.** Add a "cloud transfer" kind to the
+  durable task state machine so a download-to-library run completes under Core
+  while the phone sleeps. Self-use, deferrable.
+- **Real-provider and deployment acceptance.** OpenList, Arcane, qBittorrent and
+  the other providers are wired but not verified against live instances, and the
+  Docker build has not been run on the authoring machine. Publish the first image.
+
+## Later
+
+Named after the first beta in `../ui/docs/DEVELOPMENT-PLAN.md` and Core's own
+research.
+
+- **More service coverage.** Radarr, Sonarr, Lidarr, Prowlarr, Jellyseerr, then
+  Plex, Proxmox, and TrueNAS.
+- **Remote push.** APNs delivery through an optional, separately deployed Thebe
+  Push Relay that Core signs minimal events for; a self-hosted Core never embeds
+  Thebe's APNs credentials.
+- **Docker without Arcane.** Talk to the Docker Engine API through
+  `docker-socket-proxy` instead of a container panel.
+- **Open-source release prep.** Scan commit history, remove personal information,
+  finish the README set, publish the Docker image, and add maintenance notes.
+- **Sandbox evolution.** Harden the staged `bwrap` / Gondolin micro-VM path; see
+  `docs/thebe_nas_isolation_and_microvm_research.md`.
+
+## Candidate directions (identified, not scheduled)
+
+- **Web client / browser surface.** Core ships no web UI and none is planned:
+  the only graphical client is the closed-source Apple app, which targets
+  iOS/iPadOS only. There is no macOS, Windows, Android, or web client (the one
+  "Tauri" mention in `security.ts` is a comment example, not a client), so a
+  non-Apple device can reach Core only through the raw API or MCP. `CONTEXT.md`
+  (TUI) explicitly rejects a Thebe-written web chat. Surveyed peers such as Open
+  WebUI, Home Assistant Assist, and Hermes do offer a browser surface. This is an
+  open question, not a decision; revisit at the first-beta retrospective, with no
+  hard metric. Any such client must go through the same `/v1` seam and safety
+  boundary (token, Host allowlist, origin/CSRF for browser writes, no arbitrary
+  host paths, no credential exposure) and must not become a second agent loop.
+- **New provider-native background-task producers.** OpenList, Arcane, and
+  qBittorrent are already on the Activity source seam; another provider extends
+  the same feed rather than adding a new lifecycle owner.
+
+## Not planned
+
+Explicit non-ships from `CONTEXT.md` and `docs/CORE-PRODUCT-HTTP.md`, kept here so
+they are not re-raised as omissions:
+
+- A Goal identity rewrite or `GET /v1/goals/{id}/runs`.
+- Replacing raw `/mcp` for integrations.
+- Skill file or arbitrary extension code editing.
+- Arbitrary filesystem browsing, uploads, or unrestricted Artifact paths.
+- A chat-tool `/v1/approvals` collection (diagnose-restart uses `/v1/activity`;
+  tool confirmations use `/v1/permissions`).
+- A second agent loop, or a Thebe-owned transcript store.
+- iOS DTOs, SwiftUI screens, or native provider clients inside Core.
+- Self-hosted inference; Octop / Hermes / ACP as dependencies.

@@ -1,5 +1,7 @@
 # Thebe 配置指南
 
+[English](configuration.en.md) | 简体中文
+
 ## 配置文件位置
 
 Thebe 的用户配置文件默认位于：
@@ -260,8 +262,8 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 
 ## Arcane 容器 provider 与活动来源
 
-Arcane 提供容器能力（`containers.list` / `containers.inspect` / `container.logs` /
-`host.status`）；配置完整的地址与 API key 后，Core 还会把 Arcane 的
+Arcane 提供容器能力（`container.list` / `container.inspect` / `container.logs` /
+`container.status_summary` / `container.restart` / `container.start`）；配置完整的地址与 API key 后，Core 还会把 Arcane 的
 background activity 注册为 Activity 的后台任务来源（`provider=arcane`）：
 
 ```bash
