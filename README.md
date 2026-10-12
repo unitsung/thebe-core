@@ -6,7 +6,7 @@ Thebe Core is a server you run on your own machine. It works with the services y
 
 This repository is the server. The Thebe app for Apple platforms is not in this repository, and its source is not published. What you can use from here is the terminal, the HTTP API, and MCP.
 
-The server runs as one Docker container, for x86_64 and arm64: a NAS, a mini PC, a Raspberry Pi, or a cloud server. No prebuilt image is published. Build it from this repository.
+The server runs as one Docker container, for x86_64 and arm64: a NAS, a mini PC, a Raspberry Pi, or a cloud server. A multi-arch image is published to GitHub Container Registry (`ghcr.io/unitsung/thebe-core`); the package is private until Core is open-sourced, so the image is not pullable by others yet — build it from this repository, or pull it if you have access.
 
 ## What it does
 
@@ -28,7 +28,7 @@ Models, service URLs, and credentials are in the [configuration guide](docs/conf
 
 ## Quick start
 
-No prebuilt image is published. Build the container from this repository; see the [deployment guide](docs/DEPLOYMENT.md). Running from source, without Docker, needs Node.js 22.19+ and pnpm 10+.
+Build the container from this repository, or pull the published image if you have access; see the [deployment guide](docs/DEPLOYMENT.md). Running from source, without Docker, needs Node.js 22.19+ and pnpm 10+.
 
 ```bash
 cd deploy

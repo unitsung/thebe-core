@@ -80,8 +80,10 @@ Work named for the first beta, not yet complete in this checkout.
   durable task state machine so a download-to-library run completes under Core
   while the phone sleeps. Self-use, deferrable.
 - **Real-provider and deployment acceptance.** OpenList, Arcane, qBittorrent and
-  the other providers are wired but not verified against live instances, and the
-  Docker build has not been run on the authoring machine. Publish the first image.
+  the other providers are wired but not verified against live instances. The
+  container image is now built and pushed to GHCR (linux/amd64 + arm64) by
+  `.github/workflows/publish-image.yml`; its first green run and a live
+  `scripts/smoke.mjs` against a real deployment are still pending.
 
 ## Later
 

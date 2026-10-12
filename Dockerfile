@@ -34,7 +34,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --frozen-lockfile --prod
 COPY --from=build /app/dist ./dist
-COPY --from=build /app/scripts/smoke.mjs /app/scripts/check-pi-resolution.mjs ./scripts/
+COPY scripts/smoke.mjs scripts/check-pi-resolution.mjs ./scripts/
 RUN mkdir -p /data/config /data/agent /data/store /data/outputs /data/home /workspace \
   && chown -R node:node /data /workspace
 USER node
@@ -48,5 +48,5 @@ ENV HOME=/data/home \
     THEBE_OUTPUT_DIR=/data/outputs
 EXPOSE 8787
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.THEBE_PORT||8787)+'/v1/health',{headers:{'X-Thebe-Token':process.env.THEBE_TOKEN||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "const fs=require('fs');const p=(process.env.THEBE_CONFIG_DIR||'/data/config')+'/token';const t=process.env.THEBE_TOKEN||(fs.existsSync(p)?fs.readFileSync(p,'utf8').trim():'');fetch('http://127.0.0.1:'+(process.env.THEBE_PORT||8787)+'/v1/health',{headers:{'X-Thebe-Token':t}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 CMD ["node", "dist/serve.js"]

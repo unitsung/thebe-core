@@ -26,6 +26,8 @@ out/
 
 # Runtime / data
 /data/
+/deploy/data/
+/deploy/workspace/
 /sessions/
 /.thebe/*
 !/.thebe/skills/

@@ -6,7 +6,7 @@ Thebe Core 是跑在你自己机器上的服务端，用来操作已经在跑的
 
 这个仓库只有服务端。Apple 上的 Thebe App 不在这里，源码也不公开。仓库里可以直接使用的是终端、HTTP API 和 MCP。
 
-服务端是一个 Docker 容器，支持 x86_64 和 arm64。NAS、迷你主机、树莓派或云服务器都可以。镜像不单独发布，从本仓库构建。
+服务端是一个 Docker 容器，支持 x86_64 和 arm64。NAS、迷你主机、树莓派或云服务器都可以。多架构镜像已发布到 GitHub Container Registry（`ghcr.io/unitsung/thebe-core`）；Core 开源前该包为私有，别人还拉不到——可以从本仓库构建，有访问权限则可直接拉取。
 
 ## 能做什么
 
@@ -28,7 +28,7 @@ Agent 运行时使用 pi-coding-agent。在指定的工作区里，它可以读�
 
 ## 快速开始
 
-没有预构建镜像，容器从本仓库构建，见[部署文档](docs/DEPLOYMENT.md)。不使用 Docker 时，从源码运行需要 Node.js 22.19+ 和 pnpm 10+。
+容器可从本仓库构建，有访问权限也可拉取已发布镜像，见[部署文档](docs/DEPLOYMENT.md)。不使用 Docker 时，从源码运行需要 Node.js 22.19+ 和 pnpm 10+。
 
 ```bash
 cd deploy

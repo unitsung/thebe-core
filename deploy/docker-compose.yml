@@ -9,10 +9,13 @@
 # the internet, and never send the token over plaintext off-host traffic.
 services:
   thebe-core:
+    # By default this builds from the local source. To run the published image
+    # instead, set THEBE_IMAGE in deploy/.env (see .env.example) and pull:
+    #   docker login ghcr.io && docker compose pull && docker compose up -d
+    image: ${THEBE_IMAGE:-thebe-core:0.1.0}
     build:
       context: ..
       dockerfile: Dockerfile
-    image: thebe-core:0.1.0
     restart: unless-stopped
     env_file:
       - .env
@@ -30,7 +33,7 @@ services:
       - "127.0.0.1:8787:8787"
     volumes:
       - ./data:/data
-      - ${THEBE_WORKSPACE:?set THEBE_WORKSPACE in deploy/.env}:/workspace
+      - ${THEBE_WORKSPACE:-./workspace}:/workspace
     read_only: true
     tmpfs:
       - /tmp
