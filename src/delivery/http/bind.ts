@@ -1,3 +1,7 @@
+import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 export const DEFAULT_THEBE_HOST = "127.0.0.1";
 export const DEFAULT_THEBE_PORT = 8787;
 
@@ -61,4 +65,55 @@ export function productionTokenError(
     return "THEBE_TOKEN is required in production. Set it in .env.local or environment.";
   }
   return undefined;
+}
+
+export type ThebeTokenResolution = {
+  token: string;
+  /** True when this run created the token (it must be shown to the operator). */
+  generated: boolean;
+  /** Where the token is persisted, so it survives a restart. */
+  path?: string;
+};
+
+/**
+ * Resolve the shared token without making the operator invent one.
+ *
+ * Explicit `THEBE_TOKEN` wins. Otherwise the persisted `{configDir}/token` is
+ * reused, and only when neither exists is a new 32-byte token generated and
+ * written (`0600`). Clients (the app, curl) send it as `X-Thebe-Token`; showing
+ * it once on first start is the whole setup step.
+ */
+export function resolveThebeToken(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    configDir?: string;
+    generate?: () => string;
+  } = {},
+): ThebeTokenResolution {
+  const env = options.env ?? process.env;
+  const explicit = env.THEBE_TOKEN?.trim();
+  if (explicit) {
+    return { token: explicit, generated: false };
+  }
+  const generate = options.generate ?? (() => randomBytes(32).toString("hex"));
+  if (options.configDir) {
+    const path = join(options.configDir, "token");
+    try {
+      if (existsSync(path)) {
+        const existing = readFileSync(path, "utf8").trim();
+        if (existing) return { token: existing, generated: false, path };
+      }
+    } catch {
+      // fall through to generate
+    }
+    const token = generate();
+    try {
+      mkdirSync(options.configDir, { recursive: true });
+      writeFileSync(path, `${token}\n`, { mode: 0o600 });
+    } catch {
+      // The token still works for this run even if it could not be persisted.
+    }
+    return { token, generated: true, path };
+  }
+  return { token: generate(), generated: true };
 }

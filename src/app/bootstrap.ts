@@ -21,6 +21,7 @@ import {
 } from "../adapters/arcane/tasks.ts";
 import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
+import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createThebeApp } from "./create.ts";
 import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
@@ -53,10 +54,13 @@ export type ThebeBootstrap = {
   model?: { providerId: string; modelId: string };
   workspacePath: string;
   outputDirectory: string;
+  /** Shared token for HTTP clients; generated and persisted when unset. */
+  token: string;
+  tokenGenerated: boolean;
+  tokenPath?: string;
 };
 
-export type BootstrapOptions = {
-  fromDir?: string;
+export type BootstrapOptions = {  fromDir?: string;
   requireArcane?: boolean;
   model?: { providerId: string; modelId: string };
   allowedHosts?: string[];
@@ -82,6 +86,7 @@ export async function bootstrapThebe(
   const configDir = resolve(
     process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe"),
   );
+  const tokenResolution = resolveThebeToken({ configDir });
   const resolveConfiguredPath = (path: string): string =>
     isAbsolute(path) ? resolve(path) : resolve(configDir, path);
   const workspacePath = resolveConfiguredPath(configuredWorkspacePath);
@@ -183,7 +188,7 @@ export async function bootstrapThebe(
     runtime,
     provider,
     version,
-    token: process.env.THEBE_TOKEN,
+    token: tokenResolution.token,
     modelResultLimit: resolveModelResultLimit(process.env.THEBE_MODEL_RESULT_LIMIT),
     agentStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
@@ -235,6 +240,9 @@ export async function bootstrapThebe(
     model: defaultModel,
     workspacePath,
     outputDirectory,
+    token: tokenResolution.token,
+    tokenGenerated: tokenResolution.generated,
+    tokenPath: tokenResolution.path,
   };
 }
 

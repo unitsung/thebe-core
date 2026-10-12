@@ -28,6 +28,11 @@ if (command.kind === "tui" && (!process.stdin.isTTY || !process.stdout.isTTY)) {
   process.exit(0);
 }
 
+if (command.kind === "doctor") {
+  const { runDoctor } = await import("./commands/doctor.ts");
+  process.exit(await runDoctor());
+}
+
 const { agent, workspacePath, model: bootModel } = await bootstrapThebe({ fromDir: here });
 
 const userConfig = await loadThebeConfig();

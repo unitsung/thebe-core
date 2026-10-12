@@ -2,6 +2,7 @@ export type CliModel = { providerId: string; modelId: string };
 
 export type CliCommand =
   | { kind: "help" }
+  | { kind: "doctor" }
   | {
       kind: "tui";
       sessionId?: string;

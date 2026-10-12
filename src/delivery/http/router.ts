@@ -30,6 +30,7 @@ export type ThebeHttpRouterOptions = {
   agent?: ThebeHttpContext["agent"];
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
+  workspacePath?: string;
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {

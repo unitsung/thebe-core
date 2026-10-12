@@ -2,10 +2,8 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadEnvLocal } from "../../app/config/env.ts";
 import { bootstrapThebe } from "../../app/bootstrap.ts";
-import {
-  productionTokenError,
-  resolveThebeListen,
-} from "./bind.ts";
+import { buildIsolationReport } from "../../agent/security/isolation.ts";
+import { resolveThebeListen } from "./bind.ts";
 import { drainThebeHttpServer } from "./drain.ts";
 import { listenThebeHttp } from "./index.ts";
 
@@ -13,16 +11,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 loadEnvLocal(here);
 
 const listen = resolveThebeListen(process.env);
-const tokenError = productionTokenError(listen.token, process.env.NODE_ENV);
-if (tokenError) {
-  console.error(tokenError);
-  process.exit(1);
-}
 
-const { handler: app, version, agent } = await bootstrapThebe({
+const {
+  handler: app,
+  version,
+  agent,
+  token,
+  tokenGenerated,
+  tokenPath,
+  workspacePath,
+} = await bootstrapThebe({
   fromDir: here,
   allowedHosts: listen.allowedHosts,
 });
+
+for (const warning of buildIsolationReport({ workspacePath }).warnings) {
+  console.warn(`SECURITY: ${warning}`);
+}
 
 const { server, url, bind } = await listenThebeHttp(app, {
   host: listen.host,
@@ -30,6 +35,15 @@ const { server, url, bind } = await listenThebeHttp(app, {
 });
 console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);
 console.log(`THEBE_DOCS ${url}/docs`);
+if (tokenGenerated) {
+  console.log(`THEBE_TOKEN ${token}`);
+  if (tokenPath) {
+    console.log(`THEBE_TOKEN_FILE ${tokenPath}`);
+  }
+  console.log(
+    "New token generated; paste it into the app. It is saved and reused on restart.",
+  );
+}
 
 let shuttingDown = false;
 const shutdown = (signal: string) => {

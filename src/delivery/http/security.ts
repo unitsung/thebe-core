@@ -10,7 +10,10 @@
  * requests are blocked via sec-fetch-site first, then Origin vs Host.
  *
  * When allowedHosts is set, the Host header must be in that set so a
- * DNS-rebound Host cannot pass just because Origin matches it.
+ * DNS-rebound Host cannot pass just because Origin matches it. Loopback,
+ * private-network addresses, `.local`, and Tailscale `.ts.net` names are
+ * trusted without listing, so a homelab deployment does not have to enumerate
+ * its own names; the shared token remains the primary guard.
  */
 export function validateRequestSecurity(
   request: Request,
@@ -32,7 +35,7 @@ export function validateRequestSecurity(
       }
     })();
   if (allowedHosts && allowedHosts.size > 0) {
-    if (!host || !hostInAllowlist(host, allowedHosts)) {
+    if (!host || !hostAllowed(host, allowedHosts)) {
       return { ok: false, reason: "host not allowed" };
     }
   }
@@ -47,7 +50,7 @@ export function validateRequestSecurity(
     try {
       const originUrl = new URL(origin);
       if (originUrl.host !== host) {
-        if (!allowedHosts || !hostInAllowlist(originUrl.host, allowedHosts)) {
+        if (!allowedHosts || !hostAllowed(originUrl.host, allowedHosts)) {
           return { ok: false, reason: "cross-origin browser requests rejected" };
         }
       }
@@ -70,6 +73,42 @@ function hostInAllowlist(hostHeader: string, allowed: Set<string>): boolean {
     }
   }
   return false;
+}
+
+/** Allowlist entry, or a name this host can be reached by on a local network. */
+function hostAllowed(hostHeader: string, allowed: Set<string>): boolean {
+  if (allowed.has("*")) {
+    return true;
+  }
+  return hostInAllowlist(hostHeader, allowed) || isTrustedLocalHost(hostnameOf(hostHeader));
+}
+
+function isTrustedLocalHost(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    return true;
+  }
+  if (host.endsWith(".local") || host.endsWith(".ts.net")) {
+    return true;
+  }
+  return isPrivateAddress(host);
+}
+
+function isPrivateAddress(host: string): boolean {
+  const v4 = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (v4) {
+    const a = Number(v4[1]);
+    const b = Number(v4[2]);
+    return (
+      a === 10 ||
+      a === 127 ||
+      (a === 192 && b === 168) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 169 && b === 254)
+    );
+  }
+  // IPv6 unique-local (fc00::/7) and link-local (fe80::/10).
+  return /^f[cd]/i.test(host) || /^fe[89ab]/i.test(host);
 }
 
 function hostnameOf(hostHeader: string): string {

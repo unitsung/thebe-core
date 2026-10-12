@@ -12,6 +12,8 @@ export type ThebeHttpContext = {
   agent?: ThebeAgent;
   /** Durable device registration state used by the iOS push endpoint. */
   deviceRegistry?: DeviceRegistry;
+  /** The authorization boundary, used by the isolation report. */
+  workspacePath?: string;
 };
 
 export type ThebeHttpRoute = (
@@ -25,6 +27,7 @@ export function createThebeHttpContext(
     agent?: ThebeAgent;
     path?: string;
     deviceRegistry?: DeviceRegistry;
+    workspacePath?: string;
   },
 ): ThebeHttpContext {
   const url = new URL(request.url);
@@ -37,6 +40,7 @@ export function createThebeHttpContext(
     version: options.version,
     agent: options.agent,
     deviceRegistry: options.deviceRegistry,
+    workspacePath: options.workspacePath,
   };
 }
 

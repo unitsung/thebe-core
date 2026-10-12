@@ -67,6 +67,7 @@ const operations: Operation[] = [
   { method: "delete", path: "/v1/devices/{registrationId}", summary: "Remove a registered iOS device", tag: "compatibility", parameters: [idParameter("registrationId")], responseSchema: "Ok" },
   { method: "post", path: "/v1/messages", summary: "Send a prompt (iOS compatibility endpoint)", tag: "compatibility", requestBody: { required: true } },
   { method: "get", path: "/v1/system/status", summary: "Read maintenance state", tag: "system" },
+  { method: "get", path: "/v1/system/isolation", summary: "Read the effective isolation posture (sandbox, guard, guard rails)", tag: "system" },
   { method: "post", path: "/v1/system/quiesce", summary: "Enter maintenance mode", tag: "system" },
   { method: "post", path: "/v1/system/unquiesce", summary: "Leave maintenance mode", tag: "system" },
   { method: "post", path: "/v1/system/reap", summary: "Reap idle sessions", tag: "system" },

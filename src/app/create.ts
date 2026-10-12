@@ -116,6 +116,7 @@ export function createThebeApp(options: {
     agent,
     allowedHosts: options.allowedHosts ?? resolveAllowedHosts("127.0.0.1"),
     deviceStoreDir: options.agentStoreDir ? join(options.agentStoreDir, "devices") : undefined,
+    workspacePath: options.workspacePath,
   });
   return { agent, prompt, send: prompt, handler };
 }

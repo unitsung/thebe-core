@@ -6,20 +6,20 @@ directory (see `docs/adr/0002-core-ships-as-a-container.md`). A host service is
 possible for development, but the container is the supported release shape.
 
 > 中文速览：Core 以单个容器交付；所有持久状态在 `deploy/data`（配置、Pi agent、
-> 会话元数据、输出），工作区用 `THEBE_WORKSPACE` 挂到 `/workspace`；必须设置
-> `THEBE_TOKEN` 与 `THEBE_ALLOWED_HOSTS`；对外只发布 loopback 端口，用 Tailscale
-> Serve 或反向代理终止 TLS；升级 = 换镜像 + 保留 `data/`；发布前跑
-> `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
+> 会话元数据、输出），工作区默认挂 `./workspace` 到 `/workspace`；token 首次启动
+> 自动生成并打印，本机 / 私网 / `.local` / Tailscale `.ts.net` 的 Host 自动放行；
+> 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；升级 = 换镜像
+> + 保留 `data/`；发布前跑 `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
 
 ## 1. Quick start (container)
 
 ```bash
 cd deploy
 cp .env.example .env
-# edit .env: THEBE_TOKEN ($(openssl rand -hex 32)), THEBE_ALLOWED_HOSTS, THEBE_WORKSPACE
+# .env is optional; edit it only to pin THEBE_TOKEN or point THEBE_WORKSPACE elsewhere
 docker compose up -d --build
 docker compose ps                                   # health: starting → healthy
-TOKEN=$(sed -n 's/^THEBE_TOKEN=//p' .env)
+TOKEN=$(sed -n 's/^THEBE_TOKEN=//p' .env)           # empty if Core generated one; see the logs
 curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/health
 ```
 
@@ -32,6 +32,49 @@ $THEBE_WORKSPACE → /workspace the only tree the agent may touch
 
 Everything durable lives under `/data`, so backup, upgrade, and rollback all
 operate on that one directory.
+
+### 1.1 Use the published image
+
+A multi-arch image (`linux/amd64` and `linux/arm64`) is built and pushed to
+GitHub Container Registry by `.github/workflows/publish-image.yml`. The package
+is private while this repository is private, so authenticate first:
+
+```bash
+echo "$GHCR_TOKEN" | docker login ghcr.io -u unitsung --password-stdin   # token needs read:packages
+```
+
+Point the compose file at it in `deploy/.env`:
+
+```bash
+THEBE_IMAGE=ghcr.io/unitsung/thebe-core:dev   # or :latest, :v1.2.3, or a sha-* tag
+```
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+With `THEBE_IMAGE` set and the image present locally, `docker compose up` uses the
+pulled image and does not rebuild; add `--build` only to build the local source
+(§2) instead. Until Core is open-sourced there is no pullable public image.
+
+### 1.2 NAS notes
+
+- **Architecture.** The same tag covers `linux/amd64` and `linux/arm64`, so an
+  Intel/AMD NAS and an ARM NAS pull the same reference.
+- **Workspace ownership.** The container runs as uid/gid 1000 (`node`), but the
+  bind-mounted workspace keeps the host's ownership. On Linux,
+  `chown -R 1000:1000 $THEBE_WORKSPACE` (or grant group write), or the agent
+  cannot write. On macOS + colima/Docker Desktop the virtiofs mount cannot be
+  chowned: use a Docker named volume for `/workspace`, or run the container as
+  your host uid. `/data` is created and owned by the container on first start.
+- **Mounts.** Keep both mounts on the same host. `deploy/data` is the only
+  durable state — back it up (§8). Never mount the Docker socket (ADR 0002).
+- **Exposure.** Publish the port on loopback only; reach Core over Tailscale or a
+  reverse proxy (§4), never directly over the LAN or internet.
+- **Skills.** The image intentionally ships no built-in skills. Put them in the
+  mounted workspace (`/workspace/.thebe/skills`) or a persistent `HOME`
+  (`/data/home`); see the configuration guide's Skills section.
 
 ## 2. Reproducible install, build, and start
 
@@ -66,19 +109,20 @@ THEBE_WORKSPACE_DIR=/path/to/work \
   node dist/serve.js
 ```
 
-`dist/serve.js` prints `THEBE_LISTEN <url>`, then serves. It refuses to start
-when `NODE_ENV=production` without `THEBE_TOKEN`.
+`dist/serve.js` prints `THEBE_LISTEN <url>`, then serves. When `THEBE_TOKEN` is
+unset it generates one, persists it under the config dir, and prints it once
+(`THEBE_TOKEN ...`).
 
 ## 3. Production configuration
 
 | Variable | Required | Meaning |
 | --- | --- | --- |
 | `NODE_ENV=production` | yes | Enables the production token check and hardens defaults |
-| `THEBE_TOKEN` | yes | Shared secret; clients send it as `X-Thebe-Token` |
+| `THEBE_TOKEN` | no | Shared secret; clients send it as `X-Thebe-Token`. Generated and persisted on first start when unset, then printed once |
 | `THEBE_HOST` | container: `0.0.0.0` | Bind address; default `127.0.0.1` |
 | `THEBE_PORT` | no (8787) | Bind port |
-| `THEBE_ALLOWED_HOSTS` | wildcard binds: yes | Comma list for the Host allowlist; loopback is implicit |
-| `THEBE_WORKSPACE_DIR` | yes | The only tree the agent may read/write |
+| `THEBE_ALLOWED_HOSTS` | no | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
+| `THEBE_WORKSPACE_DIR` | container: `/workspace` | The only tree the agent may read/write |
 | `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations |
 | Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …) | per provider | `deploy/.env`, or the App's provider settings |
 
@@ -118,7 +162,7 @@ plaintext off-host:
 ```bash
 # a) Tailscale Serve (recommended for a personal tailnet)
 tailscale serve --bg --https=443 http://127.0.0.1:8787
-#    → https://<machine>.<tailnet>.ts.net   ; add that name to THEBE_ALLOWED_HOSTS
+#    → https://<machine>.<tailnet>.ts.net   ; .ts.net names are trusted automatically
 
 # b) Tailscale Funnel (public HTTPS; still token-gated) — only if you need it
 tailscale funnel --bg 443 http://127.0.0.1:8787
@@ -127,10 +171,42 @@ tailscale funnel --bg 443 http://127.0.0.1:8787
 #    proxy_pass http://127.0.0.1:8787;  add the public name to THEBE_ALLOWED_HOSTS
 ```
 
+Concrete reverse-proxy configs (both must preserve the `Host` header, and neither
+may buffer the stream, or SSE log endpoints break):
+
+`/etc/caddy/Caddyfile`:
+
+```caddyfile
+thebe.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name thebe.example.com;
+    ssl_certificate     /etc/ssl/thebe.crt;
+    ssl_certificate_key /etc/ssl/thebe.key;
+    location / {
+        proxy_pass http://127.0.0.1:8787;
+        proxy_set_header Host $host;              # required: Core checks the Host header
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_buffering off;                      # keep SSE streams live
+        proxy_read_timeout 3600s;
+    }
+}
+```
+
 Rules:
 
-- Add every host name a client uses (Tailscale name, LAN IP, proxy name) to
-  `THEBE_ALLOWED_HOSTS`; otherwise mutating requests from that name get `403`.
+- Loopback, private-network addresses, `.local`, and `.ts.net` host names are
+  trusted automatically; only a public reverse-proxy name must be added.
+  `THEBE_ALLOWED_HOSTS=*` accepts any Host, but disables the DNS-rebinding Host
+  check (the shared token is still required). Otherwise mutating requests from
+  an unlisted public Host get `403`.
 - Do not publish `8787` on `0.0.0.0`, and do not put Core behind a proxy that
   strips the `Host` header.
 - iOS: in the App, set the Core URL to the TLS endpoint and paste
@@ -153,6 +229,24 @@ container is the release boundary:
   if you need micro-VM isolation.
 - Choosing the host-service path instead means you provide the dedicated user
   (no login shell, no sudo) and the filesystem permissions yourself.
+
+Check what is actually in effect, on the host or in the container:
+
+```bash
+thebe doctor                              # the CLI prints the same report offline
+# or, against a running deployment:
+curl -s -H "X-Thebe-Token: $THEBE_TOKEN" http://127.0.0.1:8787/v1/system/isolation
+```
+
+The report shows the effective sandbox mode and whether it is **enforced** or
+would silently **fall back** to running bash unsandboxed — `bwrap`, `docker`, and
+`seatbelt` degrade to the raw command when their backend is missing, so a set
+`THEBE_SANDBOX` is not proof of isolation. The micro-VM (`gondolin`) fails closed
+instead. It also lists a `warnings` array for every relaxed safety layer
+(`THEBE_ALLOWED_HOSTS=*`, command guard off, allowed workspace escapes, sandbox
+fallback), and Core prints each as a `SECURITY:` line at startup. `thebe doctor`
+exits non-zero when a requested sandbox would fall back or the workspace is
+missing.
 
 ## 6. Health check and graceful shutdown
 
@@ -265,8 +359,8 @@ nested `@earendil-works/pi-ai` copy; reinstall with
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `401` on every route | Missing/incorrect `X-Thebe-Token` | Send the token from `deploy/.env`; `/docs` is the only token-free route |
-| `403` on writes, reads fine | `Host` header not in the allowlist | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart |
-| Container unhealthy; logs show `THEBE_TOKEN is required` | `NODE_ENV=production` without a token | Set `THEBE_TOKEN` in `deploy/.env` |
+| `403` on writes, reads fine | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
+| Client needs the token | First start generated one | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token` |
 | `pnpm --version` hangs | Known release-environment issue (#5 P1) | Use `node_modules/.bin/*` or `bash scripts/release-check.sh` |
 | `Could not find @earendil-works/pi-ai dist` | Pruned install lost the nested copy | Reinstall with `--frozen-lockfile --prod`; verify with `scripts/check-pi-resolution.mjs` |
 | Agent cannot write files | `/workspace` not writable by uid 1000 | `chown 1000:1000` the host folder, or grant group write |

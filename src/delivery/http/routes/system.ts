@@ -1,5 +1,6 @@
 import type { ThebeHttpContext } from "../context.ts";
 import { json } from "../json.ts";
+import { buildIsolationReport } from "../../../agent/security/isolation.ts";
 
 /** System lifecycle controls and the running-session compatibility view. */
 export async function handleSystemRoutes(
@@ -8,6 +9,11 @@ export async function handleSystemRoutes(
   const { request, path, agent } = context;
   if (request.method === "GET" && path === "/v1/system/status") {
     return json({ ok: true, quiesced: Boolean(agent?.isQuiesced()) });
+  }
+  if (request.method === "GET" && path === "/v1/system/isolation") {
+    return json(
+      buildIsolationReport({ workspacePath: context.workspacePath }),
+    );
   }
   if (
     request.method !== "POST" ||

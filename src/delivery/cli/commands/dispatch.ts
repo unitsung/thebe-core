@@ -236,6 +236,11 @@ export async function runCliCommand(
       log(applied.level);
       return 0;
     }
+    case "doctor": {
+      // `doctor` runs in main.ts before bootstrap, so it never reaches dispatch.
+      error("doctor is handled before the agent starts");
+      return 1;
+    }
     default: {
       const _exhaustive: never = command;
       void _exhaustive;

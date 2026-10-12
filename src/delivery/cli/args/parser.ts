@@ -93,6 +93,9 @@ export function parseCliArgs(argv: string[]): CliCommand {
   if (head === "help") {
     return { kind: "help" };
   }
+  if (head === "doctor") {
+    return { kind: "doctor" };
+  }
   if (head === "tui") {
     if (model === "invalid") {
       return {

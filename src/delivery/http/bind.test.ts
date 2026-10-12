@@ -1,9 +1,13 @@
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_THEBE_HOST,
   productionTokenError,
   resolveAllowedHosts,
   resolveThebeListen,
+  resolveThebeToken,
 } from "./bind.ts";
 
 describe("resolveThebeListen", () => {
@@ -43,6 +47,10 @@ describe("resolveAllowedHosts", () => {
       expect.arrayContaining(["10.0.0.2", "127.0.0.1"]),
     );
   });
+
+  it("passes through the wildcard entry", () => {
+    expect(resolveAllowedHosts("0.0.0.0", ["*"])).toContain("*");
+  });
 });
 
 describe("productionTokenError", () => {
@@ -51,5 +59,38 @@ describe("productionTokenError", () => {
     expect(productionTokenError("secret", "production")).toBeUndefined();
     expect(productionTokenError("  ", "production")).toMatch(/THEBE_TOKEN/);
     expect(productionTokenError(undefined, "production")).toMatch(/THEBE_TOKEN/);
+  });
+});
+
+describe("resolveThebeToken", () => {
+  it("prefers an explicit THEBE_TOKEN and generates nothing", () => {
+    const result = resolveThebeToken({ env: { THEBE_TOKEN: "explicit" } });
+    expect(result).toEqual({ token: "explicit", generated: false });
+  });
+
+  it("generates, persists with 0600, and reuses the token", () => {
+    const dir = mkdtempSync(join(tmpdir(), "thebe-token-"));
+    const first = resolveThebeToken({
+      env: {},
+      configDir: dir,
+      generate: () => "generated-1",
+    });
+    expect(first).toMatchObject({ token: "generated-1", generated: true });
+
+    const path = join(dir, "token");
+    expect(readFileSync(path, "utf8").trim()).toBe("generated-1");
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+
+    const second = resolveThebeToken({
+      env: {},
+      configDir: dir,
+      generate: () => "generated-2",
+    });
+    expect(second).toMatchObject({ token: "generated-1", generated: false });
+  });
+
+  it("generates in memory when there is no config dir", () => {
+    const result = resolveThebeToken({ env: {}, generate: () => "memory" });
+    expect(result).toEqual({ token: "memory", generated: true });
   });
 });

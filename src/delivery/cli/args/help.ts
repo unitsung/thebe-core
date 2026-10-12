@@ -8,6 +8,7 @@ Usage:
   thebe --list-models [search]   List models
   thebe session list|create|resume|fork|compact|export|delete|messages|status
   thebe session interrupt|revert|unrevert|model|thinking
+  thebe doctor                   Report the effective isolation posture
 
 Options:
   -p, --print              Print response and exit
