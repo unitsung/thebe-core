@@ -1626,14 +1626,17 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       typeAndConfirm(idInput, "test-custom-provider");
       await flush();
 
-      // Step 4: API Key (Input)
+      // Step 4: API Key (Input). Confirming it triggers the model fetch, so the
+      // next step waits for the SelectList instead of a fixed delay.
       const keyInput = findNamed(tui, "Input");
       typeAndConfirm(keyInput, "sk-custom-secret");
-      await flush();
 
       // Step 5: Auto-fetched Model selection (SelectList)
+      await vi.waitFor(
+        () => expect(findNamedOrNull(tui, "SelectList")).not.toBeNull(),
+        { timeout: 10_000 },
+      );
       const modelSelect = findNamed(tui, "SelectList");
-      expect(modelSelect).toBeDefined();
       // Select first auto-fetched model (auto-model-1)
       modelSelect.handleInput("\r");
       await flush();
@@ -1649,7 +1652,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-  });
+  }, 20_000);
 
   it("dynamically updates editor border color when typing ! for bash mode", () => {
     const fake = createFakeRuntime();
