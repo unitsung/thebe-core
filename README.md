@@ -50,16 +50,16 @@ Then connect a model and your services with the [configuration guide](docs/confi
 
 ## Documentation
 
-| Topic | Where |
-| --- | --- |
-| Models, services, MCP, sandboxing | [Configuration](docs/configuration.en.md) |
-| Container, upgrade, backup, release check | [Deployment](docs/DEPLOYMENT.md) |
-| HTTP routes | [Core product HTTP](docs/CORE-PRODUCT-HTTP.md) |
-| Roadmap | [ROADMAP.md](ROADMAP.md) |
-| Vocabulary and architecture | [CONTEXT.md](CONTEXT.md) |
-| Contributing and security | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) |
+| Topic                                     | Where                                                          |
+| ----------------------------------------- | -------------------------------------------------------------- |
+| Models, services, MCP, sandboxing         | [Configuration](docs/configuration.en.md)                      |
+| Container, upgrade, backup, release check | [Deployment](docs/DEPLOYMENT.md)                               |
+| HTTP routes                               | [Core product HTTP](docs/CORE-PRODUCT-HTTP.md)                 |
+| Roadmap                                   | [ROADMAP.md](ROADMAP.md)                                       |
+| Vocabulary and architecture               | [CONTEXT.md](CONTEXT.md)                                       |
+| Contributing and security                 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) |
 
-Development checks: `npm run typecheck`, `npm test`, `bash scripts/release-check.sh`.
+Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm test`, `bash scripts/release-check.sh`.
 
 ## License
 

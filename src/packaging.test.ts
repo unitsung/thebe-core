@@ -6,37 +6,47 @@ import { describe, expect, it } from "vitest";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 describe("Node packaging", () => {
-  it("uses Vite 8 Rolldown options with named chunk groups under dist/chunks", async () => {
-    const config = await readFile(join(root, "vite.config.ts"), "utf8");
-    expect(config).toContain("rolldownOptions");
-    expect(config).toContain("codeSplitting");
+  it("bundles with tsdown for Node ESM, keeping entries at the root", async () => {
+    const config = await readFile(join(root, "tsdown.config.ts"), "utf8");
+    expect(config).toContain("defineConfig");
+    expect(config).toContain('format: ["esm"]');
+    expect(config).toContain('platform: "node"');
+    expect(config).toContain("fixedExtension: false");
+    expect(config).toContain('entryFileNames: "[name].js"');
     expect(config).toContain('chunkFileNames: "chunks/[name]-[hash].js"');
     expect(config).toContain("sourcemap: false");
-    expect(config).toContain('minify: "oxc"');
-    expect(config).toContain("reportCompressedSize: false");
-    expect(config).not.toContain("experimentalMinChunkSize");
-    expect(config).not.toContain("thebe-inline-node-entries");
-    expect(config).not.toContain("rollupOptions");
+    expect(config).toContain("dts: false");
+    expect(config).not.toContain("dts: true");
   });
 
   it("pins @earendil-works/pi-coding-agent in package.json and the lockfile", async () => {
     const pkg = JSON.parse(
-      await readFile(join(root, "package.json"), "utf8"),
+      await readFile(join(root, "package.json"), "utf8")
     ) as { dependencies?: Record<string, string> };
-    expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe("1.0.4");
+    expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe(
+      "^1.2.0"
+    );
     expect(pkg.dependencies?.["@earendil-works/pi-agent-core"]).toBeUndefined();
     expect(pkg.dependencies?.["@earendil-works/pi-ai"]).toBeUndefined();
     const lock = JSON.parse(
-      await readFile(join(root, "package-lock.json"), "utf8"),
+      await readFile(join(root, "package-lock.json"), "utf8")
     ) as { packages?: Record<string, { version?: string }> };
     expect(
-      lock.packages?.["node_modules/@earendil-works/pi-coding-agent"]?.version,
-    ).toBe("1.0.4");
+      lock.packages?.["node_modules/@earendil-works/pi-coding-agent"]?.version
+    ).toBe("1.2.0");
   });
 
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {
     const names = await readdir(join(root, "dist"));
-    expect(names).toEqual(expect.arrayContaining(["serve.js", "tui.js", "cli.js", "index.js", "chunks"]));
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "serve.js",
+        "tui.js",
+        "cli.js",
+        "index.js",
+        "chunks",
+      ])
+    );
     const chunks = await readdir(join(root, "dist", "chunks"));
     expect(chunks.some((name) => name.endsWith(".js"))).toBe(true);
     expect(chunks.some((name) => /-[a-z0-9]+\.js$/i.test(name))).toBe(true);

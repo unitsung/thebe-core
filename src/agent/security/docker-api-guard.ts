@@ -35,9 +35,9 @@ export function validateDockerApiRequest(
     blockHostRootMounts: true,
     blockDockerSocketMount: true,
     blockVolumePrune: true,
-  },
+  }
 ): DockerApiValidationResult {
-  const normPath = pathname.replace(/^\/v[0-9\.]+/, "");
+  const normPath = pathname.replace(/^\/v[0-9.]+/, "");
 
   // 1. Container creation security checks
   if (method === "POST" && normPath === "/containers/create") {
@@ -50,16 +50,22 @@ export function validateDockerApiRequest(
         return {
           allowed: false,
           statusCode: 403,
-          reason: "Forbidden by Thebe Docker Guard: Privileged container creation is blocked",
+          reason:
+            "Forbidden by Thebe Docker Guard: Privileged container creation is blocked",
           violation: "HostConfig.Privileged=true",
         };
       }
 
       // Volume / bind mounts check
-      const binds = Array.isArray(hostConfig.Binds) ? hostConfig.Binds.map(String) : [];
+      const binds = Array.isArray(hostConfig.Binds)
+        ? hostConfig.Binds.map(String)
+        : [];
       for (const bind of binds) {
         const hostSource = bind.split(":")[0]?.trim();
-        if (policy.blockHostRootMounts && (hostSource === "/" || hostSource === "/root")) {
+        if (
+          policy.blockHostRootMounts &&
+          (hostSource === "/" || hostSource === "/root")
+        ) {
           return {
             allowed: false,
             statusCode: 403,
@@ -67,23 +73,36 @@ export function validateDockerApiRequest(
             violation: `HostConfig.Binds: ${bind}`,
           };
         }
-        if (policy.blockDockerSocketMount && hostSource && hostSource.includes("docker.sock")) {
+        if (
+          policy.blockDockerSocketMount &&
+          hostSource &&
+          hostSource.includes("docker.sock")
+        ) {
           return {
             allowed: false,
             statusCode: 403,
-            reason: "Forbidden by Thebe Docker Guard: Mounting docker.sock inside container is blocked",
+            reason:
+              "Forbidden by Thebe Docker Guard: Mounting docker.sock inside container is blocked",
             violation: `HostConfig.Binds: ${bind}`,
           };
         }
       }
 
       // Capability checks
-      const capAdd = Array.isArray(hostConfig.CapAdd) ? hostConfig.CapAdd.map(String) : [];
-      if (policy.blockPrivileged && capAdd.some((c) => c.toUpperCase() === "ALL" || c.toUpperCase() === "SYS_ADMIN")) {
+      const capAdd = Array.isArray(hostConfig.CapAdd)
+        ? hostConfig.CapAdd.map(String)
+        : [];
+      if (
+        policy.blockPrivileged &&
+        capAdd.some(
+          (c) => c.toUpperCase() === "ALL" || c.toUpperCase() === "SYS_ADMIN"
+        )
+      ) {
         return {
           allowed: false,
           statusCode: 403,
-          reason: "Forbidden by Thebe Docker Guard: Adding SYS_ADMIN or ALL capabilities is blocked",
+          reason:
+            "Forbidden by Thebe Docker Guard: Adding SYS_ADMIN or ALL capabilities is blocked",
           violation: `HostConfig.CapAdd: ${capAdd.join(",")}`,
         };
       }
@@ -91,12 +110,16 @@ export function validateDockerApiRequest(
   }
 
   // 2. Volume and system prune checks
-  if (method === "POST" && (normPath === "/volumes/prune" || normPath === "/system/prune")) {
+  if (
+    method === "POST" &&
+    (normPath === "/volumes/prune" || normPath === "/system/prune")
+  ) {
     if (policy.blockVolumePrune) {
       return {
         allowed: false,
         statusCode: 403,
-        reason: "Forbidden by Thebe Docker Guard: Volume pruning is blocked to prevent NAS data loss",
+        reason:
+          "Forbidden by Thebe Docker Guard: Volume pruning is blocked to prevent NAS data loss",
         violation: normPath,
       };
     }

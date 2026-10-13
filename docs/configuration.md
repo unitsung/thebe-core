@@ -159,8 +159,19 @@ token 只由 Core adapter 使用，不进入 Agent capability 参数。
 连接这些服务器，Core 不自己维护 MCP 连接；工具名为 `mcp__<server>__<tool>`。
 
 ```json
-{ "mcpServers": { "notes": { "command": "notes-mcp", "args": ["--stdio"], "env": { "API_KEY": "..." },
-  "description": "Search and read notes", "exposure": "codemode", "permission": "confirm", "disabled": true } } }
+{
+  "mcpServers": {
+    "notes": {
+      "command": "notes-mcp",
+      "args": ["--stdio"],
+      "env": { "API_KEY": "..." },
+      "description": "Search and read notes",
+      "exposure": "codemode",
+      "permission": "confirm",
+      "disabled": true
+    }
+  }
+}
 ```
 
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
@@ -331,12 +342,12 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
 `bash`、`write`、`edit` 的审批前会先过一遍命令风险守卫（`src/agent/security/command-risk.ts`，
 规则表来自重构前的 `src/policy/safety-evaluator.ts`），分四档：
 
-| 风险 | 行为 | 例子 |
-|---|---|---|
-| `critical` | **策略直接拒绝**（不会进入审批，模型收到 `denied by policy`） | `rm -rf /`、`/volume1` 等 NAS 数据目录批量删除、`zfs destroy`、`zpool destroy`、`mkfs.*`/`mke2fs`、`ntfsclone --overwrite`、`ntfswipe`、`exportfs -ua`、`mdadm --stop/--zero-superblock`、`fdisk`/`parted`、`dd of=/dev/sdX`、fork bomb、`kill -9 1`、`docker run -v /:... --privileged` |
-| `dangerous` | 仍需人工审批（审批界面显示高风险） | 关机/重启、防火墙清空、`docker rm -f $(ps -aq)`、`docker volume prune -f`、挂载 docker.sock、`ntfsfix`/`ntfsresize`、强制卸载共享存储、停掉 smbd/nfs-server/sshd/docker 服务、写 `/etc/…` 等系统路径、越出工作区写文件或改文件 |
-| `caution` | 允许，记录警号 | 重启/停止容器或系统服务、`chmod -R`/`chown -R`、scrub、`exportfs -a` |
-| `safe` | 正常执行 | 只读检查类命令（`docker ps`、`zpool status` 等） |
+| 风险        | 行为                                                          | 例子                                                                                                                                                                                                                                                                                     |
+| ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `critical`  | **策略直接拒绝**（不会进入审批，模型收到 `denied by policy`） | `rm -rf /`、`/volume1` 等 NAS 数据目录批量删除、`zfs destroy`、`zpool destroy`、`mkfs.*`/`mke2fs`、`ntfsclone --overwrite`、`ntfswipe`、`exportfs -ua`、`mdadm --stop/--zero-superblock`、`fdisk`/`parted`、`dd of=/dev/sdX`、fork bomb、`kill -9 1`、`docker run -v /:... --privileged` |
+| `dangerous` | 仍需人工审批（审批界面显示高风险）                            | 关机/重启、防火墙清空、`docker rm -f $(ps -aq)`、`docker volume prune -f`、挂载 docker.sock、`ntfsfix`/`ntfsresize`、强制卸载共享存储、停掉 smbd/nfs-server/sshd/docker 服务、写 `/etc/…` 等系统路径、越出工作区写文件或改文件                                                           |
+| `caution`   | 允许，记录警号                                                | 重启/停止容器或系统服务、`chmod -R`/`chown -R`、scrub、`exportfs -a`                                                                                                                                                                                                                     |
+| `safe`      | 正常执行                                                      | 只读检查类命令（`docker ps`、`zpool status` 等）                                                                                                                                                                                                                                         |
 
 - Docker/Podman 命令另有一层容器守卫（`src/agent/security/docker-command-guard.ts`）：特权容器 + 宿主根挂载、宿主根 bind mount、`--privileged`、docker.sock 挂载、volume prune。
 - 存储系统识别：ZFS / Btrfs / EXT4（含 xfs/f2fs）/ NTFS / NFS，判定结果会带在 `storageSystem` 上。
@@ -383,7 +394,7 @@ Gondolin micro-VM（QEMU 后端）执行 bash，宿主工作区通过 `RealFSPro
 
 ```bash
 # 1) 包本体（Core 已把它列为 optionalDependency，可跳过）
-npm install @earendil-works/gondolin@0.12.0
+npm install @earendil-works/gondolin@0.13.0
 # 2) VM 后端：QEMU（macOS）
 brew install qemu                     # Linux: sudo apt install qemu-system-arm
 # 3) 首次启动自动下载 guest 镜像（约 200MB），缓存在 ~/.cache/gondolin/images/
@@ -401,12 +412,12 @@ THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe
 
 `src/agent/security/scenario-profile.ts`（移植自重构前的 `src/policy/scenario-profile.ts`）把多层开关打包成情景：
 
-| 情景 | 命令守卫 | 工作区越界 | 沙箱 | Docker 守卫 |
-| --- | --- | --- | --- | --- |
-| `nas-strict` | 开 | 禁止 | `bwrap` | 全开（含 volume prune） |
-| `homelab-host` | 开 | 允许 | 关 | 只挡宿主根挂载 + volume prune |
-| `microvm-sandbox` | 开 | 禁止 | `gondolin` + 断网 | 全开 |
-| `yolo-guarded` | 开 | 禁止 | `bwrap` | 全开 |
+| 情景              | 命令守卫 | 工作区越界 | 沙箱              | Docker 守卫                   |
+| ----------------- | -------- | ---------- | ----------------- | ----------------------------- |
+| `nas-strict`      | 开       | 禁止       | `bwrap`           | 全开（含 volume prune）       |
+| `homelab-host`    | 开       | 允许       | 关                | 只挡宿主根挂载 + volume prune |
+| `microvm-sandbox` | 开       | 禁止       | `gondolin` + 断网 | 全开                          |
+| `yolo-guarded`    | 开       | 禁止       | `bwrap`           | 全开                          |
 
 ```bash
 export THEBE_SCENARIO=nas-strict   # 等价于照抄上表

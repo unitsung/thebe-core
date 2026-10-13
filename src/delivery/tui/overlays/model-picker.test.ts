@@ -6,10 +6,14 @@ import {
   attachSearchableProviderPicker,
 } from "./model-picker.ts";
 import type { RuntimeModel, RuntimeProvider } from "../../../agent/index.ts";
-import { TuiMainScreen, type Terminal, type TUI } from "../rendering/adapter.ts";
+import {
+  TuiMainScreen,
+  type Terminal,
+  type TUI,
+} from "../rendering/adapter.ts";
 import { createFakeRuntime } from "../../../testing/runtime/index.ts";
 import { createThebeAgent } from "../../../agent/index.ts";
-import type { ContainerInfoProvider } from "../../../agent/capabilities/containers.ts"
+import type { ContainerInfoProvider } from "../../../agent/capabilities/containers.ts";
 
 class MemoryTerminal implements Terminal {
   start(): void {}
@@ -33,6 +37,7 @@ class MemoryTerminal implements Terminal {
   clearScreen(): void {}
   setTitle(): void {}
   setProgress(): void {}
+  setProgramStatus(): void {}
 }
 
 const mockModels: RuntimeModel[] = [
@@ -151,7 +156,7 @@ describe("SearchableModelPicker", () => {
     picker.handleInput("\r");
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ modelId: "muse-spark-1.3-free" }),
+      expect.objectContaining({ modelId: "muse-spark-1.3-free" })
     );
   });
 
@@ -207,7 +212,7 @@ describe("SearchableModelPicker", () => {
     const sorted = [...mockModels].sort(
       (a, b) =>
         a.providerId.localeCompare(b.providerId) ||
-        a.modelId.localeCompare(b.modelId),
+        a.modelId.localeCompare(b.modelId)
     );
     expect(onSelect).toHaveBeenCalledWith(sorted.at(-1));
   });
@@ -309,7 +314,7 @@ describe("SearchableProviderPicker", () => {
     picker.handleInput("\r");
     expect(onSelect).toHaveBeenCalledTimes(1);
     expect(onSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "opencode" }),
+      expect.objectContaining({ id: "opencode" })
     );
   });
 });
@@ -330,12 +335,12 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
 
     // Wait for picker to mount
     await new Promise((r) => setTimeout(r, 20));
-    expect(
-      tui.children.some((c) => c instanceof SearchableModelPicker),
-    ).toBe(true);
+    expect(tui.children.some((c) => c instanceof SearchableModelPicker)).toBe(
+      true
+    );
 
     const picker = tui.children.find(
-      (c) => c instanceof SearchableModelPicker,
+      (c) => c instanceof SearchableModelPicker
     ) as SearchableModelPicker;
     // Press enter to select current highlighted item
     picker.handleInput("\r");
@@ -344,9 +349,9 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
     expect(result).not.toBeNull();
     expect(result?.providerId).toBeDefined();
     // After resolution, picker is removed from tui children
-    expect(
-      tui.children.some((c) => c instanceof SearchableModelPicker),
-    ).toBe(false);
+    expect(tui.children.some((c) => c instanceof SearchableModelPicker)).toBe(
+      false
+    );
   });
 
   it("attaches provider picker to TUI, handles selection, and unmounts cleanly", async () => {
@@ -363,11 +368,11 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
 
     await new Promise((r) => setTimeout(r, 20));
     expect(
-      tui.children.some((c) => c instanceof SearchableProviderPicker),
+      tui.children.some((c) => c instanceof SearchableProviderPicker)
     ).toBe(true);
 
     const picker = tui.children.find(
-      (c) => c instanceof SearchableProviderPicker,
+      (c) => c instanceof SearchableProviderPicker
     ) as SearchableProviderPicker;
     for (const char of "fake") {
       picker.handleInput(char);
@@ -378,7 +383,7 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
     expect(result).not.toBeNull();
     expect(result?.id).toBe("fake");
     expect(
-      tui.children.some((c) => c instanceof SearchableProviderPicker),
+      tui.children.some((c) => c instanceof SearchableProviderPicker)
     ).toBe(false);
   });
 
@@ -397,7 +402,7 @@ describe("attachSearchableModelPicker & attachSearchableProviderPicker helpers",
 
     await new Promise((r) => setTimeout(r, 20));
     const picker = tui.children.find(
-      (c) => c instanceof SearchableModelPicker,
+      (c) => c instanceof SearchableModelPicker
     ) as SearchableModelPicker;
     expect(picker).toBeDefined();
     const lines = picker.render(80).join("\n");

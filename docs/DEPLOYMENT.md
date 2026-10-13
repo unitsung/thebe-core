@@ -9,7 +9,8 @@ possible for development, but the container is the supported release shape.
 > 会话元数据、输出），工作区默认挂 `./workspace` 到 `/workspace`；token 首次启动
 > 自动生成并打印，本机 / 私网 / `.local` / Tailscale `.ts.net` 的 Host 自动放行；
 > 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；升级 = 换镜像
-> + 保留 `data/`；发布前跑 `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
+>
+> - 保留 `data/`；发布前跑 `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
 
 ## 1. Quick start (container)
 
@@ -36,8 +37,9 @@ operate on that one directory.
 ### 1.1 Use the published image
 
 A multi-arch image (`linux/amd64` and `linux/arm64`) is built and pushed to
-GitHub Container Registry by `.github/workflows/publish-image.yml`. The package
-is private while this repository is private, so authenticate first:
+GitHub Container Registry by `.github/workflows/publish-image.yml`, which runs
+on version tags (`v*`) and manual dispatch — not on every push. The package is
+private while this repository is private, so authenticate first:
 
 ```bash
 echo "$GHCR_TOKEN" | docker login ghcr.io -u unitsung --password-stdin   # token needs read:packages
@@ -46,7 +48,7 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u unitsung --password-stdin   # token
 Point the compose file at it in `deploy/.env`:
 
 ```bash
-THEBE_IMAGE=ghcr.io/unitsung/thebe-core:dev   # or :latest, :v1.2.3, or a sha-* tag
+THEBE_IMAGE=ghcr.io/unitsung/thebe-core:latest   # or :v1.2.3, :1.2, or a sha-* tag
 ```
 
 ```bash
@@ -78,20 +80,21 @@ pulled image and does not rebuild; add `--build` only to build the local source
 
 ## 2. Reproducible install, build, and start
 
-| What | Pin |
-| --- | --- |
-| Node | Node 24 LTS (package `engines`: `>=24.0.0`); the Dockerfile pins the base image to `node:24.21.0-bookworm-slim` plus its manifest-list digest |
-| Install | `npm ci`; runtime images add `--omit=dev` |
+| What    | Pin                                                                                                                                           |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node    | Node 24 LTS (package `engines`: `>=24.0.0`); the Dockerfile pins the base image to `node:24.21.0-bookworm-slim` plus its manifest-list digest |
+| Install | `npm ci`; runtime images add `--omit=dev`                                                                                                     |
 
 The release check calls the local binaries directly:
 
 ```bash
-bash scripts/release-check.sh              # typecheck + build + tests + smoke
-bash scripts/release-check.sh --no-smoke   # typecheck + build + tests only
+bash scripts/release-check.sh              # typecheck + lint + build + tests + smoke
+bash scripts/release-check.sh --no-smoke   # typecheck + lint + build + tests only
 
 # equivalently, by hand:
 node_modules/.bin/tsc --noEmit
-node_modules/.bin/vite build
+node_modules/.bin/oxlint
+node_modules/.bin/tsdown
 node_modules/.bin/vitest run
 ```
 
@@ -100,7 +103,7 @@ already harden). `npm start` now starts the existing build immediately; use
 `npm run start:build` when source changes must be compiled first:
 
 ```bash
-node_modules/.bin/vite build        # produce dist/ first (or run the release check)
+node_modules/.bin/tsdown            # produce dist/ first (or run the release check)
 THEBE_TOKEN="$(openssl rand -hex 32)" \
 THEBE_ALLOWED_HOSTS=thebe.local \
 THEBE_WORKSPACE_DIR=/path/to/work \
@@ -128,16 +131,16 @@ enable it by default. This never pushes.
 
 ## 3. Production configuration
 
-| Variable | Required | Meaning |
-| --- | --- | --- |
-| `NODE_ENV=production` | yes | Enables the production token check and hardens defaults |
-| `THEBE_TOKEN` | no | Shared secret; clients send it as `X-Thebe-Token`. Generated and persisted on first start when unset, then printed once |
-| `THEBE_HOST` | container: `0.0.0.0` | Bind address; default `127.0.0.1` |
-| `THEBE_PORT` | no (8787) | Bind port |
-| `THEBE_ALLOWED_HOSTS` | no | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
-| `THEBE_WORKSPACE_DIR` | container: `/workspace` | The only tree the agent may read/write |
-| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations |
-| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …) | per provider | `deploy/.env`, or the App's provider settings |
+| Variable                                                                           | Required                 | Meaning                                                                                                                                                                          |
+| ---------------------------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                          |
+| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token`. Generated and persisted on first start when unset, then printed once                                                          |
+| `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                |
+| `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                        |
+| `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
+| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                           |
+| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                          |
+| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`, or the App's provider settings                                                                                                                                    |
 
 Request contract (verified by `scripts/smoke.mjs`):
 
@@ -351,10 +354,10 @@ Expected output ends with `SMOKE OK (8 checks)`.
 Release gate:
 
 ```bash
-bash scripts/release-check.sh     # tsc --noEmit + vite build + vitest run + smoke
+bash scripts/release-check.sh     # tsc --noEmit + oxlint + tsdown + vitest run + smoke
 ```
 
-CI runs the same gate (`.github/workflows/release-check.yml`) on every push and
+CI runs the same gate (`.github/workflows/verify.yml`) on every push and
 pull request, so a release candidate on a clean host reproduces what CI saw.
 
 ### Container verification after an upgrade
@@ -368,19 +371,20 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 
 ## 11. Troubleshooting
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `401` on every route | Missing/incorrect `X-Thebe-Token` | Send the token from `deploy/.env`; `/docs` is the only token-free route |
-| `403` on writes, reads fine | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
-| Client needs the token | First start generated one | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token` |
-| `docker build` fails with `--mount requires BuildKit` | Legacy (pre-BuildKit) builder | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build` |
-| `Could not find @earendil-works/pi-ai dist` | Pruned install lost the nested copy | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs` |
-| Agent cannot write files | `/workspace` not writable by uid 1000 | `chown 1000:1000` the host folder, or grant group write |
+| Symptom                                               | Cause                                                           | Fix                                                                                                                                       |
+| ----------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `401` on every route                                  | Missing/incorrect `X-Thebe-Token`                               | Send the token from `deploy/.env`; `/docs` is the only token-free route                                                                   |
+| `403` on writes, reads fine                           | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
+| Client needs the token                                | First start generated one                                       | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token`                                                           |
+| `docker build` fails with `--mount requires BuildKit` | Legacy (pre-BuildKit) builder                                   | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build`                                                                            |
+| `Could not find @earendil-works/pi-ai dist`           | Pruned install lost the nested copy                             | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs`                                                         |
+| Agent cannot write files                              | `/workspace` not writable by uid 1000                           | `chown 1000:1000` the host folder, or grant group write                                                                                   |
 
 ## 12. What has been verified on this checkout
 
 - Local gates pass on macOS with Node 24 and the `npm` install: `tsc --noEmit`,
-  `vite build`, the full Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
+  `oxlint`, `tsdown` (bundling four Node ESM entries into `dist/`), the full
+  Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
   including SIGTERM exit `0` and a settings write surviving a Core restart).
 - `scripts/check-pi-resolution.mjs` resolves pi-ai in the current install.
 - The container builds and runs. The optimized image (490 MB on disk, 104 MB

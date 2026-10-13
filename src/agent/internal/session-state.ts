@@ -1,4 +1,4 @@
-import type { AgentRuntime, NormalizedEvent, RuntimeSession } from "../runtime/index.ts";
+import type { AgentRuntime, RuntimeSession } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { SessionRunStatus } from "../types.ts";
 
@@ -60,7 +60,7 @@ export function createSessionState(input: {
   }
 
   function withRunState(
-    meta: AgentSessionMeta,
+    meta: AgentSessionMeta
   ): AgentSessionMeta & { status: SessionRunStatus; streaming: boolean } {
     const isStreaming = streaming.has(meta.thebeSessionId);
     return {

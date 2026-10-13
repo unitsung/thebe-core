@@ -1,4 +1,8 @@
-import type { RuntimeThinkingInfo, ThebeAgent, ThinkingLevel } from "../../../agent/index.ts";
+import type {
+  RuntimeThinkingInfo,
+  ThebeAgent,
+  ThinkingLevel,
+} from "../../../agent/index.ts";
 import type { Markdown, Editor, TUI, Component } from "../rendering/adapter.ts";
 import type { ThebeTuiOptions } from "../types.ts";
 import { parseModelRef } from "../overlays/model-ref.ts";
@@ -44,9 +48,10 @@ export class SessionDriver {
         const parsed = parseModelRef(state.currentModel);
         const meta = await agent.createSession({
           title: state.sessionTitle ?? options.title,
-          model: parsed.providerId && parsed.modelId
-            ? { providerId: parsed.providerId, modelId: parsed.modelId }
-            : undefined,
+          model:
+            parsed.providerId && parsed.modelId
+              ? { providerId: parsed.providerId, modelId: parsed.modelId }
+              : undefined,
         });
         state.sessionId = meta.thebeSessionId;
         state.sessionTitle = meta.title;
@@ -62,21 +67,27 @@ export class SessionDriver {
     try {
       return await pending;
     } finally {
-      if (state.sessionCreationPromise === pending) state.sessionCreationPromise = undefined;
+      if (state.sessionCreationPromise === pending)
+        state.sessionCreationPromise = undefined;
     }
   }
 
   async setThinkingLevel(level: ThinkingLevel): Promise<RuntimeThinkingInfo> {
     if (!this.deps.agent) return this.deps.state.thinkingInfo;
     const id = await this.ensureSession();
-    this.deps.state.thinkingInfo = await this.deps.agent.setThinkingLevel(id, level);
+    this.deps.state.thinkingInfo = await this.deps.agent.setThinkingLevel(
+      id,
+      level
+    );
     this.deps.state.currentThinking = this.deps.state.thinkingInfo.level;
     this.deps.updateFooter();
     this.deps.updateEditorBorderColor();
     return this.deps.state.thinkingInfo;
   }
 
-  async syncThinkingLevel(thebeSessionId = this.deps.state.sessionId): Promise<void> {
+  async syncThinkingLevel(
+    thebeSessionId = this.deps.state.sessionId
+  ): Promise<void> {
     const { state, agent } = this.deps;
     if (state.disposed || !agent || !thebeSessionId) return;
     try {
@@ -106,7 +117,10 @@ export class SessionDriver {
     }
   }
 
-  async runPrompt(text: string, mode: "prompt" | "steer" | "followUp" = "prompt"): Promise<void> {
+  async runPrompt(
+    text: string,
+    mode: "prompt" | "steer" | "followUp" = "prompt"
+  ): Promise<void> {
     const { state, agent, options, editor, events, tui } = this.deps;
     if (!agent) {
       if (!options.send) throw new Error("TUI requires agent or send");
@@ -147,12 +161,18 @@ export class SessionDriver {
     this.deps.updateEditorBorderColor();
     this.deps.insertBeforeFooter(this.deps.makeMarkdown(text));
     events.beginStream();
-    state.streamUnsub = agent.subscribeLog(id, (event) => events.onEvent(event));
+    state.streamUnsub = agent.subscribeLog(id, (event) =>
+      events.onEvent(event)
+    );
     try {
-      const result = await agent.prompt(text, { thebeSessionId: id, mode: "prompt" });
+      const result = await agent.prompt(text, {
+        thebeSessionId: id,
+        mode: "prompt",
+      });
       if (state.replyMarkdown && !readMarkdownSource(state.replyMarkdown)) {
         const index = tui.children.indexOf(state.replyMarkdown);
-        if (index >= 0) tui.children[index] = this.deps.makeMarkdown(result.text);
+        if (index >= 0)
+          tui.children[index] = this.deps.makeMarkdown(result.text);
       } else if (!state.replyMarkdown && result.text) {
         events.insertBeforeWorking(this.deps.makeMarkdown(result.text));
       }
@@ -191,7 +211,9 @@ export class SessionDriver {
         this.deps.tasks.watchGoal(thebeId);
         this.deps.tasks.updateGoalStatus(goal);
         if (isFinishedGoal(goal)) {
-          events.insertBeforeFooter(this.deps.makeMarkdown(formatGoalConclusion(goal)));
+          events.insertBeforeFooter(
+            this.deps.makeMarkdown(formatGoalConclusion(goal))
+          );
         }
       }
       tui.requestRender();
@@ -201,7 +223,7 @@ export class SessionDriver {
   }
 
   switchSession(value: string | undefined): void {
-    const { state, agent, footerText } = this.deps;
+    const { state, footerText } = this.deps;
     if (state.sessionId !== value) {
       state.streamUnsub?.();
       state.streamUnsub = undefined;
@@ -234,10 +256,16 @@ export class SessionDriver {
 
   private isCurrent(id: string, generation: number): boolean {
     const { state } = this.deps;
-    return !state.disposed && state.historyLoadGeneration === generation && state.sessionId === id;
+    return (
+      !state.disposed &&
+      state.historyLoadGeneration === generation &&
+      state.sessionId === id
+    );
   }
 }
 
 function isFinishedGoal(run: { status: string }): boolean {
-  return ["completed", "max_iterations", "cancelled", "failed"].includes(run.status);
+  return ["completed", "max_iterations", "cancelled", "failed"].includes(
+    run.status
+  );
 }

@@ -142,17 +142,17 @@ export type ScenarioProfileOverrides = Partial<{
 
 export function getScenarioProfile(
   name: ScenarioName = "nas-strict",
-  overrides?: ScenarioProfileOverrides,
+  overrides?: ScenarioProfileOverrides
 ): ScenarioProfile {
   const base = SCENARIO_PROFILES[name] ?? SCENARIO_PROFILES["nas-strict"];
   if (!overrides) return base;
   return {
     ...base,
     ...overrides,
-    commandGuard: { ...base.commandGuard, ...(overrides.commandGuard ?? {}) },
-    workspace: { ...base.workspace, ...(overrides.workspace ?? {}) },
-    sandbox: { ...base.sandbox, ...(overrides.sandbox ?? {}) },
-    dockerGuard: { ...base.dockerGuard, ...(overrides.dockerGuard ?? {}) },
+    commandGuard: { ...base.commandGuard, ...overrides.commandGuard },
+    workspace: { ...base.workspace, ...overrides.workspace },
+    sandbox: { ...base.sandbox, ...overrides.sandbox },
+    dockerGuard: { ...base.dockerGuard, ...overrides.dockerGuard },
   };
 }
 
@@ -162,12 +162,12 @@ export function listScenarioProfiles(): ScenarioProfile[] {
 
 /** `THEBE_SCENARIO=<name>`; unknown values mean "no scenario". */
 export function scenarioFromEnv(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): ScenarioName | undefined {
   const raw = env.THEBE_SCENARIO?.trim().toLowerCase();
   if (!raw) return undefined;
   return (Object.keys(SCENARIO_PROFILES) as ScenarioName[]).find(
-    (name) => name === raw,
+    (name) => name === raw
   );
 }
 
@@ -191,12 +191,13 @@ function parseSandboxMode(value: string | undefined): SandboxMode | undefined {
  */
 export function resolveScenarioSettings(
   scenario: ScenarioName | undefined = scenarioFromEnv(),
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): ScenarioSettings {
   const profile = scenario ? getScenarioProfile(scenario) : undefined;
   const guardOverride = env.THEBE_COMMAND_GUARD?.trim().toLowerCase();
   const networkOverride = env.THEBE_SANDBOX_NETWORK?.trim().toLowerCase();
-  const escapesOverride = env.THEBE_ALLOW_WORKSPACE_ESCAPES?.trim().toLowerCase();
+  const escapesOverride =
+    env.THEBE_ALLOW_WORKSPACE_ESCAPES?.trim().toLowerCase();
 
   return {
     scenario,

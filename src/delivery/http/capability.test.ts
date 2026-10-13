@@ -3,9 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
-import {
-  createCapabilityRunStore,
-} from "../../agent/capabilities/runs.ts";
+import { createCapabilityRunStore } from "../../agent/capabilities/runs.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 import type { StrmRepairProvider } from "../../agent/capabilities/strm.ts";
@@ -51,14 +49,19 @@ function app(options: { agentStoreDir?: string; now?: () => Date } = {}) {
 
 async function fetchRun(
   handler: ReturnType<typeof app>["handler"],
-  runId: string,
+  runId: string
 ): Promise<Record<string, unknown>> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const fetched = await handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`)
     );
     const run = await json(fetched);
-    if (run.status === "succeeded" || run.status === "failed" || run.status === "interrupted") return run;
+    if (
+      run.status === "succeeded" ||
+      run.status === "failed" ||
+      run.status === "interrupted"
+    )
+      return run;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
   throw new Error(`capability run did not finish: ${runId}`);
@@ -91,8 +94,8 @@ describe("capability product HTTP", () => {
 
     const capabilities = await json(
       await created.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/capabilities"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/capabilities")
+      )
     );
     expect(capabilities.capabilities).toEqual(
       expect.arrayContaining([
@@ -108,7 +111,7 @@ describe("capability product HTTP", () => {
           background: true,
           destructive: true,
         }),
-      ]),
+      ])
     );
 
     const response = await created.handler.handle(
@@ -124,50 +127,56 @@ describe("capability product HTTP", () => {
           },
           mode: "direct",
         }),
-      }),
+      })
     );
     expect(response.status).toBe(200);
     const direct = await json(response);
-    expect(direct).toEqual(expect.objectContaining({
-      type: "result",
-      result: {
-        status: "repaired",
-        summary: "STRM path repaired and verified.",
-        target: "/Movies/Dune.mkv",
-        verification: { media: "reachable" },
-      },
-      artifactId: expect.any(String),
-    }));
+    expect(direct).toEqual(
+      expect.objectContaining({
+        type: "result",
+        result: {
+          status: "repaired",
+          summary: "STRM path repaired and verified.",
+          target: "/Movies/Dune.mkv",
+          verification: { media: "reachable" },
+        },
+        artifactId: expect.any(String),
+      })
+    );
     const artifactId = String(direct.artifactId);
     const artifact = await json(
       await created.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`)
+      )
     );
-    expect(artifact).toEqual(expect.objectContaining({
-      artifactId,
-      kind: "report",
-      resource: {
-        kind: "strm",
-        id: "openlist:/Movies/Dune.strm",
-      },
-      contentType: "application/json",
-    }));
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        artifactId,
+        kind: "report",
+        resource: {
+          kind: "strm",
+          id: "openlist:/Movies/Dune.strm",
+        },
+        contentType: "application/json",
+      })
+    );
     const content = await json(
       await created.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`)
+      )
     );
-    expect(JSON.parse(content.content as string)).toEqual(expect.objectContaining({
-      version: 1,
-      capabilityId: "strm.repair",
-      result: {
-        status: "repaired",
-        summary: "STRM path repaired and verified.",
-        target: "/Movies/Dune.mkv",
-        verification: { media: "reachable" },
-      },
-    }));
+    expect(JSON.parse(content.content as string)).toEqual(
+      expect.objectContaining({
+        version: 1,
+        capabilityId: "strm.repair",
+        result: {
+          status: "repaired",
+          summary: "STRM path repaired and verified.",
+          target: "/Movies/Dune.mkv",
+          verification: { media: "reachable" },
+        },
+      })
+    );
     expect(calls).toEqual([
       {
         arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
@@ -201,7 +210,7 @@ describe("capability product HTTP", () => {
           resource: { kind: "strm", id: "strm-1", provider: "openlist" },
           mode: "direct",
         }),
-      }),
+      })
     );
 
     expect(response.status).toBe(500);
@@ -237,7 +246,7 @@ describe("capability product HTTP", () => {
           arguments: { title: "Dune" },
           resource: { kind: "strm", id: "strm-1", provider: "openlist" },
         }),
-      }),
+      })
     );
     expect(response.status).toBe(202);
     const started = await json(response);
@@ -248,7 +257,7 @@ describe("capability product HTTP", () => {
         status: "succeeded",
         resource: { kind: "strm", id: "strm-1", provider: "openlist" },
         result: { status: "repaired", summary: "background repair complete" },
-      }),
+      })
     );
     expect(calls).toEqual([
       {
@@ -281,11 +290,13 @@ describe("capability product HTTP", () => {
           resource: { kind: "media_item", id: "movie-1" },
           mode: "direct",
         }),
-      }),
+      })
     );
     expect(response.status).toBe(400);
     expect(await json(response)).toEqual(
-      expect.objectContaining({ error: expect.stringContaining("resource.kind") }),
+      expect.objectContaining({
+        error: expect.stringContaining("resource.kind"),
+      })
     );
     expect(called).toBe(false);
   });
@@ -317,21 +328,21 @@ describe("capability product HTTP", () => {
           },
           mode: "direct",
         }),
-      }),
+      })
     );
 
     expect(response.status).toBe(400);
     expect(await json(response)).toEqual(
       expect.objectContaining({
         error: expect.stringContaining("resource.provider"),
-      }),
+      })
     );
     expect(called).toBe(false);
   });
 
   it("GET /v1/capabilities includes product metadata for discovery", async () => {
     const res = await app().handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities"),
+      new Request("http://127.0.0.1:8787/v1/capabilities")
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -381,22 +392,25 @@ describe("capability product HTTP", () => {
           execution: "direct",
           background: true,
         }),
-      ]),
+      ])
     );
   });
 
   it("POST /v1/capabilities/{id}/invoke returns a direct result through the Agent", async () => {
     const created = app();
     const res = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/container.list/invoke", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          arguments: {},
-          mode: "direct",
-          resource: { kind: "container", provider: "arcane" },
-        }),
-      }),
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/container.list/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            arguments: {},
+            mode: "direct",
+            resource: { kind: "container", provider: "arcane" },
+          }),
+        }
+      )
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -408,15 +422,17 @@ describe("capability product HTTP", () => {
     const artifactId = String(body.artifactId);
     const artifact = await json(
       await created.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`)
+      )
     );
-    expect(artifact).toEqual(expect.objectContaining({
-      artifactId,
-      kind: "report",
-      title: "Capability report: container.list",
-      contentType: "application/json",
-    }));
+    expect(artifact).toEqual(
+      expect.objectContaining({
+        artifactId,
+        kind: "report",
+        title: "Capability report: container.list",
+        contentType: "application/json",
+      })
+    );
   });
 
   it("rejects unapproved container.restart invoke and does not restart", async () => {
@@ -432,11 +448,14 @@ describe("capability product HTTP", () => {
       provider: restarting,
     });
     const res = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/container.restart/invoke", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ arguments: { id: "ctr-emby" } }),
-      }),
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/container.restart/invoke",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ arguments: { id: "ctr-emby" } }),
+        }
+      )
     );
     expect(res.status).toBe(403);
     const body = await json(res);
@@ -452,22 +471,31 @@ describe("capability product HTTP", () => {
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ mode: "background", arguments: { category: "all" } }),
-        },
-      ),
+          body: JSON.stringify({
+            mode: "background",
+            arguments: { category: "all" },
+          }),
+        }
+      )
     );
     expect(res.status).toBe(202);
     const body = await json(res);
     expect(body.type).toBe("run");
     expect(body.runId).toEqual(expect.any(String));
     const fetched = await created.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${body.runId}`),
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${body.runId}`)
     );
     expect(fetched.status).toBe(200);
     const run = await json(fetched);
     expect(run.runId).toBe(body.runId);
     expect(run.capabilityId).toBe("diagnose_from_events");
-    expect(["queued", "running", "succeeded", "failed", "interrupted"]).toContain(run.status);
+    expect([
+      "queued",
+      "running",
+      "succeeded",
+      "failed",
+      "interrupted",
+    ]).toContain(run.status);
   });
 
   it("streams capability run snapshots over the log SSE route", async () => {
@@ -495,14 +523,14 @@ describe("capability product HTTP", () => {
           arguments: { title: "Dune" },
           resource: { kind: "strm", id: "strm-1", provider: "openlist" },
         }),
-      }),
+      })
     );
     const startedBody = await json(started);
     const runId = String(startedBody.runId);
     const response = await created.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}/log`, {
         headers: { accept: "text/event-stream" },
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
@@ -510,13 +538,13 @@ describe("capability product HTTP", () => {
     const reader = response.body!.getReader();
     const initial = new TextDecoder().decode((await reader.read()).value);
     expect(initial).toContain("event: capability_update");
-    expect(initial).toContain(`\"runId\":\"${runId}\"`);
-    expect(initial).toContain(`\"status\":\"running\"`);
+    expect(initial).toContain(`"runId":"${runId}"`);
+    expect(initial).toContain(`"status":"running"`);
 
     releaseRepair();
     const completed = new TextDecoder().decode((await reader.read()).value);
     expect(completed).toContain("event: capability_update");
-    expect(completed).toContain(`\"status\":\"succeeded\"`);
+    expect(completed).toContain(`"status":"succeeded"`);
     await reader.cancel();
   });
 
@@ -533,8 +561,8 @@ describe("capability product HTTP", () => {
             arguments: { category: "all" },
             resource: { kind: "container", id: "ctr-emby" },
           }),
-        },
-      ),
+        }
+      )
     );
     const startedBody = await json(started);
     const run = await fetchRun(created.handler, String(startedBody.runId));
@@ -544,9 +572,9 @@ describe("capability product HTTP", () => {
     const artifact = await json(
       await created.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/artifacts/${String(run.artifactId)}`,
-        ),
-      ),
+          `http://127.0.0.1:8787/v1/artifacts/${String(run.artifactId)}`
+        )
+      )
     );
     expect(artifact).toEqual(
       expect.objectContaining({
@@ -554,7 +582,7 @@ describe("capability product HTTP", () => {
         kind: "report",
         runId: run.runId,
         resource: { kind: "container", id: "ctr-emby" },
-      }),
+      })
     );
   });
 
@@ -570,18 +598,15 @@ describe("capability product HTTP", () => {
       },
     });
     const started = await created.handler.handle(
-      new Request(
-        "http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke",
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            mode: "background",
-            arguments: { title: "Dune" },
-            resource: { kind: "strm", id: "strm-1", provider: "openlist" },
-          }),
-        },
-      ),
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mode: "background",
+          arguments: { title: "Dune" },
+          resource: { kind: "strm", id: "strm-1", provider: "openlist" },
+        }),
+      })
     );
     const startedBody = await json(started);
     const run = await fetchRun(created.handler, String(startedBody.runId));
@@ -591,13 +616,13 @@ describe("capability product HTTP", () => {
         status: "failed",
         error: "provider failed: TOKEN=***REDACTED***",
         artifactId: expect.any(String),
-      }),
+      })
     );
     const artifactId = String(run.artifactId);
     const artifact = await json(
       await created.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`)
+      )
     );
     expect(artifact).toEqual(
       expect.objectContaining({
@@ -605,12 +630,12 @@ describe("capability product HTTP", () => {
         kind: "report",
         runId: run.runId,
         resource: { kind: "strm", id: "strm-1" },
-      }),
+      })
     );
     const content = await json(
       await created.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`)
+      )
     );
     expect(JSON.parse(content.content as string)).toEqual({
       version: 1,
@@ -635,8 +660,8 @@ describe("capability product HTTP", () => {
             arguments: { category: "all" },
             resource: { kind: "container", id: "ctr-emby" },
           }),
-        },
-      ),
+        }
+      )
     );
     const body = await json(started);
     const runId = String(body.runId);
@@ -646,7 +671,7 @@ describe("capability product HTTP", () => {
 
     const restarted = app({ agentStoreDir: dir });
     const restored = await restarted.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`),
+      new Request(`http://127.0.0.1:8787/v1/capabilities/runs/${runId}`)
     );
     expect(restored.status).toBe(200);
     const restoredRun = await json(restored);
@@ -656,7 +681,7 @@ describe("capability product HTTP", () => {
     });
 
     const listed = await restarted.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/runs"),
+      new Request("http://127.0.0.1:8787/v1/capabilities/runs")
     );
     expect(listed.status).toBe(200);
     expect(await json(listed)).toEqual({ runs: [restoredRun] });
@@ -681,7 +706,7 @@ describe("capability product HTTP", () => {
       now: () => new Date("2026-09-21T00:00:00.000Z"),
     });
     const recovered = await restarted.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/runs/stale-run"),
+      new Request("http://127.0.0.1:8787/v1/capabilities/runs/stale-run")
     );
     expect(recovered.status).toBe(200);
     const run = await json(recovered);
@@ -692,7 +717,9 @@ describe("capability product HTTP", () => {
   });
 
   it("normalizes legacy interruption failures into explicit recovery state", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "thebe-capability-legacy-recovery-"));
+    const dir = await mkdtemp(
+      join(tmpdir(), "thebe-capability-legacy-recovery-")
+    );
     const store = createCapabilityRunStore({
       dir: join(dir, "capability-runs"),
       ownerId: "previous-core-instance",
@@ -713,14 +740,18 @@ describe("capability product HTTP", () => {
       now: () => new Date("2026-09-21T00:00:01.000Z"),
     });
     const recovered = await restarted.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/runs/legacy-interrupted"),
+      new Request(
+        "http://127.0.0.1:8787/v1/capabilities/runs/legacy-interrupted"
+      )
     );
     expect(recovered.status).toBe(200);
-    expect(await json(recovered)).toEqual(expect.objectContaining({
-      status: "interrupted",
-      recovery: "interrupted",
-      error: "Capability run interrupted when Core restarted.",
-    }));
+    expect(await json(recovered)).toEqual(
+      expect.objectContaining({
+        status: "interrupted",
+        recovery: "interrupted",
+        error: "Capability run interrupted when Core restarted.",
+      })
+    );
   });
 
   it("returns 404 for an unknown capability", async () => {
@@ -729,7 +760,7 @@ describe("capability product HTTP", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ arguments: {} }),
-      }),
+      })
     );
     expect(res.status).toBe(404);
   });

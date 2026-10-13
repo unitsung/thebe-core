@@ -28,13 +28,21 @@ gate before opening a pull request:
 
 ```bash
 npm run typecheck                # tsc --noEmit
+npm run lint                     # oxlint
+npm run format                   # oxfmt, writes in place
 npm test                         # vitest run
-bash scripts/release-check.sh    # typecheck + build + tests + live smoke test
+bash scripts/release-check.sh    # typecheck + lint + build + tests + live smoke test
 ```
 
 `scripts/release-check.sh` is the release gate and runs in CI
-(`.github/workflows/release-check.yml`) on every push and pull request. Use
+(`.github/workflows/verify.yml`) on every push and pull request. Use
 `bash scripts/release-check.sh --no-smoke` to skip the smoke test.
+
+A Husky `pre-commit` hook formats staged files (oxfmt), then runs `tsc`, `oxlint`
+and the tests affected by the change. A `commit-msg` hook enforces
+[Conventional Commits](https://www.conventionalcommits.org/) via commitlint
+(`feat:`, `fix:`, `chore:`, `docs:`, …). Install both with `npm install` (the
+`prepare` script wires `.husky/`).
 
 ## Pull requests
 

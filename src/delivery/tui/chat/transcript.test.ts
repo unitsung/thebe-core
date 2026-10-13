@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { TuiMainScreen, type Terminal, getPiThemeInstance } from "../rendering/adapter.ts";
+import {
+  TuiMainScreen,
+  type Terminal,
+  getPiThemeInstance,
+} from "../rendering/adapter.ts";
 import {
   ThinkingBlock,
   ElapsedWorking,
@@ -33,6 +37,7 @@ class TestTerminal implements Terminal {
   clearScreen(): void {}
   setTitle(): void {}
   setProgress(): void {}
+  setProgramStatus(): void {}
 }
 
 describe("transcript components", () => {
@@ -48,20 +53,24 @@ describe("transcript components", () => {
     const normalized = normalizeMarkdownImages(source);
 
     expect(normalized).toContain(
-      "[🖼 portrait](https://example.com/portrait.png?w=400)",
+      "[🖼 portrait](https://example.com/portrait.png?w=400)"
     );
-    expect(normalized).toContain("`![literal](https://example.com/literal.png)`");
+    expect(normalized).toContain(
+      "`![literal](https://example.com/literal.png)`"
+    );
     expect(normalized).toContain("![code](https://example.com/code.png)");
     expect(normalized).not.toContain(
-      "![portrait](https://example.com/portrait.png?w=400)",
+      "![portrait](https://example.com/portrait.png?w=400)"
     );
   });
 
   it("renders an image response as a clickable Markdown link", () => {
     const rendered = makeReplyMarkdown(
       "![portrait](https://example.com/portrait.png)",
-      defaultMarkdownTheme,
-    ).render(80).join("\n");
+      defaultMarkdownTheme
+    )
+      .render(80)
+      .join("\n");
 
     expect(rendered).toContain("portrait");
     expect(rendered).toContain("https://example.com/portrait.png");
@@ -70,7 +79,9 @@ describe("transcript components", () => {
 
   it("ThinkingBlock renders folded by default with elapsed seconds and Ctrl+T hint", () => {
     const tb = new ThinkingBlock(true);
-    tb.append("Let me ponder the architecture of this universe...\nSecond thought.");
+    tb.append(
+      "Let me ponder the architecture of this universe...\nSecond thought."
+    );
     tb.finish(3);
 
     expect(tb.isFinished()).toBe(true);
@@ -124,7 +135,10 @@ describe("transcript components", () => {
 
     // Test bash tool call
     const bashRenderers = createToolRenderers("bash");
-    const bashCallComp = bashRenderers.renderCall({ command: "npm test --run" }, theme);
+    const bashCallComp = bashRenderers.renderCall(
+      { command: "npm test --run" },
+      theme
+    );
     const bashRendered = bashCallComp.render(80).join("\n");
     expect(bashRendered).toContain("bash");
     expect(bashRendered).toContain("⚙");
@@ -133,7 +147,10 @@ describe("transcript components", () => {
 
     // Test edit_file tool call and diff result
     const editRenderers = createToolRenderers("edit_file");
-    const editCallComp = editRenderers.renderCall({ path: "src/delivery/tui/chat/controller.ts" }, theme);
+    const editCallComp = editRenderers.renderCall(
+      { path: "src/delivery/tui/chat/controller.ts" },
+      theme
+    );
     const editRendered = editCallComp.render(80).join("\n");
     expect(editRendered).toContain("edit_file");
     expect(editRendered).toContain("src/delivery/tui/chat/controller.ts");
@@ -155,21 +172,24 @@ describe("transcript components", () => {
       },
       { expanded: false, isPartial: false },
       theme,
-      { args: { path: "src/foo.ts" } },
+      { args: { path: "src/foo.ts" } }
     );
     const diffRendered = diffResultComp.render(80).join("\n");
     expect(diffRendered).not.toContain("+const b = 2;");
     expect(diffRendered).toContain("Ctrl+O");
 
-    const expandedDiffRendered = editRenderers.renderResult(
-      {
-        content: [{ type: "text", text: sampleDiff }],
-        details: { diff: sampleDiff },
-      },
-      { expanded: true, isPartial: false },
-      theme,
-      { args: { path: "src/foo.ts" } },
-    ).render(80).join("\n");
+    const expandedDiffRendered = editRenderers
+      .renderResult(
+        {
+          content: [{ type: "text", text: sampleDiff }],
+          details: { diff: sampleDiff },
+        },
+        { expanded: true, isPartial: false },
+        theme,
+        { args: { path: "src/foo.ts" } }
+      )
+      .render(80)
+      .join("\n");
     expect(expandedDiffRendered).toContain("+const b = 2;");
 
     // Test tool component
@@ -178,10 +198,12 @@ describe("transcript components", () => {
       "edit_file",
       "call_123",
       { path: "src/foo.ts" },
-      false,
+      false
     );
     toolComp.setArgsComplete();
-    toolComp.updateResult(toolResultPayload(sampleDiff, false, { diff: sampleDiff }));
+    toolComp.updateResult(
+      toolResultPayload(sampleDiff, false, { diff: sampleDiff })
+    );
 
     const collapsedToolLines = toolComp.render(80);
     expect(collapsedToolLines).toHaveLength(3);

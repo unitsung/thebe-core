@@ -24,7 +24,15 @@ export type InputControllerDeps = {
 
 /** Owns editor submission, keyboard shortcuts, and the direct shell flow. */
 export class InputController {
-  private readonly thinkingCycle: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  private readonly thinkingCycle: ThinkingLevel[] = [
+    "off",
+    "minimal",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+  ];
   private readonly originalHandleInput: (data: string) => void;
 
   constructor(private readonly deps: InputControllerDeps) {
@@ -47,13 +55,17 @@ export class InputController {
     }
     if (trimmed.startsWith("!")) {
       const isExcluded = trimmed.startsWith("!!");
-      const command = isExcluded ? trimmed.slice(2).trim() : trimmed.slice(1).trim();
+      const command = isExcluded
+        ? trimmed.slice(2).trim()
+        : trimmed.slice(1).trim();
       editor.setText("");
       state.isBashMode = false;
       this.deps.updateEditorBorderColor();
       if (!command) return;
       if (state.isExecutingBash) {
-        notice("A bash command is already running. Press Esc to cancel it first.");
+        notice(
+          "A bash command is already running. Press Esc to cancel it first."
+        );
         return;
       }
       void this.runBash(command, isExcluded);
@@ -74,10 +86,12 @@ export class InputController {
   }
 
   private handleInput(data: string): void {
-    const { state, editor, tui, agent, notice } = this.deps;
-    if (matchesKey(data, "ctrl+shift+g")) return void this.deps.tasks.openLatestSubagent();
+    const { state, editor, agent, notice } = this.deps;
+    if (matchesKey(data, "ctrl+shift+g"))
+      return void this.deps.tasks.openLatestSubagent();
     if (matchesKey(data, "ctrl+g")) return void this.deps.tasks.openTaskPane();
-    if (matchesKey(data, "ctrl+l") || matchesKey(data, "ctrl+p")) return void this.deps.handleSlash("/model");
+    if (matchesKey(data, "ctrl+l") || matchesKey(data, "ctrl+p"))
+      return void this.deps.handleSlash("/model");
     if (matchesKey(data, "ctrl+x")) return void this.deps.handleSlash("/copy");
     if (matchesKey(data, "shift+tab")) {
       void this.cycleThinking();
@@ -92,7 +106,8 @@ export class InputController {
       return;
     }
     if (matchesKey(data, "escape")) {
-      if (state.currentBashAbortController) return void state.currentBashAbortController.abort();
+      if (state.currentBashAbortController)
+        return void state.currentBashAbortController.abort();
       if (state.isBashMode) {
         editor.setText("");
         state.isBashMode = false;
@@ -101,15 +116,21 @@ export class InputController {
         return;
       }
     }
-    if (state.isResponding && (matchesKey(data, "alt+enter") || matchesKey(data, "ctrl+q"))) {
+    if (
+      state.isResponding &&
+      (matchesKey(data, "alt+enter") || matchesKey(data, "ctrl+q"))
+    ) {
       const text = editor.getText().trim();
       if (text && agent && state.sessionId) {
-        void agent.prompt(text, { thebeSessionId: state.sessionId, mode: "followUp" })
+        void agent
+          .prompt(text, { thebeSessionId: state.sessionId, mode: "followUp" })
           .then(() => {
             notice(`queued follow-up: ${text}`);
             editor.setText("");
           })
-          .catch((error: unknown) => notice(error instanceof Error ? error.message : String(error)));
+          .catch((error: unknown) =>
+            notice(error instanceof Error ? error.message : String(error))
+          );
         return;
       }
     }
@@ -122,34 +143,60 @@ export class InputController {
     try {
       if (agent && state.sessionId) {
         await state.thinkingSyncPromise;
-        const levels = state.thinkingInfo.availableLevels.length > 0 ? state.thinkingInfo.availableLevels : this.thinkingCycle;
+        const levels =
+          state.thinkingInfo.availableLevels.length > 0
+            ? state.thinkingInfo.availableLevels
+            : this.thinkingCycle;
         const index = levels.indexOf(state.currentThinking);
-        await this.deps.sessions.setThinkingLevel(levels[(index < 0 ? 0 : index + 1) % levels.length]!);
+        await this.deps.sessions.setThinkingLevel(
+          levels[(index < 0 ? 0 : index + 1) % levels.length]!
+        );
       } else {
         const index = this.thinkingCycle.indexOf(state.currentThinking);
-        state.currentThinking = this.thinkingCycle[(index < 0 ? 0 : index + 1) % this.thinkingCycle.length]!;
+        state.currentThinking =
+          this.thinkingCycle[
+            (index < 0 ? 0 : index + 1) % this.thinkingCycle.length
+          ]!;
         this.deps.updateFooter();
         this.deps.updateEditorBorderColor();
       }
     } catch (error) {
       notice(error instanceof Error ? error.message : String(error));
-      state.thinkingSyncPromise = this.deps.sessions.syncThinkingLevel(state.sessionId);
+      state.thinkingSyncPromise = this.deps.sessions.syncThinkingLevel(
+        state.sessionId
+      );
     }
   }
 
-  private async runBash(command: string, excludeFromContext: boolean): Promise<void> {
+  private async runBash(
+    command: string,
+    excludeFromContext: boolean
+  ): Promise<void> {
     const { state, tui, notice } = this.deps;
     state.isExecutingBash = true;
     this.deps.updateEditorBorderColor();
     const controller = new AbortController();
     state.currentBashAbortController = controller;
     try {
-      const sessionId = this.deps.agent ? await this.deps.sessions.ensureSession() : state.sessionId;
+      const sessionId = this.deps.agent
+        ? await this.deps.sessions.ensureSession()
+        : state.sessionId;
       await runChatBash(
-        { tui, insertBeforeFooter: (component) => this.deps.events.insertBeforeFooter(component), notice },
+        {
+          tui,
+          insertBeforeFooter: (component) =>
+            this.deps.events.insertBeforeFooter(component),
+          notice,
+        },
         command,
         excludeFromContext,
-        { agent: this.deps.agent, sessionId, signal: controller.signal, onData: () => {}, cwd: this.deps.workspacePath },
+        {
+          agent: this.deps.agent,
+          sessionId,
+          signal: controller.signal,
+          onData: () => {},
+          cwd: this.deps.workspacePath,
+        }
       );
     } finally {
       state.currentBashAbortController = undefined;

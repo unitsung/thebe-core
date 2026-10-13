@@ -2,8 +2,12 @@ import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { REDACTED, redactToolOutput } from "../security/redaction.ts";
-import { limitModelOutput, MODEL_RESULT_CHAR_LIMIT } from "./model-output-limit.ts";
-import type { CustomToolDefinition, CustomToolResult, NormalizedEvent } from "../runtime/index.ts";
+import { limitModelOutput } from "./model-output-limit.ts";
+import type {
+  CustomToolDefinition,
+  CustomToolResult,
+  NormalizedEvent,
+} from "../runtime/index.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 type Audit = ReturnType<typeof createAuditLog>;
@@ -19,7 +23,7 @@ export function wrapCustomTools(
     sessionId?: () => string | undefined;
     /** Cap on the text one result adds to the model's context. Omit for callers that need the full result. */
     modelResultLimit?: number;
-  },
+  }
 ): CustomToolDefinition[] {
   const limit = options.modelResultLimit;
   return tools.map((tool) => ({
@@ -71,7 +75,9 @@ export function wrapCustomTools(
                 elapsedMs: watchdogMs,
               });
               reject(
-                new Error(`tool call exceeded watchdog timeout (${watchdogMs}ms)`),
+                new Error(
+                  `tool call exceeded watchdog timeout (${watchdogMs}ms)`
+                )
               );
             }, watchdogMs);
           });
@@ -98,7 +104,7 @@ export function wrapCustomTools(
         return wrapped;
       } catch (error) {
         const message = redactToolOutput(
-          error instanceof Error ? error.message : String(error),
+          error instanceof Error ? error.message : String(error)
         );
         await options.audit?.append({
           method: tool.name,
@@ -120,7 +126,11 @@ export function wrapCustomTools(
   }));
 }
 
-function wrapResult(toolName: string, limit: number | undefined, result: CustomToolResult): CustomToolResult {
+function wrapResult(
+  toolName: string,
+  limit: number | undefined,
+  result: CustomToolResult
+): CustomToolResult {
   return {
     isError: result.isError,
     details: result.details ?? {},

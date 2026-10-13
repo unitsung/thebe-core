@@ -2,54 +2,64 @@
   "name": "thebe-core",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "description": "Headless homelab agent on a replaceable coding-agent runtime.",
   "license": "Apache-2.0",
-  "scarfSettings": {
-    "enabled": false
+  "bin": {
+    "thebe": "./dist/cli.js"
   },
-  "engines": {
-    "node": ">=24.0.0"
-  },
+  "type": "module",
   "exports": {
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "vite build",
+    "build": "tsdown",
     "start": "node dist/serve.js",
     "start:build": "npm run build && node dist/serve.js",
     "start:lan": "node scripts/start-lan.mjs",
     "start:lan:build": "npm run build && node scripts/start-lan.mjs",
     "docs": "npm start",
-    "tui": "vite build && node dist/tui.js",
+    "tui": "npm run build && node dist/tui.js",
     "test": "vitest run",
+    "test:changed": "vitest run --changed",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "cli": "vite build && node dist/cli.js",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "cli": "npm run build && node dist/cli.js",
     "smoke": "node scripts/smoke.mjs",
-    "release-check": "bash scripts/release-check.sh"
-  },
-  "devDependencies": {
-    "@apidevtools/swagger-parser": "13.0.0",
-    "@earendil-works/pi-ai": "1.0.4",
-    "@types/node": "^24.0.0",
-    "typescript": "7.0.2",
-    "vite": "8.3.0",
-    "vitest": "5.0.0"
+    "release-check": "bash scripts/release-check.sh",
+    "prepare": "husky"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.0.4",
-    "@earendil-works/pi-mcp": "1.0.4",
-    "@earendil-works/pi-server": "1.0.4",
-    "@earendil-works/pi-tui": "1.0.4",
-    "@modelcontextprotocol/sdk": "1.31.0",
-    "chalk": "6.0.0",
-    "swagger-ui-dist": "5.32.15"
+    "@earendil-works/pi-coding-agent": "^1.2.0",
+    "@earendil-works/pi-mcp": "^1.2.0",
+    "@earendil-works/pi-tui": "^1.2.0",
+    "chalk": "^6.0.1",
+    "swagger-ui-dist": "^5.33.2"
   },
-  "bin": {
-    "thebe": "./dist/cli.js"
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^13.1.0",
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
+    "@earendil-works/pi-ai": "^1.2.0",
+    "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^17.6.0",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "tsdown": "^0.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4"
   },
   "optionalDependencies": {
-    "@earendil-works/gondolin": "0.12.0"
+    "@earendil-works/gondolin": "^0.13.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scarfSettings": {
+    "enabled": false
   }
 }

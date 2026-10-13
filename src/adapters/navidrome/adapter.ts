@@ -9,7 +9,6 @@ import type {
   NavidromeLibraryInput,
   NavidromeLibraryResult,
   NavidromeLyrics,
-  NavidromePlaybackMode,
   NavidromePlaylist,
   NavidromeProvider,
   NavidromeQueue,
@@ -59,13 +58,18 @@ export class NavidromeAdapter implements NavidromeProvider {
     this.activeBaseUrl = this.baseUrl;
   }
 
-  async listLibrary(input: NavidromeLibraryInput): Promise<NavidromeLibraryResult> {
+  async listLibrary(
+    input: NavidromeLibraryInput
+  ): Promise<NavidromeLibraryResult> {
     const limit = clampInteger(input.limit, 1, 100, DEFAULT_LIMIT);
     const offset = clampInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0);
 
     if (input.mode === "artists") {
       const artists = await this.listArtists();
-      return { mode: "artists", artists: artists.slice(offset, offset + limit) };
+      return {
+        mode: "artists",
+        artists: artists.slice(offset, offset + limit),
+      };
     }
     if (input.mode === "playlists") {
       const playlists = await this.listPlaylists();
@@ -103,9 +107,11 @@ export class NavidromeAdapter implements NavidromeProvider {
 
   async getArtist(
     id: string,
-    limit = 12,
+    limit = 12
   ): Promise<NavidromeArtistDetails | undefined> {
-    const artistResponse = await this.requestJson("/rest/getArtist.view", { id });
+    const artistResponse = await this.requestJson("/rest/getArtist.view", {
+      id,
+    });
     const artist = mapArtist(asObject(artistResponse.artist));
     if (!isArtist(artist)) return undefined;
 
@@ -145,13 +151,15 @@ export class NavidromeAdapter implements NavidromeProvider {
           .map(asObject)
           .find((item) => stringField(item, "kind") === "main") ??
         asObject(tracks[0]);
-      const lines = asArray(track.line).map((line) => {
-        const item = asObject(line);
-        return {
-          startMilliseconds: numberField(item, "start"),
-          text: stringField(item, "value"),
-        };
-      }).filter((line) => line.text.length > 0);
+      const lines = asArray(track.line)
+        .map((line) => {
+          const item = asObject(line);
+          return {
+            startMilliseconds: numberField(item, "start"),
+            text: stringField(item, "value"),
+          };
+        })
+        .filter((line) => line.text.length > 0);
       if (lines.length > 0) {
         return {
           synced:
@@ -188,7 +196,7 @@ export class NavidromeAdapter implements NavidromeProvider {
     if (songs.length === 0) {
       throw new ProviderError(
         "NOT_FOUND",
-        "Navidrome did not return any songs for the queue",
+        "Navidrome did not return any songs for the queue"
       );
     }
 
@@ -202,7 +210,7 @@ export class NavidromeAdapter implements NavidromeProvider {
     const authorization = this.authorizationItems();
     const lyrics = input.includeLyrics
       ? await Promise.all(
-          selected.map((song) => this.getLyrics(song.id).catch(() => undefined)),
+          selected.map((song) => this.getLyrics(song.id).catch(() => undefined))
         )
       : [];
 
@@ -216,11 +224,10 @@ export class NavidromeAdapter implements NavidromeProvider {
       const artworkId = song.coverArt ?? song.albumId;
       return {
         queueId: song.id,
-        streamUrl: this.buildUrl(
-          this.activeBaseUrl,
-          "/rest/stream.view",
-          [...authorization, ...streamItems],
-        ),
+        streamUrl: this.buildUrl(this.activeBaseUrl, "/rest/stream.view", [
+          ...authorization,
+          ...streamItems,
+        ]),
         requestHeaders: {},
         title: song.title,
         artist: song.artist ?? "",
@@ -248,13 +255,16 @@ export class NavidromeAdapter implements NavidromeProvider {
   }
 
   async createPlaylist(
-    input: NavidromeCreatePlaylistInput,
+    input: NavidromeCreatePlaylistInput
   ): Promise<NavidromePlaylist | undefined> {
     const params = new URLSearchParams({ name: input.name });
     for (const songId of input.songIds ?? []) {
       params.append("songId", songId);
     }
-    const response = await this.requestJson("/rest/createPlaylist.view", params);
+    const response = await this.requestJson(
+      "/rest/createPlaylist.view",
+      params
+    );
     const playlist = mapPlaylist(asObject(response.playlist));
     return isPlaylist(playlist) ? playlist : undefined;
   }
@@ -282,7 +292,7 @@ export class NavidromeAdapter implements NavidromeProvider {
   private async listAlbums(
     type: NavidromeAlbumListType,
     size: number,
-    offset: number,
+    offset: number
   ): Promise<NavidromeAlbum[]> {
     const response = await this.requestJson("/rest/getAlbumList2.view", {
       type,
@@ -315,7 +325,10 @@ export class NavidromeAdapter implements NavidromeProvider {
       .filter(isArtist);
   }
 
-  private async listSongs(offset: number, limit: number): Promise<NavidromeSong[]> {
+  private async listSongs(
+    offset: number,
+    limit: number
+  ): Promise<NavidromeSong[]> {
     const response = await this.requestJson("/rest/search3.view", {
       query: "",
       artistCount: "0",
@@ -335,13 +348,17 @@ export class NavidromeAdapter implements NavidromeProvider {
       .filter(isPlaylist);
   }
 
-  private async getPlaylist(id: string): Promise<NavidromePlaylist | undefined> {
+  private async getPlaylist(
+    id: string
+  ): Promise<NavidromePlaylist | undefined> {
     const response = await this.requestJson("/rest/getPlaylist.view", { id });
     const playlist = mapPlaylist(asObject(response.playlist));
     return isPlaylist(playlist) ? playlist : undefined;
   }
 
-  private async resolveQueueSongs(input: NavidromeQueueInput): Promise<NavidromeSong[]> {
+  private async resolveQueueSongs(
+    input: NavidromeQueueInput
+  ): Promise<NavidromeSong[]> {
     if (input.playlistId) {
       const playlist = await this.getPlaylist(input.playlistId);
       return playlist?.songs ?? [];
@@ -354,7 +371,7 @@ export class NavidromeAdapter implements NavidromeProvider {
     if (ids.length === 0) {
       throw new ProviderError(
         "UNKNOWN",
-        "Navidrome queue requires songIds, albumId, or playlistId",
+        "Navidrome queue requires songIds, albumId, or playlistId"
       );
     }
     const songs = await Promise.all(ids.map((id) => this.getSong(id)));
@@ -363,11 +380,11 @@ export class NavidromeAdapter implements NavidromeProvider {
 
   private async requestJson(
     path: string,
-    extraItems: URLSearchParams | Record<string, string> = {},
+    extraItems: URLSearchParams | Record<string, string> = {}
   ): Promise<Json> {
     const bases = [this.baseUrl, this.fallbackUrl].filter(
       (value, index, all): value is string =>
-        Boolean(value) && all.indexOf(value) === index,
+        Boolean(value) && all.indexOf(value) === index
     );
     let lastError: unknown;
 
@@ -375,17 +392,20 @@ export class NavidromeAdapter implements NavidromeProvider {
       let response: Response;
       try {
         response = await this.fetchImpl(
-          this.buildUrl(baseUrl, path, [...this.authorizationItems(), ...asEntries(extraItems)]),
+          this.buildUrl(baseUrl, path, [
+            ...this.authorizationItems(),
+            ...asEntries(extraItems),
+          ]),
           {
             method: "GET",
             headers: { Accept: "application/json" },
-          },
+          }
         );
       } catch (cause) {
         lastError = new ProviderError(
           "UNREACHABLE",
           "Navidrome is unreachable",
-          cause,
+          cause
         );
         continue;
       }
@@ -397,7 +417,7 @@ export class NavidromeAdapter implements NavidromeProvider {
             : response.status === 404
               ? "NOT_FOUND"
               : "UNKNOWN",
-          `Navidrome HTTP ${response.status}`,
+          `Navidrome HTTP ${response.status}`
         );
         if (response.status >= 500 && bases.length > 1) {
           lastError = error;
@@ -436,7 +456,7 @@ export class NavidromeAdapter implements NavidromeProvider {
   private buildUrl(
     baseUrl: string,
     path: string,
-    items: Array<[string, string]>,
+    items: Array<[string, string]>
   ): string {
     const params = new URLSearchParams();
     for (const [key, value] of items) {
@@ -446,7 +466,9 @@ export class NavidromeAdapter implements NavidromeProvider {
   }
 }
 
-function albumListType(mode: NavidromeLibraryInput["mode"]): NavidromeAlbumListType {
+function albumListType(
+  mode: NavidromeLibraryInput["mode"]
+): NavidromeAlbumListType {
   switch (mode) {
     case "recent":
       return "newest";
@@ -482,9 +504,7 @@ function mapAlbum(value: unknown): NavidromeAlbum {
     year: numberField(album, "year"),
     genre: nonEmptyString(album.genre),
     created: nonEmptyString(album.created),
-    songs: asArray(album.song)
-      .map(mapSong)
-      .filter(isSong),
+    songs: asArray(album.song).map(mapSong).filter(isSong),
   };
 }
 
@@ -519,9 +539,7 @@ function mapArtist(value: unknown): NavidromeArtist {
     name: stringField(artist, "name"),
     coverArt: nonEmptyString(artist.coverArt),
     albumCount: numberField(artist, "albumCount"),
-    albums: asArray(artist.album)
-      .map(mapAlbum)
-      .filter(isAlbum),
+    albums: asArray(artist.album).map(mapAlbum).filter(isAlbum),
   };
 }
 
@@ -538,9 +556,7 @@ function mapPlaylist(value: unknown): NavidromePlaylist {
     coverArt: nonEmptyString(playlist.coverArt),
     created: nonEmptyString(playlist.created),
     changed: nonEmptyString(playlist.changed),
-    songs: asArray(playlist.entry)
-      .map(mapSong)
-      .filter(isSong),
+    songs: asArray(playlist.entry).map(mapSong).filter(isSong),
   };
 }
 
@@ -584,7 +600,9 @@ function nonEmptyString(value: unknown): string | undefined {
 
 function numberField(object: Json, key: string): number | undefined {
   const value = object[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function booleanField(object: Json, key: string): boolean | undefined {
@@ -593,7 +611,7 @@ function booleanField(object: Json, key: string): boolean | undefined {
 }
 
 function asEntries(
-  value: URLSearchParams | Record<string, string>,
+  value: URLSearchParams | Record<string, string>
 ): Array<[string, string]> {
   return value instanceof URLSearchParams
     ? [...value.entries()]
@@ -604,7 +622,7 @@ function clampInteger(
   value: number | undefined,
   min: number,
   max: number,
-  fallback: number,
+  fallback: number
 ): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, Math.trunc(value)));

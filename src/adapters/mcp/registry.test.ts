@@ -2,7 +2,6 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { access } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { createMcpClientRegistry } from "./index.ts";
 
@@ -36,7 +35,7 @@ describe("external MCP client registry", () => {
             permission: "confirm",
           },
         },
-      }),
+      })
     );
 
     const previousCwd = process.cwd();
@@ -57,17 +56,25 @@ describe("external MCP client registry", () => {
         }),
       ]);
       await expect(
-        registry.invokeTool("mcp:notes/echo", { text: "ok" }),
+        registry.invokeTool("mcp:notes/echo", { text: "ok" })
       ).resolves.toBe("echo:ok");
       await expect(registry.listServers()).resolves.toEqual([
-        expect.objectContaining({ name: "notes", status: "configured", disabled: false }),
+        expect.objectContaining({
+          name: "notes",
+          status: "configured",
+          disabled: false,
+        }),
       ]);
       await expect(registry.setServerEnabled("notes", false)).resolves.toEqual(
-        expect.objectContaining({ name: "notes", status: "disabled", disabled: true }),
+        expect.objectContaining({
+          name: "notes",
+          status: "disabled",
+          disabled: true,
+        })
       );
       await expect(registry.listTools()).resolves.toEqual([]);
       await expect(registry.setServerEnabled("notes", true)).resolves.toEqual(
-        expect.objectContaining({ name: "notes", disabled: false }),
+        expect.objectContaining({ name: "notes", disabled: false })
       );
       await expect(registry.listTools()).resolves.toEqual([
         expect.objectContaining({ name: "mcp:notes/echo" }),
@@ -79,7 +86,11 @@ describe("external MCP client registry", () => {
       });
       try {
         await expect(restored.listServers()).resolves.toEqual([
-          expect.objectContaining({ name: "notes", status: "disabled", disabled: true }),
+          expect.objectContaining({
+            name: "notes",
+            status: "disabled",
+            disabled: true,
+          }),
         ]);
         await expect(restored.listTools()).resolves.toEqual([]);
       } finally {
@@ -105,36 +116,84 @@ describe("external MCP client registry", () => {
       }
       let body = "";
       for await (const chunk of request) body += chunk.toString();
-      const message = JSON.parse(body) as { id?: number; method?: string; params?: { arguments?: { text?: string } } };
+      const message = JSON.parse(body) as {
+        id?: number;
+        method?: string;
+        params?: { arguments?: { text?: string } };
+      };
       response.setHeader("content-type", "application/json");
       response.setHeader("mcp-session-id", "fixture-session");
       if (message.method === "initialize") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-06-18", capabilities: { tools: {} }, serverInfo: { name: "fixture", version: "1.0.0" } } }));
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: { tools: {} },
+              serverInfo: { name: "fixture", version: "1.0.0" },
+            },
+          })
+        );
       } else if (message.method === "tools/list") {
         expect(request.headers["mcp-session-id"]).toBe("fixture-session");
         expect(request.headers["mcp-protocol-version"]).toBe("2025-06-18");
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }));
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              tools: [{ name: "echo", inputSchema: { type: "object" } }],
+            },
+          })
+        );
       } else if (message.method === "tools/call") {
-        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { content: [{ type: "text", text: `http:${message.params?.arguments?.text ?? ""}` }] } }));
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              content: [
+                {
+                  type: "text",
+                  text: `http:${message.params?.arguments?.text ?? ""}`,
+                },
+              ],
+            },
+          })
+        );
       } else {
         response.statusCode = 202;
         response.end();
       }
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve)
+    );
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("HTTP fixture did not bind");
+    if (!address || typeof address === "string")
+      throw new Error("HTTP fixture did not bind");
     await writeFile(
       join(cwd, ".thebe", "mcp.json"),
-      JSON.stringify({ mcpServers: { remote: { url: `http://127.0.0.1:${address.port}` } } }),
+      JSON.stringify({
+        mcpServers: { remote: { url: `http://127.0.0.1:${address.port}` } },
+      })
     );
-    const registry = createMcpClientRegistry({ cwd, homeDir, timeoutMs: 2_000 });
+    const registry = createMcpClientRegistry({
+      cwd,
+      homeDir,
+      timeoutMs: 2_000,
+    });
     try {
       expect((await registry.listTools())[0]?.name).toBe("mcp:remote/echo");
-      await expect(registry.invokeTool("mcp:remote/echo", { text: "ok" })).resolves.toBe("http:ok");
+      await expect(
+        registry.invokeTool("mcp:remote/echo", { text: "ok" })
+      ).resolves.toBe("http:ok");
     } finally {
       registry.close();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
     }
   });
 
@@ -153,21 +212,49 @@ describe("external MCP client registry", () => {
       "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');",
       "});",
     ].join("\n");
-    await writeFile(join(cwd, ".thebe", "mcp.json"), JSON.stringify({ mcpServers: {
-      notes: { command: process.execPath, args: ["-e", script], env: { OWN: "own" }, exposure: "direct", description: "Notes", permission: "confirm" },
-      off: { url: "http://127.0.0.1:1/mcp", disabled: true },
-    } }));
+    await writeFile(
+      join(cwd, ".thebe", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          notes: {
+            command: process.execPath,
+            args: ["-e", script],
+            env: { OWN: "own" },
+            exposure: "direct",
+            description: "Notes",
+            permission: "confirm",
+          },
+          off: { url: "http://127.0.0.1:1/mcp", disabled: true },
+        },
+      })
+    );
     process.env.THEBE_TEST_SECRET = "must-not-reach-mcp";
-    const registry = createMcpClientRegistry({ cwd, homeDir, serverStates: [{ name: "off", enabled: true }] });
+    const registry = createMcpClientRegistry({
+      cwd,
+      homeDir,
+      serverStates: [{ name: "off", enabled: true }],
+    });
     try {
       expect(registry.runtimeServers()).toEqual([
-        expect.objectContaining({ name: "notes", enabled: true, exposure: "direct", description: "Notes", permission: "confirm", env: { OWN: "own" } }),
+        expect.objectContaining({
+          name: "notes",
+          enabled: true,
+          exposure: "direct",
+          description: "Notes",
+          permission: "confirm",
+          env: { OWN: "own" },
+        }),
         expect.objectContaining({ name: "off", enabled: true }),
       ]);
       await registry.setServerEnabled("notes", false);
-      expect(registry.runtimeServers().find((server) => server.name === "notes")?.enabled).toBe(false);
+      expect(
+        registry.runtimeServers().find((server) => server.name === "notes")
+          ?.enabled
+      ).toBe(false);
       await registry.setServerEnabled("notes", true);
-      await expect(registry.invokeTool("mcp:notes/env", {})).resolves.toBe("absent own");
+      await expect(registry.invokeTool("mcp:notes/env", {})).resolves.toBe(
+        "absent own"
+      );
     } finally {
       delete process.env.THEBE_TEST_SECRET;
       registry.close();

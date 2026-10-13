@@ -33,7 +33,11 @@ type Operation = {
   requestBody?: Record<string, unknown>;
   requestSchema?: string;
   responseSchema?: string;
-  extraStatuses?: Array<{ status: number; description: string; schema?: string }>;
+  extraStatuses?: Array<{
+    status: number;
+    description: string;
+    schema?: string;
+  }>;
   parameters?: Array<Record<string, unknown>>;
 };
 
@@ -44,7 +48,10 @@ const idParameter = (name = "id") => ({
   required: true,
   schema: { type: "string" },
 });
-const queryParameter = (name: string, schema: Record<string, unknown> = { type: "string" }) => ({
+const queryParameter = (
+  name: string,
+  schema: Record<string, unknown> = { type: "string" }
+) => ({
   name,
   in: "query",
   required: false,
@@ -52,123 +59,1014 @@ const queryParameter = (name: string, schema: Record<string, unknown> = { type: 
 });
 
 const operations: Operation[] = [
-  { method: "get", path: "/v1/schedules", summary: "List durable Goal schedules", tag: "goal", responseSchema: "GoalScheduleList" },
-  { method: "post", path: "/v1/schedules", summary: "Create a durable Goal schedule", tag: "goal", response: 201, requestBody: { required: true }, requestSchema: "GoalScheduleInput", responseSchema: "GoalSchedule" },
-  { method: "get", path: "/v1/schedules/{id}", summary: "Read a Goal schedule", tag: "goal", parameters: [idParameter()], responseSchema: "GoalSchedule" },
-  { method: "put", path: "/v1/schedules/{id}", summary: "Edit a Goal schedule", tag: "goal", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "GoalScheduleInput", responseSchema: "GoalSchedule" },
-  { method: "patch", path: "/v1/schedules/{id}", summary: "Pause or resume scheduling", tag: "goal", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "GoalScheduleEnabled", responseSchema: "GoalSchedule" },
-  { method: "delete", path: "/v1/schedules/{id}", summary: "Delete a schedule without stopping its Goal", tag: "goal", parameters: [idParameter()], responseSchema: "Ok" },
-  { method: "post", path: "/v1/schedules/{id}/run", summary: "Run now through the normal Goal lifecycle", tag: "goal", parameters: [idParameter()], responseSchema: "GoalSchedule" },
+  {
+    method: "get",
+    path: "/v1/schedules",
+    summary: "List durable Goal schedules",
+    tag: "goal",
+    responseSchema: "GoalScheduleList",
+  },
+  {
+    method: "post",
+    path: "/v1/schedules",
+    summary: "Create a durable Goal schedule",
+    tag: "goal",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "GoalScheduleInput",
+    responseSchema: "GoalSchedule",
+  },
+  {
+    method: "get",
+    path: "/v1/schedules/{id}",
+    summary: "Read a Goal schedule",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "GoalSchedule",
+  },
+  {
+    method: "put",
+    path: "/v1/schedules/{id}",
+    summary: "Edit a Goal schedule",
+    tag: "goal",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "GoalScheduleInput",
+    responseSchema: "GoalSchedule",
+  },
+  {
+    method: "patch",
+    path: "/v1/schedules/{id}",
+    summary: "Pause or resume scheduling",
+    tag: "goal",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "GoalScheduleEnabled",
+    responseSchema: "GoalSchedule",
+  },
+  {
+    method: "delete",
+    path: "/v1/schedules/{id}",
+    summary: "Delete a schedule without stopping its Goal",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/schedules/{id}/run",
+    summary: "Run now through the normal Goal lifecycle",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "GoalSchedule",
+  },
   { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
-  { method: "get", path: "/v1/events", summary: "Recent process events", tag: "system" },
-  { method: "get", path: "/v1/event", summary: "Recent process events (singular compatibility alias)", tag: "system" },
-  { method: "get", path: "/v1/devices", summary: "List registered iOS devices", tag: "compatibility", responseSchema: "DeviceRegistrationList" },
-  { method: "post", path: "/v1/devices", summary: "Register an iOS device", tag: "compatibility", requestBody: { required: true }, requestSchema: "DeviceRegistrationRequest", responseSchema: "DeviceRegistration" },
-  { method: "delete", path: "/v1/devices/{registrationId}", summary: "Remove a registered iOS device", tag: "compatibility", parameters: [idParameter("registrationId")], responseSchema: "Ok" },
-  { method: "post", path: "/v1/messages", summary: "Send a prompt (iOS compatibility endpoint)", tag: "compatibility", requestBody: { required: true } },
-  { method: "get", path: "/v1/system/status", summary: "Read maintenance state", tag: "system" },
-  { method: "get", path: "/v1/system/isolation", summary: "Read the effective isolation posture (sandbox, guard, guard rails)", tag: "system" },
-  { method: "post", path: "/v1/system/quiesce", summary: "Enter maintenance mode", tag: "system" },
-  { method: "post", path: "/v1/system/unquiesce", summary: "Leave maintenance mode", tag: "system" },
-  { method: "post", path: "/v1/system/reap", summary: "Reap idle sessions", tag: "system" },
-  { method: "get", path: "/v1/agent/running", summary: "List running sessions", tag: "system" },
-  { method: "get", path: PRODUCT_HTTP_PATH.capabilities, summary: "List homelab capabilities", tag: "capabilities", responseSchema: "CapabilityList" },
-  { method: "get", path: PRODUCT_HTTP_PATH.audit, summary: "Read the redacted append-only audit log", tag: "audit", parameters: [queryParameter("limit", { type: "integer", minimum: 1, maximum: 200, default: 100 }), queryParameter("cursor", { type: "string" }), queryParameter("sessionId"), queryParameter("method"), queryParameter("result", { type: "string", enum: ["ok", "error", "denied"] })], responseSchema: "AuditList" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.audit}/{id}`, summary: "Read one redacted audit record", tag: "audit", parameters: [idParameter()], responseSchema: "AuditRecord" },
-  { method: "post", path: `${PRODUCT_HTTP_PATH.capabilities}/{id}/${PRODUCT_HTTP_SEGMENT.invoke}`, summary: "Invoke a capability through ThebeAgent", tag: "capabilities", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "CapabilityInvokeRequest", responseSchema: "CapabilityInvokeResult", extraStatuses: [{ status: 202, description: "Background run started", schema: "CapabilityInvokeResult" }, { status: 403, description: "Write requires POST /v1/action" }] },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}`, summary: "List persisted background capability runs", tag: "capabilities", responseSchema: "CapabilityRunList" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}`, summary: "Read a background capability run", tag: "capabilities", parameters: [idParameter("runId")], responseSchema: "CapabilityRun" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}/${PRODUCT_HTTP_SEGMENT.log}`, summary: "Follow a background capability run over SSE", tag: "capabilities", parameters: [idParameter("runId")], responseSchema: "CapabilityRun", responseContentType: "text/event-stream" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/${PRODUCT_HTTP_SEGMENT.profiles}`, summary: "List subagent profiles", tag: "workers", responseSchema: "SubagentProfileList" },
-  { method: "get", path: PRODUCT_HTTP_PATH.subagents, summary: "List subagent runs", tag: "workers", parameters: [queryParameter("parentSessionId")], responseSchema: "WorkerList" },
-  { method: "post", path: PRODUCT_HTTP_PATH.subagents, summary: "Spawn a subagent worker", tag: "workers", response: 201, requestBody: { required: true }, requestSchema: "SpawnWorkerRequest", responseSchema: "ProductWorker" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}`, summary: "Inspect one subagent run", tag: "workers", parameters: [idParameter("runId")], responseSchema: "ProductWorker" },
-  { method: "post", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.cancel}`, summary: "Cancel a subagent run", tag: "workers", parameters: [idParameter("runId")], responseSchema: "ProductWorker" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.log}`, summary: "Read worker activity or follow its SSE log without the parent transcript", tag: "workers", parameters: [idParameter("runId")], responseSchema: "WorkerLog", responseContentType: "text/event-stream" },
-  { method: "get", path: PRODUCT_HTTP_PATH.permissions, summary: "List runtime pending permissions (not Activity Approvals)", tag: "permissions", responseSchema: "PendingPermissionList" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.permissions}/{id}`, summary: "Read one pending permission with redacted input", tag: "permissions", parameters: [idParameter()], responseSchema: "PendingPermission" },
-  { method: "post", path: `${PRODUCT_HTTP_PATH.permissions}/{id}/${PRODUCT_HTTP_SEGMENT.resolve}`, summary: "Approve or deny a pending permission", tag: "permissions", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "PermissionResolution", responseSchema: "Ok" },
-  { method: "get", path: PRODUCT_HTTP_PATH.skills, summary: "List skills", tag: "skills", responseSchema: "SkillList" },
-  { method: "post", path: PRODUCT_HTTP_PATH.skills, summary: "Import a new disabled workspace skill", tag: "skills", response: 201, requestBody: { required: true }, requestSchema: "SkillImport", responseSchema: "Skill" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Get skill metadata", tag: "skills", parameters: [idParameter("name")], responseSchema: "Skill" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.skills}/{name}/content`, summary: "Download skill instructions with a content hash", tag: "skills", parameters: [idParameter("name")], responseSchema: "SkillContent" },
-  { method: "patch", path: `${PRODUCT_HTTP_PATH.skills}/{name}`, summary: "Enable or disable a skill", tag: "skills", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "SkillPatch", responseSchema: "Skill" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`, summary: "List MCP servers", tag: "extensions", responseSchema: "McpServerList" },
-  { method: "post", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`, summary: "Add a new disabled MCP server", tag: "extensions", response: 201, requestBody: { required: true }, requestSchema: "McpServerRegistration", responseSchema: "McpServer" },
-  { method: "delete", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`, summary: "Remove an MCP server registered through Thebe", tag: "extensions", parameters: [idParameter("name")], responseSchema: "Ok" },
-  { method: "patch", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`, summary: "Enable or disable an MCP server", tag: "extensions", parameters: [idParameter("name")], requestBody: { required: true }, requestSchema: "McpServerPatch", responseSchema: "McpServer" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.tools}`, summary: "List external MCP tools", tag: "extensions", responseSchema: "McpToolList" },
-  { method: "get", path: PRODUCT_HTTP_PATH.enabledResources, summary: "List enabled Agent resources", tag: "resources", responseSchema: "EnabledResourceList" },
-  { method: "post", path: `${PRODUCT_HTTP_PATH.enabledResources}/artifact`, summary: "Capture enabled resources as an Artifact", tag: "resources", responseSchema: "AgentArtifact" },
-  { method: "put", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Put an enabled resource", tag: "resources", parameters: [idParameter()], requestBody: { required: true }, requestSchema: "EnabledResourceWrite", responseSchema: "EnabledResource" },
-  { method: "delete", path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`, summary: "Remove an enabled resource", tag: "resources", parameters: [idParameter()], responseSchema: "Ok" },
-  { method: "get", path: PRODUCT_HTTP_PATH.artifacts, summary: "List bounded product Artifacts", tag: "artifacts", parameters: [queryParameter("kind", { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt", "task_output"] }), queryParameter("sessionId"), queryParameter("runId"), queryParameter("createdAfter"), queryParameter("createdBefore"), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 })], responseSchema: "ArtifactList" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}`, summary: "Read Artifact metadata", tag: "artifacts", parameters: [idParameter()], responseSchema: "AgentArtifact" },
-  { method: "get", path: `${PRODUCT_HTTP_PATH.artifacts}/{id}/content`, summary: "Read bounded Artifact content", tag: "artifacts", parameters: [idParameter()], responseSchema: "ArtifactContent" },
-  { method: "get", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Read permission mode", tag: "settings", responseSchema: "PermissionModeSettings" },
-  { method: "patch", path: PRODUCT_HTTP_PATH.permissionSettings, summary: "Set permission mode", tag: "settings", requestBody: { required: true }, requestSchema: "PermissionModeSettings", responseSchema: "PermissionModeSettings" },
-  { method: "get", path: PRODUCT_HTTP_PATH.agentSettings, summary: "Read effective Agent settings", tag: "settings", responseSchema: "AgentSettings" },
-  { method: "patch", path: PRODUCT_HTTP_PATH.agentSettings, summary: "Update mutable Agent settings", tag: "settings", requestBody: { required: true }, requestSchema: "AgentSettingsPatch", responseSchema: "AgentSettings", extraStatuses: [{ status: 409, description: "A setting requires a Core restart" }] },
-  { method: "post", path: "/v1/diagnosis", summary: "Run a read-only container diagnosis", tag: "diagnosis", requestBody: { required: true }, responseSchema: "DiagnosisResult" },
-  { method: "get", path: "/v1/diagnosis/{runId}", summary: "Read a diagnosis run", tag: "diagnosis", parameters: [idParameter("runId")], responseSchema: "DiagnosisResult" },
-  { method: "post", path: "/v1/diagnosis/{runId}/why", summary: "Ask why a diagnosis was reached", tag: "diagnosis", parameters: [idParameter("runId")], requestBody: { required: false }, responseSchema: "DiagnosisResult" },
-  { method: "post", path: "/v1/action", summary: "Execute an approved container.restart", tag: "action", requestBody: { required: true }, requestSchema: "ActionRequest", responseSchema: "ActionReceipt", extraStatuses: [{ status: 403, description: "Action requires on-device approval", schema: "ActionReceipt" }] },
-  { method: "get", path: "/v1/action/{receiptId}", summary: "Read an action receipt", tag: "action", parameters: [idParameter("receiptId")], responseSchema: "ActionReceipt" },
-  { method: "get", path: "/v1/activity", summary: "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task)", tag: "activity", parameters: [queryParameter("group", { type: "string", enum: ["needs_approval", "running", "recent"] }), queryParameter("source", { type: "string", enum: ["approval", "receipt", "diagnosis", "goal", "run", "worker", "background_task"] }), queryParameter("status"), queryParameter("updatedAfter", { type: "string", format: "date-time" }), queryParameter("updatedBefore", { type: "string", format: "date-time" }), queryParameter("limit", { type: "integer", minimum: 1, maximum: 100, default: 50 }), queryParameter("cursor")], responseSchema: "ActivityList" },
-  { method: "get", path: "/v1/activity/{id}", summary: "Read one Activity workspace item", tag: "activity", parameters: [idParameter()], responseSchema: "ActivityItem" },
-  { method: "post", path: "/v1/activity/{id}/deny", summary: "Reject a pending Approval and remove it from Activity", tag: "activity", parameters: [idParameter()] },
-  { method: "post", path: "/v1/goals", summary: "Create a session and start a Goal", tag: "goal", response: 201, requestBody: { required: true }, requestSchema: "GoalCreateRequest", responseSchema: "ProductGoal" },
-  { method: "get", path: "/v1/goals", summary: "List persisted Goals", tag: "goal", responseSchema: "ProductGoalList" },
-  { method: "get", path: "/v1/goals/{id}", summary: "Read one Goal (id is thebeSessionId)", tag: "goal", parameters: [idParameter()], responseSchema: "ProductGoal" },
-  { method: "post", path: "/v1/goals/{id}/pause", summary: "Pause a running Goal after the current checkpoint", tag: "goal", parameters: [idParameter()], responseSchema: "ProductGoal" },
-  { method: "post", path: "/v1/goals/{id}/resume", summary: "Resume a paused Goal", tag: "goal", parameters: [idParameter()], responseSchema: "ProductGoal" },
-  { method: "post", path: "/v1/goals/{id}/stop", summary: "Cancel a Goal", tag: "goal", parameters: [idParameter()], responseSchema: "ProductGoal" },
-  { method: "get", path: "/v1/goals/{id}/log", summary: "Read Goal events or follow an SSE log", tag: "goal", parameters: [idParameter(), queryParameter("follow", { type: "boolean" }), queryParameter("after", { type: "integer", minimum: 0 })], responseContentType: "text/event-stream" },
-  { method: "get", path: "/v1/session", summary: "List sessions", tag: "session", parameters: [queryParameter("status"), queryParameter("hostId"), queryParameter("environmentId")] },
-  { method: "post", path: "/v1/session", summary: "Create a session", tag: "session", response: 201, requestBody: { required: false } },
-  { method: "get", path: "/v1/session/status", summary: "List session statuses", tag: "session" },
-  { method: "get", path: "/v1/session/{id}", summary: "Get session metadata", tag: "session", parameters: [idParameter()] },
-  { method: "patch", path: "/v1/session/{id}", summary: "Update session metadata", tag: "session", parameters: [idParameter()], requestBody: { required: true } },
-  { method: "delete", path: "/v1/session/{id}", summary: "Delete a session", tag: "session", parameters: [idParameter()] },
-  { method: "get", path: "/v1/session/{id}/children", summary: "List forked children", tag: "session", parameters: [idParameter()] },
-  { method: "get", path: "/v1/session/{id}/context", summary: "Get context usage", tag: "session", parameters: [idParameter()] },
-  { method: "get", path: "/v1/session/{id}/message", summary: "Read paginated messages", tag: "messages", parameters: [idParameter(), queryParameter("limit", { type: "integer", minimum: 1 }), queryParameter("before"), queryParameter("after")] },
-  { method: "get", path: "/v1/session/{id}/message/{messageId}", summary: "Read one message", tag: "messages", parameters: [idParameter(), idParameter("messageId")] },
-  { method: "get", path: "/v1/session/{id}/log", summary: "Read events or follow an SSE log", tag: "events", parameters: [idParameter(), queryParameter("follow", { type: "boolean" }), queryParameter("after", { type: "integer", minimum: 0 })], responseContentType: "text/event-stream" },
-  { method: "get", path: "/v1/session/{id}/background-task", summary: "List background tasks", tag: "session", parameters: [idParameter()] },
-  { method: "post", path: "/v1/session/{id}/background-task/{taskId}/stop", summary: "Stop one background task", tag: "session", parameters: [idParameter(), idParameter("taskId")] },
-  { method: "post", path: "/v1/session/{id}/background-task/stop-all", summary: "Stop all background tasks", tag: "session", parameters: [idParameter()] },
-  { method: "post", path: "/v1/session/{id}/prompt", summary: "Submit a prompt", tag: "prompt", parameters: [idParameter()], requestBody: { required: true } },
-  { method: "post", path: "/v1/session/{id}/interrupt", summary: "Interrupt the current run", tag: "prompt", parameters: [idParameter()] },
-  { method: "post", path: "/v1/session/{id}/permission/{permissionId}", summary: "Resolve a permission request", tag: "prompt", parameters: [idParameter(), idParameter("permissionId")], requestBody: { required: true } },
-  { method: "post", path: "/v1/session/{id}/tool-call/{toolCallId}/stop", summary: "Stop one tool call", tag: "prompt", parameters: [idParameter(), idParameter("toolCallId")] },
-  { method: "post", path: "/v1/session/{id}/compact", summary: "Compact the session", tag: "prompt", parameters: [idParameter()], requestBody: { required: false } },
-  { method: "post", path: "/v1/session/{id}/fork", summary: "Fork a session", tag: "session", parameters: [idParameter()], requestBody: { required: false } },
-  { method: "post", path: "/v1/session/{id}/revert", summary: "Revert the current branch", tag: "session", parameters: [idParameter()] },
-  { method: "post", path: "/v1/session/{id}/unrevert", summary: "Unrevert the current branch", tag: "session", parameters: [idParameter()] },
-  { method: "post", path: "/v1/session/{id}/model", summary: "Set session model", tag: "models", parameters: [idParameter()], requestBody: { required: true } },
-  { method: "post", path: "/v1/session/{id}/thinking", summary: "Set thinking level", tag: "models", parameters: [idParameter()], requestBody: { required: true } },
-  { method: "get", path: "/v1/session/{id}/export", summary: "Export a session", tag: "session", parameters: [idParameter(), queryParameter("format", { type: "string", enum: ["jsonl", "html"] })] },
-  { method: "get", path: "/v1/session/{id}/diff", summary: "Get workspace git diff", tag: "session", parameters: [idParameter()] },
-  { method: "get", path: "/v1/provider", summary: "List providers", tag: "providers", parameters: [queryParameter("all", { type: "boolean" })] },
-  { method: "get", path: "/v1/provider/auth", summary: "List provider auth status", tag: "providers" },
-  { method: "get", path: "/v1/model", summary: "List models", tag: "models", parameters: [queryParameter("all", { type: "boolean" }), queryParameter("provider"), queryParameter("refresh", { type: "boolean" })] },
-  { method: "get", path: "/v1/provider/{providerId}/config", summary: "Read editable provider configuration without credentials", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "put", path: "/v1/provider/{providerId}/config", summary: "Save endpoint and replace custom model definitions", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
-  { method: "delete", path: "/v1/provider/{providerId}/config", summary: "Remove custom provider configuration and credentials", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "post", path: "/v1/provider/{providerId}/test", summary: "Test a provider", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "post", path: "/v1/provider/{providerId}/api-key", summary: "Set an API key", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
-  { method: "delete", path: "/v1/provider/{providerId}/api-key", summary: "Delete an API key", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "get", path: "/v1/provider/{providerId}/oauth/login", summary: "Start OAuth login (SSE)", tag: "providers", parameters: [idParameter("providerId")], responseContentType: "text/event-stream" },
-  { method: "post", path: "/v1/provider/{providerId}/oauth/authorize", summary: "Authorize OAuth (force starts a fresh login)", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: false }, requestSchema: "OAuthAuthorizeRequest", responseSchema: "OAuthAuthorizeResult", extraStatuses: [{ status: 202, description: "Authorization pending", schema: "OAuthAuthorizeResult" }] },
-  { method: "post", path: "/v1/provider/{providerId}/oauth/callback", summary: "Submit OAuth callback", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
-  { method: "post", path: "/v1/provider/{providerId}/oauth/login", summary: "Submit OAuth callback (compatibility alias)", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
-  { method: "post", path: "/v1/provider/{providerId}/oauth/logout", summary: "Logout OAuth", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "delete", path: "/v1/provider/{providerId}/oauth/logout", summary: "Logout OAuth", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "post", path: "/v1/auth", summary: "Set an API key (compatibility endpoint)", tag: "providers", requestBody: { required: true } },
-  { method: "put", path: "/v1/auth/{providerId}", summary: "Set an API key (compatibility endpoint)", tag: "providers", parameters: [idParameter("providerId")], requestBody: { required: true } },
-  { method: "delete", path: "/v1/auth/{providerId}", summary: "Logout provider (compatibility endpoint)", tag: "providers", parameters: [idParameter("providerId")] },
-  { method: "post", path: "/mcp", summary: "MCP JSON-RPC endpoint", tag: "mcp", requestBody: { required: true } },
+  {
+    method: "get",
+    path: "/v1/events",
+    summary: "Recent process events",
+    tag: "system",
+  },
+  {
+    method: "get",
+    path: "/v1/event",
+    summary: "Recent process events (singular compatibility alias)",
+    tag: "system",
+  },
+  {
+    method: "get",
+    path: "/v1/devices",
+    summary: "List registered iOS devices",
+    tag: "compatibility",
+    responseSchema: "DeviceRegistrationList",
+  },
+  {
+    method: "post",
+    path: "/v1/devices",
+    summary: "Register an iOS device",
+    tag: "compatibility",
+    requestBody: { required: true },
+    requestSchema: "DeviceRegistrationRequest",
+    responseSchema: "DeviceRegistration",
+  },
+  {
+    method: "delete",
+    path: "/v1/devices/{registrationId}",
+    summary: "Remove a registered iOS device",
+    tag: "compatibility",
+    parameters: [idParameter("registrationId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/messages",
+    summary: "Send a prompt (iOS compatibility endpoint)",
+    tag: "compatibility",
+    requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/system/status",
+    summary: "Read maintenance state",
+    tag: "system",
+  },
+  {
+    method: "get",
+    path: "/v1/system/isolation",
+    summary:
+      "Read the effective isolation posture (sandbox, guard, guard rails)",
+    tag: "system",
+  },
+  {
+    method: "post",
+    path: "/v1/system/quiesce",
+    summary: "Enter maintenance mode",
+    tag: "system",
+  },
+  {
+    method: "post",
+    path: "/v1/system/unquiesce",
+    summary: "Leave maintenance mode",
+    tag: "system",
+  },
+  {
+    method: "post",
+    path: "/v1/system/reap",
+    summary: "Reap idle sessions",
+    tag: "system",
+  },
+  {
+    method: "get",
+    path: "/v1/agent/running",
+    summary: "List running sessions",
+    tag: "system",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.capabilities,
+    summary: "List homelab capabilities",
+    tag: "capabilities",
+    responseSchema: "CapabilityList",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.audit,
+    summary: "Read the redacted append-only audit log",
+    tag: "audit",
+    parameters: [
+      queryParameter("limit", {
+        type: "integer",
+        minimum: 1,
+        maximum: 200,
+        default: 100,
+      }),
+      queryParameter("cursor", { type: "string" }),
+      queryParameter("sessionId"),
+      queryParameter("method"),
+      queryParameter("result", {
+        type: "string",
+        enum: ["ok", "error", "denied"],
+      }),
+    ],
+    responseSchema: "AuditList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.audit}/{id}`,
+    summary: "Read one redacted audit record",
+    tag: "audit",
+    parameters: [idParameter()],
+    responseSchema: "AuditRecord",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.capabilities}/{id}/${PRODUCT_HTTP_SEGMENT.invoke}`,
+    summary: "Invoke a capability through ThebeAgent",
+    tag: "capabilities",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "CapabilityInvokeRequest",
+    responseSchema: "CapabilityInvokeResult",
+    extraStatuses: [
+      {
+        status: 202,
+        description: "Background run started",
+        schema: "CapabilityInvokeResult",
+      },
+      { status: 403, description: "Write requires POST /v1/action" },
+    ],
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}`,
+    summary: "List persisted background capability runs",
+    tag: "capabilities",
+    responseSchema: "CapabilityRunList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}`,
+    summary: "Read a background capability run",
+    tag: "capabilities",
+    parameters: [idParameter("runId")],
+    responseSchema: "CapabilityRun",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.capabilities}/${PRODUCT_HTTP_SEGMENT.runs}/{runId}/${PRODUCT_HTTP_SEGMENT.log}`,
+    summary: "Follow a background capability run over SSE",
+    tag: "capabilities",
+    parameters: [idParameter("runId")],
+    responseSchema: "CapabilityRun",
+    responseContentType: "text/event-stream",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.subagents}/${PRODUCT_HTTP_SEGMENT.profiles}`,
+    summary: "List subagent profiles",
+    tag: "workers",
+    responseSchema: "SubagentProfileList",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.subagents,
+    summary: "List subagent runs",
+    tag: "workers",
+    parameters: [queryParameter("parentSessionId")],
+    responseSchema: "WorkerList",
+  },
+  {
+    method: "post",
+    path: PRODUCT_HTTP_PATH.subagents,
+    summary: "Spawn a subagent worker",
+    tag: "workers",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "SpawnWorkerRequest",
+    responseSchema: "ProductWorker",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.subagents}/{runId}`,
+    summary: "Inspect one subagent run",
+    tag: "workers",
+    parameters: [idParameter("runId")],
+    responseSchema: "ProductWorker",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.cancel}`,
+    summary: "Cancel a subagent run",
+    tag: "workers",
+    parameters: [idParameter("runId")],
+    responseSchema: "ProductWorker",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.subagents}/{runId}/${PRODUCT_HTTP_SEGMENT.log}`,
+    summary:
+      "Read worker activity or follow its SSE log without the parent transcript",
+    tag: "workers",
+    parameters: [idParameter("runId")],
+    responseSchema: "WorkerLog",
+    responseContentType: "text/event-stream",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.permissions,
+    summary: "List runtime pending permissions (not Activity Approvals)",
+    tag: "permissions",
+    responseSchema: "PendingPermissionList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.permissions}/{id}`,
+    summary: "Read one pending permission with redacted input",
+    tag: "permissions",
+    parameters: [idParameter()],
+    responseSchema: "PendingPermission",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.permissions}/{id}/${PRODUCT_HTTP_SEGMENT.resolve}`,
+    summary: "Approve or deny a pending permission",
+    tag: "permissions",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "PermissionResolution",
+    responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.skills,
+    summary: "List skills",
+    tag: "skills",
+    responseSchema: "SkillList",
+  },
+  {
+    method: "post",
+    path: PRODUCT_HTTP_PATH.skills,
+    summary: "Import a new disabled workspace skill",
+    tag: "skills",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "SkillImport",
+    responseSchema: "Skill",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.skills}/{name}`,
+    summary: "Get skill metadata",
+    tag: "skills",
+    parameters: [idParameter("name")],
+    responseSchema: "Skill",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.skills}/{name}/content`,
+    summary: "Download skill instructions with a content hash",
+    tag: "skills",
+    parameters: [idParameter("name")],
+    responseSchema: "SkillContent",
+  },
+  {
+    method: "patch",
+    path: `${PRODUCT_HTTP_PATH.skills}/{name}`,
+    summary: "Enable or disable a skill",
+    tag: "skills",
+    parameters: [idParameter("name")],
+    requestBody: { required: true },
+    requestSchema: "SkillPatch",
+    responseSchema: "Skill",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`,
+    summary: "List MCP servers",
+    tag: "extensions",
+    responseSchema: "McpServerList",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}`,
+    summary: "Add a new disabled MCP server",
+    tag: "extensions",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "McpServerRegistration",
+    responseSchema: "McpServer",
+  },
+  {
+    method: "delete",
+    path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`,
+    summary: "Remove an MCP server registered through Thebe",
+    tag: "extensions",
+    parameters: [idParameter("name")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "patch",
+    path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.servers}/{name}`,
+    summary: "Enable or disable an MCP server",
+    tag: "extensions",
+    parameters: [idParameter("name")],
+    requestBody: { required: true },
+    requestSchema: "McpServerPatch",
+    responseSchema: "McpServer",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.mcpExtensions}/${PRODUCT_HTTP_SEGMENT.tools}`,
+    summary: "List external MCP tools",
+    tag: "extensions",
+    responseSchema: "McpToolList",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.enabledResources,
+    summary: "List enabled Agent resources",
+    tag: "resources",
+    responseSchema: "EnabledResourceList",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.enabledResources}/artifact`,
+    summary: "Capture enabled resources as an Artifact",
+    tag: "resources",
+    responseSchema: "AgentArtifact",
+  },
+  {
+    method: "put",
+    path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`,
+    summary: "Put an enabled resource",
+    tag: "resources",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "EnabledResourceWrite",
+    responseSchema: "EnabledResource",
+  },
+  {
+    method: "delete",
+    path: `${PRODUCT_HTTP_PATH.enabledResources}/{id}`,
+    summary: "Remove an enabled resource",
+    tag: "resources",
+    parameters: [idParameter()],
+    responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.artifacts,
+    summary: "List bounded product Artifacts",
+    tag: "artifacts",
+    parameters: [
+      queryParameter("kind", {
+        type: "string",
+        enum: [
+          "diagnosis",
+          "report",
+          "resource_list",
+          "operation_receipt",
+          "task_output",
+        ],
+      }),
+      queryParameter("sessionId"),
+      queryParameter("runId"),
+      queryParameter("createdAfter"),
+      queryParameter("createdBefore"),
+      queryParameter("limit", { type: "integer", minimum: 1, maximum: 100 }),
+    ],
+    responseSchema: "ArtifactList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.artifacts}/{id}`,
+    summary: "Read Artifact metadata",
+    tag: "artifacts",
+    parameters: [idParameter()],
+    responseSchema: "AgentArtifact",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.artifacts}/{id}/content`,
+    summary: "Read bounded Artifact content",
+    tag: "artifacts",
+    parameters: [idParameter()],
+    responseSchema: "ArtifactContent",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.permissionSettings,
+    summary: "Read permission mode",
+    tag: "settings",
+    responseSchema: "PermissionModeSettings",
+  },
+  {
+    method: "patch",
+    path: PRODUCT_HTTP_PATH.permissionSettings,
+    summary: "Set permission mode",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "PermissionModeSettings",
+    responseSchema: "PermissionModeSettings",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.agentSettings,
+    summary: "Read effective Agent settings",
+    tag: "settings",
+    responseSchema: "AgentSettings",
+  },
+  {
+    method: "patch",
+    path: PRODUCT_HTTP_PATH.agentSettings,
+    summary: "Update mutable Agent settings",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "AgentSettingsPatch",
+    responseSchema: "AgentSettings",
+    extraStatuses: [
+      { status: 409, description: "A setting requires a Core restart" },
+    ],
+  },
+  {
+    method: "post",
+    path: "/v1/diagnosis",
+    summary: "Run a read-only container diagnosis",
+    tag: "diagnosis",
+    requestBody: { required: true },
+    responseSchema: "DiagnosisResult",
+  },
+  {
+    method: "get",
+    path: "/v1/diagnosis/{runId}",
+    summary: "Read a diagnosis run",
+    tag: "diagnosis",
+    parameters: [idParameter("runId")],
+    responseSchema: "DiagnosisResult",
+  },
+  {
+    method: "post",
+    path: "/v1/diagnosis/{runId}/why",
+    summary: "Ask why a diagnosis was reached",
+    tag: "diagnosis",
+    parameters: [idParameter("runId")],
+    requestBody: { required: false },
+    responseSchema: "DiagnosisResult",
+  },
+  {
+    method: "post",
+    path: "/v1/action",
+    summary: "Execute an approved container.restart",
+    tag: "action",
+    requestBody: { required: true },
+    requestSchema: "ActionRequest",
+    responseSchema: "ActionReceipt",
+    extraStatuses: [
+      {
+        status: 403,
+        description: "Action requires on-device approval",
+        schema: "ActionReceipt",
+      },
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/action/{receiptId}",
+    summary: "Read an action receipt",
+    tag: "action",
+    parameters: [idParameter("receiptId")],
+    responseSchema: "ActionReceipt",
+  },
+  {
+    method: "get",
+    path: "/v1/activity",
+    summary:
+      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task)",
+    tag: "activity",
+    parameters: [
+      queryParameter("group", {
+        type: "string",
+        enum: ["needs_approval", "running", "recent"],
+      }),
+      queryParameter("source", {
+        type: "string",
+        enum: [
+          "approval",
+          "receipt",
+          "diagnosis",
+          "goal",
+          "run",
+          "worker",
+          "background_task",
+        ],
+      }),
+      queryParameter("status"),
+      queryParameter("updatedAfter", { type: "string", format: "date-time" }),
+      queryParameter("updatedBefore", { type: "string", format: "date-time" }),
+      queryParameter("limit", {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+        default: 50,
+      }),
+      queryParameter("cursor"),
+    ],
+    responseSchema: "ActivityList",
+  },
+  {
+    method: "get",
+    path: "/v1/activity/{id}",
+    summary: "Read one Activity workspace item",
+    tag: "activity",
+    parameters: [idParameter()],
+    responseSchema: "ActivityItem",
+  },
+  {
+    method: "post",
+    path: "/v1/activity/{id}/deny",
+    summary: "Reject a pending Approval and remove it from Activity",
+    tag: "activity",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/goals",
+    summary: "Create a session and start a Goal",
+    tag: "goal",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "GoalCreateRequest",
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "get",
+    path: "/v1/goals",
+    summary: "List persisted Goals",
+    tag: "goal",
+    responseSchema: "ProductGoalList",
+  },
+  {
+    method: "get",
+    path: "/v1/goals/{id}",
+    summary: "Read one Goal (id is thebeSessionId)",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "post",
+    path: "/v1/goals/{id}/pause",
+    summary: "Pause a running Goal after the current checkpoint",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "post",
+    path: "/v1/goals/{id}/resume",
+    summary: "Resume a paused Goal",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "post",
+    path: "/v1/goals/{id}/stop",
+    summary: "Cancel a Goal",
+    tag: "goal",
+    parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "get",
+    path: "/v1/goals/{id}/log",
+    summary: "Read Goal events or follow an SSE log",
+    tag: "goal",
+    parameters: [
+      idParameter(),
+      queryParameter("follow", { type: "boolean" }),
+      queryParameter("after", { type: "integer", minimum: 0 }),
+    ],
+    responseContentType: "text/event-stream",
+  },
+  {
+    method: "get",
+    path: "/v1/session",
+    summary: "List sessions",
+    tag: "session",
+    parameters: [
+      queryParameter("status"),
+      queryParameter("hostId"),
+      queryParameter("environmentId"),
+    ],
+  },
+  {
+    method: "post",
+    path: "/v1/session",
+    summary: "Create a session",
+    tag: "session",
+    response: 201,
+    requestBody: { required: false },
+  },
+  {
+    method: "get",
+    path: "/v1/session/status",
+    summary: "List session statuses",
+    tag: "session",
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}",
+    summary: "Get session metadata",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "patch",
+    path: "/v1/session/{id}",
+    summary: "Update session metadata",
+    tag: "session",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+  },
+  {
+    method: "delete",
+    path: "/v1/session/{id}",
+    summary: "Delete a session",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/children",
+    summary: "List forked children",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/context",
+    summary: "Get context usage",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/message",
+    summary: "Read paginated messages",
+    tag: "messages",
+    parameters: [
+      idParameter(),
+      queryParameter("limit", { type: "integer", minimum: 1 }),
+      queryParameter("before"),
+      queryParameter("after"),
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/message/{messageId}",
+    summary: "Read one message",
+    tag: "messages",
+    parameters: [idParameter(), idParameter("messageId")],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/log",
+    summary: "Read events or follow an SSE log",
+    tag: "events",
+    parameters: [
+      idParameter(),
+      queryParameter("follow", { type: "boolean" }),
+      queryParameter("after", { type: "integer", minimum: 0 }),
+    ],
+    responseContentType: "text/event-stream",
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/background-task",
+    summary: "List background tasks",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/background-task/{taskId}/stop",
+    summary: "Stop one background task",
+    tag: "session",
+    parameters: [idParameter(), idParameter("taskId")],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/background-task/stop-all",
+    summary: "Stop all background tasks",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/prompt",
+    summary: "Submit a prompt",
+    tag: "prompt",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/interrupt",
+    summary: "Interrupt the current run",
+    tag: "prompt",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/permission/{permissionId}",
+    summary: "Resolve a permission request",
+    tag: "prompt",
+    parameters: [idParameter(), idParameter("permissionId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/tool-call/{toolCallId}/stop",
+    summary: "Stop one tool call",
+    tag: "prompt",
+    parameters: [idParameter(), idParameter("toolCallId")],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/compact",
+    summary: "Compact the session",
+    tag: "prompt",
+    parameters: [idParameter()],
+    requestBody: { required: false },
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/fork",
+    summary: "Fork a session",
+    tag: "session",
+    parameters: [idParameter()],
+    requestBody: { required: false },
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/revert",
+    summary: "Revert the current branch",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/unrevert",
+    summary: "Unrevert the current branch",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/model",
+    summary: "Set session model",
+    tag: "models",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/thinking",
+    summary: "Set thinking level",
+    tag: "models",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/export",
+    summary: "Export a session",
+    tag: "session",
+    parameters: [
+      idParameter(),
+      queryParameter("format", { type: "string", enum: ["jsonl", "html"] }),
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/diff",
+    summary: "Get workspace git diff",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/provider",
+    summary: "List providers",
+    tag: "providers",
+    parameters: [queryParameter("all", { type: "boolean" })],
+  },
+  {
+    method: "get",
+    path: "/v1/provider/auth",
+    summary: "List provider auth status",
+    tag: "providers",
+  },
+  {
+    method: "get",
+    path: "/v1/model",
+    summary: "List models",
+    tag: "models",
+    parameters: [
+      queryParameter("all", { type: "boolean" }),
+      queryParameter("provider"),
+      queryParameter("refresh", { type: "boolean" }),
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/provider/{providerId}/config",
+    summary: "Read editable provider configuration without credentials",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "put",
+    path: "/v1/provider/{providerId}/config",
+    summary: "Save endpoint and replace custom model definitions",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "delete",
+    path: "/v1/provider/{providerId}/config",
+    summary: "Remove custom provider configuration and credentials",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/test",
+    summary: "Test a provider",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/api-key",
+    summary: "Set an API key",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "delete",
+    path: "/v1/provider/{providerId}/api-key",
+    summary: "Delete an API key",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "get",
+    path: "/v1/provider/{providerId}/oauth/login",
+    summary: "Start OAuth login (SSE)",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    responseContentType: "text/event-stream",
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/oauth/authorize",
+    summary: "Authorize OAuth (force starts a fresh login)",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: false },
+    requestSchema: "OAuthAuthorizeRequest",
+    responseSchema: "OAuthAuthorizeResult",
+    extraStatuses: [
+      {
+        status: 202,
+        description: "Authorization pending",
+        schema: "OAuthAuthorizeResult",
+      },
+    ],
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/oauth/callback",
+    summary: "Submit OAuth callback",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/oauth/login",
+    summary: "Submit OAuth callback (compatibility alias)",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "post",
+    path: "/v1/provider/{providerId}/oauth/logout",
+    summary: "Logout OAuth",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "delete",
+    path: "/v1/provider/{providerId}/oauth/logout",
+    summary: "Logout OAuth",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "post",
+    path: "/v1/auth",
+    summary: "Set an API key (compatibility endpoint)",
+    tag: "providers",
+    requestBody: { required: true },
+  },
+  {
+    method: "put",
+    path: "/v1/auth/{providerId}",
+    summary: "Set an API key (compatibility endpoint)",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "delete",
+    path: "/v1/auth/{providerId}",
+    summary: "Logout provider (compatibility endpoint)",
+    tag: "providers",
+    parameters: [idParameter("providerId")],
+  },
+  {
+    method: "post",
+    path: "/mcp",
+    summary: "MCP JSON-RPC endpoint",
+    tag: "mcp",
+    requestBody: { required: true },
+  },
 ];
 
 function schemaRef(name?: string): Record<string, unknown> {
@@ -182,12 +1080,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     const successStatus = String(operation.response ?? 200);
     const responses: Record<string, unknown> = {
       [successStatus]: {
-        description: operation.response === 501 ? "Feature is not available" : "Successful response",
+        description:
+          operation.response === 501
+            ? "Feature is not available"
+            : "Successful response",
         content: {
           [operation.responseContentType ?? "application/json"]: {
-            schema: operation.responseContentType === "text/event-stream"
-              ? { type: "string" }
-              : schemaRef(operation.responseSchema),
+            schema:
+              operation.responseContentType === "text/event-stream"
+                ? { type: "string" }
+                : schemaRef(operation.responseSchema),
           },
         },
       },
@@ -201,19 +1103,27 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       responses[String(extra.status)] = {
         description: extra.description,
         ...(extra.schema
-          ? { content: { "application/json": { schema: schemaRef(extra.schema) } } }
+          ? {
+              content: {
+                "application/json": { schema: schemaRef(extra.schema) },
+              },
+            }
           : {}),
       };
     }
     path[operation.method] = {
       summary: operation.summary,
-      operationId: `${operation.method}_${operation.path.replaceAll(/[{}\/]/g, "_").replaceAll(/_+/g, "_")}`,
+      operationId: `${operation.method}_${operation.path.replaceAll(/[{}/]/g, "_").replaceAll(/_+/g, "_")}`,
       tags: [operation.tag],
       parameters: operation.parameters,
       requestBody: operation.requestBody
         ? {
             ...operation.requestBody,
-            content: { "application/json": { schema: schemaRef(operation.requestSchema) } },
+            content: {
+              "application/json": {
+                schema: schemaRef(operation.requestSchema),
+              },
+            },
           }
         : undefined,
       responses,
@@ -224,7 +1134,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     info: {
       title: "Thebe Core HTTP API",
       version,
-      description: "Thebe Core session, prompt, runtime, provider, and MCP API. The JSON document is generated by the running server.",
+      description:
+        "Thebe Core session, prompt, runtime, provider, and MCP API. The JSON document is generated by the running server.",
     },
     servers: [{ url: "/" }],
     // Token auth is optional in development and required in production; the
@@ -237,21 +1148,73 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       { name: "events", description: "Normalized events and SSE logs" },
       { name: "prompt", description: "Prompt execution and approvals" },
       { name: "models", description: "Model selection" },
-      { name: "providers", description: "Provider discovery and authentication" },
-      { name: "capabilities", description: "Homelab capability discovery and Agent-mediated invoke" },
-      { name: "audit", description: "Read-only redacted audit records; raw parameters are never returned" },
-      { name: "workers", description: "Subagent runs presented as Workers; no parent transcript" },
-      { name: "permissions", description: "Runtime pending tool permissions. Distinct from Activity diagnose-restart Approvals." },
-      { name: "skills", description: "Skill import/list/get/enable; existing skill files are never overwritten" },
-      { name: "extensions", description: "Product MCP inventory; raw /mcp remains for integrations" },
-      { name: "resources", description: "Enabled Agent resources/context, not a Resource database" },
-      { name: "artifacts", description: "Bounded, redacted product results owned by Core" },
-      { name: "settings", description: "Runtime behavior settings consumed by the App" },
-      { name: "diagnosis", description: "Product-facing read-only diagnosis; App does not call raw MCP tools" },
-      { name: "action", description: "Approved write actions (container.restart) with deterministic verification receipts" },
-      { name: "activity", description: "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object" },
-      { name: "goal", description: "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*." },
-      { name: "compatibility", description: "Legacy iOS compatibility endpoints" },
+      {
+        name: "providers",
+        description: "Provider discovery and authentication",
+      },
+      {
+        name: "capabilities",
+        description: "Homelab capability discovery and Agent-mediated invoke",
+      },
+      {
+        name: "audit",
+        description:
+          "Read-only redacted audit records; raw parameters are never returned",
+      },
+      {
+        name: "workers",
+        description: "Subagent runs presented as Workers; no parent transcript",
+      },
+      {
+        name: "permissions",
+        description:
+          "Runtime pending tool permissions. Distinct from Activity diagnose-restart Approvals.",
+      },
+      {
+        name: "skills",
+        description:
+          "Skill import/list/get/enable; existing skill files are never overwritten",
+      },
+      {
+        name: "extensions",
+        description: "Product MCP inventory; raw /mcp remains for integrations",
+      },
+      {
+        name: "resources",
+        description: "Enabled Agent resources/context, not a Resource database",
+      },
+      {
+        name: "artifacts",
+        description: "Bounded, redacted product results owned by Core",
+      },
+      {
+        name: "settings",
+        description: "Runtime behavior settings consumed by the App",
+      },
+      {
+        name: "diagnosis",
+        description:
+          "Product-facing read-only diagnosis; App does not call raw MCP tools",
+      },
+      {
+        name: "action",
+        description:
+          "Approved write actions (container.restart) with deterministic verification receipts",
+      },
+      {
+        name: "activity",
+        description:
+          "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object",
+      },
+      {
+        name: "goal",
+        description:
+          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
+      },
+      {
+        name: "compatibility",
+        description: "Legacy iOS compatibility endpoints",
+      },
       { name: "mcp", description: "MCP JSON-RPC" },
     ],
     paths,
@@ -262,7 +1225,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       schemas: {
         Error: {
           type: "object",
-          properties: { ok: { type: "boolean" }, error: { type: "string" }, code: { type: "string" } },
+          properties: {
+            ok: { type: "boolean" },
+            error: { type: "string" },
+            code: { type: "string" },
+          },
         },
         Ok: {
           type: "object",
@@ -270,7 +1237,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         OAuthAuthorizeRequest: {
           type: "object",
-          properties: { force: { type: "boolean", description: "Start a new OAuth flow even when the current credential is connected." } },
+          properties: {
+            force: {
+              type: "boolean",
+              description:
+                "Start a new OAuth flow even when the current credential is connected.",
+            },
+          },
         },
         OAuthAuthorizeResult: {
           type: "object",
@@ -287,7 +1260,15 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         AuditRecord: {
           type: "object",
-          required: ["id", "timestamp", "method", "parameterHash", "responseBytes", "budgetConsumed", "redactionFired"],
+          required: [
+            "id",
+            "timestamp",
+            "method",
+            "parameterHash",
+            "responseBytes",
+            "budgetConsumed",
+            "redactionFired",
+          ],
           properties: {
             id: { type: "string" },
             timestamp: { type: "string" },
@@ -308,19 +1289,33 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["entries"],
           properties: {
-            entries: { type: "array", items: { $ref: "#/components/schemas/AuditRecord" } },
+            entries: {
+              type: "array",
+              items: { $ref: "#/components/schemas/AuditRecord" },
+            },
             nextCursor: { type: "string" },
           },
         },
         HomelabCapability: {
           type: "object",
-          required: ["id", "name", "description", "inputSchema", "category", "permission", "source"],
+          required: [
+            "id",
+            "name",
+            "description",
+            "inputSchema",
+            "category",
+            "permission",
+            "source",
+          ],
           properties: {
             id: { type: "string" },
             name: { type: "string" },
             description: { type: "string" },
             inputSchema: { type: "object", additionalProperties: true },
-            category: { type: "string", enum: [...HOMELAB_CAPABILITY_CATEGORIES] },
+            category: {
+              type: "string",
+              enum: [...HOMELAB_CAPABILITY_CATEGORIES],
+            },
             permission: { type: "string", enum: ["read", "confirm", "admin"] },
             effect: { type: "string", enum: ["read", "write"] },
             risk: { type: "string", enum: ["low", "disruptive"] },
@@ -329,7 +1324,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             source: { type: "string", enum: ["core", "external"] },
             serverName: { type: "string" },
             resourceKinds: { type: "array", items: { type: "string" } },
-            execution: { type: "string", enum: ["direct", "agent", "goal", "either"] },
+            execution: {
+              type: "string",
+              enum: ["direct", "agent", "goal", "either"],
+            },
             background: { type: "boolean" },
             destructive: { type: "boolean" },
             outputKind: { type: "string" },
@@ -339,7 +1337,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["capabilities"],
           properties: {
-            capabilities: { type: "array", items: { $ref: "#/components/schemas/HomelabCapability" } },
+            capabilities: {
+              type: "array",
+              items: { $ref: "#/components/schemas/HomelabCapability" },
+            },
           },
         },
         CapabilityInvokeRequest: {
@@ -357,7 +1358,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             type: { type: "string", enum: ["result", "run"] },
             result: { description: "Direct invoke payload", nullable: true },
             runId: { type: "string" },
-            artifactId: { type: "string", description: "Report Artifact created from a direct capability result" },
+            artifactId: {
+              type: "string",
+              description:
+                "Report Artifact created from a direct capability result",
+            },
           },
         },
         CapabilityRun: {
@@ -366,7 +1371,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             runId: { type: "string" },
             capabilityId: { type: "string" },
-            status: { type: "string", enum: ["queued", "running", "succeeded", "failed", "interrupted"] },
+            status: {
+              type: "string",
+              enum: ["queued", "running", "succeeded", "failed", "interrupted"],
+            },
             artifactId: { type: "string" },
             createdAt: { type: "string" },
             updatedAt: { type: "string" },
@@ -381,21 +1389,47 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["runs"],
           properties: {
-            runs: { type: "array", items: { $ref: "#/components/schemas/CapabilityRun" } },
+            runs: {
+              type: "array",
+              items: { $ref: "#/components/schemas/CapabilityRun" },
+            },
           },
         },
         DiagnosisResult: {
           type: "object",
-          required: ["runId", "actionId", "status", "resource", "observations", "diagnosis", "recommendations", "technicalDetails"],
+          required: [
+            "runId",
+            "actionId",
+            "status",
+            "resource",
+            "observations",
+            "diagnosis",
+            "recommendations",
+            "technicalDetails",
+          ],
           properties: {
             runId: { type: "string" },
             artifactId: { type: "string" },
             actionId: { type: "string", enum: ["container.diagnose"] },
-            status: { type: "string", enum: ["completed", "failed", "provider_unavailable", "insufficient_data"] },
+            status: {
+              type: "string",
+              enum: [
+                "completed",
+                "failed",
+                "provider_unavailable",
+                "insufficient_data",
+              ],
+            },
             resource: { type: "object", additionalProperties: true },
-            observations: { type: "array", items: { type: "object", additionalProperties: true } },
+            observations: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
             diagnosis: { type: "object", additionalProperties: true },
-            recommendations: { type: "array", items: { type: "object", additionalProperties: true } },
+            recommendations: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
             technicalDetails: { type: "object", additionalProperties: true },
             error: { type: "string" },
             sessionId: { type: "string" },
@@ -423,7 +1457,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         ActionReceipt: {
           type: "object",
-          required: ["receiptId", "actionId", "resource", "approval", "action", "verification", "idempotencyKey", "tokenUsed"],
+          required: [
+            "receiptId",
+            "actionId",
+            "resource",
+            "approval",
+            "action",
+            "verification",
+            "idempotencyKey",
+            "tokenUsed",
+          ],
           properties: {
             receiptId: { type: "string" },
             artifactId: { type: "string" },
@@ -445,12 +1488,18 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             kind: { type: "string", enum: ["container"] },
             id: { type: "string" },
             name: { type: "string" },
-            provider: { type: "string", enum: ["arcane", "portainer", "unknown"] },
+            provider: {
+              type: "string",
+              enum: ["arcane", "portainer", "unknown"],
+            },
             instanceId: { type: "string" },
             environmentId: { type: "string" },
             endpointId: { type: "integer" },
             image: { type: "string" },
-            labels: { type: "object", additionalProperties: { type: "string" } },
+            labels: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
           },
         },
         ActivityRecord: {
@@ -469,14 +1518,32 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           ],
           properties: {
             id: { type: "string" },
-            kind: { type: "string", enum: ["container.restart", "container.diagnose"] },
-            actionId: { type: "string", enum: ["container.restart", "container.diagnose"] },
+            kind: {
+              type: "string",
+              enum: ["container.restart", "container.diagnose"],
+            },
+            actionId: {
+              type: "string",
+              enum: ["container.restart", "container.diagnose"],
+            },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             status: {
               type: "string",
-              enum: ["pending", "succeeded", "failed", "rejected", "provider_unavailable", "verification_failed", "completed", "insufficient_data"],
+              enum: [
+                "pending",
+                "succeeded",
+                "failed",
+                "rejected",
+                "provider_unavailable",
+                "verification_failed",
+                "completed",
+                "insufficient_data",
+              ],
             },
-            group: { type: "string", enum: ["needs_approval", "running", "recent"] },
+            group: {
+              type: "string",
+              enum: ["needs_approval", "running", "recent"],
+            },
             summary: { type: "string" },
             createdAt: { type: "string" },
             updatedAt: { type: "string" },
@@ -488,8 +1555,14 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             action: { type: "object", additionalProperties: true },
             verification: { type: "object", additionalProperties: true },
             diagnosis: { type: "object", additionalProperties: true },
-            observations: { type: "array", items: { type: "object", additionalProperties: true } },
-            recommendations: { type: "array", items: { type: "object", additionalProperties: true } },
+            observations: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+            recommendations: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
           },
         },
         ActivityApprovalItem: {
@@ -584,19 +1657,38 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["items"],
           properties: {
-            items: { type: "array", items: { $ref: "#/components/schemas/ActivityItem" } },
+            items: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ActivityItem" },
+            },
             nextCursor: { type: "string" },
           },
         },
         ProductWorker: {
           type: "object",
-          required: ["runId", "parentSessionId", "profileName", "task", "status"],
+          required: [
+            "runId",
+            "parentSessionId",
+            "profileName",
+            "task",
+            "status",
+          ],
           properties: {
             runId: { type: "string" },
             parentSessionId: { type: "string" },
             profileName: { type: "string" },
             task: { type: "string" },
-            status: { type: "string", enum: ["queued", "running", "completed", "failed", "cancelled", "interrupted"] },
+            status: {
+              type: "string",
+              enum: [
+                "queued",
+                "running",
+                "completed",
+                "failed",
+                "cancelled",
+                "interrupted",
+              ],
+            },
             turns: { type: "integer" },
             maxTurns: { type: "integer" },
             createdAt: { type: "string" },
@@ -604,7 +1696,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             finishedAt: { type: "string" },
             artifactId: { type: "string" },
             responseText: { type: "string" },
-            activity: { type: "array", items: { type: "object", additionalProperties: true } },
+            activity: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
             result: { type: "string" },
             error: { type: "string" },
           },
@@ -626,7 +1721,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
             error: { type: "string" },
             artifactId: { type: "string" },
-            resource: { $ref: "#/components/schemas/ProductBackgroundTaskResource" },
+            resource: {
+              $ref: "#/components/schemas/ProductBackgroundTaskResource",
+            },
           },
         },
         ProductBackgroundTaskResource: {
@@ -653,21 +1750,30 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["profiles"],
           properties: {
-            profiles: { type: "array", items: { $ref: "#/components/schemas/ProductSubagentProfile" } },
+            profiles: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ProductSubagentProfile" },
+            },
           },
         },
         WorkerList: {
           type: "object",
           required: ["subagents"],
           properties: {
-            subagents: { type: "array", items: { $ref: "#/components/schemas/ProductWorker" } },
+            subagents: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ProductWorker" },
+            },
           },
         },
         WorkerLog: {
           type: "object",
           required: ["activity"],
           properties: {
-            activity: { type: "array", items: { type: "object", additionalProperties: true } },
+            activity: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
           },
         },
         SpawnWorkerRequest: {
@@ -682,7 +1788,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         DeviceRegistration: {
           type: "object",
-          required: ["registrationId", "platform", "categories", "registeredAt", "updatedAt"],
+          required: [
+            "registrationId",
+            "platform",
+            "categories",
+            "registeredAt",
+            "updatedAt",
+          ],
           properties: {
             registrationId: { type: "string" },
             platform: { type: "string", enum: ["ios"] },
@@ -696,7 +1808,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["devices"],
           properties: {
-            devices: { type: "array", items: { $ref: "#/components/schemas/DeviceRegistration" } },
+            devices: {
+              type: "array",
+              items: { $ref: "#/components/schemas/DeviceRegistration" },
+            },
           },
         },
         DeviceRegistrationRequest: {
@@ -706,12 +1821,23 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             token: { type: "string", maxLength: 512, writeOnly: true },
             platform: { type: "string", enum: ["ios"] },
             deviceId: { type: "string" },
-            categories: { type: "array", maxItems: 16, items: { type: "string", minLength: 1, maxLength: 64 } },
+            categories: {
+              type: "array",
+              maxItems: 16,
+              items: { type: "string", minLength: 1, maxLength: 64 },
+            },
           },
         },
         PendingPermission: {
           type: "object",
-          required: ["id", "sessionId", "toolName", "title", "requestedAt", "rememberScopes"],
+          required: [
+            "id",
+            "sessionId",
+            "toolName",
+            "title",
+            "requestedAt",
+            "rememberScopes",
+          ],
           properties: {
             id: { type: "string" },
             sessionId: { type: "string" },
@@ -721,7 +1847,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             input: { description: "Redacted tool arguments", nullable: true },
             argsSummary: { type: "string" },
             requestedAt: { type: "string" },
-            rememberScopes: { type: "array", items: { type: "string", enum: ["request", "tool", "conversation"] } },
+            rememberScopes: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["request", "tool", "conversation"],
+              },
+            },
             risk: { type: "string", enum: ["high", "standard"] },
           },
         },
@@ -729,7 +1861,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["permissions"],
           properties: {
-            permissions: { type: "array", items: { $ref: "#/components/schemas/PendingPermission" } },
+            permissions: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PendingPermission" },
+            },
           },
         },
         PermissionResolution: {
@@ -738,7 +1873,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             response: { type: "string", enum: ["allow", "deny"] },
             remember: { type: "boolean" },
-            rememberScope: { type: "string", enum: ["request", "tool", "conversation"] },
+            rememberScope: {
+              type: "string",
+              enum: ["request", "tool", "conversation"],
+            },
           },
         },
         Skill: {
@@ -755,15 +1893,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["name", "description", "content", "contentHash"],
           properties: {
-            name: { type: "string" }, description: { type: "string" },
-            content: { type: "string" }, contentHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+            name: { type: "string" },
+            description: { type: "string" },
+            content: { type: "string" },
+            contentHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
           },
         },
         SkillList: {
           type: "object",
           required: ["skills"],
           properties: {
-            skills: { type: "array", items: { $ref: "#/components/schemas/Skill" } },
+            skills: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Skill" },
+            },
           },
         },
         SkillPatch: {
@@ -772,19 +1915,34 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: { enabled: { type: "boolean" } },
         },
         SkillImport: {
-          type: "object", required: ["content"],
-          properties: { content: { type: "string", description: "Complete SKILL.md, at most 1 MB" } },
+          type: "object",
+          required: ["content"],
+          properties: {
+            content: {
+              type: "string",
+              description: "Complete SKILL.md, at most 1 MB",
+            },
+          },
         },
         McpServerRegistration: {
-          type: "object", required: ["name"],
+          type: "object",
+          required: ["name"],
           properties: {
-            name: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$" },
-            url: { type: "string" }, command: { type: "string" },
+            name: {
+              type: "string",
+              pattern: "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$",
+            },
+            url: { type: "string" },
+            command: { type: "string" },
             args: { type: "array", items: { type: "string" } },
             env: { type: "object", additionalProperties: { type: "string" } },
-            headers: { type: "object", additionalProperties: { type: "string" } },
+            headers: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
           },
-          description: "Provide either url or command. Saved disabled; enable separately. Credentials are never returned.",
+          description:
+            "Provide either url or command. Saved disabled; enable separately. Credentials are never returned.",
         },
         McpServer: {
           type: "object",
@@ -796,7 +1954,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             service: { type: "string" },
             category: { type: "string" },
             permission: { type: "string" },
-            status: { type: "string", enum: ["disabled", "configured"], description: "Configured state only. Connections belong to the runtime's session." },
+            status: {
+              type: "string",
+              enum: ["disabled", "configured"],
+              description:
+                "Configured state only. Connections belong to the runtime's session.",
+            },
             disabled: { type: "boolean" },
           },
         },
@@ -807,7 +1970,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         McpTool: {
           type: "object",
-          description: "External MCP tool. Same shape as HomelabCapability with source=external.",
+          description:
+            "External MCP tool. Same shape as HomelabCapability with source=external.",
           required: ["id", "name", "source"],
           properties: {
             id: { type: "string" },
@@ -824,14 +1988,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["servers"],
           properties: {
-            servers: { type: "array", items: { $ref: "#/components/schemas/McpServer" } },
+            servers: {
+              type: "array",
+              items: { $ref: "#/components/schemas/McpServer" },
+            },
           },
         },
         McpToolList: {
           type: "object",
           required: ["tools"],
           properties: {
-            tools: { type: "array", items: { $ref: "#/components/schemas/McpTool" } },
+            tools: {
+              type: "array",
+              items: { $ref: "#/components/schemas/McpTool" },
+            },
           },
         },
         EnabledResource: {
@@ -857,15 +2027,35 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["resources"],
           properties: {
-            resources: { type: "array", items: { $ref: "#/components/schemas/EnabledResource" } },
+            resources: {
+              type: "array",
+              items: { $ref: "#/components/schemas/EnabledResource" },
+            },
           },
         },
         AgentArtifact: {
           type: "object",
-          required: ["artifactId", "kind", "title", "createdAt", "updatedAt", "contentType", "sizeBytes"],
+          required: [
+            "artifactId",
+            "kind",
+            "title",
+            "createdAt",
+            "updatedAt",
+            "contentType",
+            "sizeBytes",
+          ],
           properties: {
             artifactId: { type: "string" },
-            kind: { type: "string", enum: ["diagnosis", "report", "resource_list", "operation_receipt", "task_output"] },
+            kind: {
+              type: "string",
+              enum: [
+                "diagnosis",
+                "report",
+                "resource_list",
+                "operation_receipt",
+                "task_output",
+              ],
+            },
             title: { type: "string" },
             sessionId: { type: "string" },
             runId: { type: "string" },
@@ -884,7 +2074,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["artifacts"],
           properties: {
-            artifacts: { type: "array", items: { $ref: "#/components/schemas/AgentArtifact" } },
+            artifacts: {
+              type: "array",
+              items: { $ref: "#/components/schemas/AgentArtifact" },
+            },
           },
         },
         ArtifactContent: {
@@ -918,9 +2111,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             autoCompact: { type: "boolean" },
             autoSummary: { type: "boolean" },
-            autoSummaryDelayMs: { type: "integer", minimum: 60000, maximum: 900000 },
-            permissionMode: { type: "string", enum: ["ask", "read-only", "full-access"] },
-            maxSubagentConcurrency: { type: "integer", minimum: 1, maximum: 16 },
+            autoSummaryDelayMs: {
+              type: "integer",
+              minimum: 60000,
+              maximum: 900000,
+            },
+            permissionMode: {
+              type: "string",
+              enum: ["ask", "read-only", "full-access"],
+            },
+            maxSubagentConcurrency: {
+              type: "integer",
+              minimum: 1,
+              maximum: 16,
+            },
             maxSubagentsPerParent: { type: "integer", minimum: 1, maximum: 16 },
             workspacePath: { type: "string" },
             outputDirectory: { type: "string" },
@@ -937,14 +2141,38 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 "outputDirectory",
               ],
               properties: {
-                autoCompact: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                autoSummary: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                autoSummaryDelayMs: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                permissionMode: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                maxSubagentConcurrency: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                maxSubagentsPerParent: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                workspacePath: { type: "string", enum: ["configured", "default", "environment", "derived"] },
-                outputDirectory: { type: "string", enum: ["configured", "default", "environment", "derived"] },
+                autoCompact: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                autoSummary: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                autoSummaryDelayMs: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                permissionMode: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                maxSubagentConcurrency: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                maxSubagentsPerParent: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                workspacePath: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
+                outputDirectory: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
               },
             },
             persistence: {
@@ -956,7 +2184,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             mutable: {
               type: "array",
-              items: { type: "string", enum: ["autoCompact", "autoSummary", "autoSummaryDelayMs"] },
+              items: {
+                type: "string",
+                enum: ["autoCompact", "autoSummary", "autoSummaryDelayMs"],
+              },
             },
           },
         },
@@ -967,12 +2198,22 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             autoCompact: { type: "boolean" },
             autoSummary: { type: "boolean" },
-            autoSummaryDelayMs: { type: "number", description: "Milliseconds; values are clamped to 60000..900000." },
+            autoSummaryDelayMs: {
+              type: "number",
+              description: "Milliseconds; values are clamped to 60000..900000.",
+            },
           },
         },
         ProductGoalRun: {
           type: "object",
-          required: ["id", "goalId", "sessionId", "status", "createdAt", "updatedAt"],
+          required: [
+            "id",
+            "goalId",
+            "sessionId",
+            "status",
+            "createdAt",
+            "updatedAt",
+          ],
           properties: {
             id: { type: "string" },
             goalId: { type: "string" },
@@ -990,49 +2231,99 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           required: ["goal"],
           properties: {
             goal: { type: "string", minLength: 1 },
-            criteria: { type: "array", items: { type: "string", minLength: 1 } },
+            criteria: {
+              type: "array",
+              items: { type: "string", minLength: 1 },
+            },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
           },
         },
         GoalScheduleInput: {
-          type: "object", required: ["title", "goal", "startAt"],
+          type: "object",
+          required: ["title", "goal", "startAt"],
           properties: {
             title: { type: "string", minLength: 1, maxLength: 200 },
             goal: { type: "string", minLength: 1, maxLength: 16000 },
             startAt: { type: "string", format: "date-time" },
-            intervalMinutes: { type: "integer", minimum: 5, maximum: 525600, description: "Fixed elapsed minutes; omitted means one shot. Missed intervals are not replayed." },
-            criteria: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 2000 } },
+            intervalMinutes: {
+              type: "integer",
+              minimum: 5,
+              maximum: 525600,
+              description:
+                "Fixed elapsed minutes; omitted means one shot. Missed intervals are not replayed.",
+            },
+            criteria: {
+              type: "array",
+              maxItems: 32,
+              items: { type: "string", minLength: 1, maxLength: 2000 },
+            },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
           },
         },
         GoalSchedule: {
-          allOf: [{ $ref: "#/components/schemas/GoalScheduleInput" }, {
-            type: "object", required: ["id", "enabled", "createdAt", "updatedAt"],
-            properties: {
-              id: { type: "string" }, enabled: { type: "boolean" },
-              createdAt: { type: "string", format: "date-time" }, updatedAt: { type: "string", format: "date-time" },
-              nextRunAt: { type: "string", format: "date-time" }, lastRunAt: { type: "string", format: "date-time" },
-              lastSessionId: { type: "string" }, lastError: { type: "string" }, dispatching: { type: "boolean" },
+          allOf: [
+            { $ref: "#/components/schemas/GoalScheduleInput" },
+            {
+              type: "object",
+              required: ["id", "enabled", "createdAt", "updatedAt"],
+              properties: {
+                id: { type: "string" },
+                enabled: { type: "boolean" },
+                createdAt: { type: "string", format: "date-time" },
+                updatedAt: { type: "string", format: "date-time" },
+                nextRunAt: { type: "string", format: "date-time" },
+                lastRunAt: { type: "string", format: "date-time" },
+                lastSessionId: { type: "string" },
+                lastError: { type: "string" },
+                dispatching: { type: "boolean" },
+              },
             },
-          }],
+          ],
         },
-        GoalScheduleEnabled: { type: "object", required: ["enabled"], properties: { enabled: { type: "boolean" } } },
-        GoalScheduleList: { type: "object", required: ["schedules"], properties: { schedules: { type: "array", items: { $ref: "#/components/schemas/GoalSchedule" } } } },
+        GoalScheduleEnabled: {
+          type: "object",
+          required: ["enabled"],
+          properties: { enabled: { type: "boolean" } },
+        },
+        GoalScheduleList: {
+          type: "object",
+          required: ["schedules"],
+          properties: {
+            schedules: {
+              type: "array",
+              items: { $ref: "#/components/schemas/GoalSchedule" },
+            },
+          },
+        },
         ProductGoalList: {
           type: "object",
           required: ["goals"],
           properties: {
-            goals: { type: "array", items: { $ref: "#/components/schemas/ProductGoal" } },
+            goals: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ProductGoal" },
+            },
           },
         },
         ProductGoal: {
           type: "object",
-          description: "Product-facing Goal. id and sessionId are the parent thebeSessionId.",
+          description:
+            "Product-facing Goal. id and sessionId are the parent thebeSessionId.",
           properties: {
             id: { type: "string" },
             sessionId: { type: "string" },
             title: { type: "string" },
-            status: { type: "string", enum: ["queued", "running", "paused", "succeeded", "failed", "cancelled"] },
+            status: {
+              type: "string",
+              enum: [
+                "queued",
+                "running",
+                "paused",
+                "succeeded",
+                "failed",
+                "cancelled",
+              ],
+            },
             phase: { type: "string" },
             progress: { type: "number" },
             currentStep: { type: "string" },
@@ -1069,13 +2360,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
 }
 
 export function swaggerUiHtml(version: string): string {
-  const safeVersion = version.replace(/[&<>"']/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  })[character] ?? character);
+  const safeVersion = version.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character
+  );
   const title = `Thebe Core API ${safeVersion}`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1085,15 +2380,32 @@ export function swaggerUiHtml(version: string): string {
 }
 
 const require = createRequire(import.meta.url);
-const swaggerUiDirectory = dirname(require.resolve("swagger-ui-dist/package.json"));
+const swaggerUiDirectory = dirname(
+  require.resolve("swagger-ui-dist/package.json")
+);
 const swaggerUiInitScript =
   "window.ui=SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',deepLinking:true,persistAuthorization:true});";
 const swaggerAssets: Record<string, { file: string; contentType: string }> = {
-  "/docs/swagger-ui.css": { file: "swagger-ui.css", contentType: "text/css; charset=utf-8" },
-  "/docs/swagger-ui-bundle.js": { file: "swagger-ui-bundle.js", contentType: "text/javascript; charset=utf-8" },
-  "/docs/swagger-ui-standalone-preset.js": { file: "swagger-ui-standalone-preset.js", contentType: "text/javascript; charset=utf-8" },
-  "/docs/favicon-32x32.png": { file: "favicon-32x32.png", contentType: "image/png" },
-  "/docs/favicon-16x16.png": { file: "favicon-16x16.png", contentType: "image/png" },
+  "/docs/swagger-ui.css": {
+    file: "swagger-ui.css",
+    contentType: "text/css; charset=utf-8",
+  },
+  "/docs/swagger-ui-bundle.js": {
+    file: "swagger-ui-bundle.js",
+    contentType: "text/javascript; charset=utf-8",
+  },
+  "/docs/swagger-ui-standalone-preset.js": {
+    file: "swagger-ui-standalone-preset.js",
+    contentType: "text/javascript; charset=utf-8",
+  },
+  "/docs/favicon-32x32.png": {
+    file: "favicon-32x32.png",
+    contentType: "image/png",
+  },
+  "/docs/favicon-16x16.png": {
+    file: "favicon-16x16.png",
+    contentType: "image/png",
+  },
 };
 
 /** Serve only the known Swagger UI assets; arbitrary filesystem paths are never accepted. */

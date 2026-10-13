@@ -12,9 +12,8 @@ import type { ThinkingLevel } from "../../agent/index.ts";
 const chalk = new Chalk({ level: 3 });
 
 function renderHeading(text: string, color: (value: string) => string): string {
-  const withoutMarker = text.replace(
-    /^(\x1b\[[0-9;]*m)*#{1,6}\s+/,
-    (match) => match.replace(/#{1,6}\s+/, ""),
+  const withoutMarker = text.replace(/^(\x1b\[[0-9;]*m)*#{1,6}\s+/, (match) =>
+    match.replace(/#{1,6}\s+/, "")
   );
   return color(withoutMarker);
 }
@@ -24,7 +23,10 @@ function renderCodeBlockBorder(text: string): string {
   return chalk.dim(language ? `╭─ ${language} ─` : "╰─");
 }
 
-function renderListBullet(text: string, color: (value: string) => string): string {
+function renderListBullet(
+  text: string,
+  color: (value: string) => string
+): string {
   return color(text.replace(/^[-+*]\s/, "• "));
 }
 
@@ -41,11 +43,13 @@ export const defaultSelectListTheme: SelectListTheme = {
   description: (text: string) => chalk.dim(text),
   scrollInfo: (text: string) =>
     chalk.dim(`${text.trim()} · ↑↓ move · Enter select · Esc close`),
-  noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
+  noMatch: (_text: string) =>
+    chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const defaultMarkdownTheme: MarkdownTheme = {
-  heading: (text: string) => renderHeading(text, (value) => chalk.bold.cyan(value)),
+  heading: (text: string) =>
+    renderHeading(text, (value) => chalk.bold.cyan(value)),
   link: (text: string) => chalk.blue(text),
   linkUrl: (text: string) => chalk.dim(text),
   code: (text: string) => chalk.yellow(text),
@@ -54,7 +58,8 @@ export const defaultMarkdownTheme: MarkdownTheme = {
   quote: (text: string) => chalk.italic(text),
   quoteBorder: (text: string) => chalk.dim(text),
   hr: (text: string) => chalk.dim(text),
-  listBullet: (text: string) => renderListBullet(text, (value) => chalk.cyan(value)),
+  listBullet: (text: string) =>
+    renderListBullet(text, (value) => chalk.cyan(value)),
   bold: (text: string) => chalk.bold(text),
   italic: (text: string) => chalk.italic(text),
   strikethrough: (text: string) => chalk.strikethrough(text),
@@ -74,11 +79,13 @@ export const lightSelectListTheme: SelectListTheme = {
   description: (text: string) => chalk.dim(text),
   scrollInfo: (text: string) =>
     chalk.dim(`${text.trim()} · ↑↓ move · Enter select · Esc close`),
-  noMatch: (text: string) => chalk.yellow(`  No matching commands · Esc to dismiss`),
+  noMatch: (_text: string) =>
+    chalk.yellow(`  No matching commands · Esc to dismiss`),
 };
 
 export const lightMarkdownTheme: MarkdownTheme = {
-  heading: (text: string) => renderHeading(text, (value) => chalk.bold.blue(value)),
+  heading: (text: string) =>
+    renderHeading(text, (value) => chalk.bold.blue(value)),
   link: (text: string) => chalk.blue(text),
   linkUrl: (text: string) => chalk.dim(text),
   code: (text: string) => chalk.magenta(text),
@@ -87,7 +94,8 @@ export const lightMarkdownTheme: MarkdownTheme = {
   quote: (text: string) => chalk.italic(text),
   quoteBorder: (text: string) => chalk.dim(text),
   hr: (text: string) => chalk.dim(text),
-  listBullet: (text: string) => renderListBullet(text, (value) => chalk.blue(value)),
+  listBullet: (text: string) =>
+    renderListBullet(text, (value) => chalk.blue(value)),
   bold: (text: string) => chalk.bold(text),
   italic: (text: string) => chalk.italic(text),
   strikethrough: (text: string) => chalk.strikethrough(text),
@@ -118,11 +126,13 @@ export type ThemeName = "dark" | "light";
 
 export function getThinkingBorderColor(
   level: ThinkingLevel = "off",
-  theme: ThemeName = "dark",
+  theme: ThemeName = "dark"
 ): (text: string) => string {
   switch (level) {
     case "off":
-      return theme === "light" ? lightEditorTheme.borderColor : defaultEditorTheme.borderColor;
+      return theme === "light"
+        ? lightEditorTheme.borderColor
+        : defaultEditorTheme.borderColor;
     case "minimal":
       return minimalBorder;
     case "low":
@@ -136,15 +146,21 @@ export function getThinkingBorderColor(
     case "max":
       return maxBorder;
     default:
-      return theme === "light" ? lightEditorTheme.borderColor : defaultEditorTheme.borderColor;
+      return theme === "light"
+        ? lightEditorTheme.borderColor
+        : defaultEditorTheme.borderColor;
   }
 }
 
-export function getBashModeBorderColor(_theme: ThemeName = "dark"): (text: string) => string {
+export function getBashModeBorderColor(
+  _theme: ThemeName = "dark"
+): (text: string) => string {
   return greenBorder;
 }
 
-export function getRunningBorderColor(_theme: ThemeName = "dark"): (text: string) => string {
+export function getRunningBorderColor(
+  _theme: ThemeName = "dark"
+): (text: string) => string {
   return cyanBorder;
 }
 

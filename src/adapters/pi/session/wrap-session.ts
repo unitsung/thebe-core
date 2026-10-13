@@ -48,11 +48,14 @@ export function wrapSession(
   session: PiSession,
   create: CreateRuntimeSessionOptions,
   existingListeners: Set<(event: NormalizedEvent) => void> | undefined,
-  resolveModelRef: (providerId: string, modelId: string) => PiModelShape | undefined,
+  resolveModelRef: (
+    providerId: string,
+    modelId: string
+  ) => PiModelShape | undefined,
   refreshModels?: () => Promise<void>,
   toolControllers?: Map<string, AbortController>,
   backgroundTasks?: BackgroundTaskRegistry,
-  bashOperations?: BashOperations,
+  bashOperations?: BashOperations
 ): RuntimeSession {
   const listeners =
     existingListeners ?? new Set<(event: NormalizedEvent) => void>();
@@ -61,7 +64,9 @@ export function wrapSession(
   function terminalModelError(): string | undefined {
     for (let i = session.messages.length - 1; i >= 0; i--) {
       const message = session.messages[i] as {
-        role?: string; stopReason?: string; errorMessage?: string;
+        role?: string;
+        stopReason?: string;
+        errorMessage?: string;
       };
       if (message.role === "assistant") {
         return message.stopReason === "error"
@@ -104,7 +109,7 @@ export function wrapSession(
         (file) =>
           (!file.mode || file.mode === "inline") &&
           file.data &&
-          file.mediaType.startsWith("image/"),
+          file.mediaType.startsWith("image/")
       )
       .map((file) => ({
         type: "image" as const,
@@ -112,7 +117,9 @@ export function wrapSession(
         data: file.data!,
       }));
     if (images.length > 0 && !session.model?.input?.includes("image")) {
-      throw new Error("The selected model does not support image input. Select a vision model before sending images.");
+      throw new Error(
+        "The selected model does not support image input. Select a vision model before sending images."
+      );
     }
     const inlined = (prompt.files ?? [])
       .filter(isInlineTextAttachment)
@@ -122,7 +129,7 @@ export function wrapSession(
       .filter((file) => file.mode === "reference")
       .map(
         (file) =>
-          `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`,
+          `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`
       )
       .join("\n");
     const lines = (prompt.files ?? [])
@@ -134,11 +141,10 @@ export function wrapSession(
         (file) =>
           (!file.mode || file.mode === "inline") &&
           !file.mediaType.startsWith("image/") &&
-          !isInlineTextFile(file.mediaType),
+          !isInlineTextFile(file.mediaType)
       )
       .map(
-        (file) =>
-          `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
+        (file) => `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`
       )
       .join("\n");
     const text = [prompt.text, inlined, references, lines, otherFiles]
@@ -195,9 +201,10 @@ export function wrapSession(
     },
     exportSession: () => exportPiSession(session as never),
     messages: () => mapPiMessages(session.messages),
-    currentModel: () => session.model
-      ? { providerId: session.model.provider, modelId: session.model.id }
-      : undefined,
+    currentModel: () =>
+      session.model
+        ? { providerId: session.model.provider, modelId: session.model.id }
+        : undefined,
     getThinkingInfo(): RuntimeThinkingInfo {
       const available: RuntimeThinkingInfo["availableLevels"] = (
         session.getAvailableThinkingLevels?.() ?? ["off"]
@@ -242,9 +249,20 @@ export function wrapSession(
       await session.reload?.();
     },
     async getContextUsage(): Promise<ThebeSessionContext> {
-      const raw = (session as { getContextUsage?: () => { tokens: number | null; contextWindow: number; percent: number | null } | undefined }).getContextUsage?.();
+      const raw = (
+        session as {
+          getContextUsage?: () =>
+            | {
+                tokens: number | null;
+                contextWindow: number;
+                percent: number | null;
+              }
+            | undefined;
+        }
+      ).getContextUsage?.();
       const fallbackWindow =
-        (session as { model?: { contextWindow?: number } }).model?.contextWindow ?? 1_048_576;
+        (session as { model?: { contextWindow?: number } }).model
+          ?.contextWindow ?? 1_048_576;
       const maxTokens = raw?.contextWindow ?? fallbackWindow;
       let usedTokens = raw?.tokens ?? 0;
       if (usedTokens === null || usedTokens === 0) {
@@ -252,8 +270,16 @@ export function wrapSession(
         const chars = msgs.reduce((acc, m) => acc + (m.text?.length ?? 0), 0);
         usedTokens = Math.ceil(chars / 4);
       }
-      const sessionStats = (session as { getSessionStats?: () => ThebeSessionContext["sessionStats"] }).getSessionStats?.();
-      const sessionName = (session as { sessionManager?: { getSessionName?: () => string | undefined } }).sessionManager?.getSessionName?.();
+      const sessionStats = (
+        session as {
+          getSessionStats?: () => ThebeSessionContext["sessionStats"];
+        }
+      ).getSessionStats?.();
+      const sessionName = (
+        session as {
+          sessionManager?: { getSessionName?: () => string | undefined };
+        }
+      ).sessionManager?.getSessionName?.();
       const costAmount = sessionStats?.cost ?? 0;
       const pathEntries =
         session.sessionManager.getBranch?.() ??
@@ -262,7 +288,10 @@ export function wrapSession(
       let compactedAt = lastCompactedAt;
       for (let i = pathEntries.length - 1; i >= 0; i--) {
         const entry = pathEntries[i];
-        if (entry?.type === "compaction" && typeof entry.timestamp === "number") {
+        if (
+          entry?.type === "compaction" &&
+          typeof entry.timestamp === "number"
+        ) {
           compactedAt = new Date(entry.timestamp).toISOString();
           break;
         }
@@ -319,9 +348,7 @@ export function wrapSession(
         resolved = resolveModelRef(model.providerId, model.modelId);
       }
       if (!resolved) {
-        throw new Error(
-          `unknown model: ${model.providerId}/${model.modelId}`,
-        );
+        throw new Error(`unknown model: ${model.providerId}/${model.modelId}`);
       }
       await session.setModel(resolved);
     },
@@ -347,7 +374,7 @@ export function wrapSession(
     async executeBash(
       command: string,
       onChunk?: (chunk: string) => void,
-      options?: { excludeFromContext?: boolean },
+      options?: { excludeFromContext?: boolean }
     ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
       const raw = session as unknown as {
         executeBash?: (
@@ -356,12 +383,12 @@ export function wrapSession(
           options?: {
             excludeFromContext?: boolean;
             operations?: BashOperations;
-          },
+          }
         ) => Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
       };
       if (typeof raw.executeBash === "function") {
         const executeOptions = bashOperations
-          ? { ...(options ?? {}), operations: bashOperations }
+          ? { ...options, operations: bashOperations }
           : options;
         return raw.executeBash(command, onChunk, executeOptions);
       }

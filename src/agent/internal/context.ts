@@ -1,6 +1,9 @@
 import { join, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
-import { createAuditLog, hashParameters } from "../../agent/security/audit/audit-log.ts";
+import {
+  createAuditLog,
+  hashParameters,
+} from "../../agent/security/audit/audit-log.ts";
 import { createPolicyEngine } from "../../agent/security/policy/policy-engine.ts";
 import {
   PI_BUILTIN_TOOLS,
@@ -15,18 +18,23 @@ import {
   type RuntimeSession,
 } from "../runtime/index.ts";
 import { createStreamGuard } from "../../agent/security/stream-guard/stream-guard.ts";
-import {
-  commandGuardPreflight,
-} from "../security/command-risk.ts";
+import { commandGuardPreflight } from "../security/command-risk.ts";
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
 import { createServiceAPITools } from "../tools/service-api-tools.ts";
-import { allPipelineToolNames, availablePipelineTools, createPipelineTools } from "../tools/pipeline-tools.ts";
+import {
+  allPipelineToolNames,
+  availablePipelineTools,
+  createPipelineTools,
+} from "../tools/pipeline-tools.ts";
 import { PIPELINE_WRITE_TOOL_NAMES } from "../capabilities/pipeline.ts";
-import { SERVICE_API_TOOL_NAMES, SERVICE_API_WRITE_TOOL_NAME } from "../capabilities/service-api.ts";
+import {
+  SERVICE_API_TOOL_NAMES,
+  SERVICE_API_WRITE_TOOL_NAME,
+} from "../capabilities/service-api.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
@@ -42,18 +50,19 @@ import {
   NAVIDROME_WRITE_TOOL_NAMES,
 } from "../capabilities/navidrome.ts";
 import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
-import { createAgentStore, type AgentSessionMeta } from "../store.ts";
-import { httpError, type ThebePromptOptions, type ThebePromptResult } from "../types.ts";
+import { createAgentStore } from "../store.ts";
+import {
+  httpError,
+  type ThebePromptOptions,
+  type ThebePromptResult,
+} from "../types.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import { createResearchBudget } from "../../agent/tools/research-budget.ts";
 import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createJudgmentApi } from "../judgment/service.ts";
-import {
-  createAutoSummary,
-  DEFAULT_AUTO_SUMMARY_DELAY_MS,
-} from "./auto-summary.ts";
+import { createAutoSummary } from "./auto-summary.ts";
 export { DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./auto-summary.ts";
 import { createEventLog } from "./event-log.ts";
 import { createPermissionControl } from "./permission-control.ts";
@@ -87,23 +96,30 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     autoSummary: inputOptions.autoSummary ?? storedSettings.autoSummary,
     autoSummaryDelayMs:
       inputOptions.autoSummaryDelayMs ?? storedSettings.autoSummaryDelayMs,
-    permissionMode: inputOptions.permissionMode ?? storedSettings.permissionMode,
+    permissionMode:
+      inputOptions.permissionMode ?? storedSettings.permissionMode,
     maxSubagentConcurrency:
-      inputOptions.maxSubagentConcurrency ?? storedSettings.maxSubagentConcurrency,
+      inputOptions.maxSubagentConcurrency ??
+      storedSettings.maxSubagentConcurrency,
     maxSubagentsPerParent:
-      inputOptions.maxSubagentsPerParent ?? storedSettings.maxSubagentsPerParent,
+      inputOptions.maxSubagentsPerParent ??
+      storedSettings.maxSubagentsPerParent,
     workspacePath: inputOptions.workspacePath ?? storedSettings.workspacePath,
-    outputDirectory: inputOptions.outputDirectory ?? storedSettings.outputDirectory,
-    enabledResources: inputOptions.enabledResources ?? storedSettings.enabledResources,
+    outputDirectory:
+      inputOptions.outputDirectory ?? storedSettings.outputDirectory,
+    enabledResources:
+      inputOptions.enabledResources ?? storedSettings.enabledResources,
   };
   const now = options.now ?? (() => new Date());
   const callerId = options.callerId ?? "default";
   const workspacePath = (() => {
-    const configured = options.workspacePath?.trim() || process.env.THEBE_WORKSPACE_DIR?.trim();
+    const configured =
+      options.workspacePath?.trim() || process.env.THEBE_WORKSPACE_DIR?.trim();
     return configured ? resolve(configured) : undefined;
   })();
   const outputDirectory = (() => {
-    const configured = options.outputDirectory?.trim() || process.env.THEBE_OUTPUT_DIR?.trim();
+    const configured =
+      options.outputDirectory?.trim() || process.env.THEBE_OUTPUT_DIR?.trim();
     return configured
       ? resolve(configured)
       : workspacePath
@@ -112,47 +128,57 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   })();
   const settingSources: Record<AgentSettingKey, AgentSettingSource> = {
     autoCompact:
-      inputOptions.autoCompact !== undefined || storedSettings.autoCompact !== undefined
+      inputOptions.autoCompact !== undefined ||
+      storedSettings.autoCompact !== undefined
         ? "configured"
         : "default",
     autoSummary:
-      inputOptions.autoSummary !== undefined || storedSettings.autoSummary !== undefined
+      inputOptions.autoSummary !== undefined ||
+      storedSettings.autoSummary !== undefined
         ? "configured"
         : "default",
     autoSummaryDelayMs:
-      inputOptions.autoSummaryDelayMs !== undefined || storedSettings.autoSummaryDelayMs !== undefined
+      inputOptions.autoSummaryDelayMs !== undefined ||
+      storedSettings.autoSummaryDelayMs !== undefined
         ? "configured"
         : "default",
     permissionMode:
-      inputOptions.permissionMode !== undefined || storedSettings.permissionMode !== undefined
+      inputOptions.permissionMode !== undefined ||
+      storedSettings.permissionMode !== undefined
         ? "configured"
         : "default",
     maxSubagentConcurrency:
-      inputOptions.maxSubagentConcurrency !== undefined || storedSettings.maxSubagentConcurrency !== undefined
+      inputOptions.maxSubagentConcurrency !== undefined ||
+      storedSettings.maxSubagentConcurrency !== undefined
         ? "configured"
         : "default",
     maxSubagentsPerParent:
-      inputOptions.maxSubagentsPerParent !== undefined || storedSettings.maxSubagentsPerParent !== undefined
+      inputOptions.maxSubagentsPerParent !== undefined ||
+      storedSettings.maxSubagentsPerParent !== undefined
         ? "configured"
         : "default",
-    workspacePath: inputOptions.workspacePath || storedSettings.workspacePath
-      ? "configured"
-      : process.env.THEBE_WORKSPACE_DIR?.trim()
-        ? "environment"
-        : "default",
-    outputDirectory: inputOptions.outputDirectory || storedSettings.outputDirectory
-      ? "configured"
-      : process.env.THEBE_OUTPUT_DIR?.trim()
-        ? "environment"
-        : workspacePath
-          ? "derived"
+    workspacePath:
+      inputOptions.workspacePath || storedSettings.workspacePath
+        ? "configured"
+        : process.env.THEBE_WORKSPACE_DIR?.trim()
+          ? "environment"
           : "default",
+    outputDirectory:
+      inputOptions.outputDirectory || storedSettings.outputDirectory
+        ? "configured"
+        : process.env.THEBE_OUTPUT_DIR?.trim()
+          ? "environment"
+          : workspacePath
+            ? "derived"
+            : "default",
   };
   const workspaceAccess = workspacePath
     ? createWorkspaceAccessPolicy(workspacePath)
     : {
         workspacePath: undefined,
-        async preflight(): Promise<"ask"> { return "ask"; },
+        async preflight(): Promise<"ask"> {
+          return "ask";
+        },
       };
   // Scenario presets (THEBE_SCENARIO) set the guard, confinement, and sandbox
   // defaults; explicit THEBE_* variables win over the preset.
@@ -163,15 +189,23 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   // risk raised for the approval UI, and everything else falls through to the
   // workspace policy.
   const preflight = async (
-    request: PermissionRequest,
+    request: PermissionRequest
   ): Promise<PermissionPreflightDecision> => {
-    if (request.toolName === "read" && request.args && typeof request.args === "object") {
+    if (
+      request.toolName === "read" &&
+      request.args &&
+      typeof request.args === "object"
+    ) {
       const path = (request.args as { path?: unknown }).path;
       if (typeof path === "string") {
-        const candidate = await realpath(resolve(workspacePath ?? process.cwd(), path)).catch(() => undefined);
+        const candidate = await realpath(
+          resolve(workspacePath ?? process.cwd(), path)
+        ).catch(() => undefined);
         for (const resource of enabledResources) {
           if (resource.kind !== "skill") continue;
-          const selected = await realpath(resource.source).catch(() => undefined);
+          const selected = await realpath(resource.source).catch(
+            () => undefined
+          );
           if (candidate && candidate === selected) return "allow";
         }
       }
@@ -212,9 +246,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     model: options.judgment,
     sites: options.judgmentSites ?? "all",
   });
-  const enabledResources: EnabledResource[] = [...(options.enabledResources ?? [])];
+  const enabledResources: EnabledResource[] = [
+    ...(options.enabledResources ?? []),
+  ];
   const builtinTools = options.builtinTools ?? PI_BUILTIN_TOOLS;
-  const systemPrompt = buildSystemPrompt(options.systemPrompt, workspacePath, outputDirectory, options.pipeline ? allPipelineToolNames(options.pipeline) : []);
+  const systemPrompt = buildSystemPrompt(
+    options.systemPrompt,
+    workspacePath,
+    outputDirectory,
+    options.pipeline ? allPipelineToolNames(options.pipeline) : []
+  );
   const eventLog = createEventLog();
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
@@ -229,7 +270,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   });
 
   async function lookupRemembered(
-    thebeSessionId: string,
+    thebeSessionId: string
   ): Promise<Record<string, "allow" | "deny"> | undefined> {
     try {
       return (await state.lookup(thebeSessionId)).rememberedPermissions;
@@ -269,14 +310,14 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   function getAgentSettings(): AgentSettings {
     const maxSubagentConcurrency = normalizeAgentSubagentLimit(
       options.maxSubagentConcurrency,
-      DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
+      DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY
     );
     const maxSubagentsPerParent = Math.min(
       maxSubagentConcurrency,
       normalizeAgentSubagentLimit(
         options.maxSubagentsPerParent,
-        DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
-      ),
+        DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT
+      )
     );
     return {
       autoCompact: autoCompactOverride ?? DEFAULT_AGENT_AUTO_COMPACT,
@@ -294,7 +335,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   async function updateAgentSettings(
-    patch: AgentSettingsPatch,
+    patch: AgentSettingsPatch
   ): Promise<AgentSettings> {
     checkNotQuiesced();
     const normalizedPatch: AgentSettingsPatch = {
@@ -305,7 +346,11 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ? { autoSummary: patch.autoSummary }
         : {}),
       ...(patch.autoSummaryDelayMs !== undefined
-        ? { autoSummaryDelayMs: normalizeAgentAutoSummaryDelay(patch.autoSummaryDelayMs) }
+        ? {
+            autoSummaryDelayMs: normalizeAgentAutoSummaryDelay(
+              patch.autoSummaryDelayMs
+            ),
+          }
         : {}),
     };
     await options.settingsStore?.save(normalizedPatch);
@@ -323,7 +368,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   async function updatePermissionMode(
-    value: import("../runtime/interface.ts").PermissionMode,
+    value: import("../runtime/interface.ts").PermissionMode
   ): Promise<import("../runtime/interface.ts").PermissionMode> {
     checkNotQuiesced();
     await options.settingsStore?.save({ permissionMode: value });
@@ -332,7 +377,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   function setPermissionMode(
-    value: import("../runtime/interface.ts").PermissionMode,
+    value: import("../runtime/interface.ts").PermissionMode
   ): void {
     permissions.setPermissionMode(value);
     settingSources.permissionMode = "configured";
@@ -350,11 +395,19 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
 
   function checkNotQuiesced(): void {
     if (options.runtime.isQuiesced()) {
-      throw httpError(503, "System is quiesced for maintenance; write operations are temporarily disabled");
+      throw httpError(
+        503,
+        "System is quiesced for maintenance; write operations are temporarily disabled"
+      );
     }
   }
 
-  function baseTools(toolPolicy = policy, toolCallerId = callerId, modelResults = false, scopeId?: string) {
+  function baseTools(
+    toolPolicy = policy,
+    toolCallerId = callerId,
+    modelResults = false,
+    scopeId?: string
+  ) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
       callerId: toolCallerId,
@@ -365,31 +418,76 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           policy: toolPolicy,
           callerId: toolCallerId,
           modelResults,
-        }),
+        })
       );
     }
-    const toolOptions = { policy: toolPolicy, callerId: toolCallerId, modelResults };
+    const toolOptions = {
+      policy: toolPolicy,
+      callerId: toolCallerId,
+      modelResults,
+    };
     const researchBudget = createResearchBudget();
-    if (options.musicResearch) tools.push(...createMusicResearchTools(options.musicResearch, toolPolicy, toolCallerId, researchBudget).map(tool => ({
-      ...tool, async execute(...args: Parameters<typeof tool.execute>) {
-        if (scopeId && (await state.lookup(scopeId)).labels?.["thebe.webSearch"] === "false") throw new Error("Web search is disabled for this session.");
-        return tool.execute(...args);
-      },
-    })));
-    if (options.webSearch) tools.push(...createWebSearchTools(options.webSearch, toolPolicy, toolCallerId,
-      async () => !!scopeId && (await state.lookup(scopeId)).labels?.["thebe.webSearch"] === "true", researchBudget));
-    if (options.emby) tools.push(...createMediaLibraryTools("emby", options.emby, toolOptions));
+    if (options.musicResearch)
+      tools.push(
+        ...createMusicResearchTools(
+          options.musicResearch,
+          toolPolicy,
+          toolCallerId,
+          researchBudget
+        ).map((tool) => ({
+          ...tool,
+          async execute(...args: Parameters<typeof tool.execute>) {
+            if (
+              scopeId &&
+              (await state.lookup(scopeId)).labels?.["thebe.webSearch"] ===
+                "false"
+            )
+              throw new Error("Web search is disabled for this session.");
+            return tool.execute(...args);
+          },
+        }))
+      );
+    if (options.webSearch)
+      tools.push(
+        ...createWebSearchTools(
+          options.webSearch,
+          toolPolicy,
+          toolCallerId,
+          async () =>
+            !!scopeId &&
+            (await state.lookup(scopeId)).labels?.["thebe.webSearch"] ===
+              "true",
+          researchBudget
+        )
+      );
+    if (options.emby)
+      tools.push(...createMediaLibraryTools("emby", options.emby, toolOptions));
     if (options.jellyfin) {
-      tools.push(...createMediaLibraryTools("jellyfin", options.jellyfin, toolOptions));
+      tools.push(
+        ...createMediaLibraryTools("jellyfin", options.jellyfin, toolOptions)
+      );
     }
-    if (options.immich) tools.push(...createImmichSearchTools(options.immich, toolOptions));
-    if (options.serviceAPIProviders?.length) tools.push(...createServiceAPITools(options.serviceAPIProviders, toolOptions));
-    if (options.pipeline) tools.push(...createPipelineTools(options.pipeline, { policy: toolPolicy, callerId: toolCallerId }));
-    tools.push(...createCoreEventTools(requestedId => {
-      if (scopeId && requestedId && requestedId !== scopeId) throw new Error("Event access is limited to this session");
-      const sid = scopeId ?? requestedId ?? getActive()?.meta.thebeSessionId;
-      return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
-    }));
+    if (options.immich)
+      tools.push(...createImmichSearchTools(options.immich, toolOptions));
+    if (options.serviceAPIProviders?.length)
+      tools.push(
+        ...createServiceAPITools(options.serviceAPIProviders, toolOptions)
+      );
+    if (options.pipeline)
+      tools.push(
+        ...createPipelineTools(options.pipeline, {
+          policy: toolPolicy,
+          callerId: toolCallerId,
+        })
+      );
+    tools.push(
+      ...createCoreEventTools((requestedId) => {
+        if (scopeId && requestedId && requestedId !== scopeId)
+          throw new Error("Event access is limited to this session");
+        const sid = scopeId ?? requestedId ?? getActive()?.meta.thebeSessionId;
+        return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
+      })
+    );
     return tools;
   }
 
@@ -401,50 +499,67 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     eventSessionId = explicitSessionId,
     sessionPolicy = policy,
     sessionCallerId = callerId,
-    sessionStop?: () => void | Promise<void>,
+    sessionStop?: () => void | Promise<void>
   ) {
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
     const isChatOnly = effectiveBuiltinTools.length === 0;
     return {
       model: sessionModel ?? options.model,
-      ...(!isChatOnly && sessionCallerId === callerId ? (() => {
-        const runtimeMcp = createRuntimeMcpOptions(mcp, {
-          policy: sessionPolicy, audit,
-          sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
-          onEvent: (event) => {
-            const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
-            if (sid) eventLog.appendEvent(sid, event);
-          },
-          onStop: sessionStop ?? (() => {
-            const sid = eventSessionId ?? explicitSessionId ?? getActive()?.meta.thebeSessionId;
-            if (sid) void state.openedSessions.get(sid)?.session.abort();
-          }),
-        });
-        return runtimeMcp ? { mcp: runtimeMcp } : {};
-      })() : {}),
+      ...(!isChatOnly && sessionCallerId === callerId
+        ? (() => {
+            const runtimeMcp = createRuntimeMcpOptions(mcp, {
+              policy: sessionPolicy,
+              audit,
+              sessionId: () =>
+                explicitSessionId ?? getActive()?.meta.thebeSessionId,
+              onEvent: (event) => {
+                const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
+                if (sid) eventLog.appendEvent(sid, event);
+              },
+              onStop:
+                sessionStop ??
+                (() => {
+                  const sid =
+                    eventSessionId ??
+                    explicitSessionId ??
+                    getActive()?.meta.thebeSessionId;
+                  if (sid) void state.openedSessions.get(sid)?.session.abort();
+                }),
+            });
+            return runtimeMcp ? { mcp: runtimeMcp } : {};
+          })()
+        : {}),
       customTools: isChatOnly
         ? []
-        : wrapCustomTools(baseTools(sessionPolicy, sessionCallerId, true, eventSessionId), {
-            policy: sessionPolicy,
-            audit,
-            toolWatchdogMs: options.toolWatchdogMs,
-            modelResultLimit: options.modelResultLimit && options.modelResultLimit > 0
-              ? options.modelResultLimit
-              : undefined,
-            sessionId: () => explicitSessionId ?? getActive()?.meta.thebeSessionId,
-            onEvent: (event) => {
-              const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
-              if (sid) eventLog.appendEvent(sid, event);
-            },
-            onStop: () => {
-              if (sessionStop) {
-                void sessionStop();
-                return;
-              }
-              const sid = eventSessionId ?? explicitSessionId ?? getActive()?.meta.thebeSessionId;
-              if (sid) void state.openedSessions.get(sid)?.session.abort();
-            },
-          }),
+        : wrapCustomTools(
+            baseTools(sessionPolicy, sessionCallerId, true, eventSessionId),
+            {
+              policy: sessionPolicy,
+              audit,
+              toolWatchdogMs: options.toolWatchdogMs,
+              modelResultLimit:
+                options.modelResultLimit && options.modelResultLimit > 0
+                  ? options.modelResultLimit
+                  : undefined,
+              sessionId: () =>
+                explicitSessionId ?? getActive()?.meta.thebeSessionId,
+              onEvent: (event) => {
+                const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
+                if (sid) eventLog.appendEvent(sid, event);
+              },
+              onStop: () => {
+                if (sessionStop) {
+                  void sessionStop();
+                  return;
+                }
+                const sid =
+                  eventSessionId ??
+                  explicitSessionId ??
+                  getActive()?.meta.thebeSessionId;
+                if (sid) void state.openedSessions.get(sid)?.session.abort();
+              },
+            }
+          ),
       builtinTools: effectiveBuiltinTools,
       systemPrompt,
       enabledResources: isChatOnly ? [] : enabledResources,
@@ -454,8 +569,21 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ...TOOLS_REQUIRING_APPROVAL,
         ...WORKSPACE_READ_TOOLS,
         ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
-        ...(options.serviceAPIProviders?.length ? [SERVICE_API_WRITE_TOOL_NAME] : []),
-        ...(options.pipeline ? [...PIPELINE_WRITE_TOOL_NAMES.filter(name => availablePipelineTools(options.pipeline!).includes(name)), ...(allPipelineToolNames(options.pipeline).includes("pipeline.acquire") ? ["pipeline.acquire"] : [])] : []),
+        ...(options.serviceAPIProviders?.length
+          ? [SERVICE_API_WRITE_TOOL_NAME]
+          : []),
+        ...(options.pipeline
+          ? [
+              ...PIPELINE_WRITE_TOOL_NAMES.filter((name) =>
+                availablePipelineTools(options.pipeline!).includes(name)
+              ),
+              ...(allPipelineToolNames(options.pipeline).includes(
+                "pipeline.acquire"
+              )
+                ? ["pipeline.acquire"]
+                : []),
+            ]
+          : []),
       ],
       autoCompact: autoCompactOverride,
     };
@@ -471,22 +599,27 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     cancelAutoSummary: autoSummary.cancel,
     removeEventLog: eventLog.removeSession,
     hasPending: permissions.hasPendingFor,
-    idleTimeoutMs: options.sessionIdleTimeoutMs === undefined
-      ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
-      : options.sessionIdleTimeoutMs,
+    idleTimeoutMs:
+      options.sessionIdleTimeoutMs === undefined
+        ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
+        : options.sessionIdleTimeoutMs,
   });
   getActive = () => registry.active;
 
   async function runPrompt(
     input: string | PromptInput,
-    promptOptions: ThebePromptOptions = {},
+    promptOptions: ThebePromptOptions = {}
   ): Promise<ThebePromptResult> {
     checkNotQuiesced();
     const mode = promptOptions.mode ?? "prompt";
     const lockId = promptOptions.thebeSessionId;
     if (lockId && mode === "prompt") {
       if (state.streaming.has(lockId) || state.promptLocks.has(lockId)) {
-        throw httpError(409, "session is streaming; use steer or followUp", "session_running");
+        throw httpError(
+          409,
+          "session is streaming; use steer or followUp",
+          "session_running"
+        );
       }
       state.promptLocks.add(lockId);
     }
@@ -499,16 +632,25 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       if (mode === "prompt") {
         if (!lockId) {
           if (state.streaming.has(sid) || state.promptLocks.has(sid)) {
-            throw httpError(409, "session is streaming; use steer or followUp", "session_running");
+            throw httpError(
+              409,
+              "session is streaming; use steer or followUp",
+              "session_running"
+            );
           }
           state.promptLocks.add(sid);
         }
         if (state.streaming.has(sid)) {
-          throw httpError(409, "session is streaming; use steer or followUp", "session_running");
+          throw httpError(
+            409,
+            "session is streaming; use steer or followUp",
+            "session_running"
+          );
         }
       }
       if (promptOptions.nonInteractive) permissions.nonInteractiveRuns.add(sid);
-      const queueOnly = (mode === "steer" || mode === "followUp") && state.streaming.has(sid);
+      const queueOnly =
+        (mode === "steer" || mode === "followUp") && state.streaming.has(sid);
       if (!queueOnly && resourcesNeedingReload.has(sid)) {
         await opened.session.reloadResources?.();
         resourcesNeedingReload.delete(sid);
@@ -519,8 +661,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       }
       const body = asPromptInput(input);
       const promptText = body.text.trim();
-      if (!opened.meta.title && promptText) opened.meta.title = promptText.slice(0, 80);
-      if (!opened.meta.firstMessage && promptText) opened.meta.firstMessage = promptText.slice(0, 100);
+      if (!opened.meta.title && promptText)
+        opened.meta.title = promptText.slice(0, 80);
+      if (!opened.meta.firstMessage && promptText)
+        opened.meta.firstMessage = promptText.slice(0, 100);
       opened.meta.messageCount = (opened.meta.messageCount ?? 0) + 1;
       opened.meta = state.stamp(opened.meta);
       await state.persist(opened.meta);
@@ -534,19 +678,34 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         idleMs: options.idleMs,
         watchdogMs: options.watchdogMs,
         abort: () => opened.session.abort(),
-        onEvent: (kind) => void audit?.append({
-          method: `streamguard.${kind}`,
-          parameterHash: hashParameters({}),
-          responseBytes: 0,
-          budgetConsumed: 0,
-          redactionFired: false,
-        }).catch(() => {}),
+        onEvent: (kind) =>
+          void audit
+            ?.append({
+              method: `streamguard.${kind}`,
+              parameterHash: hashParameters({}),
+              responseBytes: 0,
+              budgetConsumed: 0,
+              redactionFired: false,
+            })
+            .catch(() => {}),
       });
       registry.requestStop = () => opened.session.abort();
       const unsub = opened.session.subscribe((event) => {
         eventLog.appendEvent(sid, event);
-        if (["text_delta", "thinking_delta", "tool_start", "tool_update", "tool_end", "compaction_start", "compaction_end"].includes(event.type)) guard.noteContent();
-        if (["session_end", "error", "interrupted"].includes(event.type)) guard.notifyAgentEnd();
+        if (
+          [
+            "text_delta",
+            "thinking_delta",
+            "tool_start",
+            "tool_update",
+            "tool_end",
+            "compaction_start",
+            "compaction_end",
+          ].includes(event.type)
+        )
+          guard.noteContent();
+        if (["session_end", "error", "interrupted"].includes(event.type))
+          guard.notifyAgentEnd();
       });
       state.streaming.add(sid);
       guard.beginRun();
@@ -559,7 +718,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         return promptResult(opened.session, eventLog.lastEvents, sid);
       } catch (error) {
         if (state.abortRequested.delete(sid)) throw error;
-        eventLog.appendEvent(sid, { type: "error", message: error instanceof Error ? error.message : String(error) });
+        eventLog.appendEvent(sid, {
+          type: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       } finally {
         state.streaming.delete(sid);
@@ -576,13 +738,23 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
-  const subagentParentCancellers = new Set<(parentSessionId: string) => Promise<void>>();
-  function registerSubagentParentCanceller(canceller: (parentSessionId: string) => Promise<void>): () => void {
+  const subagentParentCancellers = new Set<
+    (parentSessionId: string) => Promise<void>
+  >();
+  function registerSubagentParentCanceller(
+    canceller: (parentSessionId: string) => Promise<void>
+  ): () => void {
     subagentParentCancellers.add(canceller);
     return () => subagentParentCancellers.delete(canceller);
   }
-  async function cancelSubagentsForParent(parentSessionId: string): Promise<void> {
-    await Promise.all([...subagentParentCancellers].map((canceller) => canceller(parentSessionId)));
+  async function cancelSubagentsForParent(
+    parentSessionId: string
+  ): Promise<void> {
+    await Promise.all(
+      [...subagentParentCancellers].map((canceller) =>
+        canceller(parentSessionId)
+      )
+    );
   }
 
   return {
@@ -604,7 +776,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     ...state,
     ...permissions,
     setPermissionMode,
-    get autoCompactOverride() { return autoCompactOverride; },
+    get autoCompactOverride() {
+      return autoCompactOverride;
+    },
     set autoCompactOverride(value: boolean | undefined) {
       autoCompactOverride = value;
       if (value !== undefined) settingSources.autoCompact = "configured";
@@ -619,10 +793,18 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     cancelAutoSummary: autoSummary.cancel,
     openSession: registry.openSession,
     reapIdleSessions: registry.reapIdleSessions,
-    get active() { return registry.active; },
-    set active(value: OpenedSession | undefined) { registry.active = value; },
-    get requestStop() { return registry.requestStop; },
-    set requestStop(value: () => void | Promise<void>) { registry.requestStop = value; },
+    get active() {
+      return registry.active;
+    },
+    set active(value: OpenedSession | undefined) {
+      registry.active = value;
+    },
+    get requestStop() {
+      return registry.requestStop;
+    },
+    set requestStop(value: () => void | Promise<void>) {
+      registry.requestStop = value;
+    },
     checkNotQuiesced,
     resourcesNeedingReload,
     baseTools,
@@ -637,11 +819,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
 function promptResult(
   session: RuntimeSession,
   events: NormalizedEvent[],
-  thebeSessionId: string,
+  thebeSessionId: string
 ): ThebePromptResult {
   return {
     text: session.lastAssistantText(),
-    tools: session.messages()
+    tools: session
+      .messages()
       .filter((message) => message.role === "tool")
       .map((message) => message.toolName)
       .filter((name): name is string => Boolean(name)),
@@ -653,17 +836,25 @@ function promptResult(
 function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
   const has = (name: string) => tools.includes(name);
   return [
-    ...(tools.includes("pipeline.acquire") ? ["Preferred route: resource.search → let the user choose a release → ONE pipeline.acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline.advance until done or failed → act on failure.advice. Use the individual download.*/files.*/library.* tools only for manual repair or when no job fits."] : []),
+    ...(tools.includes("pipeline.acquire")
+      ? [
+          "Preferred route: resource.search → let the user choose a release → ONE pipeline.acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline.advance until done or failed → act on failure.advice. Use the individual download.*/files.*/library.* tools only for manual repair or when no job fits.",
+        ]
+      : []),
     "Acquisition pipeline (find → download → place in library → scrape → verify). Work it as an explicit plan: state the steps once, then execute them, keeping a running checklist of what is done, pending and blocked. Writes are approved one by one, so batch related arguments (several URLs, several names) into one call and never repeat a step that already succeeded.",
     "1. Find: use navidrome.search / emby.search / jellyfin.search first to learn what already exists, and web_search, music_research or service_api_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
     has("download.add")
       ? "2. Download: download.add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download.status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
       : "2. Download: no downloader tool is configured; use service_api_discover to find a download operation, or tell the user which connection is missing.",
     ...(has("download.delete")
-      ? ["Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download.pause otherwise."]
+      ? [
+          "Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download.pause otherwise.",
+        ]
       : []),
     ...(has("download.pause") || has("download.resume")
-      ? ["Hold or restart a named download with download.pause / download.resume (hashes from download.list). Neither deletes the task or its files; confirm the new state with download.status."]
+      ? [
+          "Hold or restart a named download with download.pause / download.resume (hashes from download.list). Neither deletes the task or its files; confirm the new state with download.status.",
+        ]
       : []),
     has("files.copy")
       ? "3. Place: files.list the finished folder and the library folder, files.mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files.copy (prefer copy; use files.move only after a verified copy). These are asynchronous: confirm with files.list that the files arrived."
@@ -683,7 +874,7 @@ function buildSystemPrompt(
   custom: string | undefined,
   workspacePath: string | undefined,
   outputDirectory: string | undefined,
-  pipelineTools: readonly string[] = [],
+  pipelineTools: readonly string[] = []
 ): string {
   const defaults = [
     ...(pipelineTools.length ? [PIPELINE_PLAYBOOK(pipelineTools)] : []),

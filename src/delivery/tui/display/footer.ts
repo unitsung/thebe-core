@@ -35,7 +35,9 @@ export class FooterDock {
   render(width: number): string[] {
     const lines = [
       ...(this.taskLine
-        ? [`${chalk.cyan("◆ Tasks")} ${chalk.dim(`${this.taskLine} · click/Ctrl+G open`)}`]
+        ? [
+            `${chalk.cyan("◆ Tasks")} ${chalk.dim(`${this.taskLine} · click/Ctrl+G open`)}`,
+          ]
         : []),
       ...(this.summaryLine ? [chalk.dim(`↳ ${this.summaryLine}`)] : []),
       ...this.lines,
@@ -61,11 +63,12 @@ export class FooterDock {
 export function formatSummaryLine(summary: string): string {
   const flattened = summary
     .replace(/\s+/g, " ")
-    .replace(/[\*_`#>]/g, "")
+    .replace(/[*_`#>]/g, "")
     .trim();
   if (!flattened) return "";
 
-  const firstSentence = flattened.match(/^(.+?[。！？!?](?:\s|$)|.+$)/)?.[1] ?? flattened;
+  const firstSentence =
+    flattened.match(/^(.+?[。！？!?](?:\s|$)|.+$)/)?.[1] ?? flattened;
   const sentence = firstSentence.trim();
   return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
 }

@@ -15,7 +15,7 @@ export type BashOperations = {
   exec(
     command: string,
     cwd: string,
-    options: BashExecutionOptions,
+    options: BashExecutionOptions
   ): Promise<{ exitCode: number | null }>;
 };
 
@@ -100,12 +100,14 @@ function stopped(task: BackgroundTaskRecord, finishedAt: string): void {
 }
 
 function parsePids(value: string): number[] {
-  return [...new Set(
-    value
-      .split(/\s+/)
-      .map((part) => Number(part))
-      .filter((pid) => Number.isInteger(pid) && pid > 0),
-  )];
+  return [
+    ...new Set(
+      value
+        .split(/\s+/)
+        .map((part) => Number(part))
+        .filter((pid) => Number.isInteger(pid) && pid > 0)
+    ),
+  ];
 }
 
 function validRecord(value: unknown): value is BackgroundTaskRecord {
@@ -125,17 +127,18 @@ function validRecord(value: unknown): value is BackgroundTaskRecord {
 
 /** Tracks detached jobs launched through Pi's local Bash operations. */
 export function createBackgroundTaskRegistry(
-  options: BackgroundTaskRegistryOptions = {},
+  options: BackgroundTaskRegistryOptions = {}
 ) {
   const now = options.now ?? (() => new Date().toISOString());
   const tasks = new Map<string, BackgroundTaskRecord>();
   const storageDir = options.dir;
-  const storagePath = storageDir && options.sessionId
-    ? join(
-        storageDir,
-        `${createHash("sha256").update(options.sessionId).digest("hex")}.json`,
-      )
-    : undefined;
+  const storagePath =
+    storageDir && options.sessionId
+      ? join(
+          storageDir,
+          `${createHash("sha256").update(options.sessionId).digest("hex")}.json`
+        )
+      : undefined;
   let persistTail: Promise<void> = Promise.resolve();
 
   const ready = (async () => {
@@ -161,7 +164,7 @@ export function createBackgroundTaskRegistry(
         await writeFile(
           temporaryPath,
           `${JSON.stringify([...tasks.values()])}\n`,
-          { encoding: "utf8", mode: 0o600 },
+          { encoding: "utf8", mode: 0o600 }
         );
         await rename(temporaryPath, storagePath);
       } finally {
@@ -207,11 +210,14 @@ export function createBackgroundTaskRegistry(
             return operations.exec(command, cwd, options);
           }
 
-          const marker = join(tmpdir(), `thebe-background-task-${randomUUID()}.txt`);
+          const marker = join(
+            tmpdir(),
+            `thebe-background-task-${randomUUID()}.txt`
+          );
           const wrapped = [
             command,
             "__thebe_background_exit=$?",
-            `printf '%s\\n' \"$(jobs -pr)\" > ${shellQuote(marker)}`,
+            `printf '%s\\n' "$(jobs -pr)" > ${shellQuote(marker)}`,
             'exit "$__thebe_background_exit"',
           ].join("\n");
           try {
@@ -272,4 +278,6 @@ export function createBackgroundTaskRegistry(
   };
 }
 
-export type BackgroundTaskRegistry = ReturnType<typeof createBackgroundTaskRegistry>;
+export type BackgroundTaskRegistry = ReturnType<
+  typeof createBackgroundTaskRegistry
+>;

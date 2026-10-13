@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  CommandRiskCache,
-  assessCommand,
-  assessCommandCached,
-  assessToolCall,
-  commandGuardEnabled,
-  commandGuardPreflight,
-} from "./command-risk.ts";
+import { assessCommand, assessToolCall } from "./command-risk.ts";
 
 describe("command-risk (homelab & NAS heuristics)", () => {
   it("detects critical commands and strictly blocks them", () => {
@@ -99,8 +92,11 @@ describe("command-risk (homelab & NAS heuristics)", () => {
     // 1. Inside workspace -> safe
     const inside = await assessToolCall(
       "write",
-      { path: "/volume1/docker/nginx-service/nginx.conf", content: "server {}" },
-      { workspacePath: workspace },
+      {
+        path: "/volume1/docker/nginx-service/nginx.conf",
+        content: "server {}",
+      },
+      { workspacePath: workspace }
     );
     expect(inside.allowed).toBe(true);
     expect(inside.workspaceEscape).toBeFalsy();
@@ -109,7 +105,7 @@ describe("command-risk (homelab & NAS heuristics)", () => {
     const outside = await assessToolCall(
       "write",
       { path: "/volume1/photos/family.jpg", content: "malicious" },
-      { workspacePath: workspace },
+      { workspacePath: workspace }
     );
     expect(outside.allowed).toBe(false);
     expect(outside.risk).toBe("dangerous");
@@ -124,13 +120,12 @@ describe("command-risk (homelab & NAS heuristics)", () => {
     const escape = await assessToolCall(
       "bash",
       { command: "rm -f /volume1/shared_documents/report.pdf" },
-      { workspacePath: workspace },
+      { workspacePath: workspace }
     );
     expect(escape.allowed).toBe(false);
     expect(escape.workspaceEscape).toBe(true);
     expect(escape.reason).toContain("Workspace Escape Detected");
   });
-
 
   describe("Storage Systems Safety Review (ZFS, Btrfs, EXT4, NTFS, NFS)", () => {
     it("evaluates ZFS commands across critical, dangerous, caution, and safe tiers", () => {
@@ -177,7 +172,12 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       expect(cautionRes.category).toBe("storage");
 
       // Safe
-      const safeZfs = ["zpool status", "zpool list", "zfs list", "zfs get all tank"];
+      const safeZfs = [
+        "zpool status",
+        "zpool list",
+        "zfs list",
+        "zfs get all tank",
+      ];
       for (const cmd of safeZfs) {
         const res = assessCommand(cmd);
         expect(res.allowed).toBe(true);
@@ -271,7 +271,11 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       }
 
       // Safe: read-only dump / label inspection
-      const safeExt4 = ["dumpe2fs /dev/sda1", "tune2fs -l /dev/sda1", "e2label /dev/sda1"];
+      const safeExt4 = [
+        "dumpe2fs /dev/sda1",
+        "tune2fs -l /dev/sda1",
+        "e2label /dev/sda1",
+      ];
       for (const cmd of safeExt4) {
         const res = assessCommand(cmd);
         expect(res.allowed).toBe(true);
@@ -311,7 +315,11 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       }
 
       // Safe
-      const safeNtfs = ["ntfsinfo /dev/sdb1", "ntfscluster /dev/sdb1", "ntfsls /dev/sdb1"];
+      const safeNtfs = [
+        "ntfsinfo /dev/sdb1",
+        "ntfscluster /dev/sdb1",
+        "ntfsls /dev/sdb1",
+      ];
       for (const cmd of safeNtfs) {
         const res = assessCommand(cmd);
         expect(res.allowed).toBe(true);
@@ -359,7 +367,12 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       expect(cautionRes.storageSystem).toBe("nfs");
 
       // Safe: querying shares
-      const safeNfs = ["showmount -e 192.168.1.10", "showmount -a", "nfsstat -s", "exportfs -v"];
+      const safeNfs = [
+        "showmount -e 192.168.1.10",
+        "showmount -a",
+        "nfsstat -s",
+        "exportfs -v",
+      ];
       for (const cmd of safeNfs) {
         const res = assessCommand(cmd);
         expect(res.allowed).toBe(true);
@@ -368,68 +381,74 @@ describe("command-risk (homelab & NAS heuristics)", () => {
       }
     });
 
-  describe("Docker Engine API calls over the socket (curl bypass)", () => {
-    const socket = "curl --unix-socket /var/run/docker.sock";
+    describe("Docker Engine API calls over the socket (curl bypass)", () => {
+      const socket = "curl --unix-socket /var/run/docker.sock";
 
-    it("blocks volume pruning issued directly against the Docker API", () => {
-      const res = assessCommand(`${socket} -X POST http://localhost/v1.41/volumes/prune`);
-      expect(res.risk).toBe("critical");
-      expect(res.allowed).toBe(false);
-      expect(res.reason).toContain("Volume pruning");
-    });
-
-    it("blocks privileged container creation with host root and socket mounts", () => {
-      const privileged = assessCommand(
-        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`,
-      );
-      expect(privileged.risk).toBe("critical");
-
-      const hostRoot = assessCommand(
-        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/:/host"]}}'`,
-      );
-      expect(hostRoot.risk).toBe("critical");
-
-      const socketMount = assessCommand(
-        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/var/run/docker.sock:/var/run/docker.sock"]}}'`,
-      );
-      expect(socketMount.risk).toBe("critical");
-    });
-
-    it("asks for review when the create body cannot be inspected", () => {
-      const res = assessCommand(
-        `${socket} -X POST http://localhost/v1.41/containers/create -d "$BODY"`,
-      );
-      expect(res.risk).toBe("dangerous");
-      expect(res.requiresConfirmation).toBe(true);
-    });
-
-    it("allows read-only Docker API queries and hardened creates", () => {
-      const list = assessCommand(`${socket} http://localhost/v1.41/containers/json`);
-      expect(list.risk).toBe("safe");
-
-      const hardened = assessCommand(
-        `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/volume1/app:/app"]}}'`,
-      );
-      expect(hardened.risk).toBe("safe");
-    });
-
-    it("honours the scenario docker policy", () => {
-      const command = `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`;
-      const homelab = assessCommand(command, {
-        dockerGuard: {
-          blockPrivileged: false,
-          blockHostRootMounts: true,
-          blockDockerSocketMount: false,
-          blockVolumePrune: true,
-        },
+      it("blocks volume pruning issued directly against the Docker API", () => {
+        const res = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/volumes/prune`
+        );
+        expect(res.risk).toBe("critical");
+        expect(res.allowed).toBe(false);
+        expect(res.reason).toContain("Volume pruning");
       });
-      expect(homelab.risk).toBe("safe");
-    });
 
-    it("leaves unrelated curl commands untouched", () => {
-      const res = assessCommand("curl -s https://example.com/containers/create");
-      expect(res.risk).toBe("safe");
+      it("blocks privileged container creation with host root and socket mounts", () => {
+        const privileged = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`
+        );
+        expect(privileged.risk).toBe("critical");
+
+        const hostRoot = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/:/host"]}}'`
+        );
+        expect(hostRoot.risk).toBe("critical");
+
+        const socketMount = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/var/run/docker.sock:/var/run/docker.sock"]}}'`
+        );
+        expect(socketMount.risk).toBe("critical");
+      });
+
+      it("asks for review when the create body cannot be inspected", () => {
+        const res = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/containers/create -d "$BODY"`
+        );
+        expect(res.risk).toBe("dangerous");
+        expect(res.requiresConfirmation).toBe(true);
+      });
+
+      it("allows read-only Docker API queries and hardened creates", () => {
+        const list = assessCommand(
+          `${socket} http://localhost/v1.41/containers/json`
+        );
+        expect(list.risk).toBe("safe");
+
+        const hardened = assessCommand(
+          `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Binds":["/volume1/app:/app"]}}'`
+        );
+        expect(hardened.risk).toBe("safe");
+      });
+
+      it("honours the scenario docker policy", () => {
+        const command = `${socket} -X POST http://localhost/v1.41/containers/create -d '{"HostConfig":{"Privileged":true}}'`;
+        const homelab = assessCommand(command, {
+          dockerGuard: {
+            blockPrivileged: false,
+            blockHostRootMounts: true,
+            blockDockerSocketMount: false,
+            blockVolumePrune: true,
+          },
+        });
+        expect(homelab.risk).toBe("safe");
+      });
+
+      it("leaves unrelated curl commands untouched", () => {
+        const res = assessCommand(
+          "curl -s https://example.com/containers/create"
+        );
+        expect(res.risk).toBe("safe");
+      });
     });
   });
-});
 });

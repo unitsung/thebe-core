@@ -28,7 +28,8 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-const PI_LEAK = /assistantMessageEvent|@earendil|tools\/call|internalState|AgentSession/;
+const PI_LEAK =
+  /assistantMessageEvent|@earendil|tools\/call|internalState|AgentSession/;
 
 afterEach(() => {
   resetWorkerLogStreamsForTests();
@@ -38,44 +39,104 @@ describe("subagent/worker product HTTP", () => {
   it("allows an operator-defined worker to request a write through the parent approval flow", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "thebe-custom-worker-"));
     await mkdir(join(workspace, ".thebe", "agents"), { recursive: true });
-    await writeFile(join(workspace, ".thebe", "agents", "custom-editor.md"),
-      "---\nname: custom-editor\ndescription: Edit an explicitly requested file\ntools: [write]\nallowWrites: true\n---\nPerform the explicit task and report the result.\n");
+    await writeFile(
+      join(workspace, ".thebe", "agents", "custom-editor.md"),
+      "---\nname: custom-editor\ndescription: Edit an explicitly requested file\ntools: [write]\nallowWrites: true\n---\nPerform the explicit task and report the result.\n"
+    );
     const fake = createFakeRuntime();
     fake.queueTurns([
-      { kind: "tools", calls: [{ name: "write", args: { path: join(workspace, "requested.txt"), content: "requested content" } }] },
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "write",
+            args: {
+              path: join(workspace, "requested.txt"),
+              content: "requested content",
+            },
+          },
+        ],
+      },
       { kind: "text", text: "approved worker result" },
     ]);
     // The external runtime requires write to be enabled before it can request approval.
-    const runtime = { ...fake.runtime, createSession: async (options: Parameters<typeof fake.runtime.createSession>[0]) => {
-      const session = await fake.runtime.createSession(options);
-      if (options.inMemory && !session.toolNames().includes("write")) {
-        throw new Error("Worker runtime does not have write capability");
-      }
-      return session;
-    } };
-    const app = createThebeApp({ runtime, provider: provider(), workspacePath: workspace });
-    const parent = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })));
-    const worker = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/subagents", {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ profileName: "custom-editor", task: "Create the requested file", parentSessionId: parent.thebeSessionId }),
-    })));
+    const runtime = {
+      ...fake.runtime,
+      createSession: async (
+        options: Parameters<typeof fake.runtime.createSession>[0]
+      ) => {
+        const session = await fake.runtime.createSession(options);
+        if (options.inMemory && !session.toolNames().includes("write")) {
+          throw new Error("Worker runtime does not have write capability");
+        }
+        return session;
+      },
+    };
+    const app = createThebeApp({
+      runtime,
+      provider: provider(),
+      workspacePath: workspace,
+    });
+    const parent = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
+    );
+    const worker = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/subagents", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            profileName: "custom-editor",
+            task: "Create the requested file",
+            parentSessionId: parent.thebeSessionId,
+          }),
+        })
+      )
+    );
     let permissionId = "";
     try {
       await vi.waitFor(async () => {
-        const pending = await json(await app.handler.handle(new Request("http://127.0.0.1:8787/v1/permissions")));
-        const permissions = pending.permissions as Array<Record<string, unknown>>;
+        const pending = await json(
+          await app.handler.handle(
+            new Request("http://127.0.0.1:8787/v1/permissions")
+          )
+        );
+        const permissions = pending.permissions as Array<
+          Record<string, unknown>
+        >;
         expect(permissions).toHaveLength(1);
-        expect(permissions[0]).toMatchObject({ toolName: "write", sessionId: parent.thebeSessionId });
+        expect(permissions[0]).toMatchObject({
+          toolName: "write",
+          sessionId: parent.thebeSessionId,
+        });
         permissionId = String(permissions[0]!.id);
       });
-      const resolved = await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/permissions/${permissionId}/resolve`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ response: "allow" }),
-      }));
+      const resolved = await app.handler.handle(
+        new Request(
+          `http://127.0.0.1:8787/v1/permissions/${permissionId}/resolve`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ response: "allow" }),
+          }
+        )
+      );
       expect(resolved.status).toBe(200);
       await app.agent.waitSubagent(String(worker.runId));
-      const detail = await json(await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}`)));
-      expect(detail).toMatchObject({ status: "completed", result: "approved worker result" });
-    } finally { await app.agent.cancelSubagent(String(worker.runId)); }
+      const detail = await json(
+        await app.handler.handle(
+          new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}`)
+        )
+      );
+      expect(detail).toMatchObject({
+        status: "completed",
+        result: "approved worker result",
+      });
+    } finally {
+      await app.agent.cancelSubagent(String(worker.runId));
+    }
   });
 
   it("lists builtin profiles without host file paths", async () => {
@@ -84,13 +145,13 @@ describe("subagent/worker product HTTP", () => {
       provider: provider(),
     });
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/subagents/profiles"),
+      new Request("http://127.0.0.1:8787/v1/subagents/profiles")
     );
     expect(res.status).toBe(200);
     const body = await json(res);
     const profiles = body.profiles as Array<Record<string, unknown>>;
     expect(profiles.map((item) => item.name)).toEqual(
-      expect.arrayContaining(["diagnostics", "log-analyzer"]),
+      expect.arrayContaining(["diagnostics", "log-analyzer"])
     );
     expect(profiles[0]).not.toHaveProperty("filePath");
     expect(profiles[0]).not.toHaveProperty("systemPrompt");
@@ -105,16 +166,19 @@ describe("subagent/worker product HTTP", () => {
     const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
     const created = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${parentSessionId}/prompt`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: "parent-secret-transcript" }),
-      }),
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${parentSessionId}/prompt`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "parent-secret-transcript" }),
+        }
+      )
     );
 
     const spawned = await app.handler.handle(
@@ -126,7 +190,7 @@ describe("subagent/worker product HTTP", () => {
           task: "inspect health",
           parentSessionId,
         }),
-      }),
+      })
     );
     expect(spawned.status).toBe(201);
     const worker = await json(spawned);
@@ -140,25 +204,25 @@ describe("subagent/worker product HTTP", () => {
     const listed = await json(
       await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/subagents?parentSessionId=${parentSessionId}`,
-        ),
-      ),
+          `http://127.0.0.1:8787/v1/subagents?parentSessionId=${parentSessionId}`
+        )
+      )
     );
     const items = listed.subagents as Array<Record<string, unknown>>;
     expect(items.some((item) => item.runId === worker.runId)).toBe(true);
 
     const got = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}`)
+      )
     );
     expect(got.runId).toBe(worker.runId);
     expect(JSON.stringify(got)).not.toContain("parent-secret-transcript");
 
     const log = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}/log`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}/log`)
+      )
     );
     expect(Array.isArray(log.activity)).toBe(true);
     expect(JSON.stringify(log)).not.toContain("parent-secret-transcript");
@@ -166,7 +230,7 @@ describe("subagent/worker product HTTP", () => {
     const cancelled = await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/subagents/${worker.runId}/cancel`, {
         method: "POST",
-      }),
+      })
     );
     expect(cancelled.status).toBe(200);
     const after = await json(cancelled);
@@ -179,8 +243,8 @@ describe("subagent/worker product HTTP", () => {
     const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
     const created = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     const spawned = await app.handler.handle(
@@ -192,21 +256,25 @@ describe("subagent/worker product HTTP", () => {
           task: "retain this report",
           parentSessionId,
         }),
-      }),
+      })
     );
     const worker = await json(spawned);
     const runId = String(worker.runId);
     await app.agent.waitSubagent(runId);
 
     const detail = await json(
-      await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`)),
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`)
+      )
     );
     expect(detail.artifactId).toEqual(expect.any(String));
 
     const listed = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts?kind=report&runId=${runId}`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts?kind=report&runId=${runId}`
+        )
+      )
     );
     expect(listed.artifacts).toEqual([
       expect.objectContaining({
@@ -219,8 +287,10 @@ describe("subagent/worker product HTTP", () => {
 
     const content = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${detail.artifactId}/content`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts/${detail.artifactId}/content`
+        )
+      )
     );
     expect(content.content).toContain("worker report evidence");
   });
@@ -232,8 +302,8 @@ describe("subagent/worker product HTTP", () => {
     const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
     const created = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     const spawned = await app.handler.handle(
@@ -245,7 +315,7 @@ describe("subagent/worker product HTTP", () => {
           task: "stream this worker",
           parentSessionId,
         }),
-      }),
+      })
     );
     const worker = await json(spawned);
     const runId = String(worker.runId);
@@ -258,20 +328,20 @@ describe("subagent/worker product HTTP", () => {
       new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
         headers: { accept: "text/event-stream" },
         signal: abort.signal,
-      }),
+      })
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/event-stream");
     const reader = response.body!.getReader();
     const chunk = new TextDecoder().decode((await reader.read()).value);
     expect(chunk).toContain("event: worker_update");
-    expect(chunk).toContain(`\"runId\":\"${runId}\"`);
+    expect(chunk).toContain(`"runId":"${runId}"`);
     expect(chunk).not.toMatch(PI_LEAK);
 
     const crowded = await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
         headers: { accept: "text/event-stream" },
-      }),
+      })
     );
     expect(crowded.status).toBe(429);
 
@@ -281,7 +351,7 @@ describe("subagent/worker product HTTP", () => {
     const second = await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/subagents/${runId}/log`, {
         headers: { accept: "text/event-stream" },
-      }),
+      })
     );
     expect(second.status).toBe(200);
     await second.body?.cancel();
@@ -299,8 +369,8 @@ describe("subagent/worker product HTTP", () => {
     });
     const created = await json(
       await first.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     const spawned = await first.handler.handle(
@@ -312,7 +382,7 @@ describe("subagent/worker product HTTP", () => {
           task: "persist this worker",
           parentSessionId,
         }),
-      }),
+      })
     );
     expect(spawned.status).toBe(201);
     const worker = await json(spawned);
@@ -325,8 +395,8 @@ describe("subagent/worker product HTTP", () => {
     });
     const listed = await json(
       await restarted.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/subagents"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/subagents")
+      )
     );
     const workers = listed.subagents as Array<Record<string, unknown>>;
     expect(workers).toEqual(
@@ -338,13 +408,13 @@ describe("subagent/worker product HTTP", () => {
           result: "persisted worker result",
           artifactId: expect.any(String),
         }),
-      ]),
+      ])
     );
     const restoredWorker = workers.find((item) => item.runId === worker.runId);
     const artifacts = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts?runId=${worker.runId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts?runId=${worker.runId}`)
+      )
     );
     expect(artifacts.artifacts).toEqual(
       expect.arrayContaining([
@@ -354,7 +424,7 @@ describe("subagent/worker product HTTP", () => {
           runId: worker.runId,
           sessionId: parentSessionId,
         }),
-      ]),
+      ])
     );
   });
 
@@ -369,8 +439,8 @@ describe("subagent/worker product HTTP", () => {
     });
     const created = await json(
       await first.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     const spawned = await first.handler.handle(
@@ -382,7 +452,7 @@ describe("subagent/worker product HTTP", () => {
           task: "recover this active worker",
           parentSessionId,
         }),
-      }),
+      })
     );
     const worker = await json(spawned);
     const runId = String(worker.runId);
@@ -395,8 +465,8 @@ describe("subagent/worker product HTTP", () => {
     });
     const listed = await json(
       await restarted.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/subagents"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/subagents")
+      )
     );
     const workers = listed.subagents as Array<Record<string, unknown>>;
     expect(workers).toEqual(
@@ -407,7 +477,7 @@ describe("subagent/worker product HTTP", () => {
           error: "Subagent run interrupted when Core restarted.",
           finishedAt: expect.any(String),
         }),
-      ]),
+      ])
     );
 
     await first.agent.cancelSubagent(runId, parentSessionId);
@@ -424,8 +494,8 @@ describe("subagent/worker product HTTP", () => {
     });
     const created = await json(
       await first.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
-      ),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+      )
     );
     const parentSessionId = String(created.thebeSessionId);
     const spawned = await first.handler.handle(
@@ -437,7 +507,7 @@ describe("subagent/worker product HTTP", () => {
           task: "persist this worker detail",
           parentSessionId,
         }),
-      }),
+      })
     );
     const worker = await json(spawned);
     const runId = String(worker.runId);
@@ -449,7 +519,7 @@ describe("subagent/worker product HTTP", () => {
       agentStoreDir: dir,
     });
     const detail = await restarted.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`),
+      new Request(`http://127.0.0.1:8787/v1/subagents/${runId}`)
     );
     expect(detail.status).toBe(200);
     await expect(detail.json()).resolves.toEqual(
@@ -457,7 +527,7 @@ describe("subagent/worker product HTTP", () => {
         runId,
         status: "completed",
         result: "worker detail result",
-      }),
+      })
     );
   });
 
@@ -467,7 +537,7 @@ describe("subagent/worker product HTTP", () => {
       provider: provider(),
     });
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/subagents/missing"),
+      new Request("http://127.0.0.1:8787/v1/subagents/missing")
     );
     expect(res.status).toBe(404);
   });

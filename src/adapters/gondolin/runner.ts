@@ -2,7 +2,7 @@
  * Gondolin Micro-VM runner (isolation layer 3).
  *
  * Ported from the pre-refactor `src/sandbox/gondolin-runner.ts` and aligned with
- * `@earendil-works/gondolin` 0.12: a disposable hardware-virtualized VM for
+ * `@earendil-works/gondolin` 0.13: a disposable hardware-virtualized VM for
  * untrusted scripts, with the host workspace mounted (through `RealFSProvider`)
  * at `/workspace` and the same escape check as the file jail. HTTP egress is
  * mediated by `createHttpHooks`, so `allowedHosts` doubles as the network policy.
@@ -48,7 +48,10 @@ type GondolinModule = {
  * Maps a local host path into the Micro-VM /workspace path.
  * Throws if the path escapes the workspace root.
  */
-export function toGuestWorkspacePath(localWorkspace: string, targetPath: string): string {
+export function toGuestWorkspacePath(
+  localWorkspace: string,
+  targetPath: string
+): string {
   const normWorkspace = resolve(localWorkspace);
   const normTarget = isAbsolute(targetPath)
     ? resolve(targetPath)
@@ -70,7 +73,7 @@ export function toGuestWorkspacePath(localWorkspace: string, targetPath: string)
 export interface IMicroVMInstance {
   exec(
     command: string | string[],
-    options?: { cwd?: string; signal?: AbortSignal },
+    options?: { cwd?: string; signal?: AbortSignal }
   ): Promise<{ exitCode: number; stdout: string; stderr: string }>;
   close(): Promise<void>;
 }
@@ -95,7 +98,9 @@ export class GondolinMicroVMRunner {
    * real `@earendil-works/gondolin` package. Failures are surfaced with the fix
    * instead of silently running commands on the host.
    */
-  async init(customVmProvider?: () => Promise<IMicroVMInstance>): Promise<void> {
+  async init(
+    customVmProvider?: () => Promise<IMicroVMInstance>
+  ): Promise<void> {
     if (this.activeVm) {
       return;
     }
@@ -106,9 +111,12 @@ export class GondolinMicroVMRunner {
     }
 
     try {
-      const gondolin = (await import("@earendil-works/gondolin")) as unknown as GondolinModule;
+      const gondolin =
+        (await import("@earendil-works/gondolin")) as unknown as GondolinModule;
       const { httpHooks, env } = gondolin.createHttpHooks({
-        ...(this.options.allowedHosts ? { allowedHosts: this.options.allowedHosts } : {}),
+        ...(this.options.allowedHosts
+          ? { allowedHosts: this.options.allowedHosts }
+          : {}),
         ...(this.options.secrets ? { secrets: this.options.secrets } : {}),
       });
       if (this.options.image) {
@@ -120,11 +128,13 @@ export class GondolinMicroVMRunner {
         vfs: {
           mounts: {
             [GUEST_WORKSPACE]: new gondolin.RealFSProvider(
-              resolve(this.options.workspacePath),
+              resolve(this.options.workspacePath)
             ),
           },
         },
-        ...(this.options.timeoutMs ? { startTimeoutMs: this.options.timeoutMs } : {}),
+        ...(this.options.timeoutMs
+          ? { startTimeoutMs: this.options.timeoutMs }
+          : {}),
         sessionLabel: SESSION_LABEL,
       });
       this.activeVm = vm;
@@ -132,10 +142,10 @@ export class GondolinMicroVMRunner {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
         "Gondolin Micro-VM is unavailable. Install it with " +
-          "`npm install @earendil-works/gondolin@0.12.0` and provide a VM backend " +
+          "`npm install @earendil-works/gondolin@0.13.0` and provide a VM backend " +
           "(bundled krun runner, or QEMU: `brew install qemu` on macOS, " +
           "`apt install qemu-system-arm` on Linux). " +
-          `Underlying error: ${detail}`,
+          `Underlying error: ${detail}`
       );
     }
   }
@@ -143,7 +153,10 @@ export class GondolinMicroVMRunner {
   /**
    * Executes a command safely inside the Micro-VM.
    */
-  async exec(command: string, signal?: AbortSignal): Promise<GondolinExecResult> {
+  async exec(
+    command: string,
+    signal?: AbortSignal
+  ): Promise<GondolinExecResult> {
     if (!this.activeVm) {
       throw new Error("Micro-VM is not initialized. Call init() first.");
     }

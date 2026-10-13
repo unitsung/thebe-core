@@ -1,7 +1,6 @@
 import type { NormalizedEvent, RuntimeSession } from "../runtime/index.ts";
 import type { SubagentProfile } from "./catalog.ts";
-import { appendActivity, recordEvent, type ActivityRun } from "./activity.ts";
-import type { SubagentRun } from "../types.ts";
+import { appendActivity, type ActivityRun } from "./activity.ts";
 
 export type SubagentExecutionRun = ActivityRun & {
   cancelRequested: boolean;
@@ -22,7 +21,11 @@ export type SubagentExecutionDeps = {
   rejectPendingPermission?: (permissionId: string) => boolean;
   sessions: Map<string, RuntimeSession>;
   pendingByRun: Map<string, Set<string>>;
-  appendActivity: (run: SubagentExecutionRun, activity: Parameters<typeof appendActivity>[1], merge?: boolean) => void;
+  appendActivity: (
+    run: SubagentExecutionRun,
+    activity: Parameters<typeof appendActivity>[1],
+    merge?: boolean
+  ) => void;
   recordEvent: (run: SubagentExecutionRun, event: NormalizedEvent) => void;
   notify: (run: SubagentExecutionRun, event?: NormalizedEvent) => void;
   onSnapshot?: (run: SubagentExecutionRun) => void | Promise<void>;
@@ -33,7 +36,7 @@ export type SubagentExecutionDeps = {
 /** Executes exactly one ephemeral child and returns only its retained record. */
 export async function executeSubagentRun(
   run: SubagentExecutionRun,
-  deps: SubagentExecutionDeps,
+  deps: SubagentExecutionDeps
 ): Promise<void> {
   let session: RuntimeSession | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -46,7 +49,11 @@ export async function executeSubagentRun(
     deps.appendActivity(run, { kind: "status", title: "running" });
     await deps.onSnapshot?.(run);
     deps.notify(run);
-    session = await deps.createSession({ runId: run.runId, parentSessionId: run.parentSessionId, profile: run.profile });
+    session = await deps.createSession({
+      runId: run.runId,
+      parentSessionId: run.parentSessionId,
+      profile: run.profile,
+    });
     deps.sessions.set(run.runId, session);
     if (run.cancelRequested) {
       await session.abort();
@@ -88,7 +95,8 @@ export async function executeSubagentRun(
     }
   } finally {
     unsubscribe?.();
-    for (const permissionId of pending) deps.rejectPendingPermission?.(permissionId);
+    for (const permissionId of pending)
+      deps.rejectPendingPermission?.(permissionId);
     deps.pendingByRun.delete(run.runId);
     deps.sessions.delete(run.runId);
     session?.dispose();

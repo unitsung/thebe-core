@@ -17,7 +17,6 @@ import {
   fetchAvailableModels,
   generatePkce,
   methodUrl,
-  operationUrl,
   parseAuthorizationCode,
   projectFromLoadResponse,
   projectFromOperation,
@@ -28,12 +27,16 @@ import {
 } from "./antigravity.ts";
 
 beforeEach(() => {
-  process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET = "test-antigravity-secret";
+  process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET =
+    "test-antigravity-secret";
   process.env.THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET = "test-gemini-cli-secret";
 });
 
 /** `authorizeOAuth` only carries a URL while the login is still pending. */
-function pendingUrl(result: { pending?: boolean; url?: string }): string | undefined {
+function pendingUrl(result: {
+  pending?: boolean;
+  url?: string;
+}): string | undefined {
   return result.pending ? result.url : undefined;
 }
 
@@ -44,7 +47,9 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-function credential(overrides: Partial<AntigravityCredential> = {}): AntigravityCredential {
+function credential(
+  overrides: Partial<AntigravityCredential> = {}
+): AntigravityCredential {
   return {
     kind: "antigravity",
     accessToken: "a-1",
@@ -67,11 +72,15 @@ describe("Antigravity OAuth constants", () => {
         state: "state-1",
         challenge: pkce.challenge,
         redirectUri: "http://localhost:51121/oauth-callback",
-      }),
+      })
     );
-    expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(url.origin + url.pathname).toBe(
+      "https://accounts.google.com/o/oauth2/v2/auth"
+    );
     expect(url.searchParams.get("client_id")).toContain("1071006060591-");
-    expect(url.searchParams.get("redirect_uri")).toBe("http://localhost:51121/oauth-callback");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "http://localhost:51121/oauth-callback"
+    );
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("access_type")).toBe("offline");
     expect(url.searchParams.get("state")).toBe("state-1");
@@ -81,9 +90,15 @@ describe("Antigravity OAuth constants", () => {
   it("reads a code from a bare string or a pasted redirect URL", () => {
     expect(parseAuthorizationCode(" 4/0Abc ")).toBe("4/0Abc");
     expect(
-      parseAuthorizationCode("http://localhost:51121/oauth-callback?code=4%2Fxyz&state=s"),
+      parseAuthorizationCode(
+        "http://localhost:51121/oauth-callback?code=4%2Fxyz&state=s"
+      )
     ).toBe("4/xyz");
-    expect(parseAuthorizationCode("http://localhost:51121/oauth-callback?error=denied")).toBeUndefined();
+    expect(
+      parseAuthorizationCode(
+        "http://localhost:51121/oauth-callback?error=denied"
+      )
+    ).toBeUndefined();
     expect(parseAuthorizationCode("two words")).toBeUndefined();
   });
 });
@@ -100,7 +115,7 @@ describe("Antigravity token handling", () => {
           expires_in: 3600,
         });
       },
-      { kind: "antigravity", code: "code-1", verifier: "verifier-1" },
+      { kind: "antigravity", code: "code-1", verifier: "verifier-1" }
     );
     expect(exchange.accessToken).toBe("a-1");
     expect(exchange.refreshToken).toBe("r-1");
@@ -108,22 +123,37 @@ describe("Antigravity token handling", () => {
     expect(bodies[0]).toContain("code_verifier=verifier-1");
 
     // Google does not rotate the refresh token on a plain refresh.
-    const refreshed = await refreshCredential(async () => jsonResponse(200, {
-      access_token: "a-2",
-      expires_in: 1800,
-    }), exchange);
+    const refreshed = await refreshCredential(
+      async () =>
+        jsonResponse(200, {
+          access_token: "a-2",
+          expires_in: 1800,
+        }),
+      exchange
+    );
     expect(refreshed.accessToken).toBe("a-2");
     expect(refreshed.refreshToken).toBe("r-1");
-    expect(credentialNeedsRefresh({ ...refreshed, expiresAt: Date.now() - 1 })).toBe(true);
-    expect(credentialNeedsRefresh({ ...refreshed, expiresAt: Date.now() + 3_600_000 })).toBe(false);
+    expect(
+      credentialNeedsRefresh({ ...refreshed, expiresAt: Date.now() - 1 })
+    ).toBe(true);
+    expect(
+      credentialNeedsRefresh({
+        ...refreshed,
+        expiresAt: Date.now() + 3_600_000,
+      })
+    ).toBe(false);
   });
 
   it("surfaces Google's error text", async () => {
     await expect(
-      exchangeAuthorizationCode(async () => jsonResponse(400, {
-        error: "invalid_grant",
-        error_description: "Bad code",
-      }), { kind: "antigravity", code: "nope", verifier: "v" }),
+      exchangeAuthorizationCode(
+        async () =>
+          jsonResponse(400, {
+            error: "invalid_grant",
+            error_description: "Bad code",
+          }),
+        { kind: "antigravity", code: "nope", verifier: "v" }
+      )
     ).rejects.toThrow("Bad code");
   });
 });
@@ -131,22 +161,41 @@ describe("Antigravity token handling", () => {
 describe("Antigravity Cloud Code Assist", () => {
   it("targets the v1internal method URL", () => {
     expect(methodUrl("generateContent")).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal:generateContent",
+      "https://cloudcode-pa.googleapis.com/v1internal:generateContent"
     );
     expect(methodUrl("fetchAvailableModels", "https://example.test/")).toBe(
-      "https://example.test/v1internal:fetchAvailableModels",
+      "https://example.test/v1internal:fetchAvailableModels"
     );
   });
 
   it("reads a project from loadCodeAssist and from an onboard operation", () => {
-    expect(projectFromLoadResponse({ cloudaicompanionProject: "p-1" })).toBe("p-1");
-    expect(projectFromLoadResponse({ cloudaicompanionProject: { id: "p-2" } })).toBe("p-2");
+    expect(projectFromLoadResponse({ cloudaicompanionProject: "p-1" })).toBe(
+      "p-1"
+    );
+    expect(
+      projectFromLoadResponse({ cloudaicompanionProject: { id: "p-2" } })
+    ).toBe("p-2");
     expect(projectFromLoadResponse({})).toBeUndefined();
-    expect(defaultTierFromLoadResponse({
-      allowedTiers: [{ id: "legacy-tier" }, { id: "free-tier", isDefault: true }],
-    })).toBe("free-tier");
-    expect(projectFromOperation({ done: false, response: { cloudaicompanionProject: "p-3" } })).toBeUndefined();
-    expect(projectFromOperation({ done: true, response: { cloudaicompanionProject: { id: "p-3" } } })).toBe("p-3");
+    expect(
+      defaultTierFromLoadResponse({
+        allowedTiers: [
+          { id: "legacy-tier" },
+          { id: "free-tier", isDefault: true },
+        ],
+      })
+    ).toBe("free-tier");
+    expect(
+      projectFromOperation({
+        done: false,
+        response: { cloudaicompanionProject: "p-3" },
+      })
+    ).toBeUndefined();
+    expect(
+      projectFromOperation({
+        done: true,
+        response: { cloudaicompanionProject: { id: "p-3" } },
+      })
+    ).toBe("p-3");
   });
 
   it("resolves the project through loadCodeAssist without onboarding", async () => {
@@ -166,7 +215,9 @@ describe("Antigravity Cloud Code Assist", () => {
       const url = String(input);
       bodies.push(String(init?.body ?? ""));
       if (url.includes("loadCodeAssist")) {
-        return jsonResponse(200, { allowedTiers: [{ id: "free-tier", isDefault: true }] });
+        return jsonResponse(200, {
+          allowedTiers: [{ id: "free-tier", isDefault: true }],
+        });
       }
       return jsonResponse(200, {
         name: "operations/op-1",
@@ -179,7 +230,12 @@ describe("Antigravity Cloud Code Assist", () => {
   });
 
   it("sends bearer, user agent, and client metadata on model fetches", async () => {
-    const seen: { url: string; auth: string | null; metadata: string | null; body: string }[] = [];
+    const seen: {
+      url: string;
+      auth: string | null;
+      metadata: string | null;
+      body: string;
+    }[] = [];
     const models = await fetchAvailableModels(async (input, init) => {
       const headers = new Headers(init?.headers);
       seen.push({
@@ -196,7 +252,10 @@ describe("Antigravity Cloud Code Assist", () => {
       });
     }, credential());
 
-    expect(models.map((model) => model.id)).toEqual(["gemini-3-flash", "gemini-3-pro"]);
+    expect(models.map((model) => model.id)).toEqual([
+      "gemini-3-flash",
+      "gemini-3-pro",
+    ]);
     const first = seen[0];
     expect(first).toBeDefined();
     expect(first?.url).toContain("v1internal:fetchAvailableModels");
@@ -206,7 +265,10 @@ describe("Antigravity Cloud Code Assist", () => {
   });
 
   it("returns no models when the account is not connected", async () => {
-    const models = await fetchAvailableModels(async () => jsonResponse(200, { models: {} }), credential({ projectId: undefined }));
+    const models = await fetchAvailableModels(
+      async () => jsonResponse(200, { models: {} }),
+      credential({ projectId: undefined })
+    );
     expect(models).toEqual([]);
   });
 });
@@ -218,9 +280,9 @@ describe("AntigravityCredentialStore", () => {
     expect(store.get(ANTIGRAVITY_PROVIDER_ID)).toBeUndefined();
     store.set(ANTIGRAVITY_PROVIDER_ID, credential());
     expect(store.get(ANTIGRAVITY_PROVIDER_ID)?.accessToken).toBe("a-1");
-    expect(JSON.parse(readFileSync(join(dir, "antigravity.json"), "utf8"))).toHaveProperty(
-      ANTIGRAVITY_PROVIDER_ID,
-    );
+    expect(
+      JSON.parse(readFileSync(join(dir, "antigravity.json"), "utf8"))
+    ).toHaveProperty(ANTIGRAVITY_PROVIDER_ID);
     expect(statSync(join(dir, "antigravity.json")).mode & 0o777).toBe(0o600);
     store.delete(ANTIGRAVITY_PROVIDER_ID);
     expect(store.get(ANTIGRAVITY_PROVIDER_ID)).toBeUndefined();
@@ -258,16 +320,20 @@ describe("createAntigravityAuth", () => {
     expect(pendingUrl(authorize)).toContain("client_id=1071006060591-");
     expect(auth.providers()[0]?.oauthPending).toBe(true);
 
-    await expect(auth.submitOAuthCallback(ANTIGRAVITY_PROVIDER_ID, "")).rejects.toThrow(
-      "authorization code is empty",
-    );
+    await expect(
+      auth.submitOAuthCallback(ANTIGRAVITY_PROVIDER_ID, "")
+    ).rejects.toThrow("authorization code is empty");
     expect(store.get(ANTIGRAVITY_PROVIDER_ID)).toBeUndefined();
   });
 
   it("stores the credential after the code is submitted", async () => {
     const { auth, store } = makeAuth((url) => {
       if (url.includes("oauth2.googleapis.com/token")) {
-        return jsonResponse(200, { access_token: "a-9", refresh_token: "r-9", expires_in: 3600 });
+        return jsonResponse(200, {
+          access_token: "a-9",
+          refresh_token: "r-9",
+          expires_in: 3600,
+        });
       }
       if (url.includes("userinfo")) {
         return jsonResponse(200, { email: "unitsung@example.com" });
@@ -277,7 +343,7 @@ describe("createAntigravityAuth", () => {
     await auth.authorizeOAuth(ANTIGRAVITY_PROVIDER_ID);
     await auth.submitOAuthCallback(
       ANTIGRAVITY_PROVIDER_ID,
-      "http://localhost:51121/oauth-callback?code=4%2Fabc&state=s",
+      "http://localhost:51121/oauth-callback?code=4%2Fabc&state=s"
     );
 
     const stored = store.get(ANTIGRAVITY_PROVIDER_ID);
@@ -297,9 +363,14 @@ describe("createAntigravityAuth", () => {
       if (url.includes("oauth2.googleapis.com/token")) {
         return jsonResponse(200, { access_token: "a-10", expires_in: 3600 });
       }
-      return jsonResponse(200, { models: { "gemini-3-pro": { displayName: "Gemini 3 Pro" } } });
+      return jsonResponse(200, {
+        models: { "gemini-3-pro": { displayName: "Gemini 3 Pro" } },
+      });
     });
-    store.set(ANTIGRAVITY_PROVIDER_ID, credential({ expiresAt: Date.now() + 3_600_000 }));
+    store.set(
+      ANTIGRAVITY_PROVIDER_ID,
+      credential({ expiresAt: Date.now() + 3_600_000 })
+    );
     const models = await auth.models(ANTIGRAVITY_PROVIDER_ID);
     expect(models).toEqual([
       {
@@ -311,7 +382,9 @@ describe("createAntigravityAuth", () => {
       },
     ]);
 
-    const refreshed = await auth.credential(ANTIGRAVITY_PROVIDER_ID, { forceRefresh: true });
+    const refreshed = await auth.credential(ANTIGRAVITY_PROVIDER_ID, {
+      forceRefresh: true,
+    });
     expect(refreshed.accessToken).toBe("a-10");
     expect(store.get(ANTIGRAVITY_PROVIDER_ID)?.accessToken).toBe("a-10");
   });
@@ -342,17 +415,25 @@ describe("withAntigravityAuth", () => {
   it("appends the Antigravity provider and routes its ids locally", async () => {
     const dir = mkdtempSync(join(tmpdir(), "thebe-antigravity-wrap-"));
     const store = new AntigravityCredentialStore(join(dir, "antigravity.json"));
-    const antigravity = createAntigravityAuth({ store, fetchImpl: async () => jsonResponse(200, {}) });
+    const antigravity = createAntigravityAuth({
+      store,
+      fetchImpl: async () => jsonResponse(200, {}),
+    });
     const auth = withAntigravityAuth(baseAuth(), antigravity);
 
     const providers = await auth.listProviders();
-    expect(providers.map((provider) => provider.id)).toEqual(["openai", ANTIGRAVITY_PROVIDER_ID]);
+    expect(providers.map((provider) => provider.id)).toEqual([
+      "openai",
+      ANTIGRAVITY_PROVIDER_ID,
+    ]);
 
     const authorize = await auth.authorizeOAuth(ANTIGRAVITY_PROVIDER_ID, {});
     expect(pendingUrl(authorize)).toContain("accounts.google.com");
     expect(await auth.check(ANTIGRAVITY_PROVIDER_ID)).toEqual({ ok: false });
     expect((await auth.testProvider("openai")).message).toBe("base");
-    await expect(auth.setApiKey(ANTIGRAVITY_PROVIDER_ID, "key")).rejects.toThrow("Google OAuth");
+    await expect(
+      auth.setApiKey(ANTIGRAVITY_PROVIDER_ID, "key")
+    ).rejects.toThrow("Google OAuth");
   });
 });
 
@@ -364,7 +445,7 @@ describe("OAuth client secret", () => {
         kind: "antigravity",
         code: "c",
         verifier: "v",
-      }),
+      })
     ).rejects.toThrow("THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET");
   });
 });

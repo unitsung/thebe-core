@@ -47,7 +47,7 @@ export type PiCodingAgentRuntimeOptions = {
 };
 
 export async function createPiCodingAgentRuntime(
-  options: PiCodingAgentRuntimeOptions = {},
+  options: PiCodingAgentRuntimeOptions = {}
 ): Promise<AgentRuntime> {
   const sdk = await loadPiSdk();
   const cwd = options.cwd ?? process.cwd();
@@ -62,9 +62,7 @@ export async function createPiCodingAgentRuntime(
   const modelRuntime =
     options.modelRuntime ??
     (await sdk.ModelRuntime.create({
-      authPath: options.agentDir
-        ? `${options.agentDir}/auth.json`
-        : undefined,
+      authPath: options.agentDir ? `${options.agentDir}/auth.json` : undefined,
       modelsPath: options.agentDir
         ? `${options.agentDir}/models.json`
         : undefined,
@@ -75,18 +73,18 @@ export async function createPiCodingAgentRuntime(
   if (options.apiKey) {
     await modelRuntime.setRuntimeApiKey(
       options.apiKey.providerId,
-      options.apiKey.key,
+      options.apiKey.key
     );
   }
 
   function resolveModelRef(
     providerId: string,
-    modelId: string,
+    modelId: string
   ): PiModelShape | undefined {
     return resolvePiModel(
       (p, m) => modelRuntime.getModel(p, m),
       providerId,
-      modelId,
+      modelId
     );
   }
 
@@ -102,7 +100,7 @@ export async function createPiCodingAgentRuntime(
   const antigravityAgentDir =
     options.agentDir ?? join(process.env.HOME ?? ".", ".thebe", "agent");
   const antigravityStore = new AntigravityCredentialStore(
-    join(antigravityAgentDir, "antigravity.json"),
+    join(antigravityAgentDir, "antigravity.json")
   );
   // Escape hatch for local proxies and tests; defaults to Google's endpoint.
   const antigravityEndpoint =
@@ -111,8 +109,14 @@ export async function createPiCodingAgentRuntime(
     store: antigravityStore,
     endpoint: antigravityEndpoint,
   });
-  const auth = withAntigravityAuth(createPiRuntimeAuth(modelRuntime), antigravity);
-  const providerConfigurations = createProviderConfigurationStore(antigravityAgentDir, thebeUserConfigPath());
+  const auth = withAntigravityAuth(
+    createPiRuntimeAuth(modelRuntime),
+    antigravity
+  );
+  const providerConfigurations = createProviderConfigurationStore(
+    antigravityAgentDir,
+    thebeUserConfigPath()
+  );
   // Pi dropped its built-in Antigravity provider, so Core registers one on the
   // same ModelRuntime the sessions use: `provider: "google-antigravity"` then
   // resolves, lists, and streams like any Pi provider, with auth and models
@@ -132,10 +136,12 @@ export async function createPiCodingAgentRuntime(
   modelRuntime.registerNativeProvider(
     antigravityProvider as Parameters<
       InstanceType<PiSdk["ModelRuntime"]>["registerNativeProvider"]
-    >[0],
+    >[0]
   );
 
-  function backgroundTasksFor(runtimeSessionId: string): BackgroundTaskRegistry {
+  function backgroundTasksFor(
+    runtimeSessionId: string
+  ): BackgroundTaskRegistry {
     let registry = backgroundTasks.get(runtimeSessionId);
     if (!registry) {
       registry = createBackgroundTaskRegistry({
@@ -150,7 +156,7 @@ export async function createPiCodingAgentRuntime(
   async function availableKeys(providerId?: string): Promise<Set<string>> {
     try {
       const available = (await modelRuntime.getAvailable(
-        providerId,
+        providerId
       )) as PiModelShape[];
       return new Set(available.map(modelKey));
     } catch {
@@ -160,7 +166,7 @@ export async function createPiCodingAgentRuntime(
 
   async function open(
     create: Parameters<AgentRuntime["createSession"]>[0],
-    sessionManager: InstanceType<PiSdk["SessionManager"]>,
+    sessionManager: InstanceType<PiSdk["SessionManager"]>
   ) {
     return openPiSession(sdk, {
       create,
@@ -178,14 +184,25 @@ export async function createPiCodingAgentRuntime(
   return {
     runtimeId: PI_RUNTIME_ID,
     async loadSkillDirectory(directory) {
-      return sdk.loadSkillsFromDir({ dir: directory, source: "path" }).skills.map(
-        ({ name, description, filePath }: { name: string; description: string; filePath: string }) => ({ name, description, filePath }),
-      );
+      return sdk
+        .loadSkillsFromDir({ dir: directory, source: "path" })
+        .skills.map(
+          ({
+            name,
+            description,
+            filePath,
+          }: {
+            name: string;
+            description: string;
+            filePath: string;
+          }) => ({ name, description, filePath })
+        );
     },
     async createSession(create) {
-      const sessionManager = (create.inMemory ?? inMemory)
-        ? sdk.SessionManager.inMemory(create.cwd ?? cwd)
-        : sdk.SessionManager.create(create.cwd ?? cwd, options.sessionDir);
+      const sessionManager =
+        (create.inMemory ?? inMemory)
+          ? sdk.SessionManager.inMemory(create.cwd ?? cwd)
+          : sdk.SessionManager.create(create.cwd ?? cwd, options.sessionDir);
       const session = await open(create, sessionManager);
       if (create.inMemory) {
         const dispose = session.dispose.bind(session);
@@ -202,7 +219,7 @@ export async function createPiCodingAgentRuntime(
       if (!sessionPath && !inMemory) {
         const listed = await sdk.SessionManager.list(cwd, options.sessionDir);
         sessionPath = listed.find(
-          (row: { id: string; path: string }) => row.id === runtimeSessionId,
+          (row: { id: string; path: string }) => row.id === runtimeSessionId
         )?.path;
       }
       active?.dispose();
@@ -230,19 +247,21 @@ export async function createPiCodingAgentRuntime(
           },
           toolControllersFor(existing),
           backgroundTasksFor(runtimeSessionId),
-          backgroundTasksFor(runtimeSessionId).wrap(sdk.createLocalBashOperations()),
+          backgroundTasksFor(runtimeSessionId).wrap(
+            sdk.createLocalBashOperations()
+          )
         );
       }
       let info: { id: string; path: string } | undefined;
       if (!inMemory) {
         const listed = (await sdk.SessionManager.list(
           create.cwd ?? cwd,
-          options.sessionDir,
+          options.sessionDir
         )) as Array<{ id: string; path: string }>;
         info = listed.find((row) => row.id === runtimeSessionId);
         if (!info) {
           const all = (await sdk.SessionManager.listAll(
-            options.sessionDir,
+            options.sessionDir
           )) as Array<{ id: string; path: string }>;
           info = all.find((row) => row.id === runtimeSessionId);
         }
@@ -250,11 +269,13 @@ export async function createPiCodingAgentRuntime(
       if (info) {
         return open(
           create,
-          sdk.SessionManager.open(info.path, options.sessionDir),
+          sdk.SessionManager.open(info.path, options.sessionDir)
         );
       }
       const sessionManager = inMemory
-        ? sdk.SessionManager.inMemory(create.cwd ?? cwd, { id: runtimeSessionId })
+        ? sdk.SessionManager.inMemory(create.cwd ?? cwd, {
+            id: runtimeSessionId,
+          })
         : sdk.SessionManager.create(create.cwd ?? cwd, options.sessionDir, {
             id: runtimeSessionId,
           });
@@ -274,37 +295,77 @@ export async function createPiCodingAgentRuntime(
     async listBackgroundTasksForSession(runtimeSessionId: string) {
       return backgroundTasksFor(runtimeSessionId).list();
     },
-    async listModels(query?: { all?: boolean; providerId?: string; refresh?: boolean }) {
+    async listModels(query?: {
+      all?: boolean;
+      providerId?: string;
+      refresh?: boolean;
+    }) {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
-      if (query?.refresh && query.providerId && query.providerId !== antigravity.providerId) {
+      if (
+        query?.refresh &&
+        query.providerId &&
+        query.providerId !== antigravity.providerId
+      ) {
         const providerId = query.providerId;
         const sample = modelRuntime.getModels(providerId)[0];
         const saved = await providerConfigurations.get(providerId);
         const api = saved?.api ?? sample?.api;
         const baseUrl = saved?.baseUrl ?? sample?.baseUrl;
-        if (!baseUrl || !api || !["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai"].includes(api)) {
-          throw new Error("This provider does not expose a supported model discovery endpoint");
+        if (
+          !baseUrl ||
+          !api ||
+          ![
+            "openai-completions",
+            "openai-responses",
+            "anthropic-messages",
+            "google-generative-ai",
+          ].includes(api)
+        ) {
+          throw new Error(
+            "This provider does not expose a supported model discovery endpoint"
+          );
         }
         const configuration = saved ?? {
-          providerId, baseUrl, api: api as import("../../agent/runtime/interface.ts").RuntimeProviderConfiguration["api"],
-          models: (modelRuntime.getModels(providerId) as PiModelShape[]).map(model => ({ id: model.id, name: model.name,
-            contextWindow: model.contextWindow, maxTokens: model.maxTokens, reasoning: model.reasoning })),
+          providerId,
+          baseUrl,
+          api: api as import("../../agent/runtime/interface.ts").RuntimeProviderConfiguration["api"],
+          models: (modelRuntime.getModels(providerId) as PiModelShape[]).map(
+            (model) => ({
+              id: model.id,
+              name: model.name,
+              contextWindow: model.contextWindow,
+              maxTokens: model.maxTokens,
+              reasoning: model.reasoning,
+            })
+          ),
         };
         const resolved = await modelRuntime.getAuth(providerId);
-        const discovered = await discoverProviderModels(configuration, resolved?.auth ?? {});
+        const discovered = await discoverProviderModels(
+          configuration,
+          resolved?.auth ?? {}
+        );
         // An empty service list remains empty; never substitute the shared catalogue.
         if (!discovered.length) return [];
-        const discoveredIds = new Set(discovered.map(model => model.id));
+        const discoveredIds = new Set(discovered.map((model) => model.id));
         // Explicitly configured aliases can be callable even when the service
         // omits them from discovery. Retain them for existing sessions.
-        await providerConfigurations.save({ ...configuration, models: [
-          ...configuration.models.filter(model => !discoveredIds.has(model.id)), ...discovered,
-        ] });
+        await providerConfigurations.save({
+          ...configuration,
+          models: [
+            ...configuration.models.filter(
+              (model) => !discoveredIds.has(model.id)
+            ),
+            ...discovered,
+          ],
+        });
         await modelRuntime.refresh({ allowNetwork: false });
         const keys = await availableKeys(providerId);
-        return discovered.map(model => {
+        return discovered.map((model) => {
           const registered = modelRuntime.getModel(providerId, model.id);
-          return toRuntimeModel(registered ?? { ...model, provider: providerId }, keys);
+          return toRuntimeModel(
+            registered ?? { ...model, provider: providerId },
+            keys
+          );
         });
       }
       if (query?.providerId === antigravity.providerId) {
@@ -335,7 +396,7 @@ export async function createPiCodingAgentRuntime(
     async listAvailableModels(query?: { providerId?: string }) {
       await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
       const available = (await modelRuntime.getAvailable(
-        query?.providerId,
+        query?.providerId
       )) as PiModelShape[];
       const keys = new Set(available.map(modelKey));
       const list = available.map((model) => toRuntimeModel(model, keys));
@@ -351,7 +412,8 @@ export async function createPiCodingAgentRuntime(
     async saveProviderConfiguration(configuration, apiKey) {
       await providerConfigurations.save(configuration);
       await modelRuntime.refresh({ allowNetwork: false });
-      if (apiKey?.trim()) await auth.setApiKey(configuration.providerId, apiKey.trim());
+      if (apiKey?.trim())
+        await auth.setApiKey(configuration.providerId, apiKey.trim());
       await modelRuntime.refresh({ allowNetwork: false });
     },
     async deleteProviderConfiguration(providerId) {
@@ -372,7 +434,9 @@ export async function createPiCodingAgentRuntime(
           },
           toolControllersFor(session),
           backgroundTasksFor(session.sessionId),
-          backgroundTasksFor(session.sessionId).wrap(sdk.createLocalBashOperations()),
+          backgroundTasksFor(session.sessionId).wrap(
+            sdk.createLocalBashOperations()
+          )
         );
       if (fork?.mode === "branch_in_place") {
         if (parent) {
@@ -383,9 +447,12 @@ export async function createPiCodingAgentRuntime(
         }
         const listed = inMemory
           ? []
-          : await sdk.SessionManager.list(create.cwd ?? cwd, options.sessionDir);
+          : await sdk.SessionManager.list(
+              create.cwd ?? cwd,
+              options.sessionDir
+            );
         const info = listed.find(
-          (row: { id: string; path: string }) => row.id === runtimeSessionId,
+          (row: { id: string; path: string }) => row.id === runtimeSessionId
         );
         if (!info) {
           throw new Error(`unknown runtime session: ${runtimeSessionId}`);
@@ -399,9 +466,12 @@ export async function createPiCodingAgentRuntime(
       if (!parent) {
         const listed = inMemory
           ? []
-          : await sdk.SessionManager.list(create.cwd ?? cwd, options.sessionDir);
+          : await sdk.SessionManager.list(
+              create.cwd ?? cwd,
+              options.sessionDir
+            );
         const info = listed.find(
-          (row: { id: string; path: string }) => row.id === runtimeSessionId,
+          (row: { id: string; path: string }) => row.id === runtimeSessionId
         );
         if (!info) {
           throw new Error(`unknown runtime session: ${runtimeSessionId}`);
@@ -415,10 +485,7 @@ export async function createPiCodingAgentRuntime(
         if (!path) {
           throw new Error("Pi fork did not persist a child session");
         }
-        return open(
-          create,
-          sdk.SessionManager.open(path, options.sessionDir),
-        );
+        return open(create, sdk.SessionManager.open(path, options.sessionDir));
       }
       const leaf = fork?.atEntryId ?? parent.sessionManager.getLeafId();
       if (!leaf) {
@@ -426,10 +493,7 @@ export async function createPiCodingAgentRuntime(
       }
       const path = parent.sessionManager.createBranchedSession(leaf);
       if (path) {
-        return open(
-          create,
-          sdk.SessionManager.open(path, options.sessionDir),
-        );
+        return open(create, sdk.SessionManager.open(path, options.sessionDir));
       }
       const child = sdk.SessionManager.inMemory(create.cwd ?? cwd, {
         parentSession: runtimeSessionId,
@@ -453,7 +517,10 @@ export async function createPiCodingAgentRuntime(
     isQuiesced(): boolean {
       return quiesced;
     },
-    registerSessionLiveness(sessionId: string, isActive: () => boolean): () => void {
+    registerSessionLiveness(
+      sessionId: string,
+      isActive: () => boolean
+    ): () => void {
       livenessRegistry.set(sessionId, isActive);
       return () => {
         livenessRegistry.delete(sessionId);
@@ -461,7 +528,7 @@ export async function createPiCodingAgentRuntime(
     },
     reapInactiveSessions(): number {
       let reaped = 0;
-      for (const [sessionId, isActive] of [...livenessRegistry.entries()]) {
+      for (const [sessionId, isActive] of livenessRegistry.entries()) {
         if (isActive()) {
           continue;
         }

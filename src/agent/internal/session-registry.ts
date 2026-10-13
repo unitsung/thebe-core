@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRuntime, RuntimeSession } from "../runtime/index.ts";
+import type { AgentRuntime } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { SessionState, OpenedSession } from "./session-state.ts";
 
@@ -14,7 +14,7 @@ export function createSessionRegistry(input: {
   stamp(meta: AgentSessionMeta): AgentSessionMeta;
   createSessionOptions(
     explicitSessionId?: string,
-    builtinTools?: readonly string[],
+    builtinTools?: readonly string[]
   ): Parameters<AgentRuntime["createSession"]>[0];
   cancelAutoSummary(thebeSessionId: string): void;
   removeEventLog(thebeSessionId: string): void;
@@ -25,7 +25,9 @@ export function createSessionRegistry(input: {
   let requestStop: () => void | Promise<void> = () => {};
 
   function getActive(): OpenedSession | undefined {
-    return lastActiveId ? input.state.openedSessions.get(lastActiveId) : undefined;
+    return lastActiveId
+      ? input.state.openedSessions.get(lastActiveId)
+      : undefined;
   }
 
   function setActive(value: OpenedSession | undefined): void {
@@ -37,7 +39,7 @@ export function createSessionRegistry(input: {
     lastActiveId = value.meta.thebeSessionId;
     input.runtime.registerSessionLiveness?.(
       value.session.runtimeSessionId,
-      () => input.state.openedSessions.has(value.meta.thebeSessionId),
+      () => input.state.openedSessions.has(value.meta.thebeSessionId)
     );
   }
 
@@ -55,9 +57,10 @@ export function createSessionRegistry(input: {
       const meta = await input.lookup(thebeSessionId);
       const session = await input.runtime.resumeSession(
         meta.runtimeSessionId,
-        input.createSessionOptions(meta.thebeSessionId, meta.builtinTools),
+        input.createSessionOptions(meta.thebeSessionId, meta.builtinTools)
       );
-      if (meta.leafId && session.navigateTo) await session.navigateTo(meta.leafId);
+      if (meta.leafId && session.navigateTo)
+        await session.navigateTo(meta.leafId);
       requestStop = () => session.abort();
       const opened = { meta, session };
       setActive(opened);
@@ -65,7 +68,9 @@ export function createSessionRegistry(input: {
     }
     const current = getActive();
     if (current) return current;
-    const session = await input.runtime.createSession(input.createSessionOptions());
+    const session = await input.runtime.createSession(
+      input.createSessionOptions()
+    );
     requestStop = () => session.abort();
     const meta = input.stamp({
       thebeSessionId: randomUUID(),
@@ -78,11 +83,13 @@ export function createSessionRegistry(input: {
     return opened;
   }
 
-  async function reapIdleSessions(idleMs = input.idleTimeoutMs): Promise<number> {
+  async function reapIdleSessions(
+    idleMs = input.idleTimeoutMs
+  ): Promise<number> {
     if (idleMs <= 0) return 0;
     const cutoff = Date.now() - idleMs;
     let reaped = 0;
-    for (const [id, opened] of [...input.state.openedSessions.entries()]) {
+    for (const [id, opened] of input.state.openedSessions.entries()) {
       if (input.state.streaming.has(id) || input.hasPending(id)) continue;
       const last = Date.parse(opened.meta.lastActiveAt ?? "");
       if (!Number.isFinite(last) || last > cutoff) continue;
@@ -98,15 +105,26 @@ export function createSessionRegistry(input: {
   }
 
   if (input.idleTimeoutMs > 0) {
-    const interval = setInterval(() => void reapIdleSessions(), Math.min(input.idleTimeoutMs, 60_000));
+    const interval = setInterval(
+      () => void reapIdleSessions(),
+      Math.min(input.idleTimeoutMs, 60_000)
+    );
     interval.unref?.();
   }
 
   return {
-    get active(): OpenedSession | undefined { return getActive(); },
-    set active(value: OpenedSession | undefined) { setActive(value); },
-    get requestStop(): () => void | Promise<void> { return requestStop; },
-    set requestStop(value: () => void | Promise<void>) { requestStop = value; },
+    get active(): OpenedSession | undefined {
+      return getActive();
+    },
+    set active(value: OpenedSession | undefined) {
+      setActive(value);
+    },
+    get requestStop(): () => void | Promise<void> {
+      return requestStop;
+    },
+    set requestStop(value: () => void | Promise<void>) {
+      requestStop = value;
+    },
     openSession,
     reapIdleSessions,
   };

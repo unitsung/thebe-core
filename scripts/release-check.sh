@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Deterministic release check: typecheck, build, full test suite, smoke test.
+# Deterministic release check: typecheck, lint, build, full test suite, smoke test.
 #
 # It calls the local binaries directly; CI runs the same checks plus the smoke
 # test, so an operator can reproduce a release gate on a clean host.
@@ -26,7 +26,7 @@ for arg in "$@"; do
 done
 
 bin=node_modules/.bin
-if [ ! -x "$bin/tsc" ] || [ ! -x "$bin/vite" ] || [ ! -x "$bin/vitest" ]; then
+if [ ! -x "$bin/tsc" ] || [ ! -x "$bin/tsdown" ] || [ ! -x "$bin/vitest" ] || [ ! -x "$bin/oxlint" ]; then
   echo "missing local binaries under $bin." >&2
   echo "install dependencies first, for example:" >&2
   echo "  npm ci" >&2
@@ -36,8 +36,11 @@ fi
 echo "== typecheck: $bin/tsc --noEmit"
 "$bin/tsc" --noEmit
 
-echo "== build: $bin/vite build"
-"$bin/vite" build
+echo "== lint: $bin/oxlint"
+"$bin/oxlint"
+
+echo "== build: $bin/tsdown"
+"$bin/tsdown"
 
 echo "== test: $bin/vitest run"
 "$bin/vitest" run

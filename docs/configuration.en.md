@@ -268,8 +268,19 @@ them through Pi's built-in MCP extension; Core does not keep MCP connections of
 its own. Tool names are `mcp__<server>__<tool>`.
 
 ```json
-{ "mcpServers": { "notes": { "command": "notes-mcp", "args": ["--stdio"], "env": { "API_KEY": "..." },
-  "description": "Search and read notes", "exposure": "codemode", "permission": "confirm", "disabled": true } } }
+{
+  "mcpServers": {
+    "notes": {
+      "command": "notes-mcp",
+      "args": ["--stdio"],
+      "env": { "API_KEY": "..." },
+      "description": "Search and read notes",
+      "exposure": "codemode",
+      "permission": "confirm",
+      "disabled": true
+    }
+  }
+}
 ```
 
 - `exposure`: `codemode` (default; tools can only be called from `codemode` scripts and take no space in the model's tool list), `deferred` (declared after `tool_search` loads them), `direct`, or `hidden`.
@@ -301,12 +312,12 @@ they need are not configured instead of inventing results.
 Before approval, `bash`, `write`, and `edit` pass through a command risk guard
 (`src/agent/security/command-risk.ts`) with four levels:
 
-| Risk | Behavior | Examples |
-| --- | --- | --- |
-| `critical` | **Denied by policy** (never reaches approval; the model sees `denied by policy`) | `rm -rf /`, bulk deletes of NAS data directories such as `/volume1`, `zfs destroy`, `zpool destroy`, `mkfs.*`, `mke2fs`, `ntfsclone --overwrite`, `ntfswipe`, `exportfs -ua`, `mdadm --stop/--zero-superblock`, `fdisk`/`parted`, `dd of=/dev/sdX`, fork bombs, `kill -9 1`, `docker run -v /:... --privileged` |
-| `dangerous` | Still needs human approval (shown as high risk) | shutdown or reboot, flushing the firewall, `docker rm -f $(ps -aq)`, `docker volume prune -f`, mounting `docker.sock`, `ntfsfix`/`ntfsresize`, force-unmounting shared storage, stopping smbd, nfs-server, sshd, or docker, writing system paths such as `/etc/...`, writing or modifying files outside the workspace |
-| `caution` | Allowed, with a warning recorded | restarting or stopping containers or system services, `chmod -R`, `chown -R`, scrub, `exportfs -a` |
-| `safe` | Runs normally | read-only checks such as `docker ps`, `zpool status` |
+| Risk        | Behavior                                                                         | Examples                                                                                                                                                                                                                                                                                                              |
+| ----------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `critical`  | **Denied by policy** (never reaches approval; the model sees `denied by policy`) | `rm -rf /`, bulk deletes of NAS data directories such as `/volume1`, `zfs destroy`, `zpool destroy`, `mkfs.*`, `mke2fs`, `ntfsclone --overwrite`, `ntfswipe`, `exportfs -ua`, `mdadm --stop/--zero-superblock`, `fdisk`/`parted`, `dd of=/dev/sdX`, fork bombs, `kill -9 1`, `docker run -v /:... --privileged`       |
+| `dangerous` | Still needs human approval (shown as high risk)                                  | shutdown or reboot, flushing the firewall, `docker rm -f $(ps -aq)`, `docker volume prune -f`, mounting `docker.sock`, `ntfsfix`/`ntfsresize`, force-unmounting shared storage, stopping smbd, nfs-server, sshd, or docker, writing system paths such as `/etc/...`, writing or modifying files outside the workspace |
+| `caution`   | Allowed, with a warning recorded                                                 | restarting or stopping containers or system services, `chmod -R`, `chown -R`, scrub, `exportfs -a`                                                                                                                                                                                                                    |
+| `safe`      | Runs normally                                                                    | read-only checks such as `docker ps`, `zpool status`                                                                                                                                                                                                                                                                  |
 
 - Docker and Podman commands get a further container guard (`docker-command-guard.ts`): privileged containers with a host-root mount, host-root bind mounts, `--privileged`, `docker.sock` mounts, volume prune.
 - Storage systems recognized: ZFS, Btrfs, EXT4 (including xfs and f2fs), NTFS, NFS; the result carries a `storageSystem` field.
@@ -327,7 +338,7 @@ They are off by default.
 
 ```bash
 # gondolin setup
-npm install @earendil-works/gondolin@0.12.0                   # optional dependency; may already be installed
+npm install @earendil-works/gondolin@0.13.0                   # optional dependency; may already be installed
 brew install qemu                                           # Linux: sudo apt install qemu-system-arm
 THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe     # first start downloads a ~200 MB guest image
 ```
@@ -340,12 +351,12 @@ and leave `THEBE_COMMAND_GUARD` on.
 
 `THEBE_SCENARIO` bundles the safety switches into presets:
 
-| Scenario | Command guard | Workspace escape | Sandbox | Docker guard |
-| --- | --- | --- | --- | --- |
-| `nas-strict` | on | forbidden | `bwrap` | all (including volume prune) |
-| `homelab-host` | on | allowed | off | host-root mounts and volume prune only |
-| `microvm-sandbox` | on | forbidden | `gondolin`, no network | all |
-| `yolo-guarded` | on | forbidden | `bwrap` | all |
+| Scenario          | Command guard | Workspace escape | Sandbox                | Docker guard                           |
+| ----------------- | ------------- | ---------------- | ---------------------- | -------------------------------------- |
+| `nas-strict`      | on            | forbidden        | `bwrap`                | all (including volume prune)           |
+| `homelab-host`    | on            | allowed          | off                    | host-root mounts and volume prune only |
+| `microvm-sandbox` | on            | forbidden        | `gondolin`, no network | all                                    |
+| `yolo-guarded`    | on            | forbidden        | `bwrap`                | all                                    |
 
 ```bash
 export THEBE_SCENARIO=nas-strict

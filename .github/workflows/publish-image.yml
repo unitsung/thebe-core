@@ -3,11 +3,11 @@ name: publish-image
 # Builds the supported Core container (docs/DEPLOYMENT.md, ADR 0002) for both
 # supported architectures and pushes it to GitHub Container Registry. The
 # package is private while this repository is private; it becomes public with
-# the open-source release.
+# the open-source release. It runs on version tags and manual dispatch, not on
+# every commit: a push to `dev`/`main` is verified by the `verify` workflow.
 
 on:
   push:
-    branches: [dev, main]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -45,11 +45,11 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=latest
 
       - name: Build and push the multi-arch image
         uses: docker/build-push-action@v6

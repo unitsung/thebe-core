@@ -49,7 +49,7 @@ type CapturedRequest = { url: string; init: RequestInit | undefined };
 
 function fakeFetch(
   captured: CapturedRequest[],
-  respond: () => Response | Promise<Response>,
+  respond: () => Response | Promise<Response>
 ): FetchLike {
   return async (url, init) => {
     captured.push({ url, init });
@@ -58,14 +58,18 @@ function fakeFetch(
 }
 
 function sse(frames: unknown[]): Response {
-  const body = frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join("");
+  const body = frames
+    .map((frame) => `data: ${JSON.stringify(frame)}\n\n`)
+    .join("");
   return new Response(body, {
     status: 200,
     headers: { "content-type": "text/event-stream" },
   });
 }
 
-async function collect(stream: AsyncIterable<unknown>): Promise<AntigravityEvent[]> {
+async function collect(
+  stream: AsyncIterable<unknown>
+): Promise<AntigravityEvent[]> {
   const events: AntigravityEvent[] = [];
   for await (const event of stream) {
     events.push(event as AntigravityEvent);
@@ -82,7 +86,10 @@ describe("Antigravity requests", () => {
         {
           name: "read",
           description: "Read a file",
-          parameters: { type: "object", properties: { path: { type: "string" } } },
+          parameters: {
+            type: "object",
+            properties: { path: { type: "string" } },
+          },
         },
       ],
     });
@@ -95,7 +102,7 @@ describe("Antigravity requests", () => {
     });
 
     expect(request.url).toBe(
-      "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse",
+      "https://cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
     );
     expect(request.body).toMatchObject({
       project: "project-1",
@@ -104,7 +111,9 @@ describe("Antigravity requests", () => {
       userAgent: "antigravity",
     });
     const payload = request.body.request as Record<string, unknown>;
-    expect(payload.systemInstruction).toEqual({ parts: [{ text: "You are Thebe." }] });
+    expect(payload.systemInstruction).toEqual({
+      parts: [{ text: "You are Thebe." }],
+    });
     expect(payload.contents).toMatchObject([
       { role: "user", parts: [{ text: "hello" }] },
     ]);
@@ -123,16 +132,22 @@ describe("Antigravity requests", () => {
 
   it("uses budgets below Gemini 3 and honours thinking off", () => {
     const twoFive = model("gemini-2.5-flash");
-    expect(antigravityThinkingConfig(piAi, twoFive, { reasoning: "low" })).toEqual({
+    expect(
+      antigravityThinkingConfig(piAi, twoFive, { reasoning: "low" })
+    ).toEqual({
       includeThoughts: true,
       thinkingBudget: 2048,
     });
-    expect(antigravityThinkingConfig(piAi, twoFive, { reasoning: "off" })).toEqual({
+    expect(
+      antigravityThinkingConfig(piAi, twoFive, { reasoning: "off" })
+    ).toEqual({
       thinkingBudget: 0,
     });
     // Gemini 3 cannot disable thinking: pi maps "off" to the lowest supported
     // level through the model's thinkingLevelMap.
-    expect(antigravityThinkingConfig(piAi, model(), { reasoning: "off" })).toEqual({
+    expect(
+      antigravityThinkingConfig(piAi, model(), { reasoning: "off" })
+    ).toEqual({
       thinkingLevel: "MINIMAL",
     });
     expect(antigravityThinkingConfig(piAi, model(), {})).toBeUndefined();
@@ -145,23 +160,32 @@ describe("Antigravity requests", () => {
       context: transcript.normalizeContext({
         messages: [{ role: "user", content: "hi", timestamp: 0 }],
         tools: [
-          { name: "read", description: "r", parameters: { type: "object", properties: {} } },
+          {
+            name: "read",
+            description: "r",
+            parameters: { type: "object", properties: {} },
+          },
         ],
       }),
       options: {},
       credential: credential(),
     });
-    const tools = (request.body.request as Record<string, unknown>).tools as Array<{
+    const tools = (request.body.request as Record<string, unknown>)
+      .tools as Array<{
       functionDeclarations: Array<Record<string, unknown>>;
     }>;
     expect(tools[0]!.functionDeclarations[0]).toHaveProperty("parameters");
-    expect(tools[0]!.functionDeclarations[0]).not.toHaveProperty("parametersJsonSchema");
+    expect(tools[0]!.functionDeclarations[0]).not.toHaveProperty(
+      "parametersJsonSchema"
+    );
   });
 });
 
 describe("Antigravity SSE parsing", () => {
   it("buffers partial frames and unwraps the response envelope", () => {
-    const first = splitSseFrames('data: {"response":{"candidates":[]}}\n\ndata: {"cand');
+    const first = splitSseFrames(
+      'data: {"response":{"candidates":[]}}\n\ndata: {"cand'
+    );
     expect(first.payloads).toEqual(['{"response":{"candidates":[]}}']);
     const second = splitSseFrames(`${first.rest}idates":[]}\n\n`);
     expect(second.payloads).toEqual(['{"candidates":[]}']);
@@ -240,27 +264,48 @@ describe("Antigravity streaming", () => {
       credential: async () => credential(),
       fetchImpl: fakeFetch(captured, () =>
         sse([
-          { response: { candidates: [{ content: { parts: [{ text: "Hel" }] } }] } },
-          { response: { candidates: [{ content: { parts: [{ text: "lo" }] } }] } },
           {
             response: {
-              candidates: [{ content: { parts: [{ text: "!" }] }, finishReason: "STOP" }],
-              usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 3, totalTokenCount: 8 },
+              candidates: [{ content: { parts: [{ text: "Hel" }] } }],
             },
           },
-        ]),
+          {
+            response: {
+              candidates: [{ content: { parts: [{ text: "lo" }] } }],
+            },
+          },
+          {
+            response: {
+              candidates: [
+                { content: { parts: [{ text: "!" }] }, finishReason: "STOP" },
+              ],
+              usageMetadata: {
+                promptTokenCount: 5,
+                candidatesTokenCount: 3,
+                totalTokenCount: 8,
+              },
+            },
+          },
+        ])
       ),
       endpoint: "https://cloudcode-pa.googleapis.com",
     };
     const events = await collect(
-      streamAntigravity(deps, model(), { messages: [{ role: "user", content: "hi" }] }, {}),
+      streamAntigravity(
+        deps,
+        model(),
+        { messages: [{ role: "user", content: "hi" }] },
+        {}
+      )
     );
 
     expect(captured).toHaveLength(1);
     const headers = captured[0]!.init?.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer access-token");
     expect(headers["X-Goog-Api-Client"]).toContain("google-cloud-sdk");
-    expect(JSON.parse(String(captured[0]!.init?.body)).project).toBe("project-1");
+    expect(JSON.parse(String(captured[0]!.init?.body)).project).toBe(
+      "project-1"
+    );
 
     expect(events.map((event) => event.type)).toEqual([
       "start",
@@ -282,18 +327,27 @@ describe("Antigravity streaming", () => {
     const deps = {
       piAi,
       credential: async () => credential(),
-      fetchImpl: fakeFetch([], () =>
-        new Response(
-          JSON.stringify({
-            response: {
-              candidates: [{ content: { parts: [{ text: "once" }] }, finishReason: "STOP" }],
-            },
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        ),
+      fetchImpl: fakeFetch(
+        [],
+        () =>
+          new Response(
+            JSON.stringify({
+              response: {
+                candidates: [
+                  {
+                    content: { parts: [{ text: "once" }] },
+                    finishReason: "STOP",
+                  },
+                ],
+              },
+            }),
+            { status: 200, headers: { "content-type": "application/json" } }
+          )
       ),
     };
-    const events = await collect(streamAntigravity(deps, model(), { messages: [] }, {}));
+    const events = await collect(
+      streamAntigravity(deps, model(), { messages: [] }, {})
+    );
     expect(events.map((event) => event.type)).toEqual([
       "start",
       "text_start",
@@ -307,16 +361,25 @@ describe("Antigravity streaming", () => {
     const deps = {
       piAi,
       credential: async () => credential(),
-      fetchImpl: fakeFetch([], () =>
-        new Response(JSON.stringify({ error: { message: "quota exhausted" } }), {
-          status: 429,
-          headers: { "content-type": "application/json" },
-        }),
+      fetchImpl: fakeFetch(
+        [],
+        () =>
+          new Response(
+            JSON.stringify({ error: { message: "quota exhausted" } }),
+            {
+              status: 429,
+              headers: { "content-type": "application/json" },
+            }
+          )
       ),
     };
-    const events = await collect(streamAntigravity(deps, model(), { messages: [] }, {}));
+    const events = await collect(
+      streamAntigravity(deps, model(), { messages: [] }, {})
+    );
     expect(events.map((event) => event.type)).toEqual(["error"]);
-    expect((events[0]!.error as { errorMessage: string }).errorMessage).toBe("quota exhausted");
+    expect((events[0]!.error as { errorMessage: string }).errorMessage).toBe(
+      "quota exhausted"
+    );
   });
 });
 
@@ -335,7 +398,10 @@ type ProviderShape = {
     allowNetwork: boolean;
     signal: AbortSignal;
     stored?: { models?: unknown[] };
-    publish?: (publication: { update?: () => void; persist?: unknown }) => Promise<boolean>;
+    publish?: (publication: {
+      update?: () => void;
+      persist?: unknown;
+    }) => Promise<boolean>;
   }) => Promise<unknown>;
 };
 
@@ -346,7 +412,7 @@ describe("Antigravity provider registration", () => {
     options: {
       connected?: boolean;
       listModels?: () => Promise<Array<{ id: string; displayName?: string }>>;
-    } = {},
+    } = {}
   ): ProviderShape {
     return createAntigravityProvider({
       piAi,
@@ -360,7 +426,9 @@ describe("Antigravity provider registration", () => {
     const connected = provider();
     expect(connected.id).toBe("google-antigravity");
     expect(connected.baseUrl).toBe("https://cloudcode-pa.googleapis.com");
-    expect(connected.getModels().map((entry) => entry.id)).toEqual(ANTIGRAVITY_BASELINE_IDS);
+    expect(connected.getModels().map((entry) => entry.id)).toEqual(
+      ANTIGRAVITY_BASELINE_IDS
+    );
     expect(await connected.auth.apiKey.check()).toEqual({
       type: "api_key",
       source: "person@example.com",
@@ -376,11 +444,16 @@ describe("Antigravity provider registration", () => {
 
   it("overlays the account's models only when the network is allowed", async () => {
     const live = provider({
-      listModels: async () => [{ id: "gemini-3-pro-high", displayName: "Gemini 3 Pro High" }],
+      listModels: async () => [
+        { id: "gemini-3-pro-high", displayName: "Gemini 3 Pro High" },
+      ],
     });
     const signal = new AbortController().signal;
     const published: Array<{ update?: () => void; persist?: unknown }> = [];
-    const publish = async (publication: { update?: () => void; persist?: unknown }) => {
+    const publish = async (publication: {
+      update?: () => void;
+      persist?: unknown;
+    }) => {
       published.push(publication);
       publication.update?.();
       return true;
@@ -388,7 +461,9 @@ describe("Antigravity provider registration", () => {
 
     // Offline refreshes leave the published catalog untouched.
     await live.refreshModels?.({ allowNetwork: false, signal, publish });
-    expect(live.getModels().map((entry) => entry.id)).toEqual(ANTIGRAVITY_BASELINE_IDS);
+    expect(live.getModels().map((entry) => entry.id)).toEqual(
+      ANTIGRAVITY_BASELINE_IDS
+    );
     expect(published).toHaveLength(0);
 
     // A network refresh adds the account's real models (pi merges them over the
@@ -399,14 +474,16 @@ describe("Antigravity provider registration", () => {
       "gemini-3-pro-high",
     ]);
     expect(
-      (published.at(-1)?.persist as { models: Array<{ id: string }> }).models.map(
-        (entry) => entry.id,
-      ),
+      (
+        published.at(-1)!.persist as { models: Array<{ id: string }> }
+      ).models.map((entry) => entry.id)
     ).toEqual(["gemini-3-pro-high"]);
 
     // Without a Google session the baseline survives.
     const disconnected = provider({ connected: false });
     await disconnected.refreshModels?.({ allowNetwork: true, signal, publish });
-    expect(disconnected.getModels().map((entry) => entry.id)).toEqual(ANTIGRAVITY_BASELINE_IDS);
+    expect(disconnected.getModels().map((entry) => entry.id)).toEqual(
+      ANTIGRAVITY_BASELINE_IDS
+    );
   });
 });

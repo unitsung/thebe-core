@@ -56,6 +56,7 @@ class MemoryTerminal implements Terminal {
   clearScreen(): void {}
   setTitle(): void {}
   setProgress(): void {}
+  setProgramStatus(): void {}
 }
 
 const provider: ContainerInfoProvider = {
@@ -101,7 +102,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       "# Status\n\n**25 running** and `nginx`\n\n- one\n- two",
       1,
       1,
-      defaultMarkdownTheme,
+      defaultMarkdownTheme
     );
     const joined = md.render(40).join("\n");
     expect(joined).toContain("Status");
@@ -137,9 +138,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     });
     editor.onSubmit?.("hello");
     await new Promise((r) => setTimeout(r, 40));
-    const markdown = tui.children.filter(
-      (child) => child instanceof Markdown,
-    );
+    const markdown = tui.children.filter((child) => child instanceof Markdown);
     expect(markdown).toHaveLength(2);
     expect(markdown[0]!.render(40).join("\n")).toContain("hello");
     const reply = markdown[1]!.render(40).join("\n");
@@ -148,7 +147,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
     expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
     expect(
-      tui.children.some((child) => child.constructor.name === "Loader"),
+      tui.children.some((child) => child.constructor.name === "Loader")
     ).toBe(false);
   });
 
@@ -176,7 +175,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       agent,
       sessionId: parent.thebeSessionId,
     });
-    const footer = tui.children.at(-1) as { render: (width: number) => string[] };
+    const footer = tui.children.at(-1) as {
+      render: (width: number) => string[];
+    };
     expect(footer.render(100).join("\n")).toContain("Tasks");
     expect(footer.render(100).join("\n")).toContain("click/Ctrl+G open");
 
@@ -215,7 +216,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
 
     // TUI dispatches input to the topmost modal overlay. Selecting it must
     // reveal the original Task pane instead of leaving the user at the chat.
-    (tui as unknown as { handleTerminalInput: (data: string) => void }).handleTerminalInput("\r");
+    (
+      tui as unknown as { handleTerminalInput: (data: string) => void }
+    ).handleTerminalInput("\r");
     await expect(picker).resolves.toMatchObject({ value: "deny" });
     expect(tui.hasOverlay()).toBe(true);
 
@@ -256,7 +259,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     });
     expect(tui.hasOverlay()).toBe(true);
 
-    (tui as unknown as { handleTerminalInput: (data: string) => void }).handleTerminalInput("\r");
+    (
+      tui as unknown as { handleTerminalInput: (data: string) => void }
+    ).handleTerminalInput("\r");
     await vi.waitFor(() => {
       expect(agent.pendingPermissionIds()).toHaveLength(0);
     });
@@ -268,7 +273,10 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
 
   it("keeps the parent conversation visible while a goal runs in the background", async () => {
     const fake = createFakeRuntime();
-    fake.queueTurns([{ kind: "hang" }, { kind: "text", text: "parent continues normally" }]);
+    fake.queueTurns([
+      { kind: "hang" },
+      { kind: "text", text: "parent continues normally" },
+    ]);
     const agent = createThebeAgent({ runtime: fake.runtime, provider });
     const parent = await agent.createSession({ title: "goal-continuation" });
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
@@ -279,7 +287,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
 
     await handleSlash("/goal finish the checkpoint");
     await vi.waitFor(() => {
-      expect(agent.getGoal(parent.thebeSessionId)?.activeSubagent?.status).toBe("running");
+      expect(agent.getGoal(parent.thebeSessionId)?.activeSubagent?.status).toBe(
+        "running"
+      );
     });
     expect(tui.hasOverlay()).toBe(false);
 
@@ -340,12 +350,16 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       goal: "Finish and verify the saved task",
       maxIterations: 2,
     });
-    await expect(agent.waitGoal(goalSession.thebeSessionId)).resolves.toMatchObject({
+    await expect(
+      agent.waitGoal(goalSession.thebeSessionId)
+    ).resolves.toMatchObject({
       status: "completed",
       finalReport: expect.stringContaining("child artifact verified"),
     });
 
-    const otherSession = await agent.createSession({ title: "current-session" });
+    const otherSession = await agent.createSession({
+      title: "current-session",
+    });
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
     const { handleSlash, editor } = attachThebeChat(tui, {
       agent,
@@ -366,7 +380,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
 
     expect(tui.children.at(-1)?.render(120).join("\n")).toContain("Tasks");
     expect(
-      (await agent.listSubagents(goalSession.thebeSessionId)).map((run) => run.result),
+      (await agent.listSubagents(goalSession.thebeSessionId)).map(
+        (run) => run.result
+      )
     ).toEqual([
       "worker checkpoint result",
       "VERDICT: pass\nEVIDENCE: child artifact verified\nREMAINING: none",
@@ -386,7 +402,9 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       },
     ]);
     const agent = createThebeAgent({ runtime: fake.runtime, provider });
-    const parent = await agent.createSession({ title: "goal-does-not-interrupt" });
+    const parent = await agent.createSession({
+      title: "goal-does-not-interrupt",
+    });
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
     const { editor, handleSlash } = attachThebeChat(tui, {
       agent,
@@ -425,12 +443,10 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     tui.children.splice(
       tui.children.indexOf(editor),
       0,
-      new Markdown("keep-me-not", 1, 1, defaultMarkdownTheme),
+      new Markdown("keep-me-not", 1, 1, defaultMarkdownTheme)
     );
     editor.onSubmit?.("/clear");
-    expect(tui.children.some((child) => child instanceof Markdown)).toBe(
-      false,
-    );
+    expect(tui.children.some((child) => child instanceof Markdown)).toBe(false);
     expect(tui.children.at(-1)?.constructor.name).toBe("FooterDock");
     expect(tui.children.at(-2)?.constructor.name).toBe("Editor");
   });
@@ -447,18 +463,22 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
 
     const pickerPromise = handleSlash("/model");
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(tui.children.some((child) => child instanceof SearchableModelPicker)).toBe(true);
+    expect(
+      tui.children.some((child) => child instanceof SearchableModelPicker)
+    ).toBe(true);
 
     await handleSlash("/clear");
     await expect(
       Promise.race([
         pickerPromise,
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("picker was not cancelled")), 100),
+          setTimeout(() => reject(new Error("picker was not cancelled")), 100)
         ),
-      ]),
+      ])
     ).resolves.toBe(true);
-    expect(tui.children.some((child) => child instanceof SearchableModelPicker)).toBe(false);
+    expect(
+      tui.children.some((child) => child instanceof SearchableModelPicker)
+    ).toBe(false);
   });
 
   it("does not append a late history load after switching sessions", async () => {
@@ -468,9 +488,13 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     const second = await agent.createSession({ title: "second" });
 
     fake.queueTurns([{ kind: "text", text: "first-session marker" }]);
-    await agent.prompt("first request", { thebeSessionId: first.thebeSessionId });
+    await agent.prompt("first request", {
+      thebeSessionId: first.thebeSessionId,
+    });
     fake.queueTurns([{ kind: "text", text: "second-session marker" }]);
-    await agent.prompt("second request", { thebeSessionId: second.thebeSessionId });
+    await agent.prompt("second request", {
+      thebeSessionId: second.thebeSessionId,
+    });
 
     const originalLoadMessages = agent.loadMessages.bind(agent);
     let releaseFirstLoad = () => {};
@@ -495,8 +519,15 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
     await handleSlash(`/tree ${second.thebeSessionId}`);
     const visible = () =>
       tui.children
-        .filter((child) => typeof (child as { render?: unknown }).render === "function")
-        .map((child) => (child as { render: (width: number) => string[] }).render(80).join("\n"))
+        .filter(
+          (child) =>
+            typeof (child as { render?: unknown }).render === "function"
+        )
+        .map((child) =>
+          (child as { render: (width: number) => string[] })
+            .render(80)
+            .join("\n")
+        )
         .join("\n");
     expect(visible()).toContain("second-session marker");
 
@@ -585,7 +616,9 @@ describe("Thebe TUI agent slash commands", () => {
     editor.onSubmit?.("render markdown");
     await new Promise((r) => setTimeout(r, 80));
 
-    const reply = tui.children.filter((child) => child instanceof Markdown).at(-1)!;
+    const reply = tui.children
+      .filter((child) => child instanceof Markdown)
+      .at(-1)!;
     const rendered = reply.render(100).join("\n");
     const plainRendered = rendered.replace(/\x1b\[[0-9;]*m/g, "");
     expect(rendered).toContain("Result");
@@ -626,7 +659,9 @@ describe("Thebe TUI agent slash commands", () => {
       const transcript = tui.children
         .map((child) => child.render(80).join("\n"))
         .join("\n");
-      expect(transcript).not.toContain("I am checking the relevant files first.");
+      expect(transcript).not.toContain(
+        "I am checking the relevant files first."
+      );
 
       chat.toggleThinking();
       const expanded = tui.children
@@ -646,7 +681,9 @@ describe("Thebe TUI agent slash commands", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.list", id: "call_container_list", args: {} }],
+        calls: [
+          { name: "container.list", id: "call_container_list", args: {} },
+        ],
       },
       { kind: "text", text: "after tool" },
     ]);
@@ -691,7 +728,7 @@ describe("Thebe TUI agent slash commands", () => {
       tui.children
         .filter((child) => child instanceof Markdown)
         .map((child) => child.render(80).join("\n"))
-        .join("\n"),
+        .join("\n")
     ).not.toContain("Auto-summary");
     const footerLines = tui.children.at(-1)!.render(80);
     expect(footerLines).toHaveLength(3);
@@ -715,7 +752,7 @@ describe("Thebe TUI agent slash commands", () => {
     const agent = createThebeAgent({ runtime: fake.runtime, provider });
     const meta = await agent.createSession();
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
-    const { editor, handleSlash } = attachThebeChat(tui, {
+    const { handleSlash } = attachThebeChat(tui, {
       agent,
       sessionId: meta.thebeSessionId,
     });
@@ -741,7 +778,9 @@ describe("Thebe TUI agent slash commands", () => {
     expect(allText).toContain("Alt+Enter");
     expect(allText).toContain("switched to branch");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
-    const footer = tui.children.at(-1) as { render: (width: number) => string[] };
+    const footer = tui.children.at(-1) as {
+      render: (width: number) => string[];
+    };
     const footerText = footer.render(80).join("\n");
     expect(footerText).toContain("fake-2 • thinking off");
   });
@@ -784,7 +823,9 @@ describe("Thebe TUI agent slash commands", () => {
       .join("\n");
     expect(allText).toContain("no assistant response found to copy");
 
-    fake.queueTurns([{ kind: "text", text: "Generated assistant response for copy" }]);
+    fake.queueTurns([
+      { kind: "text", text: "Generated assistant response for copy" },
+    ]);
     await agent.prompt("hello", { thebeSessionId: meta.thebeSessionId });
     await handleSlash("/copy");
 
@@ -792,7 +833,9 @@ describe("Thebe TUI agent slash commands", () => {
       .filter((child) => child instanceof Text)
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(allText).toMatch(/copied last response|clipboard command unavailable/);
+    expect(allText).toMatch(
+      /copied last response|clipboard command unavailable/
+    );
   });
 
   it("registers slash commands in OpenCode Session/Agent/Provider/System groups", () => {
@@ -810,19 +853,19 @@ describe("Thebe TUI agent slash commands", () => {
         "fork",
         "revert",
         "delete",
-      ]),
+      ])
     );
     expect(byCategory("Agent")).toEqual(
-      expect.arrayContaining(["model", "thinking", "agents"]),
+      expect.arrayContaining(["model", "thinking", "agents"])
     );
     expect(byCategory("Provider")).toEqual(
-      expect.arrayContaining(["login", "logout"]),
+      expect.arrayContaining(["login", "logout"])
     );
     expect(byCategory("System")).toEqual(
-      expect.arrayContaining(["help", "quit", "settings", "hotkeys"]),
+      expect.arrayContaining(["help", "quit", "settings", "hotkeys"])
     );
     expect(byCategory("Thebe")).toEqual(
-      expect.arrayContaining(["skills", "mcp", "subagent"]),
+      expect.arrayContaining(["skills", "mcp", "subagent"])
     );
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("theme");
     expect(SLASH_COMMANDS.map((c) => c.name)).not.toContain("tui");
@@ -901,7 +944,7 @@ describe("Thebe TUI agent slash commands", () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({ runtime: fake.runtime, provider });
     const session1 = await agent.createSession({ title: "session-alpha" });
-    const session2 = await agent.createSession({ title: "session-beta" });
+    await agent.createSession({ title: "session-beta" });
 
     const tui: TUI = new TuiMainScreen(new MemoryTerminal());
     const { handleSlash } = attachThebeChat(tui, {
@@ -913,7 +956,7 @@ describe("Thebe TUI agent slash commands", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     const picker = tui.children.find(
-      (c) => c.constructor.name === "SearchableSessionPicker",
+      (c) => c.constructor.name === "SearchableSessionPicker"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(picker).toBeDefined();
 
@@ -939,8 +982,13 @@ describe("Thebe TUI agent slash commands", () => {
 
     const visible = () =>
       tui.children
-        .filter((child) => typeof (child as { render?: unknown }).render === "function")
-        .map((child) => (child as { render: (w: number) => string[] }).render(80).join("\n"))
+        .filter(
+          (child) =>
+            typeof (child as { render?: unknown }).render === "function"
+        )
+        .map((child) =>
+          (child as { render: (w: number) => string[] }).render(80).join("\n")
+        )
         .join("\n");
 
     await handleSlash("/history");
@@ -975,7 +1023,7 @@ describe("Thebe TUI agent slash commands", () => {
 
     // A provider picker component is attached
     const providerPicker = tui.children.find(
-      (c) => c.constructor.name === "SearchableProviderPicker",
+      (c) => c.constructor.name === "SearchableProviderPicker"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(providerPicker).toBeDefined();
 
@@ -985,7 +1033,7 @@ describe("Thebe TUI agent slash commands", () => {
 
     // Next, the model picker scoped to that provider is attached
     const modelPicker = tui.children.find(
-      (c) => c.constructor.name === "SearchableModelPicker",
+      (c) => c.constructor.name === "SearchableModelPicker"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(modelPicker).toBeDefined();
 
@@ -1042,7 +1090,7 @@ describe("Thebe TUI agent slash commands", () => {
       .join("\n");
     expect(reply.render(40).join("\n")).toBe(expected);
     expect(reply.render(40).join("\n")).not.toBe(
-      new Markdown("# Hello", 1, 1, defaultMarkdownTheme).render(40).join("\n"),
+      new Markdown("# Hello", 1, 1, defaultMarkdownTheme).render(40).join("\n")
     );
   });
 
@@ -1080,7 +1128,7 @@ describe("Thebe TUI agent slash commands", () => {
     const settingsPromise = handleSlash("/settings");
     await new Promise((r) => setTimeout(r, 20));
     const list = tui.children.find(
-      (c) => c.constructor.name === "SettingsList",
+      (c) => c.constructor.name === "SettingsList"
     ) as { handleInput: (data: string) => void };
     expect(list).toBeDefined();
     list.handleInput("\r");
@@ -1105,7 +1153,9 @@ describe("Thebe TUI agent slash commands", () => {
         .map((child) => child.render(80).join("\n"))
         .join("\n");
     const footer = () =>
-      (tui.children.at(-1) as { render: (w: number) => string[] }).render(80).join("\n");
+      (tui.children.at(-1) as { render: (w: number) => string[] })
+        .render(80)
+        .join("\n");
 
     editor.handleInput("\x1b[Z");
     await new Promise((r) => setTimeout(r, 30));
@@ -1137,10 +1187,18 @@ describe("Thebe TUI agent slash commands", () => {
     editor.onSubmit?.("run bash");
     await new Promise((r) => setTimeout(r, 40));
     const list = tui.children.find(
-      (c) => c.constructor.name === "SelectList",
-    ) as { handleInput: (data: string) => void; render: (width: number) => string[] } | undefined;
+      (c) => c.constructor.name === "SelectList"
+    ) as
+      | {
+          handleInput: (data: string) => void;
+          render: (width: number) => string[];
+        }
+      | undefined;
     expect(list).toBeDefined();
-    const choices = list!.render(80).join("\n").replace(/\x1b\[[0-9;]*m/g, "");
+    const choices = list!
+      .render(80)
+      .join("\n")
+      .replace(/\x1b\[[0-9;]*m/g, "");
     expect(choices).toContain("Deny bash (high risk)");
     expect(choices).toContain("Allow bash once");
     expect(choices).toContain("Always allow bash for this session (high risk)");
@@ -1174,7 +1232,7 @@ describe("Thebe TUI agent slash commands", () => {
     editor.onSubmit?.("run the first command");
     await new Promise((r) => setTimeout(r, 40));
     const list = tui.children.find(
-      (c) => c.constructor.name === "SelectList",
+      (c) => c.constructor.name === "SelectList"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(list).toBeDefined();
     // The tool-wide choice is the third item; the first item is selected by default.
@@ -1182,16 +1240,22 @@ describe("Thebe TUI agent slash commands", () => {
     list!.handleInput("\x1b[B");
     list!.handleInput("\r");
     await new Promise((r) => setTimeout(r, 80));
-    expect((await agent.getSession(meta.thebeSessionId)).rememberedPermissions).toEqual({
+    expect(
+      (await agent.getSession(meta.thebeSessionId)).rememberedPermissions
+    ).toEqual({
       bash: "allow",
     });
-    expect(tui.children.filter((c) => c.constructor.name === "SelectList")).toEqual([]);
+    expect(
+      tui.children.filter((c) => c.constructor.name === "SelectList")
+    ).toEqual([]);
     await vi.waitFor(() => expect(isResponding()).toBe(false));
 
     editor.onSubmit?.("run the second command");
     await new Promise((r) => setTimeout(r, 80));
     expect(agent.pendingPermissionIds()).toHaveLength(0);
-    expect(tui.children.filter((c) => c.constructor.name === "SelectList")).toEqual([]);
+    expect(
+      tui.children.filter((c) => c.constructor.name === "SelectList")
+    ).toEqual([]);
   });
 
   it("copyToClipboard succeeds via native clipboard or OSC 52", async () => {
@@ -1202,7 +1266,7 @@ describe("Thebe TUI agent slash commands", () => {
     expect(ok).toBe(true);
     if (writes.length > 0) {
       expect(writes.join("")).toContain(
-        Buffer.from("secret-reply", "utf8").toString("base64"),
+        Buffer.from("secret-reply", "utf8").toString("base64")
       );
     }
   });
@@ -1220,7 +1284,7 @@ describe("Thebe TUI agent slash commands", () => {
     const loginPromise = handleSlash("/login opencode");
     await new Promise((r) => setTimeout(r, 20));
     const keyInput = tui.children.find(
-      (c) => c.constructor.name === "Input",
+      (c) => c.constructor.name === "Input"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(keyInput).toBeDefined();
     for (const char of "sk-opencode-test") {
@@ -1256,10 +1320,16 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
   function findNamed(
     tui: TUI,
-    name: string,
-  ): { handleInput: (data: string) => void; render: (width: number) => string[] } {
+    name: string
+  ): {
+    handleInput: (data: string) => void;
+    render: (width: number) => string[];
+  } {
     const child = tui.children.find((c) => c.constructor.name === name) as
-      | { handleInput: (data: string) => void; render: (width: number) => string[] }
+      | {
+          handleInput: (data: string) => void;
+          render: (width: number) => string[];
+        }
       | undefined;
     expect(child).toBeDefined();
     return child!;
@@ -1267,17 +1337,23 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
   function findNamedOrNull(
     tui: TUI,
-    name: string,
-  ): { handleInput: (data: string) => void; render: (width: number) => string[] } | null {
+    name: string
+  ): {
+    handleInput: (data: string) => void;
+    render: (width: number) => string[];
+  } | null {
     const child = tui.children.find((c) => c.constructor.name === name) as
-      | { handleInput: (data: string) => void; render: (width: number) => string[] }
+      | {
+          handleInput: (data: string) => void;
+          render: (width: number) => string[];
+        }
       | undefined;
     return child ?? null;
   }
 
   function typeAndConfirm(
     component: { handleInput: (data: string) => void },
-    text: string,
+    text: string
   ): void {
     for (const char of text) {
       component.handleInput(char);
@@ -1288,7 +1364,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
   async function sessionModel(
     fake: ReturnType<typeof createFakeRuntime>,
     agent: ReturnType<typeof createThebeAgent>,
-    thebeSessionId: string,
+    thebeSessionId: string
   ) {
     const meta = await agent.getSession(thebeSessionId);
     return fake.snapshot(meta.runtimeSessionId).model;
@@ -1312,24 +1388,24 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
       const slashPromise = handleSlash(`/provider ${listed.id}`);
       const modelsForProvider = allModels.filter(
-        (m) => m.providerId === listed.id,
+        (m) => m.providerId === listed.id
       );
       if (modelsForProvider.length === 0) {
         await slashPromise;
         expect(notices(tui).toLowerCase()).toContain(listed.id);
         expect(notices(tui)).toMatch(/no models available for provider/i);
         expect(
-          tui.children.some((c) => c instanceof SearchableModelPicker),
+          tui.children.some((c) => c instanceof SearchableModelPicker)
         ).toBe(false);
         expect(await sessionModel(fake, agent, meta.thebeSessionId)).toEqual(
-          before,
+          before
         );
         continue;
       }
 
       await flush();
       const modelPicker = tui.children.find(
-        (c) => c instanceof SearchableModelPicker,
+        (c) => c instanceof SearchableModelPicker
       ) as SearchableModelPicker;
       expect(modelPicker).toBeDefined();
       const rendered = modelPicker.render(80).join("\n");
@@ -1351,7 +1427,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({ runtime: fake.runtime, provider });
     const providers = (await agent.listProviders()).filter((p) =>
-      FAKE_RUNTIME_MODELS.some((m) => m.providerId === p.id),
+      FAKE_RUNTIME_MODELS.some((m) => m.providerId === p.id)
     );
     expect(providers.length).toBeGreaterThan(1);
 
@@ -1367,19 +1443,19 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       typeAndConfirm(findNamed(tui, "SearchableProviderPicker"), listed.id);
       await flush();
       const modelPicker = tui.children.find(
-        (c) => c instanceof SearchableModelPicker,
+        (c) => c instanceof SearchableModelPicker
       ) as SearchableModelPicker;
       expect(modelPicker.render(80).join("\n")).toContain(`[${listed.id}]`);
       for (const other of providers) {
         if (other.id === listed.id) continue;
         expect(modelPicker.render(80).join("\n")).not.toContain(
-          `[${other.id}]`,
+          `[${other.id}]`
         );
       }
       modelPicker.handleInput("\r");
       await slashPromise;
       expect(
-        (await sessionModel(fake, agent, meta.thebeSessionId)).providerId,
+        (await sessionModel(fake, agent, meta.thebeSessionId)).providerId
       ).toBe(listed.id);
     }
 
@@ -1390,17 +1466,15 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       sessionId: meta.thebeSessionId,
     });
     const mixed = providers[0]!;
-    const slashPromise = handleSlash(
-      `/provider ${mixed.id.toUpperCase()}`,
-    );
+    const slashPromise = handleSlash(`/provider ${mixed.id.toUpperCase()}`);
     await flush();
     const modelPicker = tui.children.find(
-      (c) => c instanceof SearchableModelPicker,
+      (c) => c instanceof SearchableModelPicker
     ) as SearchableModelPicker;
     modelPicker.handleInput("\r");
     await slashPromise;
     expect(
-      (await sessionModel(fake, agent, meta.thebeSessionId)).providerId,
+      (await sessionModel(fake, agent, meta.thebeSessionId)).providerId
     ).toBe(mixed.id);
   });
 
@@ -1410,7 +1484,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     const providers = await agent.listProviders();
     const allModels = await agent.listAvailableModels();
     const empty = providers.find(
-      (p) => !allModels.some((m) => m.providerId === p.id),
+      (p) => !allModels.some((m) => m.providerId === p.id)
     );
     expect(empty).toBeDefined();
 
@@ -1423,10 +1497,10 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     });
     await handleSlash(`/provider ${empty!.id}`);
     expect(notices(tui)).toMatch(
-      new RegExp(`no models available for provider ${empty!.id}`, "i"),
+      new RegExp(`no models available for provider ${empty!.id}`, "i")
     );
     expect(await sessionModel(fake, agent, meta.thebeSessionId)).toEqual(
-      before,
+      before
     );
   });
 
@@ -1441,7 +1515,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     });
     const providers = await agent.listProviders();
     const apiKeyProviders = providers.filter((p) =>
-      p.authMethods?.includes("apiKey"),
+      p.authMethods?.includes("apiKey")
     );
     expect(apiKeyProviders.length).toBeGreaterThan(1);
 
@@ -1459,7 +1533,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       expect(fake.apiKeys.get(listed.id)).toBe(key);
       if (FAKE_RUNTIME_MODELS.some((m) => m.providerId === listed.id)) {
         expect(
-          (await sessionModel(fake, agent, meta.thebeSessionId)).providerId,
+          (await sessionModel(fake, agent, meta.thebeSessionId)).providerId
         ).toBe(listed.id);
       }
       await handleSlash(`/logout ${listed.id}`);
@@ -1477,7 +1551,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       sessionId: meta.thebeSessionId,
     });
     const oauthProviders = (await agent.listProviders()).filter((p) =>
-      p.authMethods?.includes("oauth"),
+      p.authMethods?.includes("oauth")
     );
     expect(oauthProviders.length).toBeGreaterThan(1);
 
@@ -1498,7 +1572,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       expect(row?.authStatus).toBe("connected");
       if (FAKE_RUNTIME_MODELS.some((m) => m.providerId === listed.id)) {
         expect(
-          (await sessionModel(fake, agent, meta.thebeSessionId)).providerId,
+          (await sessionModel(fake, agent, meta.thebeSessionId)).providerId
         ).toBe(listed.id);
       }
       await handleSlash(`/logout ${listed.id}`);
@@ -1518,7 +1592,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     const providers = await agent.listProviders();
     const chosen = providers.find(
       (p) =>
-        p.authMethods?.includes("apiKey") && !p.authMethods?.includes("oauth"),
+        p.authMethods?.includes("apiKey") && !p.authMethods?.includes("oauth")
     );
     expect(chosen).toBeDefined();
 
@@ -1558,7 +1632,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     const slashPromise = handleSlash("/model some-unprefixed-id");
     await flush();
     const picker = tui.children.find(
-      (c) => c instanceof SearchableModelPicker,
+      (c) => c instanceof SearchableModelPicker
     ) as SearchableModelPicker | undefined;
     expect(picker).toBeDefined();
     const listed = picker!.render(80).join("\n");
@@ -1583,7 +1657,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
               { id: "auto-model-1", name: "Auto Model One" },
               { id: "auto-model-2", name: "Auto Model Two" },
             ],
-          }),
+          })
         );
         return;
       }
@@ -1634,7 +1708,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       // Step 5: Auto-fetched Model selection (SelectList)
       await vi.waitFor(
         () => expect(findNamedOrNull(tui, "SelectList")).not.toBeNull(),
-        { timeout: 10_000 },
+        { timeout: 10_000 }
       );
       const modelSelect = findNamed(tui, "SelectList");
       // Select first auto-fetched model (auto-model-1)
@@ -1647,7 +1721,9 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       typeAndConfirm(reasoningInput, "y");
       await customPromise;
 
-      expect(notices(tui)).toContain("configured custom provider test-custom-provider (auto-model-1)");
+      expect(notices(tui)).toContain(
+        "configured custom provider test-custom-provider (auto-model-1)"
+      );
       expect(fake.apiKeys.get("test-custom-provider")).toBe("sk-custom-secret");
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -1772,7 +1848,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     expect(allText).toContain("forked session");
 
     await handleSlash(
-      `/export ${join(tmpdir(), `thebe-export-${meta.thebeSessionId.slice(0, 8)}`)}`,
+      `/export ${join(tmpdir(), `thebe-export-${meta.thebeSessionId.slice(0, 8)}`)}`
     );
     allText = tui.children
       .filter((child) => child instanceof Text)
@@ -1812,7 +1888,9 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
     expect(allText).toContain("new session created");
-    expect(tui.children.filter((child) => child instanceof Markdown)).toHaveLength(0);
+    expect(
+      tui.children.filter((child) => child instanceof Markdown)
+    ).toHaveLength(0);
   });
 
   it("/fork without an argument opens a picker and switches to the selected branch", async () => {
@@ -1837,24 +1915,24 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     const forkPromise = handleSlash("/fork");
     await new Promise((r) => setTimeout(r, 20));
     const picker = tui.children.find(
-      (c) => c.constructor.name === "SelectList",
+      (c) => c.constructor.name === "SelectList"
     ) as { handleInput: (data: string) => void } | undefined;
     expect(picker).toBeDefined();
     picker!.handleInput("\r");
     await forkPromise;
 
     expect(tui.children.some((c) => c.constructor.name === "SelectList")).toBe(
-      false,
+      false
     );
     const current = agent.lastThebeSessionId();
     expect(current).toBeDefined();
     expect(current).not.toBe(parent.thebeSessionId);
     expect((await agent.getSession(current!)).parentThebeSessionId).toBe(
-      parent.thebeSessionId,
+      parent.thebeSessionId
     );
-    expect((await agent.loadMessages(current!)).map((message) => message.text)).toEqual([
-      "fork this turn",
-    ]);
+    expect(
+      (await agent.loadMessages(current!)).map((message) => message.text)
+    ).toEqual(["fork this turn"]);
     expect(editor.getText()).toBe("fork this turn");
   });
 
@@ -1870,9 +1948,13 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
     const mcpPromise = handleSlash("/mcp");
     await vi.waitFor(() => {
-      expect(tui.children.some((child) => child.constructor.name === "SelectList")).toBe(true);
+      expect(
+        tui.children.some((child) => child.constructor.name === "SelectList")
+      ).toBe(true);
     });
-    let list = tui.children.find((child) => child.constructor.name === "SelectList") as {
+    let list = tui.children.find(
+      (child) => child.constructor.name === "SelectList"
+    ) as {
       handleInput: (data: string) => void;
       render: (width: number) => string[];
     };
@@ -1882,10 +1964,16 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
 
     const deletePromise = handleSlash("/delete");
     await vi.waitFor(() => {
-      expect(tui.children.some((child) => child.constructor.name === "SelectList")).toBe(true);
+      expect(
+        tui.children.some((child) => child.constructor.name === "SelectList")
+      ).toBe(true);
     });
-    list = tui.children.find((child) => child.constructor.name === "SelectList") as typeof list;
-    expect(list.render(80).join("\n")).toContain("Delete remove me and transcript");
+    list = tui.children.find(
+      (child) => child.constructor.name === "SelectList"
+    ) as typeof list;
+    expect(list.render(80).join("\n")).toContain(
+      "Delete remove me and transcript"
+    );
     list.handleInput("\x1b[B");
     list.handleInput("\r");
     await deletePromise;

@@ -1,5 +1,12 @@
-import { createAuditLog, hashParameters } from "../../agent/security/audit/audit-log.ts";
-import type { AgentRuntime, RuntimeModelRef, RuntimeSession } from "../runtime/index.ts";
+import {
+  createAuditLog,
+  hashParameters,
+} from "../../agent/security/audit/audit-log.ts";
+import type {
+  AgentRuntime,
+  RuntimeModelRef,
+  RuntimeSession,
+} from "../runtime/index.ts";
 import type { OpenedSession } from "./session-state.ts";
 import {
   DEFAULT_AGENT_AUTO_SUMMARY_DELAY_MS,
@@ -7,26 +14,28 @@ import {
   MIN_AGENT_AUTO_SUMMARY_DELAY_MS,
 } from "../settings/product.ts";
 
-export const DEFAULT_AUTO_SUMMARY_DELAY_MS = DEFAULT_AGENT_AUTO_SUMMARY_DELAY_MS;
+export const DEFAULT_AUTO_SUMMARY_DELAY_MS =
+  DEFAULT_AGENT_AUTO_SUMMARY_DELAY_MS;
 
 function normalizeDelay(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_AUTO_SUMMARY_DELAY_MS;
   return Math.min(
     MAX_AGENT_AUTO_SUMMARY_DELAY_MS,
-    Math.max(MIN_AGENT_AUTO_SUMMARY_DELAY_MS, Math.round(value as number)),
+    Math.max(MIN_AGENT_AUTO_SUMMARY_DELAY_MS, Math.round(value as number))
   );
 }
 
 export function summaryTranscript(
-  messages: ReturnType<RuntimeSession["messages"]>,
+  messages: ReturnType<RuntimeSession["messages"]>
 ): string {
   const rows: string[] = [];
   let remaining = 60_000;
   for (const message of [...messages].reverse()) {
     if (remaining <= 0) break;
-    const role = message.role === "tool"
-      ? `tool:${message.toolName ?? "unknown"}`
-      : message.role;
+    const role =
+      message.role === "tool"
+        ? `tool:${message.toolName ?? "unknown"}`
+        : message.role;
     const text = message.text.trim();
     if (!text) continue;
     const clipped = text.slice(0, Math.min(text.length, remaining, 6_000));
@@ -46,7 +55,10 @@ export function createAutoSummary(input: {
   streaming: Set<string>;
   promptLocks: Set<string>;
   persist(meta: OpenedSession["meta"]): Promise<void>;
-  appendEvent(thebeSessionId: string, event: { type: "summary_ready"; summary: string; generatedAt: string }): void;
+  appendEvent(
+    thebeSessionId: string,
+    event: { type: "summary_ready"; summary: string; generatedAt: string }
+  ): void;
   enabled?: boolean;
   delayMs?: number;
 }) {
@@ -55,8 +67,12 @@ export function createAutoSummary(input: {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const runs = new Set<string>();
 
-  function enabled(): boolean { return enabledOverride ?? true; }
-  function delayMs(): number { return delayOverride; }
+  function enabled(): boolean {
+    return enabledOverride ?? true;
+  }
+  function delayMs(): number {
+    return delayOverride;
+  }
 
   function cancel(thebeSessionId: string): void {
     const timer = timers.get(thebeSessionId);
@@ -66,7 +82,10 @@ export function createAutoSummary(input: {
 
   async function generate(thebeSessionId: string): Promise<void> {
     if (!enabled() || runs.has(thebeSessionId)) return;
-    if (input.streaming.has(thebeSessionId) || input.promptLocks.has(thebeSessionId)) {
+    if (
+      input.streaming.has(thebeSessionId) ||
+      input.promptLocks.has(thebeSessionId)
+    ) {
       schedule(thebeSessionId);
       return;
     }
@@ -76,7 +95,8 @@ export function createAutoSummary(input: {
     if (
       messages.filter((message) => message.role === "user").length === 0 ||
       messages.filter((message) => message.role === "assistant").length === 0
-    ) return;
+    )
+      return;
     const transcript = summaryTranscript(messages);
     if (!transcript) return;
     const activityAtStart = opened.meta.lastActiveAt;
@@ -88,12 +108,13 @@ export function createAutoSummary(input: {
         model: input.model,
         customTools: [],
         builtinTools: [],
-        systemPrompt: "You are Thebe's background task summarizer. Do not perform actions or use tools. Summarize only what is evidenced in the transcript. Return concise Markdown in the same language as the user. Include: result, important files or changes, validation/tests, and remaining follow-ups. If there are no follow-ups, say so.",
+        systemPrompt:
+          "You are Thebe's background task summarizer. Do not perform actions or use tools. Summarize only what is evidenced in the transcript. Return concise Markdown in the same language as the user. Include: result, important files or changes, validation/tests, and remaining follow-ups. If there are no follow-ups, say so.",
         autoCompact: false,
         inMemory: true,
       });
       await summarySession.prompt(
-        `Summarize this completed coding task:\n\n<conversation>\n${transcript}\n</conversation>`,
+        `Summarize this completed coding task:\n\n<conversation>\n${transcript}\n</conversation>`
       );
       const summary = summarySession.lastAssistantText().trim();
       const current = input.openedSessions.get(thebeSessionId);
@@ -102,21 +123,32 @@ export function createAutoSummary(input: {
         !current ||
         current.meta.lastActiveAt !== activityAtStart ||
         current.session.messages().length !== messageCountAtStart
-      ) return;
+      )
+        return;
       const generatedAt = input.now().toISOString();
-      current.meta = { ...current.meta, lastSummary: summary, lastSummaryAt: generatedAt };
+      current.meta = {
+        ...current.meta,
+        lastSummary: summary,
+        lastSummaryAt: generatedAt,
+      };
       await input.persist(current.meta);
-      input.appendEvent(thebeSessionId, { type: "summary_ready", summary, generatedAt });
+      input.appendEvent(thebeSessionId, {
+        type: "summary_ready",
+        summary,
+        generatedAt,
+      });
     } catch (error) {
-      await input.audit?.append({
-        method: "summary.auto",
-        parameterHash: hashParameters({}),
-        responseBytes: 0,
-        budgetConsumed: 0,
-        redactionFired: false,
-        sessionId: thebeSessionId,
-        result: "error",
-      }).catch(() => {});
+      await input.audit
+        ?.append({
+          method: "summary.auto",
+          parameterHash: hashParameters({}),
+          responseBytes: 0,
+          budgetConsumed: 0,
+          redactionFired: false,
+          sessionId: thebeSessionId,
+          result: "error",
+        })
+        .catch(() => {});
       void error;
     } finally {
       summarySession?.dispose();
@@ -142,6 +174,8 @@ export function createAutoSummary(input: {
 
   function setDelayMs(value: number): void {
     delayOverride = normalizeDelay(value);
+    // Snapshot: schedule() can re-insert timer ids while iterating.
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const id of [...timers.keys()]) schedule(id);
   }
 

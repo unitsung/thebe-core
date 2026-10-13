@@ -5,7 +5,6 @@ import {
   type AgentRuntime,
   type CreateRuntimeSessionOptions,
   type RuntimeModel,
-  type RuntimeModelRef,
 } from "../../agent/runtime/interface.ts";
 import { createFakeRuntimeAuth } from "./fake-auth.ts";
 import {
@@ -36,7 +35,7 @@ export type FakeRuntimeHarness = {
 };
 
 export function createFakeRuntime(
-  options: FakeRuntimeOptions = {},
+  options: FakeRuntimeOptions = {}
 ): FakeRuntimeHarness {
   const sessions = new Map<string, FakeSessionState>();
   const queue: FakeQueuedTurn[] = [];
@@ -76,7 +75,7 @@ export function createFakeRuntime(
 
   function applyCreate(
     state: FakeSessionState,
-    create: CreateRuntimeSessionOptions,
+    create: CreateRuntimeSessionOptions
   ): void {
     state.tools = create.customTools;
     state.builtinTools = [...(create.builtinTools ?? state.builtinTools)];
@@ -142,7 +141,7 @@ export function createFakeRuntime(
       let copied = parent.messages.map((message) => ({ ...message }));
       if (fork?.atEntryId) {
         const index = copied.findIndex(
-          (message) => message.id === fork.atEntryId,
+          (message) => message.id === fork.atEntryId
         );
         if (index < 0) {
           throw new Error(`unknown message: ${fork.atEntryId}`);
@@ -186,7 +185,7 @@ export function createFakeRuntime(
       return models.filter(
         (model) =>
           !query?.providerId ||
-          model.providerId.toLowerCase() === query.providerId.toLowerCase(),
+          model.providerId.toLowerCase() === query.providerId.toLowerCase()
       );
     },
     async listAvailableModels(query?: { providerId?: string }) {
@@ -194,7 +193,7 @@ export function createFakeRuntime(
         (model) =>
           model.available !== false &&
           (!query?.providerId ||
-            model.providerId.toLowerCase() === query.providerId.toLowerCase()),
+            model.providerId.toLowerCase() === query.providerId.toLowerCase())
       );
     },
     async listProviders() {
@@ -218,7 +217,7 @@ export function createFakeRuntime(
     },
     registerSessionLiveness(
       sessionId: string,
-      isActive: () => boolean,
+      isActive: () => boolean
     ): () => void {
       livenessRegistry.set(sessionId, isActive);
       return () => {
@@ -227,7 +226,7 @@ export function createFakeRuntime(
     },
     reapInactiveSessions(): number {
       let reaped = 0;
-      for (const [sessionId, isActive] of [...livenessRegistry.entries()]) {
+      for (const [sessionId, isActive] of livenessRegistry.entries()) {
         if (isActive()) {
           continue;
         }

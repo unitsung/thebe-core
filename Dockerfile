@@ -25,7 +25,7 @@ ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /app
-COPY package.json package-lock.json tsconfig.json vite.config.ts ./
+COPY package.json package-lock.json tsconfig.json tsdown.config.ts ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY src ./src
 # Build, drop dev dependencies, and strip files the running process never reads:
