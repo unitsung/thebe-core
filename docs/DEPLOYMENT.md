@@ -111,6 +111,21 @@ THEBE_WORKSPACE_DIR=/path/to/work \
 unset it generates one, persists it under the config dir, and prints it once
 (`THEBE_TOKEN ...`).
 
+### 2.1 Build the container image on this host
+
+`.github/workflows/publish-image.yml` builds and pushes the multi-arch image and
+is the canonical source. To build and verify one locally — fast on a Linux host,
+slower through a Docker VM on macOS — use the helper, which tags the image and
+then runs the pi-ai resolution check and the smoke test inside it:
+
+```bash
+bash scripts/build-image.sh                 # tags thebe-core:local
+bash scripts/build-image.sh thebe-core:dev   # custom tag
+```
+
+BuildKit is required (the Dockerfile mounts a cache); Docker 23+ and Compose v2
+enable it by default. This never pushes.
+
 ## 3. Production configuration
 
 | Variable | Required | Meaning |
