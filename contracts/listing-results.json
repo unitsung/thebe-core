@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "examples": {
+    "container.list": [
+      {
+        "id": "c1",
+        "name": "emby",
+        "image": "emby/embyserver:latest",
+        "state": "running",
+        "status": "Up 3 days",
+        "created": 1760000000
+      },
+      {
+        "id": "c2",
+        "name": "qbittorrent",
+        "image": "linuxserver/qbittorrent",
+        "state": "exited",
+        "status": "Exited (1) 2 hours ago",
+        "created": 1760000100
+      }
+    ],
+    "download.list": {
+      "downloads": [
+        {
+          "hash": "0123456789abcdef0123456789abcdef01234567",
+          "name": "Dune.Part.Two.2024.2160p",
+          "state": "downloading",
+          "progress": 0.42,
+          "sizeBytes": 21474836480,
+          "downloadSpeedBytes": 5242880,
+          "etaSeconds": 3600,
+          "category": "movies"
+        },
+        {
+          "hash": "fedcba9876543210fedcba9876543210fedcba98",
+          "name": "Album.FLAC",
+          "state": "completed",
+          "progress": 1,
+          "sizeBytes": 734003200
+        }
+      ]
+    },
+    "files.list": {
+      "entries": [
+        {
+          "name": "Movies",
+          "path": "/media/Movies",
+          "isDirectory": true
+        },
+        {
+          "name": "Dune.mkv",
+          "path": "/media/Dune.mkv",
+          "isDirectory": false,
+          "sizeBytes": 21474836480,
+          "modifiedAt": "2026-10-01T08:30:00Z"
+        }
+      ],
+      "total": 2
+    }
+  }
+}
