@@ -10,6 +10,7 @@ import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
 import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
+import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/openlist-transfer.ts";
 import { createFileJobStore } from "../agent/pipeline/job-store.ts";
 import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowlarr-search.ts";
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
@@ -220,6 +221,7 @@ export async function bootstrapThebe(
     navidrome,
     pipeline: {
       downloads: createQBittorrentDownloadProviderFromEnv(),
+      transfer: createOpenListTransferProviderFromEnv(),
       files: createOpenListFilesProviderFromEnv(),
       libraries: createLibraryRefreshProvidersFromEnv(),
       search: createProwlarrSearchProviderFromEnv(),

@@ -16,12 +16,14 @@ import { createScheduleApi } from "./schedules/service.ts";
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const ctx = createAgentContext(options);
-  const artifactStore = options.artifactStore ?? createArtifactStore({
-    dir: options.agentStoreDir
-      ? join(options.agentStoreDir, "artifacts")
-      : undefined,
-    now: ctx.now,
-  });
+  const artifactStore =
+    options.artifactStore ??
+    createArtifactStore({
+      dir: options.agentStoreDir
+        ? join(options.agentStoreDir, "artifacts")
+        : undefined,
+      now: ctx.now,
+    });
   const extensions = createExtensionApi(ctx, artifactStore);
   const subagents = createSubagentApi(ctx, artifactStore);
   const goals = createGoalApi(ctx, subagents, artifactStore);
@@ -33,13 +35,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const sessions = createSessionApi(ctx, restoreSessionState);
   const prompts = createPromptApi(ctx);
   const schedules = createScheduleApi({
-    dir: options.agentStoreDir ? join(options.agentStoreDir, "schedules") : undefined,
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "schedules")
+      : undefined,
     now: ctx.now,
     goals: { ...sessions, ...goals },
     checkWritable: ctx.checkNotQuiesced,
     isQuiesced: () => options.runtime.isQuiesced(),
   });
   schedules.start();
+  ctx.pipelineAdvancer?.start();
   const activityStore = createActivityStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "activity")
@@ -81,8 +86,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     setScheduleEnabled: schedules.setScheduleEnabled,
     deleteSchedule: schedules.deleteSchedule,
     runSchedule: schedules.runSchedule,
-    async quiesce() { await schedules.stop(); await options.runtime.quiesce(); },
-    async unquiesce() { await options.runtime.unquiesce(); schedules.start(); },
+    async quiesce() {
+      ctx.pipelineAdvancer?.stop();
+      await schedules.stop();
+      await options.runtime.quiesce();
+    },
+    async unquiesce() {
+      await options.runtime.unquiesce();
+      schedules.start();
+      ctx.pipelineAdvancer?.start();
+    },
     ...diagnosis,
     ...actions,
     async listArtifacts(query) {

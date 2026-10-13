@@ -8,7 +8,14 @@ export function createFileJobStore(path: string): JobStore {
     load() {
       try {
         const data: unknown = JSON.parse(readFileSync(path, "utf8"));
-        return Array.isArray(data) ? (data as Job[]).filter(job => job && typeof job.id === "string" && typeof job.hash === "string") : [];
+        return Array.isArray(data)
+          ? (data as Job[]).filter(
+              (job) =>
+                job &&
+                typeof job.id === "string" &&
+                typeof job.stage === "string"
+            )
+          : [];
       } catch {
         return [];
       }

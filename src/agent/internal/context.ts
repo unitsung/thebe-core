@@ -29,8 +29,14 @@ import { createServiceAPITools } from "../tools/service-api-tools.ts";
 import {
   allPipelineToolNames,
   availablePipelineTools,
+  canRunPipelineJobs,
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
+import { createJobBook } from "../pipeline/job-runner.ts";
+import {
+  createPipelineAdvancer,
+  pipelineAdvanceIntervalMs,
+} from "../pipeline/advancer.ts";
 import { PIPELINE_WRITE_TOOL_NAMES } from "../capabilities/pipeline.ts";
 import {
   SERVICE_API_TOOL_NAMES,
@@ -261,6 +267,30 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     outputDirectory,
     options.pipeline ? allPipelineToolNames(options.pipeline) : []
   );
+  // One durable job set shared by the pipeline tools and the background
+  // advancer, so a job keeps moving after the app session that started it stops.
+  const pipelineProviders = options.pipeline;
+  const pipelineBook =
+    pipelineProviders && canRunPipelineJobs(pipelineProviders)
+      ? createJobBook(
+          {
+            downloads: pipelineProviders.downloads,
+            transfer: pipelineProviders.transfer,
+            files: pipelineProviders.files!,
+            libraries: pipelineProviders.libraries,
+            media: pipelineProviders.media,
+          },
+          pipelineProviders.jobStore
+        )
+      : undefined;
+  const pipelineAdvancer = pipelineBook
+    ? createPipelineAdvancer({
+        book: pipelineBook,
+        intervalMs: pipelineAdvanceIntervalMs(),
+        isQuiesced: () => options.runtime.isQuiesced(),
+      })
+    : undefined;
+
   const eventLog = createEventLog();
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
@@ -527,6 +557,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ...createPipelineTools(options.pipeline, {
           policy: toolPolicy,
           callerId: toolCallerId,
+          book: pipelineBook,
+          onAcquired: (jobId) => pipelineAdvancer?.track(jobId),
         })
       );
     tools.push(
@@ -868,6 +900,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     baseTools,
     sessionOptions,
     runPrompt,
+    pipelineAdvancer,
     lookupRemembered,
     registerSubagentParentCanceller,
     cancelSubagentsForParent,
