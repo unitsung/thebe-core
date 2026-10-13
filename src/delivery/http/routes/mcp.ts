@@ -4,10 +4,16 @@ import {
   DIAGNOSE_FROM_EVENTS_TOOL,
   LIST_CORE_EVENTS_TOOL,
   listCoreMcpTools,
+  toMcpWireTool,
+  type McpWireTool,
 } from "../../../agent/extensions/mcp.ts";
+import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
 import { asObject, json, readJson } from "../json.ts";
 
-const MCP_EVENT_TOOLS = [LIST_CORE_EVENTS_TOOL, DIAGNOSE_FROM_EVENTS_TOOL] as const;
+const MCP_EVENT_TOOLS = [
+  LIST_CORE_EVENTS_TOOL,
+  DIAGNOSE_FROM_EVENTS_TOOL,
+] as const;
 
 const ALIASES: Record<string, (typeof CONTAINER_TOOL_NAMES)[number]> = {
   containers_summary: "container.status_summary",
@@ -20,70 +26,83 @@ const ALL_TOOL_NAMES = new Set<string>([
   ...Object.keys(ALIASES),
 ]);
 
-function listedCoreTools(): Array<{
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}> {
-  return listCoreMcpTools().map(({ name, description, inputSchema }) => ({
-    name,
-    description,
-    inputSchema,
-  }));
+/**
+ * Failures of the request itself (no such tool, no agent service) are JSON-RPC errors; a tool that
+ * ran and failed, or rejected its input, is an `isError` result so the model can read and recover.
+ */
+class McpProtocolError extends Error {
+  constructor(
+    message: string,
+    readonly code: number
+  ) {
+    super(message);
+  }
 }
+
+const AGENT_REQUIRED = "MCP tools require the Thebe agent service";
 
 async function callTool(
   agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
   name: string,
-  args: unknown,
-): Promise<string> {
+  args: unknown
+): Promise<{ text: string; isError: boolean }> {
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
-    if (!agent) throw new Error("MCP tools require the Thebe agent service");
-    return agent.invokeTool(name, asObject(args) ?? {});
+    if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
+    return agent.invokeToolDetailed(name, asObject(args) ?? {});
   }
   const mapped = ALIASES[name] ?? name;
   if (ALL_TOOL_NAMES.has(name)) {
-    if (!agent) {
-      throw new Error("MCP tools require the Thebe agent service");
-    }
-    return agent.invokeTool(mapped, asObject(args) ?? {});
+    if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
+    return agent.invokeToolDetailed(mapped, asObject(args) ?? {});
   }
   if (agent) {
     const coreCapability = (await agent.listMcpTools()).find((tool) => {
-      return tool.source === "core" && (tool.id === mapped || tool.name === mapped);
+      return (
+        tool.source === "core" && (tool.id === mapped || tool.name === mapped)
+      );
     });
     if (coreCapability) {
-      return agent.invokeTool(coreCapability.name, asObject(args) ?? {});
+      return agent.invokeToolDetailed(
+        coreCapability.name,
+        asObject(args) ?? {}
+      );
     }
   }
   if (agent && name.startsWith("mcp:")) {
-    return agent.invokeTool(name, asObject(args) ?? {});
+    return agent.invokeToolDetailed(name, asObject(args) ?? {});
   }
-  throw new Error(`unknown tool: ${name}`);
+  throw new McpProtocolError(`unknown tool: ${name}`, -32602);
 }
 
 async function listedTools(
-  agent?: NonNullable<ThebeHttpContext["agent"]>,
-): Promise<Array<{
-  name: string;
-  description: string;
-  inputSchema: Record<string, unknown>;
-}>> {
-  if (!agent) return listedCoreTools();
-  return (await agent.listMcpTools()).map(({ name, description, inputSchema }) => ({
-    name,
-    description,
-    inputSchema,
-  }));
+  agent?: NonNullable<ThebeHttpContext["agent"]>
+): Promise<McpWireTool[]> {
+  const capabilities = agent ? await agent.listMcpTools() : listCoreMcpTools();
+  return capabilities.map(toMcpWireTool);
+}
+
+/**
+ * Text stays the universal fallback; a JSON object result is also offered as `structuredContent`
+ * so clients can read typed data without re-parsing the text.
+ */
+function toolResult(text: string, isError = false): Record<string, unknown> {
+  const result: Record<string, unknown> = { content: [{ type: "text", text }] };
+  if (isError) {
+    result.isError = true;
+    return result;
+  }
+  const parsed = parseCapabilityResult(text);
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    result.structuredContent = parsed;
+  }
+  return result;
 }
 
 function mcpError(id: unknown, code: number, message: string): Response {
   return json({ jsonrpc: "2.0", id, error: { code, message } });
 }
 
-export async function handleMcp(
-  context: ThebeHttpContext,
-): Promise<Response> {
+export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
   const body = await readJson(context.request);
   const { agent } = context;
   const id = body.id ?? null;
@@ -116,7 +135,7 @@ export async function handleMcp(
             "System is quiesced for maintenance; write operations are temporarily disabled",
         },
       },
-      503,
+      503
     );
   }
   if (method === "tools/list") {
@@ -131,18 +150,14 @@ export async function handleMcp(
     const name = typeof params.name === "string" ? params.name : "";
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
-      const text = await callTool(agent, name, params.arguments);
-      return json({
-        jsonrpc: "2.0",
-        id,
-        result: { content: [{ type: "text", text }] },
-      });
+      const { text, isError } = await callTool(agent, name, params.arguments);
+      return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
     } catch (error) {
-      return mcpError(
-        id,
-        -32000,
-        error instanceof Error ? error.message : String(error),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      if (error instanceof McpProtocolError)
+        return mcpError(id, error.code, message);
+      // The model can read and recover from a tool failure only when it is a result, not a protocol error.
+      return json({ jsonrpc: "2.0", id, result: toolResult(message, true) });
     }
   }
   return mcpError(id, -32601, "Method not found");

@@ -365,6 +365,11 @@ export interface ThebeAgent {
   deleteProviderConfiguration(providerId: string): Promise<void>;
   exportSession(thebeSessionId?: string): Promise<RuntimeExport>;
   invokeTool(name: string, args: unknown): Promise<string>;
+  /** `invokeTool` plus the tool's own failure flag, for the MCP `isError` result. */
+  invokeToolDetailed(
+    name: string,
+    args: unknown
+  ): Promise<{ text: string; isError: boolean }>;
   invokeCapability(
     id: string,
     input?: CapabilityInvokeInput

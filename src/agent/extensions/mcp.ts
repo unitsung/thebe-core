@@ -201,6 +201,44 @@ export const CORE_EVENT_TOOLS: Record<
   },
 };
 
+/** Tool shape on the wire (`tools/list`): standard MCP fields, with Thebe's extras namespaced under `_meta`. */
+export type McpWireTool = {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations: {
+    readOnlyHint: boolean;
+    destructiveHint: boolean;
+    openWorldHint: boolean;
+  };
+  _meta: Record<string, unknown>;
+};
+
+/**
+ * Derive MCP tool annotations from Core's own classification, never from a remote server's claims.
+ * A capability is read-only when its effect (or, without one, its permission) says so. A write is
+ * destructive unless Core classified it `risk: "low"`, which is the safe default for unclassified
+ * external tools. Hosts treat these as hints; Core's policy engine remains the enforcement point.
+ */
+export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
+  const readOnly = (capability.effect ?? (capability.permission === "read" ? "read" : "write")) === "read";
+  return {
+    name: capability.name,
+    description: capability.description,
+    inputSchema: capability.inputSchema,
+    annotations: {
+      readOnlyHint: readOnly,
+      destructiveHint: !readOnly && capability.risk !== "low",
+      openWorldHint: capability.source === EXTERNAL_CAPABILITY_SOURCE || capability.service === "public-music",
+    },
+    _meta: {
+      "thebe/category": capability.category,
+      ...(capability.resourceKinds?.length ? { "thebe/resourceKinds": capability.resourceKinds } : {}),
+      ...(capability.approval ? { "thebe/approval": capability.approval } : {}),
+    },
+  };
+}
+
 export function withProductMetadata(capability: HomelabCapability): HomelabCapability {
   return {
     ...capability,

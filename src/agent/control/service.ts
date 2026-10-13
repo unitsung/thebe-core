@@ -192,6 +192,15 @@ export function createControlApi(
   }
 
   async function invokeTool(name: string, args: unknown): Promise<string> {
+    return (await invokeToolDetailed(name, args)).text;
+  }
+
+  /** Same as `invokeTool`, but keeps the tool's own failure flag for callers that speak MCP. */
+  async function invokeToolDetailed(
+    name: string,
+    args: unknown
+  ): Promise<{ text: string; isError: boolean }> {
+    const ok = (text: string) => ({ text, isError: false });
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
     }
@@ -224,24 +233,24 @@ export function createControlApi(
           );
         }
       }
-      return JSON.stringify(await options.strmRepairProvider.repair(input));
+      return ok(JSON.stringify(await options.strmRepairProvider.repair(input)));
     }
     const params = (args ?? {}) as Record<string, unknown>;
     if (name === SERVICE_API_CONFIRM_TOOL_NAME) {
-      return JSON.stringify(await confirmServiceOperation(params));
+      return ok(JSON.stringify(await confirmServiceOperation(params)));
     }
     if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
-      return JSON.stringify(await invokeServiceOperation(name, params));
+      return ok(JSON.stringify(await invokeServiceOperation(name, params)));
     }
     const external = await mcp.invokeTool(name, params);
-    if (external !== undefined) return external;
+    if (external !== undefined) return ok(external);
     if (name in CORE_EVENT_TOOLS) {
       // Preserve the JSON control-plane contract. Conversation calls still go
       // through the untrusted-output wrapper and session policy.
       const tool = baseTools().find((item) => item.name === name);
       if (!tool) throw new Error(`unknown tool: ${name}`);
       const result = await tool.execute("mcp", params);
-      return result.content.map((block) => block.text).join("\n");
+      return ok(result.content.map((block) => block.text).join("\n"));
     }
     const tools = wrapCustomTools(baseTools(), { policy, audit });
     const tool = tools.find((item) => item.name === name);
@@ -249,7 +258,10 @@ export function createControlApi(
       throw new Error(`unknown tool: ${name}`);
     }
     const result = await tool.execute("mcp", args ?? {});
-    return result.content.map((block) => block.text).join("\n");
+    return {
+      text: result.content.map((block) => block.text).join("\n"),
+      isError: result.isError === true,
+    };
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
@@ -505,6 +517,7 @@ export function createControlApi(
       return audit?.get(id);
     },
     invokeTool,
+    invokeToolDetailed,
     async invokeCapability(
       id: string,
       input: CapabilityInvokeInput = {}

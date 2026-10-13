@@ -56,7 +56,7 @@ kind and opening its content from task details. Existing Artifact retention
 limits still apply. Authorization/Proxy-Authorization Bearer and Basic tokens
 are redacted in logs and Artifact content.
 
-This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` remains unchanged for integrations. The durable product contract is described in `docs/CORE-NEXT-PRODUCT-SPEC.md`.
+This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` stays the integration surface (see "Raw `/mcp` contract" below). The durable product contract is described in `docs/CORE-NEXT-PRODUCT-SPEC.md`.
 
 ## Session-scoped full-access preset (2026-10-13)
 
@@ -253,3 +253,11 @@ arguments. Core permission modes remain `ask`, `read-only`, and `full-access`.
 | --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
 | Activity Approval / Receipt | `GET /v1/activity`, `POST /v1/action`, `POST /v1/activity/{id}/deny` | Diagnose-restart; one id mutates Approval → Receipt                            |
 | Runtime pending permission  | `GET /v1/permissions`, session permission resolve                    | In-prompt tool confirmation (`bash` / `write` / `edit`, …); redacted args; TTL |
+
+## Raw `/mcp` contract
+
+`POST /mcp` is a stateless JSON-RPC endpoint (protocol `2025-06-18`, `tools` only; no resources or prompts).
+
+- `tools/list` returns each tool with standard `annotations`: `readOnlyHint` and `destructiveHint` come from Core's own `effect`/`risk` classification (never from a remote server's claims), and `openWorldHint` is true for external or public-web tools. Thebe extras are namespaced under `_meta`: `thebe/category`, `thebe/resourceKinds`, `thebe/approval`. No `outputSchema` is advertised yet.
+- `tools/call` returns text `content` (the universal fallback) and, when the result is a JSON object, the same data as `structuredContent`.
+- A tool that ran and failed, or rejected its input (including writes that need runtime approval), returns `result.isError: true` with the message as text. Only a failure of the request itself is a JSON-RPC error: `-32602` for an unknown tool, `-32000` when no agent service is attached, `-32003` while quiesced.

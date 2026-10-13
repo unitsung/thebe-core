@@ -361,7 +361,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     );
     const body = await json(res);
     expect(body.error).toMatchObject({
-      code: -32000,
+      code: -32602,
       message: "unknown tool: bash",
     });
   });
@@ -523,10 +523,16 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     );
 
     expect(response.status).toBe(200);
+    // Rejected input is a tool result the model can act on, not a protocol error.
     expect(await json(response)).toMatchObject({
-      error: {
-        code: -32000,
-        message: "strm.repair requires resource.provider=openlist",
+      result: {
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: "strm.repair requires resource.provider=openlist",
+          },
+        ],
       },
     });
     expect(called).toBe(false);
