@@ -1,3 +1,4 @@
+import { createStaleToolResultExtension } from "./stale-tool-results.ts";
 import { randomUUID } from "node:crypto";
 import type {
   CreateRuntimeSessionOptions,
@@ -233,6 +234,16 @@ export async function openPiSession(
         )
       );
     }
+    // Results the model has already answered from are resent on every later call; shorten them.
+    permissionExtension.push(
+      await sdk.loadExtensionFromFactory(
+        createStaleToolResultExtension() as never,
+        create.cwd ?? cwd,
+        sdk.createEventBus(),
+        extensionRuntime,
+        "thebe://tool-result-hygiene"
+      )
+    );
     return { extensions: permissionExtension, runtime: extensionRuntime };
   }
   const loadedExtensions = await loadSessionExtensions();
