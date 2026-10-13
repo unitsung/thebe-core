@@ -283,6 +283,8 @@ describe("NavidromeAdapter", () => {
     expect(direct.items[0]).toEqual(
       expect.objectContaining({
         queueId: "song-1",
+        albumId: "album-1",
+        artistId: "artist-1",
         title: "Afterglow",
         artist: "Night Service",
         album: "Quiet Hours",

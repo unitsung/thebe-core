@@ -122,6 +122,9 @@ export type NavidromeQueueItem = {
   lyrics?: NavidromeLyrics;
   duration?: number;
   year?: number;
+  /** Lets the player link a playing song back to its album and artist. */
+  albumId?: string;
+  artistId?: string;
 };
 
 export type NavidromeQueue = {

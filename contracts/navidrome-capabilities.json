@@ -1,0 +1,319 @@
+{
+  "version": 1,
+  "libraryModes": [
+    "recent",
+    "recently_played",
+    "albums",
+    "artists",
+    "playlists",
+    "songs",
+    "recommended",
+    "random",
+    "frequent",
+    "highest",
+    "starred"
+  ],
+  "capabilities": {
+    "navidrome.library": {
+      "effect": "read",
+      "risk": "low",
+      "approval": "none",
+      "permission": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "recent",
+              "recently_played",
+              "albums",
+              "artists",
+              "playlists",
+              "songs",
+              "recommended",
+              "random",
+              "frequent",
+              "highest",
+              "starred"
+            ],
+            "description": "Library view. Defaults to recent."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "description": "Maximum items to return. Defaults to 30."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based result offset for paged modes."
+          }
+        }
+      }
+    },
+    "navidrome.search": {
+      "effect": "read",
+      "risk": "low",
+      "approval": "none",
+      "permission": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search terms."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60,
+            "description": "Maximum matches per result type. Defaults to 10; raise it only when the results lack the needed matches."
+          }
+        },
+        "required": [
+          "query"
+        ]
+      }
+    },
+    "navidrome.artist": {
+      "effect": "read",
+      "risk": "low",
+      "approval": "none",
+      "permission": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Navidrome artist id."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Maximum similar artists. Defaults to 12."
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    },
+    "navidrome.lyrics": {
+      "effect": "read",
+      "risk": "low",
+      "approval": "none",
+      "permission": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "songId": {
+            "type": "string",
+            "description": "Navidrome song id."
+          }
+        },
+        "required": [
+          "songId"
+        ]
+      }
+    },
+    "navidrome.queue": {
+      "effect": "read",
+      "risk": "low",
+      "approval": "none",
+      "permission": "read",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "songIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered song ids to enqueue."
+          },
+          "albumId": {
+            "type": "string",
+            "description": "Queue an album by id instead of explicit song ids."
+          },
+          "playlistId": {
+            "type": "string",
+            "description": "Queue a playlist by id instead of explicit song ids."
+          },
+          "startIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based item to start from. Defaults to 0."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "transcode"
+            ],
+            "description": "Direct stream or provider transcode. Defaults to direct."
+          },
+          "maxBitRate": {
+            "type": "integer",
+            "enum": [
+              64,
+              128,
+              192,
+              256,
+              320
+            ],
+            "description": "Transcode bitrate in kbps. Defaults to 320."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "Maximum queue items. Defaults to the complete source."
+          },
+          "includeLyrics": {
+            "type": "boolean",
+            "description": "Fetch lyrics for every queue item. Defaults to false."
+          }
+        }
+      }
+    },
+    "navidrome.playlist.create": {
+      "effect": "write",
+      "risk": "low",
+      "approval": "required",
+      "permission": "confirm",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Playlist name."
+          },
+          "songIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional ordered song ids."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      }
+    },
+    "navidrome.playlist.update": {
+      "effect": "write",
+      "risk": "low",
+      "approval": "required",
+      "permission": "confirm",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "playlistId": {
+            "type": "string",
+            "description": "Navidrome playlist id."
+          },
+          "name": {
+            "type": "string",
+            "description": "Optional new name."
+          },
+          "comment": {
+            "type": "string",
+            "description": "Optional description."
+          },
+          "isPublic": {
+            "type": "boolean",
+            "description": "Optional public flag."
+          },
+          "addSongIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Song ids to append."
+          },
+          "removeSongIndexes": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Zero-based playlist indexes to remove."
+          }
+        },
+        "required": [
+          "playlistId"
+        ]
+      }
+    },
+    "navidrome.playlist.delete": {
+      "effect": "write",
+      "risk": "disruptive",
+      "approval": "required",
+      "permission": "confirm",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "playlistId": {
+            "type": "string",
+            "description": "Navidrome playlist id."
+          }
+        },
+        "required": [
+          "playlistId"
+        ]
+      }
+    }
+  },
+  "examples": {
+    "navidrome.queue": {
+      "items": [
+        {
+          "queueId": "song-1",
+          "streamUrl": "https://music.example/rest/stream.view?id=song-1&format=raw",
+          "requestHeaders": {},
+          "title": "First",
+          "artist": "Artist",
+          "album": "Album",
+          "artworkUrl": "https://music.example/rest/getCoverArt.view?id=al-1&size=600",
+          "artworkHeaders": {},
+          "lyrics": {
+            "synced": true,
+            "offsetMilliseconds": 0,
+            "lines": [
+              {
+                "startMilliseconds": 1000,
+                "text": "line"
+              }
+            ]
+          },
+          "duration": 215,
+          "year": 2020,
+          "albumId": "al-1",
+          "artistId": "ar-1"
+        },
+        {
+          "queueId": "song-2",
+          "streamUrl": "https://music.example/rest/stream.view?id=song-2&format=raw",
+          "requestHeaders": {},
+          "title": "Second",
+          "artist": "Artist",
+          "album": "Album"
+        }
+      ],
+      "startIndex": 0,
+      "mode": "direct"
+    },
+    "navidrome.lyrics": {
+      "synced": false,
+      "lines": [
+        {
+          "text": "plain line"
+        }
+      ]
+    }
+  }
+}

@@ -243,6 +243,8 @@ export class NavidromeAdapter implements NavidromeProvider {
         lyrics: lyrics[index],
         duration: song.duration,
         year: song.year,
+        albumId: song.albumId,
+        artistId: song.artistId,
       };
     });
 
