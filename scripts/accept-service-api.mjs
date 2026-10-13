@@ -8,6 +8,10 @@
  *   - the per-operation tools appear under GET /v1/capabilities
  *   - service_api_discover lists the service's operations
  *   - a configured read operation is invoked and returns real data
+ *   - `--confirm` proves the two-phase write contract end to end: the write
+ *     makes no change and returns a confirmToken, `service_api.confirm` executes
+ *     exactly that request, the token cannot be replayed, and (with --verify /
+ *     --expect) the side effect is observable through a read
  *
  * Usage (spawn a throwaway Core):
  *   THEBE_SERVICE_APIS='[{"id":"petstore","baseURL":"https://petstore3.swagger.io/api/v3","openapiPath":"/openapi.json","readOperations":["findPetsByStatus"]}]' \
@@ -47,6 +51,13 @@ function parseArgs(argv) {
     arguments: undefined,
     query: undefined,
     preview: undefined,
+    confirm: undefined,
+    confirmArguments: undefined,
+    verify: undefined,
+    verifyArguments: undefined,
+    expect: undefined,
+    cleanup: undefined,
+    cleanupArguments: undefined,
     keep: false,
     dist: join(coreRoot, "dist"),
   };
@@ -73,6 +84,27 @@ function parseArgs(argv) {
         break;
       case "--preview-arguments":
         options.previewArguments = next();
+        break;
+      case "--confirm":
+        options.confirm = next();
+        break;
+      case "--confirm-arguments":
+        options.confirmArguments = next();
+        break;
+      case "--verify":
+        options.verify = next();
+        break;
+      case "--verify-arguments":
+        options.verifyArguments = next();
+        break;
+      case "--expect":
+        options.expect = next();
+        break;
+      case "--cleanup":
+        options.cleanup = next();
+        break;
+      case "--cleanup-arguments":
+        options.cleanupArguments = next();
         break;
       case "--dist":
         options.dist = resolve(next());
@@ -135,6 +167,23 @@ async function startCore({ dist, env }) {
   return { child, baseUrl };
 }
 
+async function invokeRaw(baseUrl, token, id, args) {
+  return request(baseUrl, {
+    method: "POST",
+    path: `/v1/capabilities/${encodeURIComponent(id)}/invoke`,
+    token,
+    body: { arguments: args },
+  });
+}
+
+async function readText(baseUrl, token, id, args) {
+  try {
+    return JSON.stringify(await invoke(baseUrl, token, id, args));
+  } catch (error) {
+    return `error: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 async function invoke(baseUrl, token, id, args) {
   const res = await request(baseUrl, {
     method: "POST",
@@ -153,7 +202,7 @@ export async function main(argv = process.argv.slice(2)) {
   const options = parseArgs(argv);
   if (options.help) {
     console.log(
-      "usage: node scripts/accept-service-api.mjs [--operation ID] [--arguments JSON] [--query TEXT] [--preview WRITE_ID] [--base-url URL --token T] [--dist DIR] [--keep]"
+      "usage: node scripts/accept-service-api.mjs [--operation ID] [--arguments JSON] [--query TEXT] [--preview WRITE_ID] [--confirm WRITE_ID [--confirm-arguments JSON] [--verify READ_ID [--verify-arguments JSON]] [--expect TEXT] [--cleanup WRITE_ID [--cleanup-arguments JSON]]]] [--base-url URL --token T] [--dist DIR] [--keep]"
     );
     return 0;
   }
@@ -254,6 +303,96 @@ export async function main(argv = process.argv.slice(2)) {
         hasToken,
         "a write operation must return a preview + confirmToken and make no change"
       );
+    }
+
+    if (options.confirm) {
+      const writeArgs = options.confirmArguments
+        ? JSON.parse(options.confirmArguments)
+        : options.arguments
+          ? JSON.parse(options.arguments)
+          : {};
+      const readArgs = options.verifyArguments
+        ? JSON.parse(options.verifyArguments)
+        : {};
+      const preview = await invoke(baseUrl, token, options.confirm, writeArgs);
+      assert(
+        typeof preview?.confirmToken === "string",
+        `${options.confirm} did not return a confirmToken (is it in writeOperations?)`
+      );
+      assert(
+        preview.preview && typeof preview.preview === "object",
+        "a write operation must return a preview object"
+      );
+      console.log(`\n${options.confirm} preview (no change made):`);
+      console.log("  " + JSON.stringify(preview.preview).slice(0, 400));
+
+      if (options.verify && options.expect) {
+        const before = await readText(baseUrl, token, options.verify, readArgs);
+        assert(
+          !before.includes(options.expect),
+          `${options.verify} already exposes ${options.expect} before confirm; --expect needs a fresh target`
+        );
+        console.log(
+          `  ${options.verify} before confirm: ${options.expect} absent (the preview changed nothing)`
+        );
+      }
+
+      const confirmed = await invoke(baseUrl, token, "service_api.confirm", {
+        token: preview.confirmToken,
+      });
+      console.log("\nservice_api.confirm ->");
+      console.log("  " + JSON.stringify(confirmed).slice(0, 600));
+
+      const replay = await invokeRaw(baseUrl, token, "service_api.confirm", {
+        token: preview.confirmToken,
+      });
+      assert(
+        replay.status !== 200,
+        `replaying the confirm token must fail, got ${replay.status}`
+      );
+      console.log(
+        `  the same token again -> HTTP ${replay.status} (single-use, as documented)`
+      );
+
+      if (options.verify) {
+        const after = await invoke(baseUrl, token, options.verify, readArgs);
+        const text = JSON.stringify(after);
+        console.log(`\n${options.verify} after confirm ->`);
+        console.log("  " + text.slice(0, 400));
+        if (options.expect)
+          assert(
+            text.includes(options.expect),
+            `${options.verify} did not contain ${options.expect}`
+          );
+      }
+
+      if (options.cleanup) {
+        try {
+          const cleanupArgs = options.cleanupArguments
+            ? JSON.parse(options.cleanupArguments)
+            : {};
+          const previewed = await invoke(
+            baseUrl,
+            token,
+            options.cleanup,
+            cleanupArgs
+          );
+          // A cleanup write is two-phase too, so confirm it before calling it done.
+          const cleaned =
+            typeof previewed?.confirmToken === "string"
+              ? await invoke(baseUrl, token, "service_api.confirm", {
+                  token: previewed.confirmToken,
+                })
+              : previewed;
+          console.log(
+            `\ncleanup ${options.cleanup} (preview + confirm) -> ${JSON.stringify(cleaned).slice(0, 200)}`
+          );
+        } catch (error) {
+          console.log(
+            `\ncleanup ${options.cleanup} failed (ignored): ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
     }
     console.log("\nOK");
     return 0;
