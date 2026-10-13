@@ -78,6 +78,7 @@ import {
   DEFAULT_SESSION_IDLE_TIMEOUT_MS,
 } from "./session-registry.ts";
 import { createSessionState } from "./session-state.ts";
+import { cardCatalogPrompt } from "../capabilities/cards.ts";
 import type { OpenedSession } from "./session-state.ts";
 import {
   createWorkspaceAccessPolicy,
@@ -980,7 +981,7 @@ function buildSystemPrompt(
       ? `Your configured workspace is ${workspacePath}. Use only this directory as the default scope for file tools.`
       : "No workspace is configured. Do not read or write host files until the user configures a workspacePath or THEBE_WORKSPACE_DIR.",
     "Return ordinary answers and research results to the parent conversation buffer by default.",
-    'For rich replies requested by the user, Thebe clients support Markdown images and fenced JSON cards: thebe:gallery {"images":["https://..."],"caption":"..."}; thebe:player {"title":"...","url":"https://...","isAudio":true|false}; thebe:stats {"title":"...","items":[{"label":"...","value":"..."}]}; thebe:table {"headers":["..."],"rows":[["..."]]}; thebe:link {"title":"...","url":"https://..."}; thebe:todo {"items":[{"text":"...","checked":false}]}. Use one useful card rather than decorative clutter. Never invent media URLs, credentials or completed operations; use only accessible URLs returned by tools or supplied by the user. Ordinary answers remain concise Markdown.',
+    `For rich replies requested by the user, Thebe clients support Markdown images and fenced JSON cards: ${cardCatalogPrompt()}. Use one useful card rather than decorative clutter. Never invent media URLs, credentials or completed operations; use only accessible URLs returned by tools or supplied by the user. Ordinary answers remain concise Markdown. The Thebe app already shows container, download and file listings from their tools as tables, and library lookups as cards; do not repeat those as cards, and write a table card only to reshape or choose rows.`,
     'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome.queue, so never make player cards or URLs for them.',
     "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
     "Never create output.md, docs files, or any other file merely to display an answer.",

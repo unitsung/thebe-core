@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "cards": {
+    "gallery": {
+      "images": [
+        "https://example.invalid/a.png"
+      ],
+      "caption": "Caption"
+    },
+    "player": {
+      "title": "Title",
+      "url": "https://example.invalid/a.mp3",
+      "isAudio": true
+    },
+    "stats": {
+      "title": "Title",
+      "items": [
+        {
+          "label": "Label",
+          "value": "1"
+        }
+      ]
+    },
+    "table": {
+      "headers": [
+        "A",
+        "B"
+      ],
+      "rows": [
+        [
+          "1",
+          "2"
+        ]
+      ]
+    },
+    "link": {
+      "title": "Title",
+      "url": "https://example.invalid"
+    },
+    "todo": {
+      "items": [
+        {
+          "text": "Item",
+          "checked": false
+        }
+      ]
+    }
+  }
+}
