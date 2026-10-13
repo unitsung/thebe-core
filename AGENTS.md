@@ -46,3 +46,9 @@ Use `npm test` for broad verification. Use targeted Vitest files while iterating
 ## Hygiene
 
 Use `apply_patch` for edits. Preserve existing uncommitted changes. Avoid destructive Git operations. Update the relevant `docs/` page when a user-visible workflow or configuration contract changes. Keep `AGENTS.md` concise; record domain facts in `CONTEXT.md` or focused docs instead.
+
+## Commits
+
+- Conventional commits (`@commitlint/config-conventional`): a scoped imperative subject (`core: …`, `fix: …`, `chore: …`) and body lines of at most 100 characters.
+- One focused change per commit. Do not bundle unrelated features, and never commit another process's uncommitted work.
+- The pre-commit hook (husky + lint-staged) runs `oxfmt --write` on staged files and re-stages them, which flattens hunk-level staging. When splitting a change into several commits that need `git add -p`, commit with `git commit --no-verify` and run `npm run typecheck`, `npx vitest run` and `npm run lint` yourself instead. The files are already formatted from the earlier hook run, so skipping it adds no formatting debt.
