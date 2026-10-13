@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { writeFileAtomicSync } from "../../atomic-write.ts";
 import type {
   OAuthAuthorizeResult,
   RuntimeAuth,
@@ -47,41 +48,47 @@ type ClientConfig = {
  * `THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET`. Without one, sign-in and refresh fail
  * with a clear error.
  */
-export const ANTIGRAVITY_CLIENTS: Record<AntigravityClientKind, ClientConfig> = {
-  antigravity: {
-    clientId:
-      "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
-    get clientSecret() {
-      return process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET ?? "";
+export const ANTIGRAVITY_CLIENTS: Record<AntigravityClientKind, ClientConfig> =
+  {
+    antigravity: {
+      clientId:
+        "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com",
+      get clientSecret() {
+        return process.env.THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET ?? "";
+      },
+      scopes: [
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+        "https://www.googleapis.com/auth/cclog",
+        "https://www.googleapis.com/auth/experimentsandconfigs",
+      ],
+      userAgent: "antigravity/1.15.8 thebe-core",
     },
-    scopes: [
-      "https://www.googleapis.com/auth/cloud-platform",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-      "https://www.googleapis.com/auth/cclog",
-      "https://www.googleapis.com/auth/experimentsandconfigs",
-    ],
-    userAgent: "antigravity/1.15.8 thebe-core",
-  },
-  "gemini-cli": {
-    clientId:
-      "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
-    get clientSecret() {
-      return process.env.THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET ?? "";
+    "gemini-cli": {
+      clientId:
+        "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+      get clientSecret() {
+        return process.env.THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET ?? "";
+      },
+      scopes: [
+        "https://www.googleapis.com/auth/cloud-platform",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile",
+      ],
+      userAgent: "gemini-cli/0.1.0 thebe-core",
     },
-    scopes: [
-      "https://www.googleapis.com/auth/cloud-platform",
-      "https://www.googleapis.com/auth/userinfo.email",
-      "https://www.googleapis.com/auth/userinfo.profile",
-    ],
-    userAgent: "gemini-cli/0.1.0 thebe-core",
-  },
-};
+  };
 
-function requireClientSecret(client: ClientConfig, kind: AntigravityClientKind): void {
+function requireClientSecret(
+  client: ClientConfig,
+  kind: AntigravityClientKind
+): void {
   if (client.clientSecret) return;
   const name = kind === "antigravity" ? "ANTIGRAVITY" : "GEMINI_CLI";
-  throw new Error(`Google OAuth client secret is not configured (set THEBE_GOOGLE_${name}_CLIENT_SECRET)`);
+  throw new Error(
+    `Google OAuth client secret is not configured (set THEBE_GOOGLE_${name}_CLIENT_SECRET)`
+  );
 }
 
 export const CLIENT_METADATA = JSON.stringify({
@@ -103,7 +110,7 @@ export type AntigravityCredential = {
 
 export type FetchLike = (
   input: string,
-  init?: RequestInit,
+  init?: RequestInit
 ) => Promise<Response>;
 
 // MARK: - PKCE + authorization URL
@@ -132,7 +139,10 @@ export function buildAuthorizationUrl(options: {
   const url = new URL(AUTHORIZATION_ENDPOINT);
   url.searchParams.set("client_id", client.clientId);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("redirect_uri", options.redirectUri ?? LOOPBACK_REDIRECT_URI);
+  url.searchParams.set(
+    "redirect_uri",
+    options.redirectUri ?? LOOPBACK_REDIRECT_URI
+  );
   url.searchParams.set("scope", client.scopes.join(" "));
   url.searchParams.set("code_challenge", options.challenge);
   url.searchParams.set("code_challenge_method", "S256");
@@ -172,7 +182,7 @@ function credentialFromTokenResponse(
   payload: Record<string, unknown>,
   kind: AntigravityClientKind,
   previousRefreshToken?: string,
-  now = Date.now(),
+  now = Date.now()
 ): AntigravityCredential | undefined {
   const accessToken = payload.access_token;
   if (typeof accessToken !== "string" || accessToken.length === 0) {
@@ -187,8 +197,12 @@ function credentialFromTokenResponse(
       typeof refreshToken === "string" && refreshToken.length > 0
         ? refreshToken
         : previousRefreshToken,
-    expiresAt: Number.isFinite(expiresIn) && expiresIn > 0 ? now + expiresIn * 1000 : undefined,
-    tokenType: typeof payload.token_type === "string" ? payload.token_type : undefined,
+    expiresAt:
+      Number.isFinite(expiresIn) && expiresIn > 0
+        ? now + expiresIn * 1000
+        : undefined,
+    tokenType:
+      typeof payload.token_type === "string" ? payload.token_type : undefined,
   };
 }
 
@@ -196,7 +210,8 @@ export async function tokenError(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as Record<string, unknown>;
     const description = payload.error_description;
-    if (typeof description === "string" && description.length > 0) return description;
+    if (typeof description === "string" && description.length > 0)
+      return description;
     const error = payload.error;
     if (typeof error === "string" && error.length > 0) return error;
   } catch {}
@@ -210,7 +225,7 @@ export async function exchangeAuthorizationCode(
     code: string;
     verifier: string;
     redirectUri?: string;
-  },
+  }
 ): Promise<AntigravityCredential> {
   const client = ANTIGRAVITY_CLIENTS[options.kind];
   requireClientSecret(client, options.kind);
@@ -237,7 +252,7 @@ export async function exchangeAuthorizationCode(
 
 export async function refreshCredential(
   fetchImpl: FetchLike,
-  credential: AntigravityCredential,
+  credential: AntigravityCredential
 ): Promise<AntigravityCredential> {
   const refreshToken = credential.refreshToken;
   if (!refreshToken) throw new Error("no refresh token stored");
@@ -260,7 +275,7 @@ export async function refreshCredential(
   const refreshed = credentialFromTokenResponse(
     payload,
     credential.kind,
-    refreshToken,
+    refreshToken
   );
   if (!refreshed) throw new Error("refresh response has no access_token");
   return {
@@ -273,7 +288,7 @@ export async function refreshCredential(
 
 export function credentialNeedsRefresh(
   credential: AntigravityCredential,
-  now = Date.now(),
+  now = Date.now()
 ): boolean {
   if (credential.expiresAt === undefined) return false;
   return credential.expiresAt - now < 60_000;
@@ -283,7 +298,7 @@ export function credentialNeedsRefresh(
 
 export function methodUrl(
   method: string,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): string {
   return `${endpoint.replace(/\/+$/, "")}/${CODE_ASSIST_API_VERSION}:${method}`;
 }
@@ -291,7 +306,7 @@ export function methodUrl(
 /** Long-running operations live under `/v1internal/{name}` as plain GETs. */
 export function operationUrl(
   operation: string,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): string {
   const name = operation.replace(/^operations\//, "");
   return `${endpoint.replace(/\/+$/, "")}/${CODE_ASSIST_API_VERSION}/${name}`;
@@ -301,7 +316,7 @@ export async function codeAssistOperationRequest(
   fetchImpl: FetchLike,
   operation: string,
   credential: AntigravityCredential,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): Promise<Response> {
   return fetchImpl(operationUrl(operation, endpoint), {
     method: "GET",
@@ -319,7 +334,7 @@ export async function codeAssistRequest(
   method: string,
   body: Record<string, unknown>,
   credential: AntigravityCredential,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): Promise<Response> {
   return fetchImpl(methodUrl(method, endpoint), {
     method: "POST",
@@ -346,7 +361,7 @@ export function onboardUserBody(tierId: string): Record<string, unknown> {
 }
 
 export function projectFromLoadResponse(
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): string | undefined {
   const project = payload.cloudaicompanionProject;
   if (typeof project === "string" && project.length > 0) return project;
@@ -358,12 +373,13 @@ export function projectFromLoadResponse(
 }
 
 export function defaultTierFromLoadResponse(
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): string | undefined {
   const tiers = payload.allowedTiers;
   if (!Array.isArray(tiers)) return undefined;
   const rows = tiers.filter(
-    (tier): tier is Record<string, unknown> => !!tier && typeof tier === "object",
+    (tier): tier is Record<string, unknown> =>
+      !!tier && typeof tier === "object"
   );
   const preferred = rows.find((tier) => tier.isDefault === true);
   const id =
@@ -373,7 +389,7 @@ export function defaultTierFromLoadResponse(
 }
 
 export function projectFromOperation(
-  payload: Record<string, unknown>,
+  payload: Record<string, unknown>
 ): string | undefined {
   if (payload.done !== true) return undefined;
   const response = payload.response;
@@ -385,14 +401,14 @@ export function projectFromOperation(
 export async function resolveProjectId(
   fetchImpl: FetchLike,
   credential: AntigravityCredential,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): Promise<string | undefined> {
   const loadResponse = await codeAssistRequest(
     fetchImpl,
     "loadCodeAssist",
     loadCodeAssistBody(),
     credential,
-    endpoint,
+    endpoint
   );
   if (!loadResponse.ok) return undefined;
   const loadPayload = (await loadResponse.json()) as Record<string, unknown>;
@@ -405,10 +421,13 @@ export async function resolveProjectId(
     "onboardUser",
     onboardUserBody(tier),
     credential,
-    endpoint,
+    endpoint
   );
   if (!onboardResponse.ok) return undefined;
-  const onboardPayload = (await onboardResponse.json()) as Record<string, unknown>;
+  const onboardPayload = (await onboardResponse.json()) as Record<
+    string,
+    unknown
+  >;
   const onboarded = projectFromOperation(onboardPayload);
   if (onboarded) return onboarded;
 
@@ -421,7 +440,7 @@ export async function resolveProjectId(
       fetchImpl,
       operation,
       credential,
-      endpoint,
+      endpoint
     );
     if (!poll.ok) return undefined;
     const payload = (await poll.json()) as Record<string, unknown>;
@@ -438,7 +457,7 @@ export type AntigravityModel = { id: string; displayName?: string };
 export async function fetchAvailableModels(
   fetchImpl: FetchLike,
   credential: AntigravityCredential,
-  endpoint = CODE_ASSIST_ENDPOINT,
+  endpoint = CODE_ASSIST_ENDPOINT
 ): Promise<AntigravityModel[]> {
   if (!credential.projectId) return [];
   const response = await codeAssistRequest(
@@ -446,7 +465,7 @@ export async function fetchAvailableModels(
     "fetchAvailableModels",
     { project: credential.projectId },
     credential,
-    endpoint,
+    endpoint
   );
   if (!response.ok) return [];
   const payload = (await response.json()) as Record<string, unknown>;
@@ -455,7 +474,8 @@ export async function fetchAvailableModels(
   return Object.entries(models as Record<string, Record<string, unknown>>)
     .map(([id, info]) => ({
       id,
-      displayName: typeof info?.displayName === "string" ? info.displayName : undefined,
+      displayName:
+        typeof info?.displayName === "string" ? info.displayName : undefined,
     }))
     .filter((model) => model.id.length > 0)
     .sort((a, b) => a.id.localeCompare(b.id));
@@ -474,7 +494,8 @@ export function generateContentBody(options: {
     requestType: "agent",
     userAgent: "antigravity",
     requestId:
-      options.requestId ?? `agent-${Date.now()}-${randomBytes(4).toString("hex")}`,
+      options.requestId ??
+      `agent-${Date.now()}-${randomBytes(4).toString("hex")}`,
   };
 }
 
@@ -495,18 +516,24 @@ function textFromCandidate(payload: Record<string, unknown>): string {
   if (!Array.isArray(parts)) return "";
   return parts
     .map((part) =>
-      part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string"
+      part &&
+      typeof part === "object" &&
+      typeof (part as Record<string, unknown>).text === "string"
         ? ((part as Record<string, unknown>).text as string)
-        : "",
+        : ""
     )
     .join("");
 }
 
-export function codeAssistError(payload: Record<string, unknown>): string | undefined {
+export function codeAssistError(
+  payload: Record<string, unknown>
+): string | undefined {
   const error = payload.error;
   if (!error || typeof error !== "object") return undefined;
   const message = (error as Record<string, unknown>).message;
-  return typeof message === "string" && message.length > 0 ? message : undefined;
+  return typeof message === "string" && message.length > 0
+    ? message
+    : undefined;
 }
 
 /**
@@ -521,7 +548,7 @@ export async function generateText(
     prompt: string;
     maxOutputTokens?: number;
     endpoint?: string;
-  },
+  }
 ): Promise<CloudCodeTextResult> {
   const projectId = credential.projectId;
   if (!projectId) throw new Error("no Cloud project resolved");
@@ -537,7 +564,7 @@ export async function generateText(
       },
     }),
     credential,
-    options.endpoint,
+    options.endpoint
   );
   const payload = (await response.json()) as Record<string, unknown>;
   if (!response.ok) {
@@ -547,7 +574,10 @@ export async function generateText(
   const usage = inner.usageMetadata;
   return {
     text: textFromCandidate(payload),
-    usage: usage && typeof usage === "object" ? (usage as Record<string, unknown>) : undefined,
+    usage:
+      usage && typeof usage === "object"
+        ? (usage as Record<string, unknown>)
+        : undefined,
   };
 }
 
@@ -572,7 +602,7 @@ export class AntigravityCredentialStore {
 
   private write(all: Record<string, AntigravityCredential>): void {
     mkdirSync(dirname(this.filePath), { recursive: true });
-    writeFileSync(this.filePath, JSON.stringify(all, null, 2), {
+    writeFileAtomicSync(this.filePath, JSON.stringify(all, null, 2), {
       encoding: "utf8",
       mode: 0o600,
     });
@@ -580,7 +610,8 @@ export class AntigravityCredentialStore {
 
   get(providerId: string): AntigravityCredential | undefined {
     const credential = this.read()[providerId];
-    if (!credential || typeof credential.accessToken !== "string") return undefined;
+    if (!credential || typeof credential.accessToken !== "string")
+      return undefined;
     return credential;
   }
 
@@ -618,12 +649,18 @@ export type AntigravityAuth = {
   readonly providerId: string;
   handles(providerId: string): boolean;
   providers(): RuntimeProvider[];
-  authorizeOAuth(providerId: string, options?: { force?: boolean }): Promise<OAuthAuthorizeResult>;
+  authorizeOAuth(
+    providerId: string,
+    options?: { force?: boolean }
+  ): Promise<OAuthAuthorizeResult>;
   submitOAuthCallback(providerId: string, input: string): Promise<void>;
   logout(providerId: string): Promise<void>;
   check(providerId: string): Promise<{ ok: boolean }>;
   testProvider(providerId: string): Promise<{ ok: boolean; message?: string }>;
-  credential(providerId: string, options?: { forceRefresh?: boolean }): Promise<AntigravityCredential>;
+  credential(
+    providerId: string,
+    options?: { forceRefresh?: boolean }
+  ): Promise<AntigravityCredential>;
   models(providerId: string): Promise<RuntimeModel[]>;
 };
 
@@ -633,7 +670,7 @@ export type AntigravityAuth = {
  * (`authorizeOAuth` + `submitOAuthCallback`) that the app already speaks.
  */
 export function createAntigravityAuth(
-  options: AntigravityAdapterOptions,
+  options: AntigravityAdapterOptions
 ): AntigravityAuth {
   const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   const endpoint = options.endpoint ?? CODE_ASSIST_ENDPOINT;
@@ -653,14 +690,17 @@ export function createAntigravityAuth(
 
   async function credential(
     providerId: string,
-    refreshOptions?: { forceRefresh?: boolean },
+    refreshOptions?: { forceRefresh?: boolean }
   ): Promise<AntigravityCredential> {
     if (providerId !== ANTIGRAVITY_PROVIDER_ID) {
       throw new Error(`unknown provider: ${providerId}`);
     }
     let stored = options.store.get(providerId);
     if (!stored) throw new Error("Google account is not connected");
-    if (stored.refreshToken && (refreshOptions?.forceRefresh || credentialNeedsRefresh(stored))) {
+    if (
+      stored.refreshToken &&
+      (refreshOptions?.forceRefresh || credentialNeedsRefresh(stored))
+    ) {
       stored = await refreshCredential(fetchImpl, stored);
       options.store.set(providerId, stored);
     }
@@ -687,7 +727,12 @@ export function createAntigravityAuth(
       const kind = defaultKind;
       const redirectUri = LOOPBACK_REDIRECT_URI;
       const state = base64Url(randomBytes(16));
-      pending.set(providerId, { kind, verifier: pkce.verifier, state, redirectUri });
+      pending.set(providerId, {
+        kind,
+        verifier: pkce.verifier,
+        state,
+        redirectUri,
+      });
       const url = buildAuthorizationUrl({
         kind,
         state,
@@ -705,7 +750,8 @@ export function createAntigravityAuth(
 
     async submitOAuthCallback(providerId, input) {
       const login = pending.get(providerId);
-      if (!login) throw new Error("no OAuth login is pending for this provider");
+      if (!login)
+        throw new Error("no OAuth login is pending for this provider");
       const code = parseAuthorizationCode(input);
       if (!code) throw new Error("authorization code is empty");
       let credential = await exchangeAuthorizationCode(fetchImpl, {
@@ -773,7 +819,7 @@ export function createAntigravityAuth(
 
 async function fetchAccount(
   fetchImpl: FetchLike,
-  credential: AntigravityCredential,
+  credential: AntigravityCredential
 ): Promise<string | undefined> {
   try {
     const response = await fetchImpl(USERINFO_ENDPOINT, {
@@ -794,7 +840,7 @@ async function fetchAccount(
  */
 export function withAntigravityAuth(
   base: RuntimeAuth,
-  antigravity: AntigravityAuth,
+  antigravity: AntigravityAuth
 ): RuntimeAuth {
   return {
     ...base,
@@ -805,7 +851,8 @@ export function withAntigravityAuth(
       // methods and connection status, so it replaces Pi's api-key view.
       const extras = antigravity.providers();
       const merged = providers.map(
-        (provider) => extras.find((extra) => extra.id === provider.id) ?? provider,
+        (provider) =>
+          extras.find((extra) => extra.id === provider.id) ?? provider
       );
       for (const extra of extras) {
         if (!merged.some((provider) => provider.id === extra.id)) {
@@ -817,7 +864,7 @@ export function withAntigravityAuth(
     async setApiKey(providerId, apiKey) {
       if (antigravity.handles(providerId)) {
         throw new Error(
-          `${ANTIGRAVITY_PROVIDER_ID} signs in with Google OAuth instead of an API key`,
+          `${ANTIGRAVITY_PROVIDER_ID} signs in with Google OAuth instead of an API key`
         );
       }
       return base.setApiKey(providerId, apiKey);
@@ -830,7 +877,9 @@ export function withAntigravityAuth(
       if (result.pending && result.url) {
         await interaction.openUrl?.(result.url);
       }
-      throw new Error("finish the Google sign-in by submitting the authorization code");
+      throw new Error(
+        "finish the Google sign-in by submitting the authorization code"
+      );
     },
     async authorizeOAuth(providerId, options) {
       if (!antigravity.handles(providerId)) {

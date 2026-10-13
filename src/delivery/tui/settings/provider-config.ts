@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../../../atomic-write.ts";
 import {
   getThebeAgentDir,
   loadThebeConfig,
@@ -128,7 +129,7 @@ export async function saveCustomProvider(
       },
     };
     modelsData.providers = existingProviders;
-    await writeFile(
+    await writeFileAtomic(
       modelsJsonPath,
       JSON.stringify(modelsData, null, 2),
       "utf8"
@@ -146,7 +147,7 @@ export async function saveCustomProvider(
       type: "api_key",
       key: options.apiKey || "none",
     };
-    await writeFile(authJsonPath, JSON.stringify(authData, null, 2), {
+    await writeFileAtomic(authJsonPath, JSON.stringify(authData, null, 2), {
       encoding: "utf8",
       mode: 0o600,
     });
@@ -180,7 +181,7 @@ export async function saveProviderEndpoint(
       baseUrl,
     };
     existingJson.providers = existingProviders;
-    await writeFile(
+    await writeFileAtomic(
       modelsJsonPath,
       JSON.stringify(existingJson, null, 2),
       "utf8"

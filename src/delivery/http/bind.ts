@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeFileAtomicSync } from "../../atomic-write.ts";
 
 export const DEFAULT_THEBE_HOST = "127.0.0.1";
 export const DEFAULT_THEBE_PORT = 8787;
@@ -20,7 +21,7 @@ export type ThebeListenConfig = {
  * would pass.
  */
 export function resolveThebeListen(
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): ThebeListenConfig {
   const host = env.THEBE_HOST?.trim() || DEFAULT_THEBE_HOST;
   const parsedPort = Number(env.THEBE_PORT ?? String(DEFAULT_THEBE_PORT));
@@ -43,7 +44,7 @@ export function resolveThebeListen(
 
 export function resolveAllowedHosts(
   bindHost: string,
-  extra: string[] = [],
+  extra: string[] = []
 ): string[] {
   const extras = extra.map((value) => value.trim()).filter(Boolean);
   const wildcard = bindHost === "0.0.0.0" || bindHost === "::";
@@ -59,7 +60,7 @@ export function resolveAllowedHosts(
 
 export function productionTokenError(
   token: string | undefined,
-  nodeEnv: string | undefined = process.env.NODE_ENV,
+  nodeEnv: string | undefined = process.env.NODE_ENV
 ): string | undefined {
   if (nodeEnv === "production" && !token?.trim()) {
     return "THEBE_TOKEN is required in production. Set it in .env.local or environment.";
@@ -88,7 +89,7 @@ export function resolveThebeToken(
     env?: NodeJS.ProcessEnv;
     configDir?: string;
     generate?: () => string;
-  } = {},
+  } = {}
 ): ThebeTokenResolution {
   const env = options.env ?? process.env;
   const explicit = env.THEBE_TOKEN?.trim();
@@ -109,7 +110,7 @@ export function resolveThebeToken(
     const token = generate();
     try {
       mkdirSync(options.configDir, { recursive: true });
-      writeFileSync(path, `${token}\n`, { mode: 0o600 });
+      writeFileAtomicSync(path, `${token}\n`, { mode: 0o600 });
     } catch {
       // The token still works for this run even if it could not be persisted.
     }

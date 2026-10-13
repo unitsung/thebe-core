@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../../../atomic-write.ts";
 import type { TuiMode } from "../rendering/adapter.ts";
 
 export type ThebeUserConfig = {
@@ -23,11 +24,17 @@ export type ThebeUserConfig = {
 };
 
 export function getThebeConfigDir(): string {
-  return process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe");
+  return (
+    process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe")
+  );
 }
 
-export function getThebeConfigPath(): string { return join(getThebeConfigDir(), "config.json"); }
-export function getThebeAgentDir(): string { return process.env.THEBE_AGENT_DIR ?? join(getThebeConfigDir(), "agent"); }
+export function getThebeConfigPath(): string {
+  return join(getThebeConfigDir(), "config.json");
+}
+export function getThebeAgentDir(): string {
+  return process.env.THEBE_AGENT_DIR ?? join(getThebeConfigDir(), "agent");
+}
 
 export async function ensureThebeConfigFile(): Promise<string> {
   const configPath = getThebeConfigPath();
@@ -42,24 +49,37 @@ export async function ensureThebeConfigFile(): Promise<string> {
 
 export function getExternalEditorCommand(config: ThebeUserConfig): string {
   const configured = config.externalEditor?.trim();
-  return configured || process.env.VISUAL || process.env.EDITOR || (process.platform === "win32" ? "notepad" : "nano");
+  return (
+    configured ||
+    process.env.VISUAL ||
+    process.env.EDITOR ||
+    (process.platform === "win32" ? "notepad" : "nano")
+  );
 }
 
 export async function loadThebeConfig(): Promise<ThebeUserConfig> {
   try {
-    const parsed = JSON.parse(await readFile(getThebeConfigPath(), "utf8")) as ThebeUserConfig;
+    const parsed = JSON.parse(
+      await readFile(getThebeConfigPath(), "utf8")
+    ) as ThebeUserConfig;
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
   }
 }
 
-export async function saveThebeConfig(patch: Partial<ThebeUserConfig>): Promise<ThebeUserConfig> {
+export async function saveThebeConfig(
+  patch: Partial<ThebeUserConfig>
+): Promise<ThebeUserConfig> {
   try {
     const dir = getThebeConfigDir();
     await mkdir(dir, { recursive: true });
     const updated: ThebeUserConfig = { ...(await loadThebeConfig()), ...patch };
-    await writeFile(getThebeConfigPath(), JSON.stringify(updated, null, 2), "utf8");
+    await writeFileAtomic(
+      getThebeConfigPath(),
+      JSON.stringify(updated, null, 2),
+      "utf8"
+    );
     return updated;
   } catch {
     return {};

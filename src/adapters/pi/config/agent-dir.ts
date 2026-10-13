@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomicSync } from "../../../atomic-write.ts";
 import { loadThebeUserConfig } from "./user-config.ts";
 
 /** Merge user/env base URLs into agentDir/models.json. */
@@ -40,6 +41,6 @@ export function syncAgentModelsFile(agentDir: string): void {
   }
   data.providers = providers;
   try {
-    writeFileSync(modelsPath, JSON.stringify(data, null, 2), "utf8");
+    writeFileAtomicSync(modelsPath, JSON.stringify(data, null, 2), "utf8");
   } catch {}
 }

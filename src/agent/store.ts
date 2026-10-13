@@ -1,13 +1,6 @@
-import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readdir,
-  readFile,
-  rename,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../atomic-write.ts";
 import type { GoalRun, SubagentRun, SubagentRunStatus } from "./types.ts";
 
 export type StoredGoalEvent = {
@@ -122,13 +115,12 @@ export function createAgentStore(dir?: string) {
       return;
     }
     await mkdir(dir, { recursive: true });
-    // Write to a unique temp file and rename over the target: a concurrent
-    // load/list sees either the previous file or the complete new one, never a
-    // half-written (empty) file. The `.tmp` suffix keeps it out of `list()`.
-    const target = join(dir, `${meta.thebeSessionId}.json`);
-    const temp = join(dir, `.${meta.thebeSessionId}.${randomUUID()}.tmp`);
-    await writeFile(temp, JSON.stringify(meta), "utf8");
-    await rename(temp, target);
+    // Atomic: a concurrent load/list never reads a half-written file.
+    await writeFileAtomic(
+      join(dir, `${meta.thebeSessionId}.json`),
+      JSON.stringify(meta),
+      "utf8"
+    );
   }
 
   async function load(thebeSessionId: string): Promise<AgentSessionMeta> {
