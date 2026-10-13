@@ -20,6 +20,10 @@ _Avoid_: putting model-based review here (that is `JudgmentModel`), blocking ins
 Deployment presets in `src/agent/security/scenario-profile.ts`, ported from the pre-refactor `src/policy/scenario-profile.ts`: `nas-strict`, `homelab-host`, `microvm-sandbox`, `yolo-guarded`. `THEBE_SCENARIO=<name>` sets the guard, workspace-escape, sandbox, and Docker-API-guard defaults; explicit `THEBE_*` variables always win.
 _Avoid_: a second safety engine behind the profiles, per-session scenario state that delivery code mutates directly
 
+**FullAccessPreset**:
+Host-gated, session-scoped switch that lifts the command guard, the sandbox, and tool approval for one conversation. Off unless the host sets `THEBE_FULL_ACCESS` (`src/agent/security/full-access.ts`); stored as `AgentSessionMeta.fullAccess`; toggled by `ThebeAgent.setSessionFullAccess` via `POST /v1/session/{id}/full-access`; `GET /v1/settings/full-access` reports the gate and the session metadata carries `fullAccess` for the App indicator. Not inherited by subagents, schedules, background goals, `/mcp` callers, or non-interactive turns; workspace boundary, redaction, and audit stay on.
+_Avoid_: treating it as the global `full-access` permission mode, a remote-controlled global switch, or a second permission-mode name
+
 **GondolinMicroVM**:
 Micro-VM execution path in `src/adapters/gondolin`: `runner.ts` maps the workspace to `/workspace` (escaping the jail throws) and owns the VM lifecycle, `bash-operations.ts` makes it the `bash` backend behind `THEBE_SANDBOX=gondolin`. The VM provider is injectable, so tests run without QEMU/KVM; `@earendil-works/gondolin` stays an optional dynamic import (clear failure, no silent unsandboxed run).
 _Avoid_: importing Pi types outside `src/adapters/pi`, falling back to local execution without telling the caller
@@ -45,8 +49,12 @@ User-facing unit of work exposed by an integration, such as file search, media s
 _Avoid_: exposing raw vendor endpoints as the only client contract, or requiring the UI to know which MCP server implements a capability
 
 **IntegrationPlugin**:
-The service-specific boundary that supplies one or more `HomelabCapability` implementations. A plugin may be a built-in adapter or an external MCP server; it owns credentials, vendor API details, and idempotency while Core owns discovery, policy, task orchestration, normalized events, and audit.
-_Avoid_: putting a new agent loop in each plugin, hard-coding every third-party service into Core, or auto-enabling untrusted code
+The service-specific boundary that supplies one or more `HomelabCapability` implementations. A plugin may be a built-in adapter or an external MCP server; it owns credentials, vendor API details, and idempotency while Core owns discovery, policy, task orchestration, normalized events, and audit. Prefer the provider's own MCP server for vendor service coverage; add a built-in adapter only when Core owns cross-cutting semantics the MCP boundary cannot express (the approval → execute → verify → receipt action path, e.g. containers and diagnosis).
+_Avoid_: putting a new agent loop in each plugin, hard-coding every third-party service into Core as more `vendor.tool` modules, or auto-enabling untrusted code
+
+**ServiceCoverage**:
+How a vendor service reaches the model, in preference order: (1) the provider's own MCP server (`.thebe/mcp.json`: `url` + `headers`, or `command` + `env`; also reachable from the App, TUI, and `thebe mcp`); (2) `service_api_discover` / `service_api_read` / `service_api_write` over the service's own OpenAPI 3 / Swagger 2 document — whose operator allow-listed read operations are each also exposed as their own MCP tool (`service_api.<id>.<operationId>`), still with no per-vendor code; (3) a built-in adapter — only with a reason Core owns. Which services actually ship an MCP server today is recorded in `docs/PROVIDER-MCP.md`. Built-in adapters exist today for: containers (`Arcane`, or the Docker Engine proxy via `docker-socket-proxy`) because the write runs on Core's approval → execute → verify → receipt path; the acquisition pipeline (`DownloadProvider` qBittorrent, `CloudTransferProvider`/`FilesProvider` OpenList, Prowlarr release search, Emby/Jellyfin library refresh) because Core owns its durable job state machine, bounded retries, and background advancer rather than a single request/response; and read-only media/photo/music observation (Emby, Jellyfin, Immich, Navidrome) that shipped before this rule. Radarr, Sonarr, Lidarr, Prowlarr's own management, Jellyseerr, Plex, Proxmox, and TrueNAS are reached through a provider MCP server or `service_api_*`, not new `vendor.tool` modules.
+_Avoid_: writing a built-in adapter for a service that already publishes an MCP server or an OpenAPI document; adding `src/agent/capabilities/<vendor>.ts` or `vendor.*` tools per service; treating shipped read adapters as a precedent for new ones; bundling a third-party MCP server (the operator installs it; `docs/PROVIDER-MCP.md` says which clear the quality bar)
 
 **RuntimeSession**:
 One runtime-backed conversation. Create, resume, list, fork (including at a message), compact, export, steer, follow-up, model selection, and revert are runtime facilities.
@@ -108,11 +116,11 @@ Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on t
 _Avoid_: reimplementing filesystem/bash tools in Thebe
 
 **ContainerInfoProvider**:
-The Agent-owned capability declaration in `src/agent/capabilities/containers.ts` for read-only container observation. Tool Layer and PolicyEngine speak only this Interface; Arcane implements it as an Adapter.
-_Avoid_: tool code importing a panel SDK or HTTP client
+The Agent-owned capability declaration in `src/agent/capabilities/containers.ts` for read-only container observation plus the approved `restartContainer` write. Tool Layer and PolicyEngine speak only this Interface; Arcane implements it as an Adapter, and `DockerEngineAdapter` (`src/adapters/docker/adapter.ts`) implements it against the Docker Engine API through a restricted `docker-socket-proxy` (`THEBE_DOCKER_PROXY_URL`) when Arcane is not configured (ADR 0003).
+_Avoid_: tool code importing a panel SDK, a Docker client, or an HTTP client directly
 
 **Arcane**:
-The default container capability provider. Thebe Core does not talk to docker.sock. ArcaneAdapter owns the built-in container surface; other service categories should normally arrive through their integration plugin/MCP boundary.
+The default container capability provider. Thebe Core does not talk to docker.sock; when Arcane is configured it wins over the Docker Engine API proxy fallback. ArcaneAdapter owns the built-in container surface; other service categories should normally arrive through their integration plugin/MCP boundary.
 _Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core into a vendor-by-vendor service implementation
 
 **NavidromeProvider**:
@@ -126,6 +134,14 @@ _Avoid_: handing the connection to Pi, inventing a rating the server did not ret
 **PhotoLibraryProvider**:
 Agent-owned Immich capability in the same module. `immich.search` is semantic search through `POST /api/search/smart`. Metadata listing stays a separate read. A machine-learning failure stays an error.
 _Avoid_: treating semantic search as a filename filter, or hiding an unavailable search as an empty library
+
+**AcquisitionJob**:
+Durable media-import state machine in `src/agent/pipeline/job-runner.ts`: `submit` → `download` → `place` → `scan` → `verify` → `done`/`failed`, with bounded retries and persisted snapshots (`pipeline.acquire`/`advance`/`status`). Two kinds share it: `torrent` (qBittorrent `DownloadProvider`) and `cloud_transfer`, which fetches a share/direct link through a `CloudTransferProvider` (OpenList offline download) into the file manager before the same place → scan → verify. Providers own credentials and vendor calls; the model chooses the release and folders once.
+_Avoid_: putting vendor endpoints in the state machine, a second job runner per service, or running the transfer only while a client is connected
+
+**PipelineAdvancer**:
+Agent-owned background loop in `src/agent/pipeline/advancer.ts` that steps acquisition jobs acquired in the running process so they finish without a client (`THEBE_PIPELINE_ADVANCE_MS`, default one minute; `0` disables). It never auto-resumes a job restored after a Core restart (that needs an explicit `pipeline.advance`) and stops while quiesced.
+_Avoid_: a second scheduler, auto-retrying a failed job, or replaying a restored write-capable job silently
 
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.

@@ -38,7 +38,8 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_STORE_DIR`: session, goal, and subagent metadata. Pi transcripts are not stored here.
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
-- `THEBE_MODEL_RESULT_LIMIT` (optional, unlimited by default): a positive integer (minimum `2000`, suggested `12000`) that caps how many characters of one custom-tool result enter the model context. JSON keeps the leading entries and states how many were omitted; logs and plain text keep the tail. It only affects what the model sees: capability and MCP callers still get the full result, and Pi built-in tools (`read`, `bash`, and so on) are unaffected.
+- `THEBE_MODEL_RESULT_LIMIT` (optional, off by default): a positive integer (minimum `2000`) that caps how many characters of one custom-tool result enter the model context. JSON keeps the leading entries and states how many were omitted; logs and plain text keep the tail. Unset (or `off` / `0`) sends results as the tool produced them, like the Pi agent. It only affects what the model sees: capability and MCP callers still get the full result, and Pi built-in tools (`read`, `bash`, and so on) are unaffected.
+- `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
 ## Managing settings
 
@@ -168,6 +169,25 @@ returns 409 "already finished"; Arcane versions without activity cancellation
 return 404. Without credentials neither the container capabilities nor the
 activity source is registered.
 
+### Containers without Arcane (Docker Engine API via docker-socket-proxy)
+
+With no Arcane, Core can reach the Docker Engine API through a **restricted**
+`docker-socket-proxy` (ADR 0003). Arcane wins when it is configured:
+
+```bash
+export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # proxy root, must be an http(s) URL
+# export THEBE_DOCKER_API_VERSION=v1.43               # optional; no version prefix by default
+```
+
+Core only talks to that proxy root: it never opens `docker.sock`, never accepts a
+host from a request, and refuses redirects. The proxy should expose only the read
+endpoints and `POST /containers/*/restart`; reach it over loopback or Tailscale and
+publish nothing. The reads map to the same `container.*` surface, and the only
+write (`container.restart`) still follows approval → execute → verify → receipt and
+is never attached to the model tool loop. `ResourceRef.provider` gains a `docker`
+value. Logs may be a multiplexed stream (non-TTY) or plain text (TTY/proxy); Core
+demultiplexes the framed form and falls back to text.
+
 ### OpenList and the acquisition pipeline
 
 ```bash
@@ -189,6 +209,15 @@ and an Emby or Jellyfin API key configured, Core exposes the acquisition tools:
 also exposes `resource.search` and `pipeline.acquire/advance/status`: a
 deterministic job (download, copy, scan, verify) with bounded retries, persisted
 in `<agent store>/pipeline-jobs.json`. Writes need approval.
+
+An acquisition job can start from a torrent or from a network-drive transfer:
+`pipeline.acquire` with `kind: "cloud_transfer"` and a `transferSource` fetches
+the share/direct link through OpenList's offline download, then runs the same
+place → scan → verify steps. Core keeps jobs acquired in the running process
+moving on its own (`THEBE_PIPELINE_ADVANCE_MS`, default `60000`; `0` disables),
+so an import finishes while the phone is asleep. A job restored after a Core
+restart is not auto-resumed — call `pipeline.advance` to continue it — and a
+failed job is never retried automatically.
 
 - `download.pause` and `download.resume` take `hashes` (1 to 20 info-hashes; there is no "pause all"), keep the task and files, and need approval. qBittorrent 5 uses `stop`/`start` and 4.x uses `pause`/`resume`; Core detects the version. Unknown hashes are rejected rather than silently ignored. If the downloader lacks the operation, the tool does not appear.
 - `download.delete` also takes `hashes` (1 to 20), is irreversible, and needs approval. `deleteFiles` must be explicitly `true` or `false`: `false` removes only the task, `true` also deletes files on disk. A missing or non-boolean value is rejected; nothing is deleted by default.
@@ -260,6 +289,32 @@ Operations are loaded from the OpenAPI document for discovery and reads, and
 writes need approval. Header values are environment references and are never
 sent to the model.
 
+- `openapiPath` is fetched from `baseURL`. When the service does not serve its
+  spec there, use `openapiURL` with an absolute `http(s)` URL instead (the spec is
+  fetched without the API's auth headers, which stay on the API host).
+- `readOperations` is the operator's read-only allow-list — operation IDs or
+  `METHOD /path` entries. Each allow-listed read operation becomes its own tool
+  (`service_api.<id>.<operationId>`) with a real input schema, listed on `/mcp`
+  and in `/v1/capabilities`, so an MCP client gets named tools instead of one
+  generic call. Everything else stays behind `service_api_discover` /
+  `service_api_write` with runtime approval; operations that require a header
+  parameter are never exposed this way (headers are operator-owned).
+- Less typing, same trust model: `readMethods` (e.g. `["GET","HEAD"]`) treats
+  every operation with those methods as read-only, and
+  `trustReadOnlyAnnotations: true` additionally trusts the document's own
+  read-only hints. Both are **off unless you set them** — a remote document can
+  never mark itself read-only on its own.
+- `writeOperations` (operation IDs or `METHOD /path`) exposes chosen writes as
+  two-phase tools. Calling one performs **no change**: it returns a
+  `preview` (`method`, `path`, `body`) and a single-use `confirmToken` that
+  expires in five minutes. `service_api.confirm` with that token executes exactly
+  the previewed request. Both the preview and the execution are audited, and the
+  App/MCP client is expected to show the preview before confirming. The model's
+  own write path stays `service_api_write` with runtime approval.
+- Run `node scripts/accept-service-api.mjs` to check a configured service end to
+  end (it spawns Core, lists the per-operation tools, discovers operations, and
+  invokes a read; `--preview` checks the two-phase write).
+
 ## MCP servers
 
 External MCP servers go in `.thebe/mcp.json` under `mcpServers` (the global
@@ -284,10 +339,13 @@ its own. Tool names are `mcp__<server>__<tool>`.
 ```
 
 - `exposure`: `codemode` (default; tools can only be called from `codemode` scripts and take no space in the model's tool list), `deferred` (declared after `tool_search` loads them), `direct`, or `hidden`.
+- URL servers accept a `headers` map (string values) sent on every request, so a provider's own MCP that needs a token — for example `"headers": { "X-Api-Key": "..." }` or a service-specific header such as `{"sqmusic":"<JWT>"}` — is attached without Core growing a vendor adapter. Prefer this over hard-coding the service: point Core at the provider's MCP and it gets those tools instead. `headers` are stored in `.thebe/mcp.json` (mode `600`), never logged, and never sent anywhere but the configured URL.
 - `permission`: servers other than `read` need approval on every call. If omitted, the tool's own `readOnlyHint` decides; with no hint, approval is required.
 - Scripts run in Pi's QuickJS sandbox and reach the outside only through tools. Every MCP call from a script still goes through policy, approval, audit, and redaction. The `models` global in `codemode` is disabled.
 - stdio servers inherit only basic variables such as `HOME` and `PATH`, plus their own `env`, never Core's environment.
 - Newly added servers are disabled. Enable, disable, or delete them with `/v1/extensions/mcp/servers`; sessions pick up the change on the next reload.
+- From the terminal: `thebe mcp add <name> --url <url> --header K=V` (repeat `--header`, `--env`, `--arg`), then `thebe mcp enable <name>`; `thebe mcp list` and `thebe mcp tools` show the inventory, and `thebe mcp remove <name>` deletes a server Thebe wrote.
+- Which services ship their own MCP server (Home Assistant, Grafana, Docker, GitHub, Kubernetes today) is recorded in `PROVIDER-MCP.md`; an opt-in live check connects to real servers with `THEBE_MCP_LIVE=1 npx vitest run src/adapters/mcp/live.test.ts`.
 
 ## Skills
 
@@ -366,6 +424,39 @@ export THEBE_SCENARIO=nas-strict
 - Without `THEBE_SCENARIO` the defaults are: guard on, sandbox off, network on, workspace escape forbidden.
 - `THEBE_ALLOW_WORKSPACE_ESCAPES=true` allows workspace escapes on its own.
 - A scenario is a preset, not a second safety engine; the guard, sandbox, and Docker guard each still decide for themselves.
+
+## Full-access preset (off by default)
+
+The full-access preset is a host-gated, session-scoped switch that lifts the
+command guard, the OS sandbox, and tool approval for one conversation while
+leaving the workspace boundary, redaction, and audit in place. It is not the
+same as `permissionMode: full-access`, which only skips the application-level
+confirmation globally and is not an OS sandbox.
+
+```bash
+export THEBE_FULL_ACCESS=on   # allow the preset on this host; default off
+```
+
+Only a host that sets this can enable the preset; the HTTP/App client cannot
+grant it to itself. `GET /v1/settings/full-access` reports `{ "allowed": … }`
+and `POST /v1/session/{id}/full-access` with `{ "enabled": true|false }` toggles
+one session (403 `full_access_not_allowed` when the host has not allowed it).
+The session metadata carries `fullAccess` while it is active, for the client
+indicator.
+
+Scope and limits:
+
+- It applies to the enabled session only. A new session, a subagent, a scheduled
+  occurrence, a background goal, an `/mcp` caller, and a non-interactive turn do
+  not inherit it.
+- The guard is skipped in the permission preflight and the sandbox mode is read
+  per command, so enabling it mid-conversation takes effect on the next command.
+  The Gondolin micro-VM backend is chosen at session open, so with it the preset
+  applies to a session opened after enabling.
+- An explicit remembered denial and the workspace boundary still win, and audit
+  records are still written.
+- The model reads untrusted content (web pages, tool output, remote MCP). In this
+  mode a mistaken command can damage the host, so enable it only when needed.
 
 ## Judgment Model (off by default)
 

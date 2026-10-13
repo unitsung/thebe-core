@@ -119,7 +119,8 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_DIR` 单独改变 Pi agent 文件目录。
 - `THEBE_AGENT_STORE_DIR` 单独改变 Thebe 的会话与 Goal/子代理元数据目录；不存储 Pi transcript。
 - `THEBE_WORKSPACE_DIR` 在未设置配置文件 `workspacePath` 时提供 Thebe 文件工具和 TUI 的工作区；两者都未设置时 Thebe 拒绝启动，不会回退到进程启动目录。
-- `THEBE_MODEL_RESULT_LIMIT` 可选，默认不限制，Core 与 Pi agent 行为一致。设置为正整数（最小 `2000`，建议 `12000`）后，限制单次自定义工具结果进入模型上下文的字符数：JSON 保留靠前条目并标明省略数量，日志和纯文本保留末尾；只影响给模型的文本，capability 与 MCP 调用方仍拿完整结果，Pi 内置工具（`read`、`bash` 等）不受影响。
+- `THEBE_MODEL_RESULT_LIMIT` 可选，默认关闭。设为正整数（最小 `2000`）时，限制单次自定义工具结果进入模型上下文的字符数：JSON 保留靠前条目并标明省略数量，日志和纯文本保留末尾。未设置（或 `off` / `0`）时按工具原样发送，与 Pi agent 行为一致。只影响给模型的文本，capability 与 MCP 调用方仍拿完整结果，Pi 内置工具（`read`、`bash` 等）不受影响。
+- `THEBE_TOOL_RESULT_COMPACTION` 可选，默认关闭。设为 `on` 时，每次调用模型前把模型已经据以回答过的工具结果缩短（本轮约 3000 字符，更早的轮次约 1200 字符，更早轮次的图片会被去掉）；模型最后一条消息之后新到的结果保持完整，会话记录不变。它减小输入，但会改写服务商已经见过的文本，从改写处起丢失提示缓存命中，所以只在输入体积比缓存复用更重要时开启。
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 
@@ -148,6 +149,11 @@ Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBitto
 必须明确给出 true 或 false：false 只移除任务并保留已下载文件，true 连同磁盘上的文件一起删除；缺省或
 非布尔值会被拒绝，不会默认删除。未知 hash 同样会被拒绝。下载器不支持时该工具不会出现。
 
+采集任务可以从种子开始，也可以从网盘转存开始：`pipeline.acquire` 传 `kind: "cloud_transfer"` 和
+`transferSource` 时，先由 OpenList 的离线下载取回分享/直链，再走同样的 place → scan → verify。Core 会
+自己推进本进程内新建的任务（`THEBE_PIPELINE_ADVANCE_MS`，默认 `60000` 毫秒；`0` 关闭），所以手机休眠时
+也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline.advance`；失败的任务不会自动重试。
+
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
@@ -175,10 +181,13 @@ token 只由 Core adapter 使用，不进入 Agent capability 参数。
 ```
 
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
+- URL 服务器可带 `headers`（字符串键值），每个请求都会发送，用来接入需要令牌的服务商自带 MCP，例如 `"headers": { "X-Api-Key": "..." }` 或服务专用头 `{"sqmusic":"<JWT>"}`，Core 不用为它新增厂商适配器。有自带 MCP 的服务优先这样接：把 Core 指向它的 MCP，工具就有了。`headers` 保存在 `.thebe/mcp.json`（权限 `600`），不写日志，也只发给配置的 URL。
 - `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
 - 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
 - 新添加的服务器默认禁用；启用、禁用、删除走 `/v1/extensions/mcp/servers`，会话在下次 reload 时生效。
+- 终端也可以：`thebe mcp add <name> --url <url> --header K=V`（`--header`/`--env`/`--arg` 可重复），再 `thebe mcp enable <name>`；`thebe mcp list`、`thebe mcp tools` 看清单，`thebe mcp remove <name>` 删除 Thebe 自己写入的服务器。
+- 哪些服务自带 MCP（目前是 Home Assistant、Grafana、Docker、GitHub、Kubernetes）见 `PROVIDER-MCP.md`；可选的真实连接检查：`THEBE_MCP_LIVE=1 npx vitest run src/adapters/mcp/live.test.ts`。
 
 ## Navidrome 音乐 provider
 
@@ -263,7 +272,7 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 仓库还提供三个围绕 homelab 运维的 skill，放置和启用方式与上面相同：
 
 - `container-triage`：只读排查容器状态和日志（`container.*`），重启不由模型调用，
-  仍走诊断审批流程。需要配置容器 provider（如 Arcane）。
+  仍走诊断审批流程。需要配置容器 provider（Arcane，或经 docker-socket-proxy 的 Docker Engine API）。
 - `download-monitor`：用 `download.*`、`pipeline.status` / `pipeline.advance`、
   `files.list` 查看下载与入库任务进度，定位卡住或失败的环节。
 - `media-acquire`：`resource.search` 找片源，由用户选定后用 `pipeline.acquire`
@@ -289,6 +298,23 @@ export ARCANE_ENVIRONMENT_ID=0   # 可选；0 是 Arcane 的本地环境
 调用 `/api/environments/{id}/activities/{activityId}/cancel`，activity 已结束时
 Core 返回 409 与 “already finished” 说明（取消需要 Arcane 版本带活动取消能力，
 旧版本返回 404）。缺少凭据时既不暴露容器能力，也不注册该活动来源。
+
+### 不依赖 Arcane 的容器（Docker Engine API 经 docker-socket-proxy）
+
+没有 Arcane 时，Core 可以直接经一个**限权的** `docker-socket-proxy` 访问 Docker
+Engine API（ADR 0003）。已配置 Arcane 时 Arcane 优先：
+
+```bash
+export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须是 http(s) URL
+# export THEBE_DOCKER_API_VERSION=v1.43               # 可选；默认不带版本前缀
+```
+
+只连这个代理地址，Core 不打开 `docker.sock`，也不接受请求里传来的主机名，并拒绝
+重定向。代理只应开放读取端点与 `POST /containers/*/restart`；不要把它发布到公网，
+用 loopback 或 Tailscale 访问。读操作映射成同一组 `container.*`；唯一的写
+`container.restart` 仍走审批 → 执行 → 验证 → 回执，绝不挂到模型的工具循环里。
+`ResourceRef.provider` 增加 `docker` 取值。日志可能是多路复用流（非 TTY）或纯文本
+（TTY/代理），Core 会自动解复用并在无法识别时按文本处理。
 
 ## Google / Antigravity（OAuth 登录）
 
@@ -427,6 +453,23 @@ export THEBE_SCENARIO=nas-strict   # 等价于照抄上表
 - 不设 `THEBE_SCENARIO` 时保留原有默认（守卫开、沙箱关、联网、禁止越界）；
 - `THEBE_ALLOW_WORKSPACE_ESCAPES=true` 单独放开工作区越界（`homelab-host` 情景的取值）；
 - 情景只是预设，不是第二套安全引擎：判定仍由命令守卫 / 沙箱 / Docker 守卫各自完成。
+
+## 全放开预设（默认关闭）
+
+全放开预设是一个**由 Core 所在机器的配置门控、按会话生效**的开关：对某一个会话同时关闭命令守卫、关闭沙箱、并跳过工具审批，但工作区边界、脱敏与审计照旧。它不是 `/v1/settings/permissions` 里的 `full-access` 权限模式（那个只跳过应用层确认、且是全局的，也不是操作系统沙箱）。
+
+```bash
+export THEBE_FULL_ACCESS=on   # 允许本机启用该预设；默认关闭
+```
+
+只有设置了它的宿主才能启用；HTTP/App 客户端不能自己给自己开。`GET /v1/settings/full-access` 返回 `{ "allowed": … }`；`POST /v1/session/{id}/full-access` 带 `{ "enabled": true|false }` 只切换一个会话（宿主未允许时返回 403 `full_access_not_allowed`）。会话元数据在生效期间带 `fullAccess`，供客户端显示标识。
+
+范围与边界：
+
+- 只对启用的那个会话生效。新会话、子代理、定时任务、后台目标、`/mcp` 调用方、非交互轮次都不继承。
+- 命令守卫在权限预检里跳过，沙箱模式在每次命令时读取，因此会话中途启用也在下一条命令生效；Gondolin 微虚拟机后端在会话打开时选定，用该后端时需在启用后新开会话。
+- 显式记住的拒绝和工作区边界仍然生效，审计记录照常写入。
+- 模型会读到不可信内容（网页、工具输出、外部 MCP）。该模式下一条误判的命令可能损坏宿主数据，只在需要时短时开启。
 
 ## Judgment Model（默认关闭）
 

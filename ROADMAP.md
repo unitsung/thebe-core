@@ -37,8 +37,20 @@ terminal, the HTTP API, and MCP, and no other UI.
 
 - Arcane (containers), Emby/Jellyfin (media search), Immich (photos), Navidrome
   (music), OpenList (files and offline download), and qBittorrent (downloads).
+- Containers without a panel: the Docker Engine API through a restricted
+  `docker-socket-proxy` (`THEBE_DOCKER_PROXY_URL`, ADR 0003), with Arcane taking
+  priority when configured and the approved `container.restart` path unchanged.
 - Prowlarr release search, used inside the acquisition pipeline
   (`adapters/pipeline/prowlarr-search.ts`) rather than as a standalone adapter.
+- Two acquisition-job kinds on one durable state machine
+  (`agent/pipeline/job-runner.ts`): `torrent` (download → place → scan → verify)
+  and `cloud_transfer`, which fetches a share/direct link through a
+  `CloudTransferProvider` (OpenList offline download) before the same
+  place → scan → verify steps. An Agent-owned background advancer
+  (`agent/pipeline/advancer.ts`, tuned by `THEBE_PIPELINE_ADVANCE_MS`) keeps jobs
+  acquired in the running process moving without a client, so a network-drive
+  import finishes while the phone sleeps; a job restored after a Core restart
+  still needs an explicit `pipeline.advance`.
 - Generic HTTP services defined by an OpenAPI 3 / Swagger 2 document, through
   `service_api_discover` / `service_api_read` / `service_api_write`.
 - Session web search and `music_research`.
@@ -51,6 +63,10 @@ terminal, the HTTP API, and MCP, and no other UI.
   grading, workspace confinement, Docker command and API guards, `bwrap` and
   Gondolin micro-VM sandbox options, ScenarioProfiles, output redaction before
   the model and before disk, and an append-only audit log.
+- Host-gated, session-scoped full-access preset (`docs/FULL-ACCESS-DESIGN.md`):
+  `THEBE_FULL_ACCESS` allows it, `POST /v1/session/{id}/full-access` toggles one
+  conversation, and it is never inherited by subagents, schedules, background
+  goals, `/mcp`, or non-interactive turns.
 
 **Product contract**
 
@@ -70,15 +86,6 @@ terminal, the HTTP API, and MCP, and no other UI.
 
 Work named for the first beta, not yet complete in this checkout.
 
-- **Core full-access preset.** A named preset combining `full-access` with the
-  command guard and sandbox off. Default off, only allowed from host config, per
-  session, and not inherited by `/mcp` callers, schedules, or background goals;
-  audit stays on and the App shows a persistent indicator. Bounds and acceptance
-  in `docs/FULL-ACCESS-DESIGN.md`; the `full-access` permission mode itself
-  already ships.
-- **Network-drive transfer task type.** Add a "cloud transfer" kind to the
-  durable task state machine so a download-to-library run completes under Core
-  while the phone sleeps. Self-use, deferrable.
 - **Real-provider and deployment acceptance.** OpenList, Arcane, qBittorrent and
   the other providers are wired but not verified against live instances. The
   container image is now built and pushed to GHCR (linux/amd64 + arm64) by
@@ -90,13 +97,15 @@ Work named for the first beta, not yet complete in this checkout.
 Named after the first beta in `../ui/docs/DEVELOPMENT-PLAN.md` and Core's own
 research.
 
-- **More service coverage.** Radarr, Sonarr, Lidarr, Prowlarr, Jellyseerr, then
-  Plex, Proxmox, and TrueNAS.
+- **More service coverage through provider MCP.** Radarr, Sonarr, Lidarr,
+  Prowlarr, Jellyseerr, Plex, Proxmox, and TrueNAS are reached through each
+  service's own MCP server (`.thebe/mcp.json`, with `headers` for token auth),
+  not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
+  where it owns the semantics (the approval → execute → verify → receipt action
+  path, as with containers and diagnosis).
 - **Remote push.** APNs delivery through an optional, separately deployed Thebe
   Push Relay that Core signs minimal events for; a self-hosted Core never embeds
   Thebe's APNs credentials.
-- **Docker without Arcane.** Talk to the Docker Engine API through
-  `docker-socket-proxy` instead of a container panel.
 - **Open-source release prep.** Scan commit history, remove personal information,
   finish the README set, publish the Docker image, and add maintenance notes.
 - **Sandbox evolution.** Harden the staged `bwrap` / Gondolin micro-VM path; see
