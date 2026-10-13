@@ -1,24 +1,30 @@
 // Hard cap on what one tool result may add to the model's context.
 // Applies to the model-facing text only; capability and MCP callers keep the full result.
 
-/** Suggested value when the cap is enabled. The cap is off unless the operator turns it on. */
+/** Size `limitModelOutput` bounds to when it is called without a limit. */
 export const MODEL_RESULT_CHAR_LIMIT = 12_000;
 const MIN_LIMIT = 2_000;
 
 /**
- * `THEBE_MODEL_RESULT_LIMIT`: opt-in cap on the characters one custom tool result may add to the
- * context. Unset, empty, "0", "off", "none" or an invalid value means no cap, so Core behaves as
- * the Pi agent does. A positive value below the floor is raised to it so results stay usable.
+ * `THEBE_MODEL_RESULT_LIMIT`: an optional cap on the characters one custom tool result may add to
+ * the context. Unset, empty, "0", "off", "none" or an invalid value means no cap, so Core behaves
+ * as the Pi agent does and every result is sent as the tool produced it. A positive value below
+ * the floor is raised to it so results stay usable.
  */
 export function resolveModelResultLimit(raw: string | undefined): number {
-  const parsed = Number(raw?.trim());
-  if (!raw?.trim() || !Number.isFinite(parsed) || parsed <= 0) return 0;
+  const value = raw?.trim().toLowerCase();
+  if (!value || ["0", "off", "none", "false"].includes(value)) return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
   return Math.max(MIN_LIMIT, Math.trunc(parsed));
 }
 const STRING_LIMIT = 600;
 
 /** Bound `text` to about `limit` characters, keeping JSON valid and saying what was left out. */
-export function limitModelOutput(text: string, limit = MODEL_RESULT_CHAR_LIMIT): string {
+export function limitModelOutput(
+  text: string,
+  limit = MODEL_RESULT_CHAR_LIMIT
+): string {
   if (text.length <= limit) return text;
   const json = parseJson(text);
   if (json !== undefined && typeof json === "object" && json !== null) {
@@ -57,12 +63,18 @@ function shrink(value: unknown, keep: number): unknown {
   if (Array.isArray(value)) {
     const head = value.slice(0, keep).map((item) => shrink(item, keep));
     return value.length > keep
-      ? [...head, `… ${value.length - keep} more items omitted; narrow the request or page it`]
+      ? [
+          ...head,
+          `… ${value.length - keep} more items omitted; narrow the request or page it`,
+        ]
       : head;
   }
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, shrink(item, keep)]),
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+        key,
+        shrink(item, keep),
+      ])
     );
   }
   return value;
@@ -72,6 +84,9 @@ function shrink(value: unknown, keep: number): unknown {
 function limitPlainText(text: string, limit: number): string {
   const kept = text.slice(-limit);
   const lineStart = kept.indexOf("\n");
-  const tail = lineStart > 0 && lineStart < kept.length / 4 ? kept.slice(lineStart + 1) : kept;
+  const tail =
+    lineStart > 0 && lineStart < kept.length / 4
+      ? kept.slice(lineStart + 1)
+      : kept;
   return `[… ${text.length - tail.length} earlier chars omitted; ask for a narrower range]\n${tail}`;
 }
