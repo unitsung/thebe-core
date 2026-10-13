@@ -1,21 +1,42 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
-import { SERVICE_API_WRITE_TOOL_NAME } from "../capabilities/service-api.ts";
+import {
+  SERVICE_API_CONFIRM_TOOL_NAME,
+  SERVICE_API_OPERATION_PREFIX,
+  SERVICE_API_TOOL_NAMES,
+  SERVICE_API_WRITE_TOOL_NAME,
+  serviceOperationExposable,
+  serviceOperationRequest,
+  serviceOperationToolName,
+  serviceOperationWritable,
+  type ServiceAPIOperation,
+  type ServiceAPIProvider,
+} from "../capabilities/service-api.ts";
 import {
   NAVIDROME_WRITE_TOOL_NAMES,
   redactNavidromeQueueForStorage,
 } from "../capabilities/navidrome.ts";
 import { hashParameters } from "../../agent/security/audit/audit-log.ts";
-import type { RuntimeExport, RuntimeModelRef, RuntimeProviderConfiguration, ThebeSessionContext } from "../runtime/index.ts";
+import type {
+  RuntimeExport,
+  RuntimeModelRef,
+  RuntimeProviderConfiguration,
+  ThebeSessionContext,
+} from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
-import type { AuditPage, AuditRecord, AuditQuery } from "../security/audit/audit-log.ts";
+import type {
+  AuditPage,
+  AuditRecord,
+  AuditQuery,
+} from "../security/audit/audit-log.ts";
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
   CORE_EVENT_TOOLS,
   listCoreMcpTools,
   withProductMetadata,
+  type HomelabCapability,
 } from "../extensions/mcp.ts";
 import {
   STRM_REPAIR_CAPABILITY_ID,
@@ -45,12 +66,14 @@ import {
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 
-const RESTART_REQUIRES_ON_DEVICE_APPROVAL =
-  `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
+const RESTART_REQUIRES_ON_DEVICE_APPROVAL = `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 const RUNTIME_APPROVAL_REQUIRED =
   "This write requires runtime approval in an agent conversation";
 
-export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStore) {
+export function createControlApi(
+  ctx: AgentContext,
+  artifactStore?: ArtifactStore
+) {
   const {
     options,
     audit,
@@ -63,29 +86,57 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
   } = ctx;
   const backgroundTaskProviders = options.backgroundTaskProviders ?? [];
   const taskArtifactFlights = new Map<string, Promise<ProductBackgroundTask>>();
-  async function productProviderTask(service: string, task: ProviderBackgroundTask): Promise<ProductBackgroundTask> {
+  async function productProviderTask(
+    service: string,
+    task: ProviderBackgroundTask
+  ): Promise<ProductBackgroundTask> {
     const product = toProductProviderBackgroundTask(service, task);
-    if (!artifactStore || !task.output || task.status === "running") return product;
+    if (!artifactStore || !task.output || task.status === "running")
+      return product;
     const key = `${product.sessionId}:${task.id}`;
     const pending = taskArtifactFlights.get(key);
     if (pending) return pending;
     const flight = (async () => {
-      const existing = (await artifactStore.list({ kind: "task_output", sessionId: product.sessionId, runId: task.id, limit: 1 }))[0];
-      const artifact = existing ?? await artifactStore.create({
-        kind: "task_output", title: task.name ?? task.id,
-        sessionId: product.sessionId, runId: task.id,
-        resource: task.resource,
-        content: task.output!.content, contentType: task.output!.contentType,
-      });
+      const existing = (
+        await artifactStore.list({
+          kind: "task_output",
+          sessionId: product.sessionId,
+          runId: task.id,
+          limit: 1,
+        })
+      )[0];
+      const artifact =
+        existing ??
+        (await artifactStore.create({
+          kind: "task_output",
+          title: task.name ?? task.id,
+          sessionId: product.sessionId,
+          runId: task.id,
+          resource: task.resource,
+          content: task.output!.content,
+          contentType: task.output!.contentType,
+        }));
       return { ...product, artifactId: artifact.artifactId };
     })();
     taskArtifactFlights.set(key, flight);
-    try { return await flight; }
-    catch { return { ...product, error: [product.error, "Task output could not be retained"].filter(Boolean).join("; ") }; }
-    finally { taskArtifactFlights.delete(key); }
+    try {
+      return await flight;
+    } catch {
+      return {
+        ...product,
+        error: [product.error, "Task output could not be retained"]
+          .filter(Boolean)
+          .join("; "),
+      };
+    } finally {
+      taskArtifactFlights.delete(key);
+    }
   }
   const capabilityRuns = new Map<string, CapabilityRun>();
-  const capabilityRunListeners = new Map<string, Set<(run: CapabilityRun) => void>>();
+  const capabilityRunListeners = new Map<
+    string,
+    Set<(run: CapabilityRun) => void>
+  >();
   const capabilityRunStore = createCapabilityRunStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "capability-runs")
@@ -109,7 +160,12 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
 
   async function updateCapabilityRun(
     runId: string,
-    patch: Partial<Pick<CapabilityRun, "status" | "finishedAt" | "result" | "error" | "artifactId">>,
+    patch: Partial<
+      Pick<
+        CapabilityRun,
+        "status" | "finishedAt" | "result" | "error" | "artifactId"
+      >
+    >
   ): Promise<void> {
     const current = capabilityRuns.get(runId);
     if (!current) return;
@@ -139,7 +195,10 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
     }
-    if ((NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) || name === SERVICE_API_WRITE_TOOL_NAME) {
+    if (
+      (NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) ||
+      name === SERVICE_API_WRITE_TOOL_NAME
+    ) {
       throw httpError(403, `${name}: ${RUNTIME_APPROVAL_REQUIRED}`);
     }
     if (name === STRM_REPAIR_CAPABILITY_ID && options.strmRepairProvider) {
@@ -149,33 +208,40 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           throw httpError(
             400,
             "strm.repair requires resource.kind=strm",
-            "invalid_body",
+            "invalid_body"
           );
         }
         const resourceProvider = input.resource.provider;
         if (
           typeof resourceProvider !== "string" ||
-          resourceProvider.trim().toLowerCase() !== options.strmRepairProvider.service.trim().toLowerCase()
+          resourceProvider.trim().toLowerCase() !==
+            options.strmRepairProvider.service.trim().toLowerCase()
         ) {
           throw httpError(
             400,
             `strm.repair requires resource.provider=${options.strmRepairProvider.service}`,
-            "invalid_body",
+            "invalid_body"
           );
         }
       }
       return JSON.stringify(await options.strmRepairProvider.repair(input));
     }
     const params = (args ?? {}) as Record<string, unknown>;
+    if (name === SERVICE_API_CONFIRM_TOOL_NAME) {
+      return JSON.stringify(await confirmServiceOperation(params));
+    }
+    if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
+      return JSON.stringify(await invokeServiceOperation(name, params));
+    }
     const external = await mcp.invokeTool(name, params);
     if (external !== undefined) return external;
     if (name in CORE_EVENT_TOOLS) {
       // Preserve the JSON control-plane contract. Conversation calls still go
       // through the untrusted-output wrapper and session policy.
-      const tool = baseTools().find(item => item.name === name);
+      const tool = baseTools().find((item) => item.name === name);
       if (!tool) throw new Error(`unknown tool: ${name}`);
       const result = await tool.execute("mcp", params);
-      return result.content.map(block => block.text).join("\n");
+      return result.content.map((block) => block.text).join("\n");
     }
     const tools = wrapCustomTools(baseTools(), { policy, audit });
     const tool = tools.find((item) => item.name === name);
@@ -186,27 +252,163 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     return result.content.map((block) => block.text).join("\n");
   }
 
+  // Per-operation service writes are two-phase: the tool returns a preview and a
+  // single-use confirm token, and only service_api.confirm executes it. Read
+  // tools run directly. Writes and confirmations are audited.
+  const CONFIRM_TTL_MS = 5 * 60_000;
+  const MAX_PENDING_WRITES = 64;
+  const pendingWrites = new Map<
+    string,
+    {
+      provider: ServiceAPIProvider;
+      request: { method: string; path: string; body?: unknown };
+      operationId: string;
+      service: string;
+      expires: number;
+    }
+  >();
+
+  async function findServiceOperation(
+    name: string
+  ): Promise<{ provider: ServiceAPIProvider; operation: ServiceAPIOperation }> {
+    const rest = name.slice(SERVICE_API_OPERATION_PREFIX.length);
+    const dot = rest.indexOf(".");
+    const serviceId = dot > 0 ? rest.slice(0, dot) : "";
+    const provider = (options.serviceAPIProviders ?? []).find(
+      (candidate) => candidate.id === serviceId
+    );
+    if (!provider?.operations)
+      throw httpError(404, `unknown service API: ${serviceId || name}`);
+    const operation = (await provider.operations()).find(
+      (candidate) => serviceOperationToolName(serviceId, candidate.id) === name
+    );
+    if (!operation) throw httpError(404, `unknown capability: ${name}`);
+    return { provider, operation };
+  }
+
+  async function invokeServiceOperation(
+    name: string,
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    const { provider, operation } = await findServiceOperation(name);
+    let request: {
+      method: string;
+      path: string;
+      body?: unknown;
+      readOnly: boolean;
+    };
+    try {
+      request = serviceOperationRequest(operation, args);
+    } catch (error) {
+      throw httpError(
+        400,
+        error instanceof Error ? error.message : "invalid arguments"
+      );
+    }
+    if (operation.readOnly) {
+      if (!serviceOperationExposable(operation))
+        throw httpError(403, `${name}: ${RUNTIME_APPROVAL_REQUIRED}`);
+      return provider.request(request);
+    }
+    if (!serviceOperationWritable(operation))
+      throw httpError(403, `${name}: ${RUNTIME_APPROVAL_REQUIRED}`);
+    for (const [token, entry] of pendingWrites)
+      if (entry.expires <= Date.now()) pendingWrites.delete(token);
+    if (pendingWrites.size >= MAX_PENDING_WRITES)
+      pendingWrites.delete(pendingWrites.keys().next().value!);
+    const token = randomUUID();
+    pendingWrites.set(token, {
+      provider,
+      request,
+      operationId: operation.id,
+      service: provider.id,
+      expires: Date.now() + CONFIRM_TTL_MS,
+    });
+    await audit?.append({
+      method: "service_api.write.preview",
+      parameterHash: hashParameters({
+        service: provider.id,
+        operation: operation.id,
+        ...request,
+      }),
+      responseBytes: 0,
+      budgetConsumed: 0,
+      redactionFired: false,
+      identity: `${provider.id}.${operation.id}`,
+    });
+    return {
+      preview: {
+        service: provider.id,
+        operation: operation.id,
+        method: request.method,
+        path: request.path,
+        ...(request.body === undefined ? {} : { body: request.body }),
+      },
+      confirmToken: token,
+      expiresInSeconds: CONFIRM_TTL_MS / 1000,
+      note: `No change was made. Review the preview, then call ${SERVICE_API_CONFIRM_TOOL_NAME} with {"token":"..."} to execute exactly this request.`,
+    };
+  }
+
+  async function confirmServiceOperation(
+    args: Record<string, unknown>
+  ): Promise<unknown> {
+    const token = typeof args.token === "string" ? args.token : "";
+    const entry = token ? pendingWrites.get(token) : undefined;
+    if (!entry || entry.expires <= Date.now()) {
+      if (token) pendingWrites.delete(token);
+      throw httpError(
+        404,
+        "This confirm token is unknown or expired; preview the write again"
+      );
+    }
+    pendingWrites.delete(token);
+    const result = await entry.provider.request({
+      ...entry.request,
+      readOnly: false,
+    });
+    await audit?.append({
+      method: "service_api.write",
+      parameterHash: hashParameters({
+        service: entry.service,
+        operation: entry.operationId,
+        ...entry.request,
+      }),
+      responseBytes: 0,
+      budgetConsumed: 0,
+      redactionFired: false,
+      identity: `${entry.service}.${entry.operationId}`,
+    });
+    return result;
+  }
+
   return {
     permissionMode(): import("../runtime/interface.ts").PermissionMode {
       return ctx.permissionMode();
     },
     setPermissionMode(
-      mode: import("../runtime/interface.ts").PermissionMode,
+      mode: import("../runtime/interface.ts").PermissionMode
     ): void {
       ctx.setPermissionMode(mode);
     },
     updatePermissionMode(
-      mode: import("../runtime/interface.ts").PermissionMode,
+      mode: import("../runtime/interface.ts").PermissionMode
     ) {
       return ctx.updatePermissionMode(mode);
     },
     getAgentSettings() {
       return ctx.getAgentSettings();
     },
-    updateAgentSettings(patch: import("../settings/product.ts").AgentSettingsPatch) {
+    updateAgentSettings(
+      patch: import("../settings/product.ts").AgentSettingsPatch
+    ) {
       return ctx.updateAgentSettings(patch);
     },
-    async listModels(query?: { all?: boolean; providerId?: string; refresh?: boolean }) {
+    async listModels(query?: {
+      all?: boolean;
+      providerId?: string;
+      refresh?: boolean;
+    }) {
       return options.runtime.listModels(query);
     },
     /**
@@ -217,7 +419,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
      */
     async testModel(
       model: RuntimeModelRef,
-      query?: { timeoutMs?: number },
+      query?: { timeoutMs?: number }
     ): Promise<{
       providerId: string;
       modelId: string;
@@ -238,7 +440,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           new Promise<never>((_resolve, reject) => {
             const timer = setTimeout(() => {
               reject(
-                httpError(504, "model test timed out; provider may be slow"),
+                httpError(504, "model test timed out; provider may be slow")
               );
             }, timeoutMs);
             if (typeof timer === "object" && "unref" in timer) {
@@ -274,22 +476,25 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       return options.runtime.listAvailableModels(query);
     },
     async listProviders(query?: { all?: boolean }) {
-        return options.runtime.listProviders(query);
+      return options.runtime.listProviders(query);
     },
     async providerConfiguration(providerId: string) {
       return options.runtime.providerConfiguration?.(providerId);
     },
-    async saveProviderConfiguration(configuration: RuntimeProviderConfiguration, apiKey?: string) {
-      if (!options.runtime.saveProviderConfiguration) throw httpError(501, "Runtime does not support provider configuration");
+    async saveProviderConfiguration(
+      configuration: RuntimeProviderConfiguration,
+      apiKey?: string
+    ) {
+      if (!options.runtime.saveProviderConfiguration)
+        throw httpError(501, "Runtime does not support provider configuration");
       await options.runtime.saveProviderConfiguration(configuration, apiKey);
     },
     async deleteProviderConfiguration(providerId: string) {
-      if (!options.runtime.deleteProviderConfiguration) throw httpError(501, "Runtime does not support provider configuration");
+      if (!options.runtime.deleteProviderConfiguration)
+        throw httpError(501, "Runtime does not support provider configuration");
       await options.runtime.deleteProviderConfiguration(providerId);
     },
-    async exportSession(
-      thebeSessionId?: string,
-    ): Promise<RuntimeExport> {
+    async exportSession(thebeSessionId?: string): Promise<RuntimeExport> {
       const opened = await openSession(thebeSessionId);
       return opened.session.exportSession();
     },
@@ -302,7 +507,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     invokeTool,
     async invokeCapability(
       id: string,
-      input: CapabilityInvokeInput = {},
+      input: CapabilityInvokeInput = {}
     ): Promise<CapabilityInvokeResult> {
       const capabilities = [
         ...listCoreMcpTools({
@@ -313,11 +518,30 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
           jellyfin: Boolean(options.jellyfin),
           immich: Boolean(options.immich),
         }),
+        ...baseTools()
+          .filter((tool) =>
+            (SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name)
+          )
+          .map((tool): HomelabCapability => ({
+            id: tool.name,
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.parameters as Record<string, unknown>,
+            category: "other",
+            source: "core",
+            serverName: "thebe-core",
+            execution: "agent",
+            permission:
+              tool.name === SERVICE_API_WRITE_TOOL_NAME ? "confirm" : "read",
+          })),
         ...(await mcp.listTools()),
       ].map(withProductMetadata);
-      const capability = capabilities.find(
-        (item) => item.id === id || item.name === id,
-      );
+      const capability =
+        capabilities.find((item) => item.id === id || item.name === id) ??
+        (id.startsWith(SERVICE_API_OPERATION_PREFIX) ||
+        id === SERVICE_API_CONFIRM_TOOL_NAME
+          ? syntheticServiceOperation(id)
+          : undefined);
       if (!capability) {
         throw httpError(404, `unknown capability: ${id}`);
       }
@@ -328,19 +552,20 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         throw httpError(
           400,
           "strm.repair requires resource.kind=strm",
-          "invalid_body",
+          "invalid_body"
         );
       }
       if (capability.id === STRM_REPAIR_CAPABILITY_ID && capability.service) {
         const resourceProvider = input.resource?.provider;
         if (
           typeof resourceProvider !== "string" ||
-          resourceProvider.trim().toLowerCase() !== capability.service.trim().toLowerCase()
+          resourceProvider.trim().toLowerCase() !==
+            capability.service.trim().toLowerCase()
         ) {
           throw httpError(
             400,
             `strm.repair requires resource.provider=${capability.service}`,
-            "invalid_body",
+            "invalid_body"
           );
         }
       }
@@ -348,22 +573,20 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
       }
       if (capability.approval === "required") {
-        throw httpError(
-          403,
-          `${capability.id}: ${RUNTIME_APPROVAL_REQUIRED}`,
-        );
+        throw httpError(403, `${capability.id}: ${RUNTIME_APPROVAL_REQUIRED}`);
       }
       const mode = input.mode ?? CAPABILITY_INVOKE_MODE_DIRECT;
       const args = input.arguments ?? {};
-      const invocationArgs = capability.id === STRM_REPAIR_CAPABILITY_ID
-        ? { arguments: args, resource: input.resource }
-        : args;
+      const invocationArgs =
+        capability.id === STRM_REPAIR_CAPABILITY_ID
+          ? { arguments: args, resource: input.resource }
+          : args;
       if (mode === CAPABILITY_INVOKE_MODE_BACKGROUND) {
         if (!capability.background) {
           throw httpError(
             400,
             "capability does not support background execution",
-            "invalid_body",
+            "invalid_body"
           );
         }
         const runId = randomUUID();
@@ -412,7 +635,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
             });
           } catch (error) {
             const errorMessage = redactToolOutput(
-              error instanceof Error ? error.message : String(error),
+              error instanceof Error ? error.message : String(error)
             );
             let artifactId: string | undefined;
             try {
@@ -488,7 +711,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     },
     subscribeCapabilityRun(
       runId: string,
-      listener: (run: CapabilityRun) => void,
+      listener: (run: CapabilityRun) => void
     ): () => void {
       const listeners = capabilityRunListeners.get(runId) ?? new Set();
       listeners.add(listener);
@@ -502,30 +725,37 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       const opened = await openSession(thebeSessionId);
       return opened.session.getContextUsage();
     },
-    async getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext> {
+    async getContextUsage(
+      thebeSessionId: string
+    ): Promise<ThebeSessionContext> {
       const opened = await openSession(thebeSessionId);
       return opened.session.getContextUsage();
     },
     async stopToolCall(
       thebeSessionId: string,
-      toolCallId: string,
+      toolCallId: string
     ): Promise<void> {
       ctx.checkNotQuiesced();
       const opened = await openSession(thebeSessionId);
       await opened.session.stopToolCall(toolCallId);
     },
     async listBackgroundTasks(
-      thebeSessionId: string,
+      thebeSessionId: string
     ): Promise<ProductBackgroundTask[]> {
       const provider = backgroundTaskProviders.find(
-        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+        (candidate) =>
+          providerBackgroundTaskSessionId(candidate.service) === thebeSessionId
       );
       if (provider) {
-        return Promise.all((await provider.list()).map(task => productProviderTask(provider.service, task)));
+        return Promise.all(
+          (await provider.list()).map((task) =>
+            productProviderTask(provider.service, task)
+          )
+        );
       }
       const opened = await openSession(thebeSessionId);
       return (await opened.session.listBackgroundTasks()).map((task) =>
-        toProductBackgroundTask(thebeSessionId, task),
+        toProductBackgroundTask(thebeSessionId, task)
       );
     },
     async listAllBackgroundTasks(): Promise<ProductBackgroundTask[]> {
@@ -534,10 +764,16 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
         if (meta.inPlace) continue;
         try {
           const current = options.runtime.listBackgroundTasksForSession
-            ? await options.runtime.listBackgroundTasksForSession(meta.runtimeSessionId)
-            : await (await openSession(meta.thebeSessionId)).session.listBackgroundTasks();
+            ? await options.runtime.listBackgroundTasksForSession(
+                meta.runtimeSessionId
+              )
+            : await (
+                await openSession(meta.thebeSessionId)
+              ).session.listBackgroundTasks();
           tasks.push(
-            ...current.map((task) => toProductBackgroundTask(meta.thebeSessionId, task)),
+            ...current.map((task) =>
+              toProductBackgroundTask(meta.thebeSessionId, task)
+            )
           );
         } catch {
           // A stale runtime session should not hide tasks from other sessions.
@@ -546,7 +782,11 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       for (const provider of backgroundTaskProviders) {
         try {
           tasks.push(
-            ...await Promise.all((await provider.list()).map(task => productProviderTask(provider.service, task))),
+            ...(await Promise.all(
+              (await provider.list()).map((task) =>
+                productProviderTask(provider.service, task)
+              )
+            ))
           );
         } catch {
           // A provider outage should not hide runtime tasks or other providers.
@@ -562,10 +802,11 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     },
     async stopBackgroundTask(
       thebeSessionId: string,
-      taskId: string,
+      taskId: string
     ): Promise<void> {
       const provider = backgroundTaskProviders.find(
-        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+        (candidate) =>
+          providerBackgroundTaskSessionId(candidate.service) === thebeSessionId
       );
       if (provider) {
         await provider.stop(taskId);
@@ -576,7 +817,8 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
     },
     async stopAllBackgroundTasks(thebeSessionId: string): Promise<void> {
       const provider = backgroundTaskProviders.find(
-        (candidate) => providerBackgroundTaskSessionId(candidate.service) === thebeSessionId,
+        (candidate) =>
+          providerBackgroundTaskSessionId(candidate.service) === thebeSessionId
       );
       if (provider) {
         await provider.stopAll();
@@ -592,7 +834,7 @@ export function createControlApi(ctx: AgentContext, artifactStore?: ArtifactStor
       thebeSessionId: string,
       command: string,
       onChunk?: (chunk: string) => void,
-      options?: { excludeFromContext?: boolean },
+      options?: { excludeFromContext?: boolean }
     ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
       const opened = await openSession(thebeSessionId);
       if (opened.session.executeBash) {
@@ -631,13 +873,13 @@ function asStrmRepairRequest(value: unknown): StrmRepairRequest {
       : value,
     resource:
       resource && typeof resource === "object" && !Array.isArray(resource)
-        ? resource as Record<string, unknown>
+        ? (resource as Record<string, unknown>)
         : undefined,
   };
 }
 
 function resourceRef(
-  resource: Record<string, unknown> | undefined,
+  resource: Record<string, unknown> | undefined
 ): { kind: string; id: string } | undefined {
   if (
     !resource ||
@@ -649,4 +891,27 @@ function resourceRef(
     return undefined;
   }
   return { kind: resource.kind, id: resource.id };
+}
+
+/** A stand-in capability so per-operation ids share the one direct-invoke path. */
+function syntheticServiceOperation(id: string): HomelabCapability {
+  const service =
+    id === SERVICE_API_CONFIRM_TOOL_NAME
+      ? undefined
+      : id.slice(SERVICE_API_OPERATION_PREFIX.length).split(".")[0];
+  return {
+    id,
+    name: id,
+    description: "Per-operation tool for a configured OpenAPI service.",
+    inputSchema: { type: "object" },
+    category: "other",
+    permission: "read",
+    effect: "read",
+    risk: "low",
+    approval: "none",
+    ...(service ? { service } : {}),
+    source: "core",
+    serverName: "thebe-core",
+    execution: "agent",
+  };
 }

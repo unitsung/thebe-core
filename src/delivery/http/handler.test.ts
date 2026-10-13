@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import SwaggerParser from "@apidevtools/swagger-parser";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
+import type { ServiceAPIProvider } from "../../agent/capabilities/service-api.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 import {
   resetSessionLogStreamsForTests,
@@ -47,23 +48,32 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 
 describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   it("rejects a model output limit larger than its context window before saving", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.runtime.saveProviderConfiguration = async () => {};
     const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
-    const response = await app.handler.handle(new Request("http://127.0.0.1:8787/v1/provider/local/config", {
-      method: "PUT", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ baseUrl: "http://127.0.0.1:11434/v1", api: "openai-completions",
-        models: [{ id: "local-model", contextWindow: 4096, maxTokens: 8192 }] }),
-    }));
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/provider/local/config", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          baseUrl: "http://127.0.0.1:11434/v1",
+          api: "openai-completions",
+          models: [{ id: "local-model", contextWindow: 4096, maxTokens: 8192 }],
+        }),
+      })
+    );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "maxTokens must not exceed contextWindow" });
+    expect(await response.json()).toEqual({
+      error: "maxTokens must not exceed contextWindow",
+    });
   });
 
   it("GET /v1/health returns ok and version", async () => {
     const res = await handler().handle(
-      new Request("http://127.0.0.1:8787/v1/health"),
+      new Request("http://127.0.0.1:8787/v1/health")
     );
     expect(res.status).toBe(200);
     await expect(json(res)).resolves.toEqual({ ok: true, version: "0.1.0" });
@@ -71,7 +81,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
 
   it("serves generated OpenAPI JSON and Swagger UI", async () => {
     const spec = await handler().handle(
-      new Request("http://127.0.0.1:8787/openapi.json"),
+      new Request("http://127.0.0.1:8787/openapi.json")
     );
     expect(spec.status).toBe(200);
     expect(spec.headers.get("cache-control")).toBe("no-cache");
@@ -79,12 +89,16 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(body.openapi).toBe("3.0.3");
     expect(body.info.version).toBe("0.1.0");
     expect(body.paths["/v1/session/{id}/prompt"]).toBeDefined();
-    expect(body.paths["/v1/session/{id}/background-task/stop-all"]).toBeDefined();
-    const parserInput = body as unknown as Parameters<typeof SwaggerParser.validate>[0];
+    expect(
+      body.paths["/v1/session/{id}/background-task/stop-all"]
+    ).toBeDefined();
+    const parserInput = body as unknown as Parameters<
+      typeof SwaggerParser.validate
+    >[0];
     await expect(SwaggerParser.validate(parserInput)).resolves.toBeDefined();
 
     const docs = await handler().handle(
-      new Request("http://127.0.0.1:8787/docs"),
+      new Request("http://127.0.0.1:8787/docs")
     );
     expect(docs.status).toBe(200);
     expect(docs.headers.get("content-type")).toContain("text/html");
@@ -95,13 +109,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(html).not.toContain("unpkg.com");
 
     const css = await handler().handle(
-      new Request("http://127.0.0.1:8787/docs/swagger-ui.css"),
+      new Request("http://127.0.0.1:8787/docs/swagger-ui.css")
     );
     expect(css.status).toBe(200);
     expect(css.headers.get("content-type")).toContain("text/css");
 
     const init = await handler().handle(
-      new Request("http://127.0.0.1:8787/docs/swagger-ui-init.js"),
+      new Request("http://127.0.0.1:8787/docs/swagger-ui-init.js")
     );
     expect(init.status).toBe(200);
     expect(init.headers.get("content-type")).toContain("text/javascript");
@@ -109,7 +123,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("GET /v1/capabilities exposes the homelab capability contract", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -117,7 +132,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities"),
+      new Request("http://127.0.0.1:8787/v1/capabilities")
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -198,13 +213,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           source: "core",
           service: "immich",
         }),
-      ]),
+      ])
     );
   });
 
   it("GET /v1/events returns an events array", async () => {
     const res = await handler().handle(
-      new Request("http://127.0.0.1:8787/v1/events"),
+      new Request("http://127.0.0.1:8787/v1/events")
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -217,7 +232,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token: "apns-token", platform: "ios" }),
-      }),
+      })
     );
     expect(res.status).toBeGreaterThanOrEqual(200);
     expect(res.status).toBeLessThan(300);
@@ -229,7 +244,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ platform: "ios" }),
-      }),
+      })
     );
     expect(missingToken.status).toBe(400);
     const wrongPlatform = await handler().handle(
@@ -237,7 +252,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token: "token", platform: "android" }),
-      }),
+      })
     );
     expect(wrongPlatform.status).toBe(400);
   });
@@ -253,7 +268,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "tools/list",
           params: {},
         }),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -270,20 +285,21 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         "emby.libraries",
         "jellyfin.libraries",
         "immich.assets",
-      ]),
+      ])
     );
     const inspect = (result.tools ?? []).find(
-      (tool) => tool.name === "container.inspect",
+      (tool) => tool.name === "container.inspect"
     ) as { inputSchema?: { required?: string[] } } | undefined;
     const logs = (result.tools ?? []).find(
-      (tool) => tool.name === "container.logs",
+      (tool) => tool.name === "container.logs"
     ) as { inputSchema?: { required?: string[] } } | undefined;
     expect(inspect?.inputSchema?.required).toEqual(["id"]);
     expect(logs?.inputSchema?.required).toEqual(["id"]);
   });
 
   it("POST /mcp supports initialize and delegates core event tools", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -295,7 +311,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize" }),
-      }),
+      })
     );
     expect(await json(initialize)).toMatchObject({
       result: {
@@ -313,16 +329,18 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "tools/call",
           params: { name: "list_core_events", arguments: {} },
         }),
-      }),
+      })
     );
     const eventBody = await json(events);
-    const text = ((eventBody.result as { content?: Array<{ text?: string }> })
-      .content?.[0]?.text ?? "");
+    const text =
+      (eventBody.result as { content?: Array<{ text?: string }> }).content?.[0]
+        ?.text ?? "";
     expect(JSON.parse(text)).toEqual([]);
   });
 
   it("POST /mcp tools/call rejects names outside the MCP allow-list", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -339,7 +357,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "tools/call",
           params: { name: "bash" },
         }),
-      }),
+      })
     );
     const body = await json(res);
     expect(body.error).toMatchObject({
@@ -359,7 +377,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "tools/call",
           params: { name: "container.status_summary" },
         }),
-      }),
+      })
     );
     const body = await json(res);
     expect(body.error).toMatchObject({
@@ -369,7 +387,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("POST /mcp tools/call container.status_summary goes through the agent", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     const app = createThebeApp({
@@ -387,7 +406,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "tools/call",
           params: { name: "container.status_summary" },
         }),
-      }),
+      })
     );
     const body = await json(res);
     const result = body.result as { content?: Array<{ text?: string }> };
@@ -398,7 +417,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("POST /mcp tools/call invokes an advertised provider-backed STRM capability", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const calls: unknown[] = [];
     const app = createThebeApp({
@@ -437,13 +457,14 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
             },
           },
         }),
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
     const body = await json(response);
-    const text = ((body.result as { content?: Array<{ text?: string }> })
-      .content?.[0]?.text ?? "");
+    const text =
+      (body.result as { content?: Array<{ text?: string }> }).content?.[0]
+        ?.text ?? "";
     expect(JSON.parse(text)).toEqual({
       status: "repaired",
       summary: "STRM path repaired and verified.",
@@ -462,7 +483,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("POST /mcp tools/call rejects a STRM resource from another provider", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     let called = false;
     const app = createThebeApp({
@@ -497,7 +519,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
             },
           },
         }),
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
@@ -515,21 +537,19 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     const res = await app.handle(
       new Request("http://127.0.0.1:8787/v1/health", {
         headers: { "X-Thebe-Token": "wrong" },
-      }),
+      })
     );
     expect(res.status).toBe(401);
   });
 
   it("keeps documentation readable while protecting API calls with the shared token", async () => {
     const app = handler({ token: "secret" });
-    const docs = await app.handle(
-      new Request("http://127.0.0.1:8787/docs"),
-    );
+    const docs = await app.handle(new Request("http://127.0.0.1:8787/docs"));
     const spec = await app.handle(
-      new Request("http://127.0.0.1:8787/openapi.json"),
+      new Request("http://127.0.0.1:8787/openapi.json")
     );
     const health = await app.handle(
-      new Request("http://127.0.0.1:8787/v1/health"),
+      new Request("http://127.0.0.1:8787/v1/health")
     );
     expect(docs.status).toBe(200);
     expect(spec.status).toBe(200);
@@ -537,7 +557,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("POST /v1/messages is a compatibility adapter delegating to prompt", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "messages response" }]);
@@ -551,7 +572,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: "hello" }),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const data = (await res.json()) as { ok: boolean; text: string };
@@ -564,13 +585,14 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     const res = await app.handle(
       new Request("http://127.0.0.1:8787/v1/health", {
         headers: { "X-Thebe-Token": "secret" },
-      }),
+      })
     );
     expect(res.status).toBe(200);
   });
 
   it("POST /v1/session then prompt/message/log/model", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "from-session" }]);
@@ -580,7 +602,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     expect(created.status).toBe(201);
     const session = (await created.json()) as { thebeSessionId: string };
@@ -591,8 +613,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "hello" }),
-        },
-      ),
+        }
+      )
     );
     expect(prompted.status).toBe(200);
     await expect(prompted.json()).resolves.toMatchObject({
@@ -602,8 +624,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     });
     const messages = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message`
+      )
     );
     const messageBody = (await messages.json()) as {
       messages: Array<{ role: string; text: string }>;
@@ -614,13 +636,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     ]);
     const log = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/log`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/log`
+      )
     );
     const logBody = (await log.json()) as { events: Array<{ type: string }> };
     expect(logBody.events.map((event) => event.type)).toContain("text_delta");
     const models = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/model"),
+      new Request("http://127.0.0.1:8787/v1/model")
     );
     const modelBody = (await models.json()) as {
       models: Array<{ providerId: string; modelId: string }>;
@@ -635,19 +657,20 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           body: JSON.stringify({
             model: { providerId: "fake", modelId: "fake-2" },
           }),
-        },
-      ),
+        }
+      )
     );
     expect(setModel.status).toBe(200);
     const listed = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session"),
+      new Request("http://127.0.0.1:8787/v1/session")
     );
     const listBody = (await listed.json()) as { sessions: unknown[] };
     expect(listBody.sessions).toHaveLength(1);
   });
 
   it("GET /v1/session/:id/log?follow=true is an event stream", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "streamed" }]);
@@ -657,7 +680,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     const session = (await created.json()) as { thebeSessionId: string };
     await app.handler.handle(
@@ -667,15 +690,15 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "hello" }),
-        },
-      ),
+        }
+      )
     );
     const ac = new AbortController();
     const res = await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/log?follow=true`,
-        { signal: ac.signal },
-      ),
+        { signal: ac.signal }
+      )
     );
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const reader = res.body!.getReader();
@@ -686,7 +709,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("OAuth authorize returns 202 with a URL; callback flips connected", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -696,7 +720,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     const authorized = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/authorize", {
         method: "POST",
-      }),
+      })
     );
     expect(authorized.status).toBe(202);
     const authBody = (await authorized.json()) as {
@@ -710,22 +734,22 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code: "abc", state: "s" }),
-      }),
+      })
     );
     expect(callback.status).toBe(200);
     const providers = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/provider/auth"),
+      new Request("http://127.0.0.1:8787/v1/provider/auth")
     );
     const providerBody = (await providers.json()) as {
       providers: Array<{ id: string; authStatus: string }>;
     };
     expect(
-      providerBody.providers.find((row) => row.id === "fake")?.authStatus,
+      providerBody.providers.find((row) => row.id === "fake")?.authStatus
     ).toBe("connected");
     const again = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/authorize", {
         method: "POST",
-      }),
+      })
     );
     expect(again.status).toBe(200);
     await expect(again.json()).resolves.toMatchObject({ connected: true });
@@ -735,24 +759,31 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ force: true }),
-      }),
+      })
     );
     expect(reauthorize.status).toBe(202);
     await expect(reauthorize.json()).resolves.toMatchObject({ pending: true });
     const pendingProviders = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/provider/auth"),
+      new Request("http://127.0.0.1:8787/v1/provider/auth")
     );
     const pendingBody = (await pendingProviders.json()) as {
-      providers: Array<{ id: string; authStatus: string; oauthPending?: boolean }>;
+      providers: Array<{
+        id: string;
+        authStatus: string;
+        oauthPending?: boolean;
+      }>;
     };
-    expect(pendingBody.providers.find((row) => row.id === "fake")).toMatchObject({
+    expect(
+      pendingBody.providers.find((row) => row.id === "fake")
+    ).toMatchObject({
       authStatus: "connected",
       oauthPending: true,
     });
   });
 
   it("OAuth callback without a pending login is 404, empty input is 400", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -764,26 +795,34 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code: "abc" }),
-      }),
+      })
     );
     expect(missing.status).toBe(404);
     await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/authorize", {
         method: "POST",
-      }),
+      })
     );
     const empty = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/callback", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
-      }),
+      })
     );
     expect(empty.status).toBe(400);
   });
 
-  async function sessionApp(turns: Array<{ kind: "text"; text: string } | { kind: "tools"; calls: Array<{ name: string; args?: unknown }> } | { kind: "hang" } | { kind: "error"; message: string }>) {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+  async function sessionApp(
+    turns: Array<
+      | { kind: "text"; text: string }
+      | { kind: "tools"; calls: Array<{ name: string; args?: unknown }> }
+      | { kind: "hang" }
+      | { kind: "error"; message: string }
+    >
+  ) {
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns(turns);
@@ -793,7 +832,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     const session = (await created.json()) as { thebeSessionId: string };
     return { app, session: session.thebeSessionId };
@@ -809,7 +848,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           title: "ops review",
           model: { providerId: "fake", modelId: "fake-2" },
         }),
-      }),
+      })
     );
     expect(created.status).toBe(201);
     const body = (await created.json()) as {
@@ -827,7 +866,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         body: JSON.stringify({
           model: { providerId: "fake", modelId: "nope" },
         }),
-      }),
+      })
     );
     expect(badModel.status).toBe(404);
   });
@@ -839,7 +878,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ level: "ultra" }),
-      }),
+      })
     );
     expect(bad.status).toBe(400);
     const ok = await app.handler.handle(
@@ -847,7 +886,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ level: "high" }),
-      }),
+      })
     );
     expect(ok.status).toBe(200);
   });
@@ -866,7 +905,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         body: JSON.stringify({
           model: { providerId: "fake", modelId: "fake-1" },
         }),
-      }),
+      })
     );
     expect(busy.status).toBe(409);
     const thinking = await app.handler.handle(
@@ -874,13 +913,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ level: "low" }),
-      }),
+      })
     );
     expect(thinking.status).toBe(409);
     await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/session/${session}/interrupt`, {
         method: "POST",
-      }),
+      })
     );
     await expect(first).rejects.toThrow();
     const unknown = await app.handler.handle(
@@ -890,7 +929,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         body: JSON.stringify({
           model: { providerId: "fake", modelId: "nope" },
         }),
-      }),
+      })
     );
     expect(unknown.status).toBe(404);
   });
@@ -898,7 +937,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   it("GET /v1/model supports provider filter and normalized DTOs", async () => {
     const { app } = await sessionApp([{ kind: "text", text: "x" }]);
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/model?provider=fake&all=true"),
+      new Request("http://127.0.0.1:8787/v1/model?provider=fake&all=true")
     );
     const body = (await res.json()) as {
       models: Array<Record<string, unknown>>;
@@ -910,7 +949,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       available: true,
     });
     const empty = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/model?provider=other"),
+      new Request("http://127.0.0.1:8787/v1/model?provider=other")
     );
     await expect(empty.json()).resolves.toMatchObject({ models: [] });
   });
@@ -920,28 +959,28 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/authorize", {
         method: "POST",
-      }),
+      })
     );
     await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/oauth/callback", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ code: "abc" }),
-      }),
+      })
     );
     const out = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/auth/fake", { method: "DELETE" }),
+      new Request("http://127.0.0.1:8787/v1/auth/fake", { method: "DELETE" })
     );
     expect(out.status).toBe(200);
     const providers = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/provider/auth"),
+      new Request("http://127.0.0.1:8787/v1/provider/auth")
     );
     const body = (await providers.json()) as {
       providers: Array<{ id: string; authStatus: string }>;
     };
-    expect(
-      body.providers.find((row) => row.id === "fake")?.authStatus,
-    ).toBe("missing");
+    expect(body.providers.find((row) => row.id === "fake")?.authStatus).toBe(
+      "missing"
+    );
   });
 
   it("export format and diff code", async () => {
@@ -949,27 +988,27 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await app.agent.prompt("hi", { thebeSessionId: session });
     const jsonl = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/export?format=jsonl`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/export?format=jsonl`
+      )
     );
     expect(jsonl.headers.get("content-type")).toContain("x-ndjson");
     const html = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/export?format=html`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/export?format=html`
+      )
     );
     expect(html.headers.get("content-type")).toContain("text/html");
     expect(html.headers.get("content-security-policy")).toContain(
-      "default-src 'none'",
+      "default-src 'none'"
     );
     const bad = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/export?format=pdf`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/export?format=pdf`
+      )
     );
     expect(bad.status).toBe(400);
     const diff = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${session}/diff`),
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/diff`)
     );
     expect(diff.status).toBe(501);
     await expect(diff.json()).resolves.toMatchObject({
@@ -978,7 +1017,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
   });
 
   it("returns a workspace diff when a workspace is configured", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -987,11 +1027,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       workspacePath: "/tmp/thebe-http-workspace",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
-    const { thebeSessionId } = (await created.json()) as { thebeSessionId: string };
+    const { thebeSessionId } = (await created.json()) as {
+      thebeSessionId: string;
+    };
     const diff = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${thebeSessionId}/diff`),
+      new Request(`http://127.0.0.1:8787/v1/session/${thebeSessionId}/diff`)
     );
     expect(diff.status).toBe(200);
     await expect(diff.json()).resolves.toMatchObject({
@@ -1007,9 +1049,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await app.agent.prompt("one", { thebeSessionId: session });
     await app.agent.prompt("two", { thebeSessionId: session });
     const page = await app.handler.handle(
-      new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/message?limit=2`,
-      ),
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/message?limit=2`)
     );
     const pageBody = (await page.json()) as {
       messages: Array<{ id: string }>;
@@ -1021,8 +1061,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(pageBody.hasMore).toBe(true);
     const rest = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/message?after=${pageBody.messages[1]!.id}`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/message?after=${pageBody.messages[1]!.id}`
+      )
     );
     const restBody = (await rest.json()) as {
       messages: unknown[];
@@ -1032,14 +1072,14 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(restBody.hasMore).toBe(false);
     const badCursor = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/message?after=nope`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/message?after=nope`
+      )
     );
     expect(badCursor.status).toBe(400);
     const badLimit = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/message?limit=zero`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/message?limit=zero`
+      )
     );
     expect(badLimit.status).toBe(400);
   });
@@ -1048,7 +1088,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     const { app, session } = await sessionApp([{ kind: "text", text: "hi" }]);
     await app.agent.prompt("hi", { thebeSessionId: session });
     const first = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${session}/log`),
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/log`)
     );
     const firstBody = (await first.json()) as {
       events: Array<{ type: string }>;
@@ -1058,20 +1098,20 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     expect(firstBody.next).toBe(firstBody.events.length);
     const second = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session}/log?after=${firstBody.next}`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session}/log?after=${firstBody.next}`
+      )
     );
     await expect(second.json()).resolves.toMatchObject({ events: [] });
     const bad = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${session}/log?after=-1`),
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/log?after=-1`)
     );
     expect(bad.status).toBe(400);
     const ac = new AbortController();
     const follow = await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session}/log?follow=true&after=0`,
-        { signal: ac.signal },
-      ),
+        { signal: ac.signal }
+      )
     );
     const reader = follow.body!.getReader();
     let text = "";
@@ -1102,7 +1142,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/session/${session}/interrupt`, {
         method: "POST",
-      }),
+      })
     );
     const resolve = await app.handler.handle(
       new Request(
@@ -1111,8 +1151,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ response: "deny" }),
-        },
-      ),
+        }
+      )
     );
     expect(resolve.status).toBe(404);
     await Promise.allSettled([pending]);
@@ -1123,15 +1163,23 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ response: "deny" }),
-        },
-      ),
+        }
+      )
     );
     expect(again.status).toBe(404);
   });
 
   it("permission events carry a redacted args summary and risk", async () => {
     const { app, session } = await sessionApp([
-      { kind: "tools", calls: [{ name: "bash", args: { command: "ls", token: "sk-live-secret-value" } }] },
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "bash",
+            args: { command: "ls", token: "sk-live-secret-value" },
+          },
+        ],
+      },
       { kind: "text", text: "after" },
     ]);
     const pending = app.agent.prompt("run", { thebeSessionId: session });
@@ -1141,14 +1189,20 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     });
     const events = app.agent.events(session);
     const requested = events.find(
-      (event) => event.type === "permission_requested",
+      (event) => event.type === "permission_requested"
     );
     expect(requested).toMatchObject({ toolName: "bash", risk: "high" });
-    expect(requested?.type === "permission_requested" && requested.argsSummary).toContain("ls");
+    expect(
+      requested?.type === "permission_requested" && requested.argsSummary
+    ).toContain("ls");
     expect(JSON.stringify(events)).not.toContain("sk-live-secret-value");
-    await app.agent.resolvePermission(session, app.agent.pendingPermissionIds()[0]!, {
-      response: "deny",
-    });
+    await app.agent.resolvePermission(
+      session,
+      app.agent.pendingPermissionIds()[0]!,
+      {
+        response: "deny",
+      }
+    );
     await pending;
   });
 
@@ -1163,33 +1217,37 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       expect(app.agent.pendingPermissionIds().length).toBe(1);
     });
     const status = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session/status"),
+      new Request("http://127.0.0.1:8787/v1/session/status")
     );
     const body = (await status.json()) as {
       sessions: Array<{ thebeSessionId: string; status: string }>;
     };
     expect(
-      body.sessions.find((row) => row.thebeSessionId === session)?.status,
+      body.sessions.find((row) => row.thebeSessionId === session)?.status
     ).toBe("awaiting_permission");
-    await app.agent.resolvePermission(session, app.agent.pendingPermissionIds()[0]!, {
-      response: "deny",
-    });
+    await app.agent.resolvePermission(
+      session,
+      app.agent.pendingPermissionIds()[0]!,
+      {
+        response: "deny",
+      }
+    );
     await pending;
     const idle = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session/status"),
+      new Request("http://127.0.0.1:8787/v1/session/status")
     );
     const idleBody = (await idle.json()) as {
       sessions: Array<{ thebeSessionId: string; status: string }>;
     };
     expect(
-      idleBody.sessions.find((row) => row.thebeSessionId === session)?.status,
+      idleBody.sessions.find((row) => row.thebeSessionId === session)?.status
     ).toBe("idle");
   });
 
   it("failed runs log an error event, aborts log interrupted only", async () => {
     const failed = await sessionApp([{ kind: "error", message: "boom" }]);
     await expect(
-      failed.app.agent.prompt("x", { thebeSessionId: failed.session }),
+      failed.app.agent.prompt("x", { thebeSessionId: failed.session })
     ).rejects.toThrow("boom");
     const log = failed.app.agent.events(failed.session);
     expect(log.some((event) => event.type === "error")).toBe(true);
@@ -1205,9 +1263,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     await aborted.app.agent.interrupt(aborted.session);
     await expect(hanging).rejects.toThrow();
     const abortedLog = aborted.app.agent.events(aborted.session);
-    expect(
-      abortedLog.some((event) => event.type === "interrupted"),
-    ).toBe(true);
+    expect(abortedLog.some((event) => event.type === "interrupted")).toBe(true);
     expect(abortedLog.some((event) => event.type === "error")).toBe(false);
   });
 
@@ -1221,7 +1277,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           text: "look",
           files: [{ mediaType: "application/pdf", data: "aaaa" }],
         }),
-      }),
+      })
     );
     expect(badType.status).toBe(400);
     const tooBig = await app.handler.handle(
@@ -1232,7 +1288,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           text: "look",
           files: [{ mediaType: "image/png", data: "a".repeat(3_000_000) }],
         }),
-      }),
+      })
     );
     expect(tooBig.status).toBe(413);
   });
@@ -1243,16 +1299,19 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     const result = await app.agent.prompt(
       {
         text: "read this",
-        files: [{ mediaType: "text/plain", data: content, filename: "app.log" }],
+        files: [
+          { mediaType: "text/plain", data: content, filename: "app.log" },
+        ],
       },
-      { thebeSessionId: session },
+      { thebeSessionId: session }
     );
     expect(result.text).toBe("done");
     expect(app.agent.messages()[0]?.text).toContain("error: disk full");
   });
 
   it("POST prompt with an invalid mode is 400", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "unused" }]);
@@ -1262,7 +1321,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     const session = (await created.json()) as { thebeSessionId: string };
     const res = await app.handler.handle(
@@ -1272,14 +1331,15 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "hello", mode: "yell" }),
-        },
-      ),
+        }
+      )
     );
     expect(res.status).toBe(400);
   });
 
   it("POST prompt while streaming is 409", async () => {
-    const { createFakeRuntime } = await import("../../testing/runtime/index.ts");
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);
@@ -1289,7 +1349,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     const session = (await created.json()) as { thebeSessionId: string };
     const first = app.agent.prompt("long", {
@@ -1306,15 +1366,15 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "again" }),
-        },
-      ),
+        }
+      )
     );
     expect(second.status).toBe(409);
     await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/interrupt`,
-        { method: "POST" },
-      ),
+        { method: "POST" }
+      )
     );
     await expect(first).rejects.toThrow();
   });
@@ -1328,8 +1388,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ response: "yes" }),
-        },
-      ),
+        }
+      )
     );
     expect(invalid.status).toBe(400);
     const missing = await app.handler.handle(
@@ -1339,8 +1399,8 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({}),
-        },
-      ),
+        }
+      )
     );
     expect(missing.status).toBe(400);
   });
@@ -1355,7 +1415,7 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
         session,
         new Request("http://127.0.0.1:8787/log", { signal: idleAc.signal }),
         0,
-        { idleMs: 30 },
+        { idleMs: 30 }
       );
       const idleReader = idle.body!.getReader();
       const idleDone = idleReader.read();
@@ -1367,21 +1427,21 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       const first = await app.handler.handle(
         new Request(
           `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
-          { signal: firstAc.signal },
-        ),
+          { signal: firstAc.signal }
+        )
       );
       const second = await app.handler.handle(
         new Request(
           `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
-          { signal: secondAc.signal },
-        ),
+          { signal: secondAc.signal }
+        )
       );
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
       const third = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${session}/log?follow=true`
+        )
       );
       expect(third.status).toBe(429);
       firstAc.abort();
@@ -1391,5 +1451,150 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     } finally {
       resetSessionLogStreamsForTests();
     }
+  });
+
+  it("POST /mcp lists and calls one tool per allow-listed operation of a configured OpenAPI service", async () => {
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const calls: Array<{ method: string; path: string; readOnly: boolean }> =
+      [];
+    const service: ServiceAPIProvider = {
+      id: "petstore",
+      catalog: () => ({ operations: [] }),
+      request: async (input) => {
+        calls.push({
+          method: input.method,
+          path: input.path,
+          readOnly: input.readOnly,
+        });
+        return { ok: true, status: 200, body: { echoed: input.path } };
+      },
+      operations: async () => [
+        {
+          id: "findPetsByStatus",
+          method: "GET",
+          path: "/pet/findByStatus",
+          readOnly: true,
+          writable: false,
+          parameters: [
+            {
+              name: "status",
+              in: "query",
+              required: true,
+              schema: { type: "string" },
+            },
+          ],
+        },
+        {
+          id: "deletePet",
+          method: "DELETE",
+          path: "/pet/{petId}",
+          readOnly: false,
+          writable: true,
+          parameters: [{ name: "petId", in: "path", required: true }],
+        },
+        {
+          id: "purge",
+          method: "POST",
+          path: "/purge",
+          readOnly: false,
+          writable: false,
+          parameters: [],
+        },
+      ],
+    };
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      serviceAPIProviders: [service],
+    });
+    const mcp = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/mcp", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+    const call = (id: number, name: string, args: unknown) =>
+      mcp({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/call",
+        params: { name, arguments: args },
+      });
+
+    const listed = await json(
+      await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })
+    );
+    const names = (
+      listed.result as { tools: Array<{ name: string }> }
+    ).tools.map((tool) => tool.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        "service_api.petstore.findPetsByStatus",
+        "service_api.petstore.deletePet",
+        "service_api.confirm",
+      ])
+    );
+    expect(names).not.toContain("service_api.petstore.purge"); // not allow-listed
+
+    const read = await json(
+      await call(2, "service_api.petstore.findPetsByStatus", {
+        status: "available",
+      })
+    );
+    expect(
+      JSON.parse(
+        (read.result as { content: Array<{ text: string }> }).content[0]!.text
+      )
+    ).toMatchObject({ ok: true, status: 200 });
+    expect(calls).toEqual([
+      {
+        method: "GET",
+        path: "/pet/findByStatus?status=available",
+        readOnly: true,
+      },
+    ]);
+
+    // A write never executes directly: it returns a preview and a confirm token.
+    const preview = await json(
+      await call(3, "service_api.petstore.deletePet", { petId: 7 })
+    );
+    const previewBody = JSON.parse(
+      (preview.result as { content: Array<{ text: string }> }).content[0]!.text
+    ) as {
+      preview: { method: string; path: string };
+      confirmToken: string;
+    };
+    expect(previewBody.preview).toMatchObject({
+      method: "DELETE",
+      path: "/pet/7",
+    });
+    expect(calls).toHaveLength(1); // still only the read
+
+    const confirmed = await json(
+      await call(4, "service_api.confirm", { token: previewBody.confirmToken })
+    );
+    expect(
+      JSON.parse(
+        (confirmed.result as { content: Array<{ text: string }> }).content[0]!
+          .text
+      )
+    ).toMatchObject({ ok: true });
+    expect(calls.at(-1)).toEqual({
+      method: "DELETE",
+      path: "/pet/7",
+      readOnly: false,
+    });
+
+    // The token is single-use, and an unlisted operation is refused.
+    const replayed = await json(
+      await call(5, "service_api.confirm", { token: previewBody.confirmToken })
+    );
+    expect(JSON.stringify(replayed)).toMatch(/unknown or expired/i);
+    const refused = await json(await call(6, "service_api.petstore.purge", {}));
+    expect(JSON.stringify(refused)).toMatch(/approval|unknown/i);
   });
 });
