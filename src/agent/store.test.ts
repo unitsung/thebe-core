@@ -37,7 +37,26 @@ describe("AgentStore", () => {
       assertMetadataOnly({
         thebeSessionId: "x",
         transcript: [],
-      }),
+      })
     ).toThrow(/transcript/);
+  });
+
+  it("writes atomically so a concurrent list never reads a partial file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-agent-atomic-"));
+    const store = createAgentStore(dir);
+    const ids = Array.from({ length: 50 }, (_, i) => `thebe-${i}`);
+    const base = { runtimeId: "pi-coding-agent", runtimeSessionId: "runtime" };
+
+    // Interleave writes and reads: a non-atomic save would let a read observe a
+    // truncated (empty) file and fail JSON.parse.
+    await Promise.all([
+      ...ids.map((id) => store.save({ thebeSessionId: id, ...base })),
+      ...ids.map(() => store.list()),
+    ]);
+
+    // No temp files leak, and every stored record is complete.
+    const names = await readdir(dir);
+    expect(names.every((name) => name.endsWith(".json"))).toBe(true);
+    expect(await store.list()).toHaveLength(ids.length);
   });
 });
