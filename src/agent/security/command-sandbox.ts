@@ -90,6 +90,11 @@ export function buildBwrapCommandString(
  * `no-new-privileges` remove escalation paths, `--network none` (unless allowed)
  * cuts off the LAN and the internet, and only the workspace is bind-mounted
  * read-write. `--rm` keeps no container behind.
+ *
+ * The container runs as the invoking user (`--user uid:gid`) rather than root:
+ * the workspace is bind-mounted from a directory that user owns, so writes land
+ * correctly even when the daemon remaps container root, and a written file is
+ * owned by the caller instead of root.
  */
 export function buildDockerArgs(
   command: string,
@@ -102,6 +107,10 @@ export function buildDockerArgs(
   args.push("--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m");
   if (config.dropCapabilities !== false) {
     args.push("--cap-drop", "ALL", "--security-opt", "no-new-privileges");
+  }
+  const user = processUserSpec();
+  if (user) {
+    args.push("--user", user);
   }
   args.push("-v", `${workspace}:${workspace}:rw`, "-w", workspace);
   args.push(image, "/bin/sh", "-lc", command);
@@ -154,6 +163,13 @@ export function buildSeatbeltCommandString(
   config: SandboxConfig,
 ): string {
   return `sandbox-exec -p ${quoteShellArg(buildSeatbeltProfile(config))} /bin/sh -lc ${quoteShellArg(command)}`;
+}
+
+/** `uid:gid` of the invoking user, so container writes land as that user. */
+function processUserSpec(): string | undefined {
+  const uid = process.getuid?.();
+  const gid = process.getgid?.();
+  return uid !== undefined && gid !== undefined ? `${uid}:${gid}` : undefined;
 }
 
 function quoteShellArg(arg: string): string {
