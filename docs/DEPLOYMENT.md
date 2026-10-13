@@ -80,7 +80,7 @@ pulled image and does not rebuild; add `--build` only to build the local source
 
 | What | Pin |
 | --- | --- |
-| Node | Node 24 LTS (package `engines`: `>=24.0.0`); the Dockerfile pins the major with `node:24-bookworm-slim` |
+| Node | Node 24 LTS (package `engines`: `>=24.0.0`); the Dockerfile pins the base image to `node:24.21.0-bookworm-slim` plus its manifest-list digest |
 | Install | `npm ci`; runtime images add `--omit=dev` |
 
 The release check calls the local binaries directly:

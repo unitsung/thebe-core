@@ -19,7 +19,11 @@
 #   reclaim the bytes from the layer that held them.
 # - The npm cache is mounted as a BuildKit cache, so it never lands in a layer.
 
-FROM node:24-bookworm-slim AS build
+# Pinned base: exact Node patch plus the multi-arch manifest-list digest, so the
+# image is reproducible. Bump NODE_IMAGE (and this digest) to update Node.
+ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json vite.config.ts ./
 RUN --mount=type=cache,target=/root/.npm npm ci
@@ -37,7 +41,7 @@ RUN npm run build \
      \) -delete \
   && rm -rf node_modules/.vite node_modules/.cache /root/.npm
 
-FROM node:24-bookworm-slim AS runtime
+FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # Runtime dependencies only. pi-ai ships inside the pi-coding-agent package and
