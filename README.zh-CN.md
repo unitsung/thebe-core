@@ -28,7 +28,7 @@ Agent 运行时使用 pi-coding-agent。在指定的工作区里，它可以读�
 
 ## 快速开始
 
-容器可从本仓库构建，有访问权限也可拉取已发布镜像，见[部署文档](docs/DEPLOYMENT.md)。不使用 Docker 时，从源码运行需要 Node.js 22.19+ 和 pnpm 10+。
+容器可从本仓库构建，有访问权限也可拉取已发布镜像，见[部署文档](docs/DEPLOYMENT.md)。不使用 Docker 时，从源码运行需要 Node.js 24 LTS（自带 npm）。
 
 ```bash
 cd deploy
@@ -41,9 +41,9 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/health
 从源码运行（必须指定工作区目录）：
 
 ```bash
-pnpm install
+npm install
 cp .env.example .env
-THEBE_WORKSPACE_DIR=/srv/thebe-workspace pnpm start:build
+THEBE_WORKSPACE_DIR=/srv/thebe-workspace npm run start:build
 ```
 
 接着按[配置指南](docs/configuration.md)连接模型和你的服务。
@@ -59,7 +59,7 @@ THEBE_WORKSPACE_DIR=/srv/thebe-workspace pnpm start:build
 | 术语与架构 | [CONTEXT.md](CONTEXT.md) |
 | 参与贡献与安全 | [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) |
 
-开发检查：`pnpm typecheck`、`pnpm test`、`bash scripts/release-check.sh`。
+开发检查：`npm run typecheck`、`npm test`、`bash scripts/release-check.sh`。
 
 ## 许可证
 

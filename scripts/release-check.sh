@@ -2,9 +2,7 @@
 #
 # Deterministic release check: typecheck, build, full test suite, smoke test.
 #
-# It calls the local binaries directly instead of going through pnpm, because
-# `pnpm --version` / `pnpm typecheck` can hang in some release environments
-# (see docs/DEPLOYMENT.md). CI runs the same three checks plus the smoke
+# It calls the local binaries directly; CI runs the same checks plus the smoke
 # test, so an operator can reproduce a release gate on a clean host.
 #
 # usage: bash scripts/release-check.sh [--no-smoke]
@@ -31,7 +29,7 @@ bin=node_modules/.bin
 if [ ! -x "$bin/tsc" ] || [ ! -x "$bin/vite" ] || [ ! -x "$bin/vitest" ]; then
   echo "missing local binaries under $bin." >&2
   echo "install dependencies first, for example:" >&2
-  echo "  corepack pnpm install --frozen-lockfile   # or: pnpm install --frozen-lockfile" >&2
+  echo "  npm ci" >&2
   exit 1
 fi
 

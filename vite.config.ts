@@ -5,7 +5,7 @@ export default defineConfig({
   envDir: ".",
   build: {
     ssr: true,
-    target: "node22",
+    target: "node24",
     sourcemap: false,
     minify: "oxc",
     reportCompressedSize: false,

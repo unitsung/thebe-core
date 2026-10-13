@@ -368,7 +368,7 @@ token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist`
   适合有 Docker 守护进程的 NAS/宿主；没有守护进程时退回本地执行并记录 warning。
 - `THEBE_SANDBOX=seatbelt`：macOS 开发机用 `sandbox-exec` + 生成的 profile（路径按 `realpath`
   规范化，兼容 `/var/folders` → `/private/var/folders`）；写只允许工作区与 `TMPDIR`，
-  默认拒绝网络。有真实进程级测试（越界写入被拒 + 断网被拒），`pnpm test` 覆盖。
+  默认拒绝网络。有真实进程级测试（越界写入被拒 + 断网被拒），`npm test` 覆盖。
 - `sandboxAvailability()` 可以自检当前宿主能跑哪些后端（`off/bwrap/docker/seatbelt/gondolin`）。
 
 ### 微虚拟机沙箱（gondolin，已实测可用）
@@ -383,7 +383,7 @@ Gondolin micro-VM（QEMU 后端）执行 bash，宿主工作区通过 `RealFSPro
 
 ```bash
 # 1) 包本体（Core 已把它列为 optionalDependency，可跳过）
-npx pnpm@11.25.0 add -O @earendil-works/gondolin@0.12.0
+npm install @earendil-works/gondolin@0.12.0
 # 2) VM 后端：QEMU（macOS）
 brew install qemu                     # Linux: sudo apt install qemu-system-arm
 # 3) 首次启动自动下载 guest 镜像（约 200MB），缓存在 ~/.cache/gondolin/images/

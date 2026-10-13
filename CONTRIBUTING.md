@@ -8,14 +8,13 @@ rules live in [AGENTS.md](AGENTS.md) and [CONTEXT.md](CONTEXT.md).
 
 ## Prerequisites
 
-- Node 22.19+ and pnpm 10+. Enable the pinned package manager with
-  `corepack enable && corepack prepare pnpm@11.25.0 --activate`.
-- No external services are required to build or run the test suite.
+- Node 24 LTS (npm is bundled). No external services are required to build or run
+  the test suite.
 
 ## Setup
 
 ```bash
-corepack pnpm install --frozen-lockfile
+npm ci
 cp .env.example .env
 ```
 
@@ -28,18 +27,14 @@ Run the narrowest check that covers your change while iterating, then the full
 gate before opening a pull request:
 
 ```bash
-corepack pnpm typecheck          # tsc --noEmit
-corepack pnpm test               # vitest run
+npm run typecheck                # tsc --noEmit
+npm test                         # vitest run
 bash scripts/release-check.sh    # typecheck + build + tests + live smoke test
 ```
 
 `scripts/release-check.sh` is the release gate and runs in CI
 (`.github/workflows/release-check.yml`) on every push and pull request. Use
 `bash scripts/release-check.sh --no-smoke` to skip the smoke test.
-
-If `pnpm --version` hangs in your environment, call the local binaries directly
-(`node_modules/.bin/tsc`, `node_modules/.bin/vitest`, `node_modules/.bin/vite`)
-or use the release-check script.
 
 ## Pull requests
 
@@ -57,7 +52,7 @@ refactors that are not part of the change.
 
 ## Conventions
 
-- TypeScript, ESM, Node 22. Keep imports inside their layer: delivery code calls
+- TypeScript, ESM, Node 24. Keep imports inside their layer: delivery code calls
   the Agent interface and never recreates the agent loop.
 - Treat tool output and remote MCP data as untrusted; preserve approval gates and
   redaction paths.

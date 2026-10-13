@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import { resolveScenarioSettings } from "./scenario-profile.ts";
 import {
   buildDockerArgs,
   buildSeatbeltProfile,
+  isBwrapAvailable,
+  isDockerAvailable,
   isSeatbeltAvailable,
   sandboxAvailability,
   wrapCommandForSandbox,
@@ -157,3 +159,72 @@ describe("seatbelt profile", () => {
     ).toContain("(allow network*)");
   });
 });
+
+/**
+ * bwrap must actually confine a running process, not just build an argument
+ * list. The workspace sits under `$HOME` because the backend mounts a tmpfs at
+ * `/tmp`, which would mask a workspace created there. Skipped on macOS (bwrap is
+ * a Linux tool) and anywhere bwrap is not installed.
+ */
+describe.skipIf(process.platform === "darwin" || !isBwrapAvailable())(
+  "bwrap sandbox execution",
+  () => {
+    it("confines writes to the workspace and denies the network", () => {
+      const parent = mkdtempSync(join(homedir(), "thebe-bwrap-"));
+      const workspace = join(parent, "workspace");
+      mkdirSync(workspace);
+      const outside = join(parent, "outside.txt");
+
+      const wrapped = wrapCommandForSandbox(
+        `echo inside > ${workspace}/inside.txt; echo outside > ${outside}`,
+        { mode: "bwrap", workspacePath: workspace, allowNetwork: false, probe: () => true },
+      );
+      expect(wrapped.applied).toBe(true);
+
+      const status = run(wrapped.command);
+      expect(readFileSync(join(workspace, "inside.txt"), "utf8")).toContain("inside");
+      expect(status).not.toBe(0);
+      expect(() => readFileSync(outside, "utf8")).toThrow();
+
+      const net = wrapCommandForSandbox("curl -s -m 2 -o /dev/null http://1.1.1.1", {
+        mode: "bwrap",
+        workspacePath: workspace,
+        allowNetwork: false,
+        probe: () => true,
+      });
+      expect(run(net.command)).not.toBe(0);
+
+      rmSync(parent, { recursive: true, force: true });
+    }, 30_000);
+  },
+);
+
+/**
+ * The docker backend runs a disposable, unprivileged container. Verified on
+ * Linux (Docker Desktop on macOS shares `$HOME` over virtiofs, which shadows a
+ * same-path bind mount, so the run is skipped there).
+ */
+describe.skipIf(process.platform === "darwin" || !isDockerAvailable())(
+  "docker sandbox execution",
+  () => {
+    it("confines writes to the workspace and denies the network", () => {
+      const parent = mkdtempSync(join(homedir(), "thebe-docker-"));
+      const workspace = join(parent, "workspace");
+      mkdirSync(workspace);
+      const outside = join(parent, "outside.txt");
+
+      const wrapped = wrapCommandForSandbox(
+        `echo inside > ${workspace}/inside.txt; echo outside > ${outside}`,
+        { mode: "docker", workspacePath: workspace, allowNetwork: false, probe: () => true },
+      );
+      expect(wrapped.applied).toBe(true);
+
+      const status = run(wrapped.command);
+      expect(readFileSync(join(workspace, "inside.txt"), "utf8")).toContain("inside");
+      expect(status).not.toBe(0);
+      expect(() => readFileSync(outside, "utf8")).toThrow();
+
+      rmSync(parent, { recursive: true, force: true });
+    }, 120_000);
+  },
+);

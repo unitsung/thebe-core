@@ -57,7 +57,7 @@ describe("Gondolin Micro-VM Runner (Layer 3 Virtualization)", () => {
 /**
  * Real micro-VM boot: downloads the guest image on first run (~200MB, cached in
  * `~/.cache/gondolin`) and needs a VM backend (bundled krun runner or QEMU), so
- * it is opt-in: `THEBE_GONDOLIN_IT=1 pnpm vitest run src/adapters/gondolin`.
+ * it is opt-in: `THEBE_GONDOLIN_IT=1 npx vitest run src/adapters/gondolin`.
  */
 const gondolinIt = process.env.THEBE_GONDOLIN_IT === "1" ? it : it.skip;
 

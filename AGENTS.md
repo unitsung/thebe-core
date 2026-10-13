@@ -17,7 +17,7 @@ Always use Context7 when library/API documentation, code generation, setup, or c
 1. Inspect the relevant module, its callers, and the current worktree before editing.
 2. Change the smallest coherent module at a time. Keep its interface small and put variable behavior behind a clear seam.
 3. Add or update a regression test when behavior changes or a bug is fixed.
-4. Run the narrowest meaningful verification first, then `pnpm typecheck` and `pnpm build` for source-layout or runtime changes.
+4. Run the narrowest meaningful verification first, then `npm run typecheck` and `npm run build` for source-layout or runtime changes.
 5. Report the changed behavior, verification, and any remaining limitation.
 
 ## Source layout
@@ -41,7 +41,7 @@ Keep entry points thin. Put related implementation and its test in the same feat
 
 ## Verification
 
-Use `pnpm test` for broad verification. Use targeted Vitest files while iterating. For terminal input, fullscreen redraw, configuration persistence, or process lifecycle changes, add a compact real-PTY check when unit coverage cannot observe the behavior. Do not add tests that merely mirror implementation details.
+Use `npm test` for broad verification. Use targeted Vitest files while iterating. For terminal input, fullscreen redraw, configuration persistence, or process lifecycle changes, add a compact real-PTY check when unit coverage cannot observe the behavior. Do not add tests that merely mirror implementation details.
 
 ## Hygiene
 

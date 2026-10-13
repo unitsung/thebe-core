@@ -327,7 +327,7 @@ They are off by default.
 
 ```bash
 # gondolin setup
-npx pnpm@11.25.0 add -O @earendil-works/gondolin@0.12.0    # optional dependency; may already be installed
+npm install @earendil-works/gondolin@0.12.0                   # optional dependency; may already be installed
 brew install qemu                                           # Linux: sudo apt install qemu-system-arm
 THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe     # first start downloads a ~200 MB guest image
 ```

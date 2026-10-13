@@ -15,15 +15,11 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.20.0
-
-      - name: Activate the pinned pnpm
-        run: |
-          corepack enable
-          corepack prepare pnpm@11.25.0 --activate
+          node-version: 24
+          cache: npm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci
 
       - name: Typecheck, build, test, and smoke
         run: bash scripts/release-check.sh

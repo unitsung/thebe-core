@@ -11,29 +11,41 @@
 #
 # deploy/docker-compose.yml wraps this with the data, workspace, and hardening
 # defaults.
+#
+# Size/build notes:
+# - Dependencies are installed once. The prune to production (and the removal of
+#   build-only files under node_modules) happens in the build stage, before the
+#   copy: deleting files in a later image layer only adds whiteouts, it does not
+#   reclaim the bytes from the layer that held them.
+# - The npm cache is mounted as a BuildKit cache, so it never lands in a layer.
 
-FROM node:22.20.0-bookworm-slim AS build
-ENV PNPM_HOME=/pnpm
-ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json vite.config.ts ./
-RUN pnpm install --frozen-lockfile
+COPY package.json package-lock.json tsconfig.json vite.config.ts ./
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY src ./src
-RUN pnpm build
+# Build, drop dev dependencies, and strip files the running process never reads:
+# sourcemaps, type declarations, TypeScript sources (the pi runtime rewrites
+# `.ts` imports to `.js` when loaded from built output) and tool caches. Markdown
+# is KEPT: pi-coding-agent reads `docs/*.md` at runtime for auth guidance.
+RUN npm run build \
+  && npm prune --omit=dev \
+  && find node_modules -type f \( \
+       -name '*.map' \
+       -o -name '*.d.ts' -o -name '*.d.mts' -o -name '*.d.cts' \
+       -o \( -name '*.ts' ! -name '*.d.ts' \) \
+     \) -delete \
+  && rm -rf node_modules/.vite node_modules/.cache /root/.npm
 
-FROM node:22.20.0-bookworm-slim AS runtime
+FROM node:24-bookworm-slim AS runtime
 ENV NODE_ENV=production
-ENV PNPM_HOME=/pnpm
-ENV PATH=$PNPM_HOME:$PATH
-RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 WORKDIR /app
 # Runtime dependencies only. pi-ai ships inside the pi-coding-agent package and
 # is resolved from there; `node scripts/check-pi-resolution.mjs` verifies it
 # inside the running container.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --prod
+COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY package.json ./
 COPY scripts/smoke.mjs scripts/check-pi-resolution.mjs ./scripts/
 RUN mkdir -p /data/config /data/agent /data/store /data/outputs /data/home /workspace \
   && chown -R node:node /data /workspace

@@ -132,7 +132,7 @@ export class GondolinMicroVMRunner {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
         "Gondolin Micro-VM is unavailable. Install it with " +
-          "`pnpm add -O @earendil-works/gondolin@0.12.0` and provide a VM backend " +
+          "`npm install @earendil-works/gondolin@0.12.0` and provide a VM backend " +
           "(bundled krun runner, or QEMU: `brew install qemu` on macOS, " +
           "`apt install qemu-system-arm` on Linux). " +
           `Underlying error: ${detail}`,

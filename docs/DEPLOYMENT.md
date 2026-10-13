@@ -80,12 +80,10 @@ pulled image and does not rebuild; add `--build` only to build the local source
 
 | What | Pin |
 | --- | --- |
-| Node | `22.20.0` (package `engines`: `>=22.19.0`); the Dockerfile pins `node:22.20.0-bookworm-slim` |
-| pnpm | `11.25.0` (`packageManager`, activated with `corepack prepare pnpm@11.25.0`) |
-| Install | `pnpm install --frozen-lockfile`; runtime images add `--prod` |
+| Node | Node 24 LTS (package `engines`: `>=24.0.0`); the Dockerfile pins the major with `node:24-bookworm-slim` |
+| Install | `npm ci`; runtime images add `--omit=dev` |
 
-`pnpm --version` / `pnpm typecheck` can hang in some release environments
-The release check therefore calls the local binaries directly:
+The release check calls the local binaries directly:
 
 ```bash
 bash scripts/release-check.sh              # typecheck + build + tests + smoke
@@ -98,8 +96,8 @@ node_modules/.bin/vitest run
 ```
 
 Start without a container (development, or a host service on a machine you
-already harden). `pnpm start` now starts the existing build immediately; use
-`pnpm start:build` when source changes must be compiled first:
+already harden). `npm start` now starts the existing build immediately; use
+`npm run start:build` when source changes must be compiled first:
 
 ```bash
 node_modules/.bin/vite build        # produce dist/ first (or run the release check)
@@ -351,8 +349,7 @@ docker compose exec thebe-core node scripts/check-pi-resolution.mjs
 ```
 
 It must print `pi-ai OK …`. `MISSING` means the production install lost the
-nested `@earendil-works/pi-ai` copy; reinstall with
-`corepack pnpm install --frozen-lockfile --prod`.
+nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 
 ## 11. Troubleshooting
 
@@ -361,18 +358,22 @@ nested `@earendil-works/pi-ai` copy; reinstall with
 | `401` on every route | Missing/incorrect `X-Thebe-Token` | Send the token from `deploy/.env`; `/docs` is the only token-free route |
 | `403` on writes, reads fine | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
 | Client needs the token | First start generated one | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token` |
-| `pnpm --version` hangs | Known release-environment issue (#5 P1) | Use `node_modules/.bin/*` or `bash scripts/release-check.sh` |
-| `Could not find @earendil-works/pi-ai dist` | Pruned install lost the nested copy | Reinstall with `--frozen-lockfile --prod`; verify with `scripts/check-pi-resolution.mjs` |
+| `docker build` fails with `--mount requires BuildKit` | Legacy (pre-BuildKit) builder | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build` |
+| `Could not find @earendil-works/pi-ai dist` | Pruned install lost the nested copy | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs` |
 | Agent cannot write files | `/workspace` not writable by uid 1000 | `chown 1000:1000` the host folder, or grant group write |
 
 ## 12. What has been verified on this checkout
 
-- Local gates pass on macOS with Node 22 and the existing `node_modules`:
-  `tsc --noEmit`, `vite build`, the full Vitest suite, and
-  `scripts/smoke.mjs` (8/8 checks, including SIGTERM exit `0` and a settings
-  write surviving a Core restart).
+- Local gates pass on macOS with Node 24 and the `npm` install: `tsc --noEmit`,
+  `vite build`, the full Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
+  including SIGTERM exit `0` and a settings write surviving a Core restart).
 - `scripts/check-pi-resolution.mjs` resolves pi-ai in the current install.
-- Not verified here: the Docker build itself (no container runtime on the
-  authoring machine). The Dockerfile and compose file mirror the verified local
-  layout; run `scripts/smoke.mjs` against the first container deployment and
-  report any deviation.
+- The container builds and runs. The optimized image (490 MB on disk, 104 MB
+  compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
+  `scripts/check-pi-resolution.mjs` and `scripts/smoke.mjs` (8/8) inside the
+  running container.
+- Each sandbox backend confines a real process, not just an argument list:
+  seatbelt (`sandbox-exec`) and gondolin (QEMU micro-VM) on macOS, `bwrap` on a
+  Linux host and in a Linux container, and the docker backend under the Docker
+  daemon. Covered by `src/agent/security/command-sandbox.live.test.ts` and
+  `src/adapters/gondolin/runner.live.test.ts`.

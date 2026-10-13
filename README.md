@@ -28,7 +28,7 @@ Models, service URLs, and credentials are in the [configuration guide](docs/conf
 
 ## Quick start
 
-Build the container from this repository, or pull the published image if you have access; see the [deployment guide](docs/DEPLOYMENT.md). Running from source, without Docker, needs Node.js 22.19+ and pnpm 10+.
+Build the container from this repository, or pull the published image if you have access; see the [deployment guide](docs/DEPLOYMENT.md). Running from source, without Docker, needs Node.js 24 LTS (npm is bundled).
 
 ```bash
 cd deploy
@@ -41,9 +41,9 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/health
 From source (a workspace directory is required):
 
 ```bash
-pnpm install
+npm install
 cp .env.example .env
-THEBE_WORKSPACE_DIR=/srv/thebe-workspace pnpm start:build
+THEBE_WORKSPACE_DIR=/srv/thebe-workspace npm run start:build
 ```
 
 Then connect a model and your services with the [configuration guide](docs/configuration.en.md).
@@ -59,7 +59,7 @@ Then connect a model and your services with the [configuration guide](docs/confi
 | Vocabulary and architecture | [CONTEXT.md](CONTEXT.md) |
 | Contributing and security | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) |
 
-Development checks: `pnpm typecheck`, `pnpm test`, `bash scripts/release-check.sh`.
+Development checks: `npm run typecheck`, `npm test`, `bash scripts/release-check.sh`.
 
 ## License
 

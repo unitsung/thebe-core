@@ -26,8 +26,12 @@ describe("Node packaging", () => {
     expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe("1.0.4");
     expect(pkg.dependencies?.["@earendil-works/pi-agent-core"]).toBeUndefined();
     expect(pkg.dependencies?.["@earendil-works/pi-ai"]).toBeUndefined();
-    const lock = await readFile(join(root, "pnpm-lock.yaml"), "utf8");
-    expect(lock).toContain("@earendil-works/pi-coding-agent@1.0.4");
+    const lock = JSON.parse(
+      await readFile(join(root, "package-lock.json"), "utf8"),
+    ) as { packages?: Record<string, { version?: string }> };
+    expect(
+      lock.packages?.["node_modules/@earendil-works/pi-coding-agent"]?.version,
+    ).toBe("1.0.4");
   });
 
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {

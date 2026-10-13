@@ -9,20 +9,18 @@
     "enabled": false
   },
   "engines": {
-    "node": ">=22.19.0",
-    "pnpm": ">=10"
+    "node": ">=24.0.0"
   },
-  "packageManager": "pnpm@11.25.0",
   "exports": {
     ".": "./dist/index.js"
   },
   "scripts": {
     "build": "vite build",
     "start": "node dist/serve.js",
-    "start:build": "pnpm build && node dist/serve.js",
+    "start:build": "npm run build && node dist/serve.js",
     "start:lan": "node scripts/start-lan.mjs",
-    "start:lan:build": "pnpm build && node scripts/start-lan.mjs",
-    "docs": "pnpm start",
+    "start:lan:build": "npm run build && node scripts/start-lan.mjs",
+    "docs": "npm start",
     "tui": "vite build && node dist/tui.js",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,7 +32,7 @@
   "devDependencies": {
     "@apidevtools/swagger-parser": "13.0.0",
     "@earendil-works/pi-ai": "1.0.4",
-    "@types/node": "22.20.2",
+    "@types/node": "^24.0.0",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "5.0.0"

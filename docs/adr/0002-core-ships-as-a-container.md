@@ -40,7 +40,7 @@ gets no support claim.
   micro-VM isolation requires running Core on a host with KVM/QEMU.
 - Upgrades are "swap the image, keep `/data`", which requires the store formats
   to stay additive (documented in the runbook's compatibility policy).
-- The image carries Node and the pinned pnpm only for installation; the process
-  runs the prebuilt `dist/` entry with production dependencies.
+- The image carries Node only for installation; the process runs the prebuilt
+  `dist/` entry with production dependencies.
 - A packaged Node distribution can be added later as a second, optional shape,
   but nothing in this decision blocks it.
