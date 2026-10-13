@@ -19,6 +19,7 @@ import {
 } from "../runtime/index.ts";
 import { createStreamGuard } from "../../agent/security/stream-guard/stream-guard.ts";
 import { commandGuardPreflight } from "../security/command-risk.ts";
+import { fullAccessPresetAllowed } from "../security/full-access.ts";
 import { resolveScenarioSettings } from "../security/scenario-profile.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
@@ -184,12 +185,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   // defaults; explicit THEBE_* variables win over the preset.
   const scenario = resolveScenarioSettings();
   const commandGuard = scenario.commandGuard;
+  // Host-only gate for the session-scoped full-access preset (THEBE_FULL_ACCESS).
+  const fullAccessAllowed =
+    options.fullAccessAllowed ?? fullAccessPresetAllowed();
   // Critical commands (storage destruction, disk writes, container breakouts)
   // never reach approval: policy denies them. Dangerous ones still ask, with the
   // risk raised for the approval UI, and everything else falls through to the
   // workspace policy.
   const preflight = async (
-    request: PermissionRequest
+    request: PermissionRequest,
+    fullAccess = false
   ): Promise<PermissionPreflightDecision> => {
     if (
       request.toolName === "read" &&
@@ -210,7 +215,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         }
       }
     }
-    if (commandGuard) {
+    if (commandGuard && !fullAccess) {
       const guarded = commandGuardPreflight(request.toolName, request.args, {
         workspacePath,
         allowGlobalEscapes: scenario.workspaceEscapes,
@@ -268,6 +273,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     listStored: store.list,
     hasPending: (thebeSessionId) => permissions.hasPendingFor(thebeSessionId),
   });
+
+  /**
+   * Whether the session-scoped full-access preset is active for this session.
+   * Host-gated (off by default) and read from live metadata, so a toggle takes
+   * effect on the next tool call without reopening the session.
+   */
+  function isSessionFullAccess(thebeSessionId?: string): boolean {
+    if (!fullAccessAllowed || !thebeSessionId) return false;
+    return state.memory.get(thebeSessionId)?.fullAccess === true;
+  }
 
   async function lookupRemembered(
     thebeSessionId: string
@@ -381,6 +396,40 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   ): void {
     permissions.setPermissionMode(value);
     settingSources.permissionMode = "configured";
+  }
+
+  /** Whether this host permits the full-access preset at all (read-only). */
+  function getFullAccessSupport(): { allowed: boolean } {
+    return { allowed: fullAccessAllowed };
+  }
+
+  /**
+   * Enable or disable the full-access preset for one session. Rejected when the
+   * host has not allowed it; scope is the single session and it never changes
+   * the global permission mode, so schedules, background goals, subagents and
+   * `/mcp` callers are unaffected.
+   */
+  async function setSessionFullAccess(
+    thebeSessionId: string,
+    enabled: boolean
+  ): Promise<{ thebeSessionId: string; fullAccess: boolean }> {
+    checkNotQuiesced();
+    if (!fullAccessAllowed) {
+      throw httpError(
+        403,
+        "full-access preset is not enabled on this Core host",
+        "full_access_not_allowed"
+      );
+    }
+    const current = await state.lookup(thebeSessionId);
+    const next = state.touchMeta({
+      ...current,
+      fullAccess: enabled ? true : undefined,
+    });
+    await state.persist(next);
+    const opened = state.openedSessions.get(thebeSessionId);
+    if (opened) opened.meta = next;
+    return { thebeSessionId, fullAccess: enabled };
   }
 
   function setAutoSummaryEnabled(value: boolean): void {
@@ -503,6 +552,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   ) {
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
     const isChatOnly = effectiveBuiltinTools.length === 0;
+    // Resolved live: a session opened without an explicit id uses the active one.
+    const fullAccessScopeId = () =>
+      explicitSessionId ?? getActive()?.meta.thebeSessionId;
     return {
       model: sessionModel ?? options.model,
       ...(!isChatOnly && sessionCallerId === callerId
@@ -564,7 +616,11 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       systemPrompt,
       enabledResources: isChatOnly ? [] : enabledResources,
       ...(workspacePath ? { cwd: workspacePath, workspacePath } : {}),
-      permissionHandler: permissions.permissionHandler(permissionSessionId),
+      permissionHandler: permissions.permissionHandler(
+        permissionSessionId,
+        () => isSessionFullAccess(fullAccessScopeId())
+      ),
+      fullAccess: () => isSessionFullAccess(fullAccessScopeId()),
       toolsRequiringApproval: [
         ...TOOLS_REQUIRING_APPROVAL,
         ...WORKSPACE_READ_TOOLS,
@@ -790,6 +846,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     getAgentSettings,
     updateAgentSettings,
     updatePermissionMode,
+    getFullAccessSupport,
+    setSessionFullAccess,
     cancelAutoSummary: autoSummary.cancel,
     openSession: registry.openSession,
     reapIdleSessions: registry.reapIdleSessions,

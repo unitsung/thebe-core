@@ -100,15 +100,12 @@ export const PROMPT_IMAGE_MEDIA_TYPES = [
 ];
 
 export function isInlineTextFile(mediaType: string): boolean {
-  return (
-    mediaType.startsWith("text/") || mediaType === "application/json"
-  );
+  return mediaType.startsWith("text/") || mediaType === "application/json";
 }
 
 export function isSupportedPromptFile(mediaType: string): boolean {
   return (
-    PROMPT_IMAGE_MEDIA_TYPES.includes(mediaType) ||
-    isInlineTextFile(mediaType)
+    PROMPT_IMAGE_MEDIA_TYPES.includes(mediaType) || isInlineTextFile(mediaType)
   );
 }
 
@@ -118,7 +115,7 @@ export const MAX_PROMPT_FILE_BYTES = 2_000_000;
 export const MAX_INLINE_FILE_BYTES = 12_288;
 
 export function estimatedDecodedBytes(base64: string): number {
-  return Math.floor(base64.length * 3 / 4);
+  return Math.floor((base64.length * 3) / 4);
 }
 
 export type PromptInput = {
@@ -171,8 +168,19 @@ export type RuntimeProviderConfiguration = {
   providerId: string;
   name?: string;
   baseUrl: string;
-  api: "openai-completions" | "openai-responses" | "anthropic-messages" | "google-generative-ai";
-  models: Array<{ id: string; name?: string; contextWindow?: number; maxTokens?: number; reasoning?: boolean; input?: Array<"text" | "image"> }>;
+  api:
+    | "openai-completions"
+    | "openai-responses"
+    | "anthropic-messages"
+    | "google-generative-ai";
+  models: Array<{
+    id: string;
+    name?: string;
+    contextWindow?: number;
+    maxTokens?: number;
+    reasoning?: boolean;
+    input?: Array<"text" | "image">;
+  }>;
 };
 
 export type PermissionDecision = {
@@ -182,8 +190,13 @@ export type PermissionDecision = {
   rememberScope?: PermissionRememberScope;
 };
 
-export const PERMISSION_REMEMBER_SCOPES = ["request", "tool", "conversation"] as const;
-export type PermissionRememberScope = (typeof PERMISSION_REMEMBER_SCOPES)[number];
+export const PERMISSION_REMEMBER_SCOPES = [
+  "request",
+  "tool",
+  "conversation",
+] as const;
+export type PermissionRememberScope =
+  (typeof PERMISSION_REMEMBER_SCOPES)[number];
 
 export const PERMISSION_MODES = ["ask", "read-only", "full-access"] as const;
 /** Approval policy for tools that the runtime marks as requiring confirmation. */
@@ -209,9 +222,9 @@ export type PermissionPreflightDecision = "allow" | "ask" | "deny";
 export type PermissionHandler = {
   request(request: PermissionRequest): Promise<"allow" | "deny">;
   /** Optional policy hook used to suppress prompts for safe, in-workspace reads. */
-  preflight?(request: PermissionRequest):
-    | PermissionPreflightDecision
-    | Promise<PermissionPreflightDecision>;
+  preflight?(
+    request: PermissionRequest
+  ): PermissionPreflightDecision | Promise<PermissionPreflightDecision>;
 };
 
 export const TOOLS_REQUIRING_APPROVAL = ["bash", "write", "edit"] as const;
@@ -239,7 +252,7 @@ export type CustomToolDefinition = {
   execute: (
     toolCallId: string,
     params: unknown,
-    signal?: AbortSignal,
+    signal?: AbortSignal
   ) => Promise<CustomToolResult>;
 };
 
@@ -277,7 +290,11 @@ export type RuntimeMcpServer = {
   permission?: "read" | "confirm" | "admin";
 };
 
-export type RuntimeMcpCall = { toolName: string; toolCallId: string; input: unknown };
+export type RuntimeMcpCall = {
+  toolName: string;
+  toolCallId: string;
+  input: unknown;
+};
 
 export type RuntimeMcpOptions = {
   /** Read on session start and on every reload. */
@@ -285,7 +302,15 @@ export type RuntimeMcpOptions = {
   /** Runs before every MCP call, including calls made from a codemode script. */
   beforeCall(call: RuntimeMcpCall): Promise<{ block: string } | undefined>;
   /** Runs after every MCP call that was not blocked. */
-  afterCall(call: RuntimeMcpCall, outcome: { bytes: number; isError: boolean; redacted: boolean; durationMs: number }): Promise<void>;
+  afterCall(
+    call: RuntimeMcpCall,
+    outcome: {
+      bytes: number;
+      isError: boolean;
+      redacted: boolean;
+      durationMs: number;
+    }
+  ): Promise<void>;
 };
 
 export type CreateRuntimeSessionOptions = {
@@ -306,6 +331,12 @@ export type CreateRuntimeSessionOptions = {
   autoCompact?: boolean;
   inMemory?: boolean;
   workspacePath?: string;
+  /**
+   * Session-scoped full-access preset. Evaluated when a bash command is about
+   * to run, so it reflects the latest enable/disable without reopening the
+   * session. Absent or false keeps the host's guard and sandbox defaults.
+   */
+  fullAccess?: () => boolean;
 };
 
 export type ForkSessionMode = "new_session" | "branch_in_place";
@@ -387,7 +418,7 @@ export type RuntimeAuth = {
   setApiKey(providerId: string, apiKey: string): Promise<void>;
   loginOAuth(
     providerId: string,
-    interaction: OAuthInteraction,
+    interaction: OAuthInteraction
   ): Promise<{ kind: "oauth"; providerId: string }>;
   /**
    * Headless OAuth start: kicks off the runtime login in the background and
@@ -396,7 +427,10 @@ export type RuntimeAuth = {
    * the flow in a browser; the resulting code comes back via
    * `submitOAuthCallback`. Tokens stay in the runtime, never in AgentStore.
    */
-  authorizeOAuth(providerId: string, options?: { force?: boolean }): Promise<OAuthAuthorizeResult>;
+  authorizeOAuth(
+    providerId: string,
+    options?: { force?: boolean }
+  ): Promise<OAuthAuthorizeResult>;
   /**
    * Feeds a user-pasted authorization code / redirect URL into a pending
    * `authorizeOAuth` login. Throws when no login is pending for the provider.
@@ -436,7 +470,7 @@ export interface RuntimeSession {
   executeBash?(
     command: string,
     onChunk?: (chunk: string) => void,
-    options?: { excludeFromContext?: boolean },
+    options?: { excludeFromContext?: boolean }
   ): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
   getForkMessages?(): Array<{ entryId: string; text: string }>;
   navigateTo?(leafId: string): Promise<void>;
@@ -449,25 +483,29 @@ export interface RuntimeSession {
 export interface AgentRuntime {
   readonly runtimeId: string;
   /** Optional runtime-owned parsing; product policy still owns source order and enablement. */
-  loadSkillDirectory?(directory: string): Promise<Array<{
-    name: string;
-    description: string;
-    filePath: string;
-  }>>;
+  loadSkillDirectory?(directory: string): Promise<
+    Array<{
+      name: string;
+      description: string;
+      filePath: string;
+    }>
+  >;
   createSession(options: CreateRuntimeSessionOptions): Promise<RuntimeSession>;
   resumeSession(
     runtimeSessionId: string,
-    options: CreateRuntimeSessionOptions,
+    options: CreateRuntimeSessionOptions
   ): Promise<RuntimeSession>;
   listSessions(): Promise<RuntimeSessionSummary[]>;
   /** Read persisted task state without opening the parent runtime session. */
-  listBackgroundTasksForSession?(runtimeSessionId: string): Promise<BackgroundTask[]>;
+  listBackgroundTasksForSession?(
+    runtimeSessionId: string
+  ): Promise<BackgroundTask[]>;
   /** Permanently removes a runtime session and its persisted transcript. */
   deleteSession(runtimeSessionId: string): Promise<void>;
   forkSession(
     runtimeSessionId: string,
     options: CreateRuntimeSessionOptions,
-    fork?: ForkSessionOptions,
+    fork?: ForkSessionOptions
   ): Promise<RuntimeSession>;
   listModels(options?: {
     all?: boolean;
@@ -478,8 +516,13 @@ export interface AgentRuntime {
     providerId?: string;
   }): Promise<RuntimeModel[]>;
   listProviders(options?: { all?: boolean }): Promise<RuntimeProvider[]>;
-  providerConfiguration?(providerId: string): Promise<RuntimeProviderConfiguration | undefined>;
-  saveProviderConfiguration?(configuration: RuntimeProviderConfiguration, apiKey?: string): Promise<void>;
+  providerConfiguration?(
+    providerId: string
+  ): Promise<RuntimeProviderConfiguration | undefined>;
+  saveProviderConfiguration?(
+    configuration: RuntimeProviderConfiguration,
+    apiKey?: string
+  ): Promise<void>;
   deleteProviderConfiguration?(providerId: string): Promise<void>;
   auth(): RuntimeAuth;
   quiesce(): Promise<void>;
@@ -487,7 +530,7 @@ export interface AgentRuntime {
   isQuiesced(): boolean;
   registerSessionLiveness?(
     sessionId: string,
-    isActive: () => boolean,
+    isActive: () => boolean
   ): () => void;
   reapInactiveSessions?(): number;
 }

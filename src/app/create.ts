@@ -5,7 +5,10 @@ import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
 import type { PipelineProviders } from "../agent/tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "../agent/capabilities/music-research.ts";
 import type { WebSearchProvider } from "../agent/capabilities/web-search.ts";
-import type { MediaLibraryProvider, PhotoLibraryProvider } from "../agent/capabilities/media.ts";
+import type {
+  MediaLibraryProvider,
+  PhotoLibraryProvider,
+} from "../agent/capabilities/media.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
@@ -20,7 +23,7 @@ import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
 import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/product.ts";
 
 export type ThebeAppPrompt = (
-  text: string,
+  text: string
 ) => Promise<{ text: string; tools: string[] }>;
 
 /** @deprecated Use ThebeAppPrompt */
@@ -43,6 +46,7 @@ export function createThebeApp(options: {
   autoSummary?: boolean;
   autoSummaryDelayMs?: number;
   permissionMode?: import("../agent/runtime/interface.ts").PermissionMode;
+  fullAccessAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -83,14 +87,17 @@ export function createThebeApp(options: {
     autoSummary: options.autoSummary,
     autoSummaryDelayMs: options.autoSummaryDelayMs,
     permissionMode: options.permissionMode,
+    fullAccessAllowed: options.fullAccessAllowed,
     maxSubagentConcurrency: options.maxSubagentConcurrency,
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,
     outputDirectory: options.outputDirectory,
-    mcp: options.mcp ?? createMcpClientRegistry({
-      cwd: options.workspacePath,
-      serverStates: storedSettings?.mcpServerStates,
-    }),
+    mcp:
+      options.mcp ??
+      createMcpClientRegistry({
+        cwd: options.workspacePath,
+        serverStates: storedSettings?.mcpServerStates,
+      }),
     judgment: options.judgment,
     judgmentSites: options.judgmentSites,
     settingsStore: options.settingsStore,
@@ -115,7 +122,9 @@ export function createThebeApp(options: {
     token: options.token,
     agent,
     allowedHosts: options.allowedHosts ?? resolveAllowedHosts("127.0.0.1"),
-    deviceStoreDir: options.agentStoreDir ? join(options.agentStoreDir, "devices") : undefined,
+    deviceStoreDir: options.agentStoreDir
+      ? join(options.agentStoreDir, "devices")
+      : undefined,
     workspacePath: options.workspacePath,
   });
   return { agent, prompt, send: prompt, handler };

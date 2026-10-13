@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -16,6 +17,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createThebeAgent } from "../../../agent/index.ts";
 import type { ContainerInfoProvider } from "../../../agent/capabilities/containers.ts";
 import { PI_RUNTIME_ID } from "../../../agent/runtime/interface.ts";
+import { isSeatbeltAvailable } from "../../../agent/security/command-sandbox.ts";
 import { loadPiSdk } from "../sdk/load-pi.ts";
 import { createPiCodingAgentRuntime } from "../runtime.ts";
 
@@ -44,7 +46,7 @@ function gondolinMicroVmAvailable(): boolean {
   // hardware virtualization (HVF on macOS, KVM on Linux). Shared CI runners
   // have neither, so the integration test skips instead of hanging.
   const qemu = ["qemu-system-x86_64", "qemu-system-aarch64"].some(
-    (bin) => spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0,
+    (bin) => spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0
   );
   if (!qemu) return false;
   return process.platform === "darwin" || existsSync("/dev/kvm");
@@ -74,7 +76,13 @@ async function piWithFaux(sessionDir?: string) {
 }
 
 /** A stdio MCP server speaking the wire protocol directly, with a read-only and a write tool. */
-function mcpFixture(initial: { block?: string; enabled?: boolean; exposure?: "codemode" | "deferred" } = {}) {
+function mcpFixture(
+  initial: {
+    block?: string;
+    enabled?: boolean;
+    exposure?: "codemode" | "deferred";
+  } = {}
+) {
   const script = [
     "const fs = require('node:fs');",
     "const rl = require('node:readline').createInterface({ input: process.stdin });",
@@ -99,27 +107,47 @@ function mcpFixture(initial: { block?: string; enabled?: boolean; exposure?: "co
     "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');",
     "});",
   ].join("\n");
-  const log = join(mkdtempSync(join(tmpdir(), "thebe-mcp-calls-")), "calls.log");
+  const log = join(
+    mkdtempSync(join(tmpdir(), "thebe-mcp-calls-")),
+    "calls.log"
+  );
   writeFileSync(log, "");
   let enabled = initial.enabled ?? true;
   const before: Array<{ toolName: string }> = [];
-  const after: Array<{ toolName: string; isError: boolean; redacted: boolean }> = [];
+  const after: Array<{
+    toolName: string;
+    isError: boolean;
+    redacted: boolean;
+  }> = [];
   const options = {
-    servers: () => [{
-      name: "fixture", command: process.execPath, args: ["-e", script], enabled, exposure: initial.exposure ?? "deferred",
-      env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
-    }],
+    servers: () => [
+      {
+        name: "fixture",
+        command: process.execPath,
+        args: ["-e", script],
+        enabled,
+        exposure: initial.exposure ?? "deferred",
+        env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
+      },
+    ],
     async beforeCall(call: { toolName: string }) {
       before.push(call);
       return initial.block ? { block: initial.block } : undefined;
     },
-    async afterCall(call: { toolName: string }, outcome: { isError: boolean; redacted: boolean }) {
+    async afterCall(
+      call: { toolName: string },
+      outcome: { isError: boolean; redacted: boolean }
+    ) {
       after.push({ toolName: call.toolName, ...outcome });
     },
   };
   return {
-    options, before, after,
-    setEnabled(value: boolean) { enabled = value; },
+    options,
+    before,
+    after,
+    setEnabled(value: boolean) {
+      enabled = value;
+    },
     calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean),
   };
 }
@@ -131,60 +159,107 @@ describe("PiCodingAgentRuntime sessions", () => {
     const schemas: string[][] = [];
     faux.setResponses([
       (context) => {
-        schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
-        return fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]);
+        schemas.push(
+          getCurrentTools(context.messages).map((tool) => tool.name)
+        );
+        return fauxAssistantMessage([
+          fauxToolCall("tool_search", { query: "remote catalog", limit: 1 }),
+        ]);
       },
       (context) => {
-        schemas.push(getCurrentTools(context.messages).map((tool) => tool.name));
-        return fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]);
+        schemas.push(
+          getCurrentTools(context.messages).map((tool) => tool.name)
+        );
+        return fauxAssistantMessage([
+          fauxToolCall("mcp__fixture__catalog", { query: "music" }),
+        ]);
       },
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("search remote catalog");
-      expect(schemas[0]).toEqual(expect.arrayContaining(["read", "tool_search"]));
+      expect(schemas[0]).toEqual(
+        expect.arrayContaining(["read", "tool_search"])
+      );
       expect(schemas[0]).not.toContain("mcp__fixture__catalog");
       expect(schemas[1]).toContain("mcp__fixture__catalog");
-      expect(session.messages()).toContainEqual(expect.objectContaining({ role: "tool", toolName: "mcp__fixture__catalog", text: expect.stringContaining("remote:music") }));
-      expect(mcp.before.map((call) => call.toolName)).toEqual(["mcp__fixture__catalog"]);
-      expect(mcp.after).toEqual([expect.objectContaining({ toolName: "mcp__fixture__catalog", isError: false })]);
-    } finally { session.dispose(); }
+      expect(session.messages()).toContainEqual(
+        expect.objectContaining({
+          role: "tool",
+          toolName: "mcp__fixture__catalog",
+          text: expect.stringContaining("remote:music"),
+        })
+      );
+      expect(mcp.before.map((call) => call.toolName)).toEqual([
+        "mcp__fixture__catalog",
+      ]);
+      expect(mcp.after).toEqual([
+        expect.objectContaining({
+          toolName: "mcp__fixture__catalog",
+          isError: false,
+        }),
+      ]);
+    } finally {
+      session.dispose();
+    }
   });
 
   it("redacts MCP results and fences them as untrusted output", async () => {
     const { faux, runtime } = await piWithFaux();
     const mcp = mcpFixture();
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "secret leak", limit: 1 })]),
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "secret leak", limit: 1 }),
+      ]),
       fauxAssistantMessage([fauxToolCall("mcp__fixture__leak", {})]),
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("leak");
       const text = JSON.stringify(session.messages());
       expect(text).toContain('<tool_output tool=\\"mcp__fixture__leak\\">');
       expect(text).not.toContain("sk-live-abcdefghijklmnopqrstuvwxyz");
       expect(mcp.after[0]).toMatchObject({ redacted: true });
-    } finally { session.dispose(); }
+    } finally {
+      session.dispose();
+    }
   });
 
   it("blocks a policy-denied MCP call before it reaches the server", async () => {
     const { faux, runtime } = await piWithFaux();
     const mcp = mcpFixture({ block: "budget exhausted" });
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
-      fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]),
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "remote catalog", limit: 1 }),
+      ]),
+      fauxAssistantMessage([
+        fauxToolCall("mcp__fixture__catalog", { query: "music" }),
+      ]),
       fauxAssistantMessage("blocked"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("search");
       expect(JSON.stringify(session.messages())).toContain("budget exhausted");
       expect(JSON.stringify(session.messages())).not.toContain("remote:music");
       expect(mcp.after).toEqual([]);
-    } finally { session.dispose(); }
+    } finally {
+      session.dispose();
+    }
   });
 
   it("asks before a server's write tool runs and does not run it when denied", async () => {
@@ -192,16 +267,32 @@ describe("PiCodingAgentRuntime sessions", () => {
     const mcp = mcpFixture();
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "publish playlist", limit: 1 })]),
-      fauxAssistantMessage([fauxToolCall("mcp__fixture__publish", { id: "playlist-1" })]),
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "publish playlist", limit: 1 }),
+      ]),
+      fauxAssistantMessage([
+        fauxToolCall("mcp__fixture__publish", { id: "playlist-1" }),
+      ]),
       fauxAssistantMessage("denied"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      permissionHandler: { request },
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("publish");
-      expect(request).toHaveBeenCalledWith(expect.objectContaining({ toolName: "mcp__fixture__publish", risk: "high" }));
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolName: "mcp__fixture__publish",
+          risk: "high",
+        })
+      );
       expect(mcp.calls()).not.toContain("publish");
-    } finally { session.dispose(); }
+    } finally {
+      session.dispose();
+    }
   });
 
   it("does not ask for a tool the server marks read-only", async () => {
@@ -209,21 +300,36 @@ describe("PiCodingAgentRuntime sessions", () => {
     const mcp = mcpFixture();
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
-      fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "music" })]),
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "remote catalog", limit: 1 }),
+      ]),
+      fauxAssistantMessage([
+        fauxToolCall("mcp__fixture__catalog", { query: "music" }),
+      ]),
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      permissionHandler: { request },
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("search");
       expect(request).not.toHaveBeenCalled();
-    } finally { session.dispose(); }
+    } finally {
+      session.dispose();
+    }
   });
 
   it("refreshes MCP servers in an existing session after enable and disable", async () => {
     const { faux, runtime } = await piWithFaux();
     const mcp = mcpFixture({ enabled: false });
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      mcp: mcp.options,
+    });
     try {
       faux.setResponses([fauxAssistantMessage("no MCP enabled")]);
       await session.prompt("list available tools");
@@ -231,8 +337,12 @@ describe("PiCodingAgentRuntime sessions", () => {
       mcp.setEnabled(true);
       await session.reloadResources!();
       faux.setResponses([
-        fauxAssistantMessage([fauxToolCall("tool_search", { query: "remote catalog", limit: 1 })]),
-        fauxAssistantMessage([fauxToolCall("mcp__fixture__catalog", { query: "x" })]),
+        fauxAssistantMessage([
+          fauxToolCall("tool_search", { query: "remote catalog", limit: 1 }),
+        ]),
+        fauxAssistantMessage([
+          fauxToolCall("mcp__fixture__catalog", { query: "x" }),
+        ]),
         fauxAssistantMessage("enabled"),
       ]);
       await session.prompt("search");
@@ -240,7 +350,9 @@ describe("PiCodingAgentRuntime sessions", () => {
       mcp.setEnabled(false);
       await session.reloadResources!();
       expect(session.toolNames()).not.toContain("mcp__fixture__catalog");
-    } finally { session.dispose(); }
+    } finally {
+      session.dispose();
+    }
   });
 
   it("keeps approval, policy and redaction on calls a codemode script makes", async () => {
@@ -248,18 +360,34 @@ describe("PiCodingAgentRuntime sessions", () => {
     const mcp = mcpFixture({ exposure: "codemode" });
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("codemode", { code: "const r = await tools.mcp__fixture__leak({}); text(JSON.stringify(r)); try { await tools.mcp__fixture__publish({ id: 'p' }); } catch (e) { text('publish failed: ' + e.message); }" })]),
+      fauxAssistantMessage([
+        fauxToolCall("codemode", {
+          code: "const r = await tools.mcp__fixture__leak({}); text(JSON.stringify(r)); try { await tools.mcp__fixture__publish({ id: 'p' }); } catch (e) { text('publish failed: ' + e.message); }",
+        }),
+      ]),
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], permissionHandler: { request }, mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      permissionHandler: { request },
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("script");
       const text = JSON.stringify(session.messages());
       expect(text).not.toContain("sk-live-abcdefghijklmnopqrstuvwxyz");
-      expect(request).toHaveBeenCalledWith(expect.objectContaining({ toolName: "mcp__fixture__publish" }));
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "mcp__fixture__publish" })
+      );
       expect(mcp.calls()).toEqual(["leak"]);
-      expect(mcp.before.map((call) => call.toolName)).toEqual(["mcp__fixture__leak", "mcp__fixture__publish"]);
-    } finally { session.dispose(); }
+      expect(mcp.before.map((call) => call.toolName)).toEqual([
+        "mcp__fixture__leak",
+        "mcp__fixture__publish",
+      ]);
+    } finally {
+      session.dispose();
+    }
   });
 
   it("starts stdio servers without Core's own environment", async () => {
@@ -267,41 +395,56 @@ describe("PiCodingAgentRuntime sessions", () => {
     process.env.THEBE_TEST_SECRET = "must-not-reach-mcp";
     const mcp = mcpFixture();
     faux.setResponses([
-      fauxAssistantMessage([fauxToolCall("tool_search", { query: "environment", limit: 1 })]),
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "environment", limit: 1 }),
+      ]),
       fauxAssistantMessage([fauxToolCall("mcp__fixture__env", {})]),
       fauxAssistantMessage("done"),
     ]);
-    const session = await runtime.createSession({ customTools: [], builtinTools: ["read"], mcp: mcp.options });
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      mcp: mcp.options,
+    });
     try {
       await session.prompt("env");
       const text = JSON.stringify(session.messages());
       expect(text).toContain("env-checked");
       expect(text).not.toContain("must-not-reach-mcp");
       expect(text).toContain("server-only");
-    } finally { delete process.env.THEBE_TEST_SECRET; session.dispose(); }
+    } finally {
+      delete process.env.THEBE_TEST_SECRET;
+      session.dispose();
+    }
   });
   it("rejects a terminal model failure and allows the next turn to recover", async () => {
     const { faux, runtime } = await piWithFaux();
     const agent = createThebeAgent({ runtime, provider: emptyProvider() });
     const session = await agent.createSession();
     const events: string[] = [];
-    agent.subscribeLog(session.thebeSessionId, (event) => events.push(event.type));
-    faux.setResponses([fauxAssistantMessage("", {
-      stopReason: "error",
-      errorMessage: "FreeTierError: free tier requires the OpenCode client",
-    })]);
+    agent.subscribeLog(session.thebeSessionId, (event) =>
+      events.push(event.type)
+    );
+    faux.setResponses([
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "FreeTierError: free tier requires the OpenCode client",
+      }),
+    ]);
 
-    await expect(agent.prompt("hello", { thebeSessionId: session.thebeSessionId }))
-      .rejects.toThrow("FreeTierError");
+    await expect(
+      agent.prompt("hello", { thebeSessionId: session.thebeSessionId })
+    ).rejects.toThrow("FreeTierError");
     expect(events.filter((type) => type === "error")).toHaveLength(1);
     expect(events).not.toContain("session_end");
     expect(await agent.loadMessages(session.thebeSessionId)).toContainEqual(
-      expect.objectContaining({ role: "assistant", isError: true }),
+      expect.objectContaining({ role: "assistant", isError: true })
     );
 
     faux.setResponses([fauxAssistantMessage("recovered")]);
-    await expect(agent.prompt("try again", { thebeSessionId: session.thebeSessionId }))
-      .resolves.toMatchObject({ text: "recovered" });
+    await expect(
+      agent.prompt("try again", { thebeSessionId: session.thebeSessionId })
+    ).resolves.toMatchObject({ text: "recovered" });
     expect(events.filter((type) => type === "session_end")).toHaveLength(1);
   });
 
@@ -309,7 +452,11 @@ describe("PiCodingAgentRuntime sessions", () => {
     const { faux, runtime } = await piWithFaux();
     faux.setResponses([
       fauxAssistantMessage([
-        fauxToolCall("bash", { command: "sleep 60 >/dev/null 2>&1 &" }, { id: "call_bg" }),
+        fauxToolCall(
+          "bash",
+          { command: "sleep 60 >/dev/null 2>&1 &" },
+          { id: "call_bg" }
+        ),
       ]),
       fauxAssistantMessage("started"),
     ]);
@@ -320,7 +467,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     });
     const session = await agent.createSession();
 
-    await expect(agent.send("start a background task", session.thebeSessionId)).resolves.toMatchObject({
+    await expect(
+      agent.send("start a background task", session.thebeSessionId)
+    ).resolves.toMatchObject({
       text: "started",
     });
 
@@ -337,7 +486,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     ]);
 
     await agent.stopBackgroundTask(session.thebeSessionId, tasks[0]!.id);
-    await expect(agent.listBackgroundTasks(session.thebeSessionId)).resolves.toEqual([
+    await expect(
+      agent.listBackgroundTasks(session.thebeSessionId)
+    ).resolves.toEqual([
       expect.objectContaining({
         id: tasks[0]!.id,
         status: "stopped",
@@ -351,7 +502,11 @@ describe("PiCodingAgentRuntime sessions", () => {
     const first = await piWithFaux(dir);
     first.faux.setResponses([
       fauxAssistantMessage([
-        fauxToolCall("bash", { command: "sleep 60 >/dev/null 2>&1 &" }, { id: "call_bg_recovery" }),
+        fauxToolCall(
+          "bash",
+          { command: "sleep 60 >/dev/null 2>&1 &" },
+          { id: "call_bg_recovery" }
+        ),
       ]),
       fauxAssistantMessage("started"),
     ]);
@@ -365,7 +520,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     let taskId: string | undefined;
     try {
       await firstAgent.send("start a background task", session.thebeSessionId);
-      const started = await firstAgent.listBackgroundTasks(session.thebeSessionId);
+      const started = await firstAgent.listBackgroundTasks(
+        session.thebeSessionId
+      );
       taskId = started[0]?.id;
       expect(taskId).toEqual(expect.any(String));
 
@@ -377,7 +534,9 @@ describe("PiCodingAgentRuntime sessions", () => {
         permissionMode: "full-access",
       });
 
-      await expect(resumed.listBackgroundTasks(session.thebeSessionId)).resolves.toEqual([
+      await expect(
+        resumed.listBackgroundTasks(session.thebeSessionId)
+      ).resolves.toEqual([
         expect.objectContaining({
           id: taskId,
           name: "sleep 60 >/dev/null 2>&1 &",
@@ -387,7 +546,8 @@ describe("PiCodingAgentRuntime sessions", () => {
       ]);
       await resumed.stopBackgroundTask(session.thebeSessionId, taskId!);
     } finally {
-      if (taskId) await firstAgent.stopBackgroundTask(session.thebeSessionId, taskId);
+      if (taskId)
+        await firstAgent.stopBackgroundTask(session.thebeSessionId, taskId);
     }
   });
 
@@ -402,7 +562,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     try {
       await agent.executeBash(
         session.thebeSessionId,
-        "sleep 60 >/dev/null 2>&1 &",
+        "sleep 60 >/dev/null 2>&1 &"
       );
       const tasks = await agent.listBackgroundTasks(session.thebeSessionId);
       taskId = tasks[0]?.id;
@@ -415,53 +575,120 @@ describe("PiCodingAgentRuntime sessions", () => {
         }),
       ]);
     } finally {
-      if (taskId) await agent.stopBackgroundTask(session.thebeSessionId, taskId);
+      if (taskId)
+        await agent.stopBackgroundTask(session.thebeSessionId, taskId);
     }
   });
 
   it.skipIf(!gondolinMicroVmAvailable())(
     "routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin",
     async () => {
-    const previous = process.env.THEBE_SANDBOX;
-    process.env.THEBE_SANDBOX = "gondolin";
-    try {
-      const { faux, runtime } = await piWithFaux();
-      faux.setResponses([
-        fauxAssistantMessage([
-          fauxToolCall("bash", { command: "uname -a" }, { id: "call_vm" }),
-        ]),
-        fauxAssistantMessage("done"),
-      ]);
-      const agent = createThebeAgent({
-        runtime,
-        provider: emptyProvider(),
-        permissionMode: "full-access",
-      });
-      const session = await agent.createSession();
+      const previous = process.env.THEBE_SANDBOX;
+      process.env.THEBE_SANDBOX = "gondolin";
+      try {
+        const { faux, runtime } = await piWithFaux();
+        faux.setResponses([
+          fauxAssistantMessage([
+            fauxToolCall("bash", { command: "uname -a" }, { id: "call_vm" }),
+          ]),
+          fauxAssistantMessage("done"),
+        ]);
+        const agent = createThebeAgent({
+          runtime,
+          provider: emptyProvider(),
+          permissionMode: "full-access",
+        });
+        const session = await agent.createSession();
 
-      // The command runs inside the guest instead of touching the host.
-      await expect(
-        agent.send("run uname in the vm", session.thebeSessionId),
-      ).resolves.toMatchObject({ text: "done" });
-      const transcript = JSON.stringify(
-        await agent.loadMessages(session.thebeSessionId),
-      );
-      expect(transcript).toContain("Linux");
-      expect(transcript).toContain("toolName\":\"bash");
-    } finally {
-      if (previous === undefined) delete process.env.THEBE_SANDBOX;
-      else process.env.THEBE_SANDBOX = previous;
+        // The command runs inside the guest instead of touching the host.
+        await expect(
+          agent.send("run uname in the vm", session.thebeSessionId)
+        ).resolves.toMatchObject({ text: "done" });
+        const transcript = JSON.stringify(
+          await agent.loadMessages(session.thebeSessionId)
+        );
+        expect(transcript).toContain("Linux");
+        expect(transcript).toContain('toolName":"bash');
+      } finally {
+        if (previous === undefined) delete process.env.THEBE_SANDBOX;
+        else process.env.THEBE_SANDBOX = previous;
+      }
     }
-  });
+  );
+
+  it.skipIf(!isSeatbeltAvailable())(
+    "lifts the OS sandbox for a session under the full-access preset",
+    async () => {
+      const previousSandbox = process.env.THEBE_SANDBOX;
+      process.env.THEBE_SANDBOX = "seatbelt";
+      const workspace = await mkdtemp(
+        join(tmpdir(), "thebe-full-access-sandbox-")
+      );
+      const target = join(
+        process.cwd(),
+        `.thebe-full-access-${randomUUID()}.txt`
+      );
+      try {
+        const { faux, runtime } = await piWithFaux();
+        faux.setResponses([
+          fauxAssistantMessage([
+            fauxToolCall(
+              "bash",
+              { command: `printf hi > ${target}` },
+              { id: "c1" }
+            ),
+          ]),
+          fauxAssistantMessage("done"),
+        ]);
+        const agent = createThebeAgent({
+          runtime,
+          provider: emptyProvider(),
+          permissionMode: "full-access",
+          fullAccessAllowed: true,
+          workspacePath: workspace,
+        });
+        const session = await agent.createSession();
+
+        // With the sandbox on, a write outside the workspace is refused.
+        await agent.send("write outside", session.thebeSessionId);
+        expect(existsSync(target)).toBe(false);
+
+        // Enabling the preset takes effect on the next command, in place.
+        await agent.setSessionFullAccess(session.thebeSessionId, true);
+        faux.setResponses([
+          fauxAssistantMessage([
+            fauxToolCall(
+              "bash",
+              { command: `printf hi > ${target}` },
+              { id: "c2" }
+            ),
+          ]),
+          fauxAssistantMessage("done"),
+        ]);
+        await agent.send("write outside again", session.thebeSessionId);
+        expect(existsSync(target)).toBe(true);
+      } finally {
+        await rm(target, { force: true });
+        if (previousSandbox === undefined) delete process.env.THEBE_SANDBOX;
+        else process.env.THEBE_SANDBOX = previousSandbox;
+      }
+    }
+  );
 
   it("exposes Pi native content and filename search without bash", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "thebe-pi-search-tools-"));
-    await writeFile(join(workspace, "needle.txt"), "needle in workspace\n", "utf8");
+    await writeFile(
+      join(workspace, "needle.txt"),
+      "needle in workspace\n",
+      "utf8"
+    );
     const { faux, runtime } = await piWithFaux();
     let modelToolNames: string[] | undefined;
     faux.setResponses([
       (context) => {
-        modelToolNames = getCurrentTools(context.messages).map((tool) => tool.name);
+        modelToolNames = getCurrentTools(context.messages).map(
+          (tool) => tool.name
+        );
         return fauxAssistantMessage([
           fauxToolCall("grep", { pattern: "needle" }, { id: "call_grep" }),
         ]);
@@ -485,7 +712,7 @@ describe("PiCodingAgentRuntime sessions", () => {
           toolName: "grep",
           text: expect.stringContaining("needle.txt"),
         }),
-      ]),
+      ])
     );
   });
 
@@ -515,9 +742,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     const again = await resumed.send("again", meta.thebeSessionId);
     expect(again.text).toBe("resumed");
     const listed = await second.runtime.listSessions();
-    expect(listed.some((row) => row.runtimeSessionId === meta.runtimeSessionId)).toBe(
-      true,
-    );
+    expect(
+      listed.some((row) => row.runtimeSessionId === meta.runtimeSessionId)
+    ).toBe(true);
   });
 
   it("deletes the persisted Pi transcript with the Thebe session", async () => {
@@ -531,11 +758,15 @@ describe("PiCodingAgentRuntime sessions", () => {
     });
     const meta = await agent.createSession({ title: "delete-real-session" });
     await agent.send("persist this", meta.thebeSessionId);
-    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(true);
+    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(
+      true
+    );
 
     await agent.deleteSession(meta.thebeSessionId);
 
-    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(false);
+    expect((await readdir(dir)).some((name) => name.endsWith(".jsonl"))).toBe(
+      false
+    );
     expect(await runtime.listSessions()).toHaveLength(0);
   });
 
@@ -563,8 +794,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     const created = await agent.createSession();
     first.faux.setResponses([fauxAssistantMessage("seed")]);
     await agent.send("seed", created.thebeSessionId);
-    await expect(agent.setThinkingLevel(created.thebeSessionId, "high"))
-      .resolves.toMatchObject({ level: "high" });
+    await expect(
+      agent.setThinkingLevel(created.thebeSessionId, "high")
+    ).resolves.toMatchObject({ level: "high" });
 
     const second = await piWithFaux(dir);
     const resumedModel = second.faux.getModel() as unknown as {
@@ -575,7 +807,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     resumedModel.thinkingLevelMap = model.thinkingLevelMap;
     const registeredResumedModel = second.modelRuntime.getModel(
       "faux",
-      second.faux.getModel().id,
+      second.faux.getModel().id
     ) as unknown as {
       reasoning?: boolean;
       thinkingLevelMap?: Record<string, string | null>;
@@ -588,8 +820,9 @@ describe("PiCodingAgentRuntime sessions", () => {
       agentStoreDir: join(dir, "meta"),
     });
     await resumed.resume(created.thebeSessionId);
-    await expect(resumed.getThinkingInfo(created.thebeSessionId))
-      .resolves.toMatchObject({ level: "high" });
+    await expect(
+      resumed.getThinkingInfo(created.thebeSessionId)
+    ).resolves.toMatchObject({ level: "high" });
   });
 
   it("forwards Pi thinking and tool events through the agent log", async () => {
@@ -625,7 +858,7 @@ describe("PiCodingAgentRuntime sessions", () => {
         "tool_start",
         "tool_end",
         "text_delta",
-      ]),
+      ])
     );
   });
 
@@ -648,14 +881,18 @@ describe("PiCodingAgentRuntime sessions", () => {
     const result = await agent.send("read the workspace file");
 
     expect(result.text).toBe("read complete");
-    expect(result.events.some((event) => event.type === "permission_requested")).toBe(
-      false,
-    );
+    expect(
+      result.events.some((event) => event.type === "permission_requested")
+    ).toBe(false);
     expect(result.events).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ type: "tool_start", toolName: "read" }),
-        expect.objectContaining({ type: "tool_end", toolName: "read", isError: false }),
-      ]),
+        expect.objectContaining({
+          type: "tool_end",
+          toolName: "read",
+          isError: false,
+        }),
+      ])
     );
   });
 
@@ -677,13 +914,13 @@ describe("PiCodingAgentRuntime sessions", () => {
     await agent.fork(parentId);
     await agent.send("two");
     const parentMeta = (await agent.listSessions()).find(
-      (row) => row.thebeSessionId === parentId,
+      (row) => row.thebeSessionId === parentId
     )!;
     const parentSession = await runtime.resumeSession(
       parentMeta.runtimeSessionId,
       {
         customTools: [],
-      },
+      }
     );
     expect(parentSession.messages().map((m) => m.text)).toEqual(parentMessages);
   });
@@ -729,8 +966,8 @@ describe("PiCodingAgentRuntime sessions", () => {
           name.endsWith(".jsonl") ||
           name.endsWith(".html") ||
           name.startsWith("session-") ||
-          name.startsWith("pi-session-"),
-      ),
+          name.startsWith("pi-session-")
+      )
     ).toEqual([]);
   });
 
@@ -747,15 +984,24 @@ describe("PiCodingAgentRuntime sessions", () => {
     expect(setSpy).not.toHaveBeenCalled();
     expect(loginSpy).toHaveBeenCalledWith("faux", "apiKey", expect.any(Object));
     const apiKeyInteraction = loginSpy.mock.calls[0]?.[2];
-    if (!apiKeyInteraction || typeof apiKeyInteraction !== "object" || !("prompt" in apiKeyInteraction) || typeof apiKeyInteraction.prompt !== "function") throw new Error("missing API key prompt");
-    expect(await apiKeyInteraction.prompt({ message: "API key" })).toBe("sk-test");
+    if (
+      !apiKeyInteraction ||
+      typeof apiKeyInteraction !== "object" ||
+      !("prompt" in apiKeyInteraction) ||
+      typeof apiKeyInteraction.prompt !== "function"
+    )
+      throw new Error("missing API key prompt");
+    expect(await apiKeyInteraction.prompt({ message: "API key" })).toBe(
+      "sk-test"
+    );
     await runtime.auth().loginOAuth("faux", { type: "oauth" });
-    expect(loginSpy).toHaveBeenLastCalledWith("faux", "oauth", expect.any(Object));
+    expect(loginSpy).toHaveBeenLastCalledWith(
+      "faux",
+      "oauth",
+      expect.any(Object)
+    );
     const src = [
-      await readFile(
-        new URL("../runtime.ts", import.meta.url),
-        "utf8",
-      ),
+      await readFile(new URL("../runtime.ts", import.meta.url), "utf8"),
       await readFile(new URL("../auth/oauth.ts", import.meta.url), "utf8"),
     ].join("\n");
     expect(src).not.toMatch(/function refresh/);
@@ -786,29 +1032,37 @@ describe("PiCodingAgentRuntime sessions", () => {
           expires: Date.now() + 60_000,
         };
       });
-    const result = await runtime
-      .auth()
-      .authorizeOAuth("unauthorized-provider");
+    const result = await runtime.auth().authorizeOAuth("unauthorized-provider");
     expect(result).toMatchObject({
       pending: true,
       url: "https://example.com/oauth/authorize",
     });
     expect(loginSpy).toHaveBeenCalled();
     await expect(
-      runtime.auth().submitOAuthCallback("unauthorized-provider", "code"),
+      runtime.auth().submitOAuthCallback("unauthorized-provider", "code")
     ).rejects.toThrow("unknown OAuth authorization");
   });
 
   it("force authorizeOAuth starts a new login when credentials already exist", async () => {
     const { runtime, modelRuntime } = await piWithFaux();
     vi.spyOn(modelRuntime, "checkAuth").mockResolvedValue(true);
-    const loginSpy = vi.spyOn(modelRuntime, "login").mockImplementation(async (...args: unknown[]) => {
-      const interaction = args[2] as {
-        notify: (event: { type: string; url?: string }) => void;
-      };
-      interaction.notify({ type: "auth_url", url: "https://example.com/renew" });
-      return { type: "oauth", access: "renewed", refresh: "r", expires: Date.now() + 60_000 };
-    });
+    const loginSpy = vi
+      .spyOn(modelRuntime, "login")
+      .mockImplementation(async (...args: unknown[]) => {
+        const interaction = args[2] as {
+          notify: (event: { type: string; url?: string }) => void;
+        };
+        interaction.notify({
+          type: "auth_url",
+          url: "https://example.com/renew",
+        });
+        return {
+          type: "oauth",
+          access: "renewed",
+          refresh: "r",
+          expires: Date.now() + 60_000,
+        };
+      });
 
     await runtime.auth().authorizeOAuth("connected-provider", { force: true });
 
@@ -835,7 +1089,7 @@ describe("PiCodingAgentRuntime sessions", () => {
           refresh: "r",
           expires: Date.now() + 60_000,
         };
-      },
+      }
     );
     const pending = await runtime.auth().authorizeOAuth("google");
     expect(pending).toMatchObject({

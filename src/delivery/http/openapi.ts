@@ -521,6 +521,13 @@ const operations: Operation[] = [
     responseSchema: "PermissionModeSettings",
   },
   {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.fullAccessSettings,
+    summary: "Read whether the full-access preset is allowed on this host",
+    tag: "settings",
+    responseSchema: "FullAccessSupport",
+  },
+  {
     method: "patch",
     path: PRODUCT_HTTP_PATH.permissionSettings,
     summary: "Set permission mode",
@@ -836,6 +843,20 @@ const operations: Operation[] = [
     summary: "Interrupt the current run",
     tag: "prompt",
     parameters: [idParameter()],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/full-access",
+    summary: "Enable or disable the session-scoped full-access preset",
+    tag: "session",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    extraStatuses: [
+      {
+        status: 403,
+        description: "The host does not allow the full-access preset",
+      },
+    ],
   },
   {
     method: "post",
@@ -2093,6 +2114,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           required: ["mode"],
           properties: {
             mode: { type: "string", enum: ["ask", "read-only", "full-access"] },
+          },
+        },
+        FullAccessSupport: {
+          type: "object",
+          required: ["allowed"],
+          properties: {
+            allowed: {
+              type: "boolean",
+              description:
+                "Whether this Core host permits the session-scoped full-access preset (THEBE_FULL_ACCESS).",
+            },
           },
         },
         AgentSettings: {

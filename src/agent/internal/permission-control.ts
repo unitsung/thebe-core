@@ -24,7 +24,8 @@ export type PendingPermission = {
 export function createPermissionControl(input: {
   initialMode?: PermissionMode;
   preflight(
-    request: PermissionRequest
+    request: PermissionRequest,
+    fullAccess?: boolean
   ): PermissionPreflightDecision | Promise<PermissionPreflightDecision>;
   workspaceReadTools: readonly string[];
   lookupRemembered(
@@ -71,15 +72,26 @@ export function createPermissionControl(input: {
     }
   }
 
-  function permissionHandler(explicitSessionId?: string) {
+  function permissionHandler(
+    explicitSessionId?: string,
+    isFullAccess?: () => boolean
+  ) {
+    function fullAccessFor(thebeSessionId?: string): boolean {
+      if (isFullAccess?.() !== true) return false;
+      // A background goal/scheduled turn on the same session is not full-access.
+      if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
+        return false;
+      return true;
+    }
     return {
       async preflight(
         request: PermissionRequest
       ): Promise<PermissionPreflightDecision> {
-        const policy = await input.preflight(request);
-        if (policy === "deny") return "deny";
         const thebeSessionId =
           explicitSessionId ?? input.active()?.meta.thebeSessionId;
+        const fullAccess = fullAccessFor(thebeSessionId);
+        const policy = await input.preflight(request, fullAccess);
+        if (policy === "deny") return "deny";
         const remembered = rememberedDecision(
           thebeSessionId
             ? await input.lookupRemembered(thebeSessionId)
@@ -87,6 +99,9 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return "deny";
+        // Full-access lifts the command guard and the sandbox; an explicit
+        // remembered denial and the workspace boundary still win.
+        if (fullAccess) return "allow";
         if (
           mode === "read-only" &&
           !input.workspaceReadTools.includes(request.toolName)
@@ -105,6 +120,7 @@ export function createPermissionControl(input: {
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
         const thebeSessionId =
           explicitSessionId ?? input.active()?.meta.thebeSessionId;
+        const fullAccess = fullAccessFor(thebeSessionId);
         const remembered = rememberedDecision(
           thebeSessionId
             ? await input.lookupRemembered(thebeSessionId)
@@ -112,6 +128,7 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return "deny";
+        if (fullAccess) return "allow";
         if (mode === "read-only") {
           return input.workspaceReadTools.includes(request.toolName)
             ? "allow"

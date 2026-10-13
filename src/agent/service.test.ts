@@ -7,10 +7,7 @@ import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
 import { createFakeRuntime } from "../testing/runtime/index.ts";
 import { createThebeApp } from "../app/create.ts";
 import { hashParameters } from "../agent/security/audit/audit-log.ts";
-import {
-  createThebeAgent,
-  DEFAULT_AUTO_SUMMARY_DELAY_MS,
-} from "./index.ts";
+import { createThebeAgent, DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./index.ts";
 import { createJsonAgentSettingsStore } from "./settings/store.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
@@ -33,34 +30,61 @@ function emptyProvider(): ContainerInfoProvider {
 describe("Thebe agent service (fake runtime)", () => {
   it("does not send an already approved or denied command to the approval UI", async () => {
     const fake = createFakeRuntime();
-    let handler: Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"];
+    let handler: Parameters<
+      typeof fake.runtime.createSession
+    >[0]["permissionHandler"];
     const agent = createThebeAgent({
-      runtime: { ...fake.runtime, async createSession(options) {
-        handler = options.permissionHandler;
-        return fake.runtime.createSession(options);
-      } },
+      runtime: {
+        ...fake.runtime,
+        async createSession(options) {
+          handler = options.permissionHandler;
+          return fake.runtime.createSession(options);
+        },
+      },
       provider: emptyProvider(),
       permissionMode: "full-access",
     });
     const session = await agent.createSession();
-    const request = { permissionId: "p", toolCallId: "c", toolName: "bash", args: { command: "ls" } };
+    const request = {
+      permissionId: "p",
+      toolCallId: "c",
+      toolName: "bash",
+      args: { command: "ls" },
+    };
     expect(await handler!.preflight!(request)).toBe("allow");
-    await agent.patchSession(session.thebeSessionId, { rememberedPermissions: { bash: "deny" } });
+    await agent.patchSession(session.thebeSessionId, {
+      rememberedPermissions: { bash: "deny" },
+    });
     expect(await handler!.preflight!(request)).toBe("deny");
-    await agent.patchSession(session.thebeSessionId, { rememberedPermissions: { bash: "allow" } });
+    await agent.patchSession(session.thebeSessionId, {
+      rememberedPermissions: { bash: "allow" },
+    });
     agent.setPermissionMode("ask");
     expect(await handler!.preflight!(request)).toBe("allow");
     agent.setPermissionMode("read-only");
     expect(await handler!.preflight!(request)).toBe("deny");
     agent.setPermissionMode("full-access");
-    expect(await handler!.preflight!({ ...request, args: { command: "zpool destroy tank" } })).toBe("deny");
+    expect(
+      await handler!.preflight!({
+        ...request,
+        args: { command: "zpool destroy tank" },
+      })
+    ).toBe("deny");
   });
 
   it("refreshes an existing conversation when a resource is enabled, updated or removed", async () => {
     const fake = createFakeRuntime();
-    const agent = createThebeAgent({ runtime: fake.runtime, provider: emptyProvider() });
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
     const session = await agent.createSession();
-    const resource = { kind: "skill" as const, identity: "demo", source: "thebe://skills/demo", version: "1" };
+    const resource = {
+      kind: "skill" as const,
+      identity: "demo",
+      source: "thebe://skills/demo",
+      version: "1",
+    };
     await agent.enableResource(resource);
     expect(fake.snapshot(session.runtimeSessionId).resourceReloads).toBe(1);
     await agent.putEnabledResource({ ...resource, version: "2" });
@@ -82,13 +106,16 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("passes one configured workspace to runtime sessions and permission policy", async () => {
     const fake = createFakeRuntime();
-    const workspace = await mkdtemp(join(tmpdir(), "thebe-configured-workspace-"));
+    const workspace = await mkdtemp(
+      join(tmpdir(), "thebe-configured-workspace-")
+    );
     const outputDirectory = join(workspace, ".thebe", "outputs");
-    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> =
+      [];
     const runtime = {
       ...fake.runtime,
       async createSession(
-        create: Parameters<typeof fake.runtime.createSession>[0],
+        create: Parameters<typeof fake.runtime.createSession>[0]
       ) {
         createCalls.push(create);
         return fake.runtime.createSession(create);
@@ -106,28 +133,33 @@ describe("Thebe agent service (fake runtime)", () => {
     const create = createCalls[0]!;
     expect(create.cwd).toBe(workspace);
     expect(create.workspacePath).toBe(workspace);
-    expect(await create.permissionHandler?.preflight?.({
-      permissionId: "p",
-      toolName: "read",
-      toolCallId: "c",
-      args: { path: "README.md" },
-    })).toBe("allow");
-    expect(await create.permissionHandler?.preflight?.({
-      permissionId: "p2",
-      toolName: "read",
-      toolCallId: "c2",
-      args: { path: "../outside.txt" },
-    })).toBe("ask");
+    expect(
+      await create.permissionHandler?.preflight?.({
+        permissionId: "p",
+        toolName: "read",
+        toolCallId: "c",
+        args: { path: "README.md" },
+      })
+    ).toBe("allow");
+    expect(
+      await create.permissionHandler?.preflight?.({
+        permissionId: "p2",
+        toolName: "read",
+        toolCallId: "c2",
+        args: { path: "../outside.txt" },
+      })
+    ).toBe("ask");
   });
 
   it("denies critical commands and asks before running dangerous ones", async () => {
     const fake = createFakeRuntime();
     const workspace = await mkdtemp(join(tmpdir(), "thebe-command-guard-"));
-    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> =
+      [];
     const runtime = {
       ...fake.runtime,
       async createSession(
-        create: Parameters<typeof fake.runtime.createSession>[0],
+        create: Parameters<typeof fake.runtime.createSession>[0]
       ) {
         createCalls.push(create);
         return fake.runtime.createSession(create);
@@ -162,7 +194,7 @@ describe("Thebe agent service (fake runtime)", () => {
         toolName: "write",
         toolCallId: "c2",
         args: { path: "/etc/sudoers", content: "x" },
-      }),
+      })
     ).toBe("ask");
   });
 
@@ -170,11 +202,13 @@ describe("Thebe agent service (fake runtime)", () => {
     vi.stubEnv("THEBE_COMMAND_GUARD", "off");
     try {
       const fake = createFakeRuntime();
-      const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+      const createCalls: Array<
+        Parameters<typeof fake.runtime.createSession>[0]
+      > = [];
       const runtime = {
         ...fake.runtime,
         async createSession(
-          create: Parameters<typeof fake.runtime.createSession>[0],
+          create: Parameters<typeof fake.runtime.createSession>[0]
         ) {
           createCalls.push(create);
           return fake.runtime.createSession(create);
@@ -189,7 +223,7 @@ describe("Thebe agent service (fake runtime)", () => {
           toolName: "bash",
           toolCallId: "c",
           args: { command: "zpool destroy tank" },
-        }),
+        })
       ).toBe("ask");
     } finally {
       vi.unstubAllEnvs();
@@ -198,11 +232,12 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("never treats the host process directory as an implicit workspace", async () => {
     const fake = createFakeRuntime();
-    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> =
+      [];
     const runtime = {
       ...fake.runtime,
       async createSession(
-        create: Parameters<typeof fake.runtime.createSession>[0],
+        create: Parameters<typeof fake.runtime.createSession>[0]
       ) {
         createCalls.push(create);
         return fake.runtime.createSession(create);
@@ -219,21 +254,24 @@ describe("Thebe agent service (fake runtime)", () => {
     expect(create.cwd).toBeUndefined();
     expect(create.workspacePath).toBeUndefined();
     expect(create.systemPrompt).toContain("No workspace is configured");
-    await expect(create.permissionHandler?.preflight?.({
-      permissionId: "p",
-      toolName: "read",
-      toolCallId: "c",
-      args: { path: "README.md" },
-    })).resolves.toBe("ask");
+    await expect(
+      create.permissionHandler?.preflight?.({
+        permissionId: "p",
+        toolName: "read",
+        toolCallId: "c",
+        args: { path: "README.md" },
+      })
+    ).resolves.toBe("ask");
   });
 
   it("gives the main session the explicit response and file-output policy", async () => {
     const fake = createFakeRuntime();
-    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+    const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> =
+      [];
     const runtime = {
       ...fake.runtime,
       async createSession(
-        create: Parameters<typeof fake.runtime.createSession>[0],
+        create: Parameters<typeof fake.runtime.createSession>[0]
       ) {
         createCalls.push(create);
         return fake.runtime.createSession(create);
@@ -248,19 +286,37 @@ describe("Thebe agent service (fake runtime)", () => {
     await agent.createSession();
     const systemPrompt = createCalls[0]?.systemPrompt ?? "";
 
-    expect(systemPrompt).toContain("Return ordinary answers and research results to the parent conversation buffer by default.");
-    expect(systemPrompt).toContain("Reply style: put the answer or result in the first sentence");
-    expect(systemPrompt).toContain("never show instance or item UUIDs, error codes");
+    expect(systemPrompt).toContain(
+      "Return ordinary answers and research results to the parent conversation buffer by default."
+    );
+    expect(systemPrompt).toContain(
+      "Reply style: put the answer or result in the first sentence"
+    );
+    expect(systemPrompt).toContain(
+      "never show instance or item UUIDs, error codes"
+    );
     expect(systemPrompt).toContain("thebe:suggest");
     expect(systemPrompt).toContain("thebe:gallery");
     expect(systemPrompt).toContain('```thebe:gallery\n{"images"');
     expect(systemPrompt).toContain("Never invent media URLs");
-    expect(systemPrompt).toContain("Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.");
-    expect(systemPrompt).toContain("Never create output.md, docs files, or any other file merely to display an answer.");
-    expect(systemPrompt).toContain("outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.");
-    expect(systemPrompt).toContain("Use Pi's native find for filename searches and Pi's native grep for content searches.");
-    expect(systemPrompt).toContain("Do not use bash or rg for ordinary searches.");
-    expect(systemPrompt).toContain("Use bash only when the task genuinely requires executing a shell command.");
+    expect(systemPrompt).toContain(
+      "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files."
+    );
+    expect(systemPrompt).toContain(
+      "Never create output.md, docs files, or any other file merely to display an answer."
+    );
+    expect(systemPrompt).toContain(
+      "outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output."
+    );
+    expect(systemPrompt).toContain(
+      "Use Pi's native find for filename searches and Pi's native grep for content searches."
+    );
+    expect(systemPrompt).toContain(
+      "Do not use bash or rg for ordinary searches."
+    );
+    expect(systemPrompt).toContain(
+      "Use bash only when the task genuinely requires executing a shell command."
+    );
   });
 
   it("asks through Thebe-owned events, not Pi event types", async () => {
@@ -278,7 +334,9 @@ describe("Thebe agent service (fake runtime)", () => {
       "session_end",
     ]);
     expect(JSON.stringify(result.events)).not.toContain("message_update");
-    expect(JSON.stringify(result.events)).not.toContain("assistantMessageEvent");
+    expect(JSON.stringify(result.events)).not.toContain(
+      "assistantMessageEvent"
+    );
   });
 
   it("drives a goal through isolated worker and independent reviewer children", async () => {
@@ -306,27 +364,30 @@ describe("Thebe agent service (fake runtime)", () => {
       maxIterations: 3,
     });
 
-    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject({
-      status: "completed",
-      iteration: 1,
-      subagentRunIds: expect.arrayContaining([
-        expect.any(String),
-        expect.any(String),
-      ]),
-    });
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      {
+        status: "completed",
+        iteration: 1,
+        subagentRunIds: expect.arrayContaining([
+          expect.any(String),
+          expect.any(String),
+        ]),
+      }
+    );
     expect(agent.getGoal(session.thebeSessionId)).toMatchObject({
       status: "completed",
       iteration: 1,
       finalReport: expect.stringContaining("VERDICT: pass"),
     });
     expect(agent.messages()).toEqual([]);
-    await expect(agent.listSubagents(session.thebeSessionId)).resolves.toHaveLength(2);
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(2);
     expect(
-      (await agent.listSubagents(session.thebeSessionId)).map((run) => run.profileName),
-    ).toEqual([
-      "goal-worker",
-      "goal-reviewer",
-    ]);
+      (await agent.listSubagents(session.thebeSessionId)).map(
+        (run) => run.profileName
+      )
+    ).toEqual(["goal-worker", "goal-reviewer"]);
   });
 
   it("restores completed Goal and child results from the saved session metadata", async () => {
@@ -344,7 +405,9 @@ describe("Thebe agent service (fake runtime)", () => {
       provider: emptyProvider(),
       agentStoreDir: dir,
     });
-    const session = await firstProduct.createSession({ title: "persisted goal" });
+    const session = await firstProduct.createSession({
+      title: "persisted goal",
+    });
     await firstProduct.startGoal({
       thebeSessionId: session.thebeSessionId,
       goal: "Persist the verified goal result",
@@ -364,7 +427,9 @@ describe("Thebe agent service (fake runtime)", () => {
       finalReport: expect.stringContaining("persisted child evidence"),
     });
     expect(
-      (await resumedProduct.listSubagents(session.thebeSessionId)).map((run) => run.result),
+      (await resumedProduct.listSubagents(session.thebeSessionId)).map(
+        (run) => run.result
+      )
     ).toEqual([
       "persisted worker result",
       "VERDICT: pass\nEVIDENCE: persisted child evidence\nREMAINING: none",
@@ -386,24 +451,35 @@ describe("Thebe agent service (fake runtime)", () => {
     });
 
     await vi.waitFor(() => {
-      expect(agent.getGoal(session.thebeSessionId)?.activeSubagent?.status).toBe("running");
+      expect(
+        agent.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
     });
     await agent.pauseGoal(session.thebeSessionId);
-    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject({
-      status: "paused",
-      iteration: 1,
-    });
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      {
+        status: "paused",
+        iteration: 1,
+      }
+    );
 
     fake.queueTurns([
       { kind: "text", text: "checkpoint complete" },
-      { kind: "text", text: "VERDICT: pass\nEVIDENCE: task artifact exists\nREMAINING: none" },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: task artifact exists\nREMAINING: none",
+      },
     ]);
     await agent.resumeGoal(session.thebeSessionId);
-    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject({
-      status: "completed",
-      iteration: 2,
-    });
-    await expect(agent.listSubagents(session.thebeSessionId)).resolves.toHaveLength(3);
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      {
+        status: "completed",
+        iteration: 2,
+      }
+    );
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(3);
   });
 
   it("registers Pi built-ins together with container tools", () => {
@@ -421,7 +497,7 @@ describe("Thebe agent service (fake runtime)", () => {
         "write",
         "container.list",
         "container.inspect",
-      ]),
+      ])
     );
   });
 
@@ -467,7 +543,7 @@ describe("Thebe agent service (fake runtime)", () => {
       version: "0.1.0",
     });
     const created = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
     );
     const session = (await created.json()) as { thebeSessionId: string };
     const http = await app.handler.handle(
@@ -477,8 +553,8 @@ describe("Thebe agent service (fake runtime)", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "hello" }),
-        },
-      ),
+        }
+      )
     );
     expect(http.status).toBe(200);
     await expect(http.json()).resolves.toMatchObject({
@@ -503,7 +579,7 @@ describe("Thebe agent service (fake runtime)", () => {
     expect(listed).toHaveLength(1);
     const raw = await readFile(
       join(dir, `${listed[0]!.thebeSessionId}.json`),
-      "utf8",
+      "utf8"
     );
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     expect(parsed.thebeSessionId).toBe(listed[0]!.thebeSessionId);
@@ -528,8 +604,9 @@ describe("Thebe agent service (fake runtime)", () => {
     const before = agent.messages().map((message) => message.text);
     await agent.fork(parentId);
     const parent = fake.snapshot(
-      (await agent.listSessions()).find((row) => row.thebeSessionId === parentId)!
-        .runtimeSessionId,
+      (await agent.listSessions()).find(
+        (row) => row.thebeSessionId === parentId
+      )!.runtimeSessionId
     );
     expect(parent.messages.map((message) => message.text)).toEqual(before);
   });
@@ -553,7 +630,10 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("deletes both the Thebe mapping and the underlying runtime session", async () => {
     const fake = createFakeRuntime();
-    const agent = createThebeAgent({ runtime: fake.runtime, provider: emptyProvider() });
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
     const meta = await agent.createSession({ title: "delete-me" });
 
     await agent.deleteSession(meta.thebeSessionId);
@@ -630,7 +710,7 @@ describe("Thebe agent service (fake runtime)", () => {
       source: "thebe://skills/homelab-status",
     });
     const row = JSON.parse(
-      (await readFile(auditPath, "utf8")).trim(),
+      (await readFile(auditPath, "utf8")).trim()
     ) as Record<string, unknown>;
     expect(row).toMatchObject({
       method: "resource.enable",
@@ -643,7 +723,9 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("restores enabled resources after the Agent is recreated", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-resources-config-"));
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
     const resource = {
       kind: "skill" as const,
       identity: "homelab-status",
@@ -669,7 +751,9 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("persists removing an enabled resource", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-resources-remove-"));
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
     const resource = {
       kind: "skill" as const,
       identity: "homelab-status",
@@ -689,7 +773,9 @@ describe("Thebe agent service (fake runtime)", () => {
       provider: emptyProvider(),
       settingsStore,
     });
-    await expect(second.removeEnabledResource(resource.identity)).resolves.toBe(true);
+    await expect(second.removeEnabledResource(resource.identity)).resolves.toBe(
+      true
+    );
 
     const third = createThebeAgent({
       runtime: createFakeRuntime().runtime,
@@ -702,12 +788,16 @@ describe("Thebe agent service (fake runtime)", () => {
 
   it("persists enabling a skill through the Skill interface", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-skill-config-"));
-    await mkdir(join(dir, ".thebe", "skills", "demo-skill"), { recursive: true });
+    await mkdir(join(dir, ".thebe", "skills", "demo-skill"), {
+      recursive: true,
+    });
     await writeFile(
       join(dir, ".thebe", "skills", "demo-skill", "SKILL.md"),
-      "---\nname: demo-skill\ndescription: Demo skill\n---\nbody\n",
+      "---\nname: demo-skill\ndescription: Demo skill\n---\nbody\n"
     );
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
 
     const first = createThebeAgent({
       runtime: createFakeRuntime().runtime,
@@ -754,7 +844,7 @@ describe("Thebe agent service (fake runtime)", () => {
           method: "tools/call",
           params: { name: "container.status_summary" },
         }),
-      }),
+      })
     );
     const body = (await res.json()) as {
       result?: { content?: Array<{ text?: string }> };
@@ -771,9 +861,7 @@ describe("Thebe agent service (fake runtime)", () => {
     });
     const result = await agent.prompt({
       text: "look",
-      files: [
-        { mediaType: "image/png", data: "aaaa", filename: "shot.png" },
-      ],
+      files: [{ mediaType: "image/png", data: "aaaa", filename: "shot.png" }],
     });
     expect(result.text).toBe("saw-file");
     expect(agent.messages()[0]?.text).toContain("shot.png");
@@ -801,7 +889,9 @@ describe("Thebe agent service (fake runtime)", () => {
       "first",
     ]);
     const kids = await agent.children(parentId);
-    expect(kids.map((row) => row.thebeSessionId)).toEqual([child.thebeSessionId]);
+    expect(kids.map((row) => row.thebeSessionId)).toEqual([
+      child.thebeSessionId,
+    ]);
   });
 
   it("reverts and unreverts the last user turn", async () => {
@@ -837,9 +927,9 @@ describe("Thebe agent service (fake runtime)", () => {
     });
     const permissionId = agent.pendingPermissionIds()[0]!;
     const sessionId = agent.lastThebeSessionId()!;
-    expect(agent.lastEvents().some((event) => event.type === "permission_requested")).toBe(
-      true,
-    );
+    expect(
+      agent.lastEvents().some((event) => event.type === "permission_requested")
+    ).toBe(true);
     await agent.resolvePermission(sessionId, permissionId, {
       response: "deny",
     });
@@ -874,7 +964,7 @@ describe("Thebe agent service (fake runtime)", () => {
     const meta = await agent.getSession(sessionId);
     expect(meta.rememberedPermissions?.bash).toBeUndefined();
     expect(
-      meta.rememberedPermissions?.[`bash:${hashParameters({ command: "ls" })}`],
+      meta.rememberedPermissions?.[`bash:${hashParameters({ command: "ls" })}`]
     ).toBe("allow");
   });
 
@@ -892,7 +982,9 @@ describe("Thebe agent service (fake runtime)", () => {
     await agent.patchSession(sessionId, {
       rememberedPermissions: { bash: "deny" },
     });
-    const result = await agent.prompt("run bash", { thebeSessionId: sessionId });
+    const result = await agent.prompt("run bash", {
+      thebeSessionId: sessionId,
+    });
     expect(result.text).toBe("after");
     expect(agent.pendingPermissionIds()).toHaveLength(0);
     const tool = agent.messages().find((message) => message.role === "tool");
@@ -930,8 +1022,12 @@ describe("Thebe agent service (fake runtime)", () => {
     await guarded.patchSession(session.thebeSessionId, {
       rememberedPermissions: { bash: "deny" },
     });
-    await guarded.prompt("run bash", { thebeSessionId: session.thebeSessionId });
-    expect(guarded.messages().find((message) => message.role === "tool")?.isError).toBe(true);
+    await guarded.prompt("run bash", {
+      thebeSessionId: session.thebeSessionId,
+    });
+    expect(
+      guarded.messages().find((message) => message.role === "tool")?.isError
+    ).toBe(true);
   });
 
   it("read-only mode denies approval-gated tools without opening a permission prompt", async () => {
@@ -951,6 +1047,191 @@ describe("Thebe agent service (fake runtime)", () => {
     expect(agent.pendingPermissionIds()).toHaveLength(0);
   });
 
+  it("host-gates the full-access preset and applies it to one session only", async () => {
+    const disabled = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+    });
+    expect(disabled.getFullAccessSupport()).toEqual({ allowed: false });
+    const disabledSession = await disabled.createSession();
+    await expect(
+      disabled.setSessionFullAccess(disabledSession.thebeSessionId, true)
+    ).rejects.toMatchObject({
+      status: 403,
+      code: "full_access_not_allowed",
+    });
+
+    const fake = createFakeRuntime();
+    const handlers: Array<
+      NonNullable<
+        Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"]
+      >
+    > = [];
+    const agent = createThebeAgent({
+      runtime: {
+        ...fake.runtime,
+        async createSession(options) {
+          if (options.permissionHandler)
+            handlers.push(options.permissionHandler);
+          return fake.runtime.createSession(options);
+        },
+      },
+      provider: emptyProvider(),
+      fullAccessAllowed: true,
+    });
+    expect(agent.getFullAccessSupport()).toEqual({ allowed: true });
+    const first = await agent.createSession();
+    await agent.createSession();
+    const firstHandler = handlers[0]!;
+    const secondHandler = handlers[1]!;
+    const request = {
+      permissionId: "p",
+      toolCallId: "c",
+      toolName: "bash",
+      args: { command: "ls" },
+    };
+    const critical = { ...request, args: { command: "zpool destroy tank" } };
+
+    expect(await firstHandler.preflight!(request)).toBe("ask");
+    expect(await firstHandler.preflight!(critical)).toBe("deny");
+
+    await agent.setSessionFullAccess(first.thebeSessionId, true);
+    expect(await firstHandler.preflight!(request)).toBe("allow");
+    // The command guard is lifted for the enabled session only.
+    expect(await firstHandler.preflight!(critical)).toBe("allow");
+    expect(await secondHandler.preflight!(request)).toBe("ask");
+    expect((await agent.getSession(first.thebeSessionId)).fullAccess).toBe(
+      true
+    );
+
+    await agent.setSessionFullAccess(first.thebeSessionId, false);
+    expect(await firstHandler.preflight!(request)).toBe("ask");
+
+    // An explicit remembered denial still wins while the preset is on.
+    await agent.setSessionFullAccess(first.thebeSessionId, true);
+    await agent.patchSession(first.thebeSessionId, {
+      rememberedPermissions: { bash: "deny" },
+    });
+    expect(await firstHandler.preflight!(request)).toBe("deny");
+  });
+
+  it("applies the preset to an auto-created session that had no explicit id", async () => {
+    const fake = createFakeRuntime();
+    const fullAccessOptions: Array<() => boolean> = [];
+    const agent = createThebeAgent({
+      runtime: {
+        ...fake.runtime,
+        async createSession(options) {
+          if (options.fullAccess) fullAccessOptions.push(options.fullAccess);
+          return fake.runtime.createSession(options);
+        },
+      },
+      provider: emptyProvider(),
+      fullAccessAllowed: true,
+    });
+    fake.queueTurns([{ kind: "text", text: "hi" }]);
+    await agent.send("hello");
+    const sessionId = agent.lastThebeSessionId()!;
+    expect(fullAccessOptions[0]!()).toBe(false);
+    await agent.setSessionFullAccess(sessionId, true);
+    expect(fullAccessOptions[0]!()).toBe(true);
+  });
+
+  it("runs approval-gated tools under the full-access preset without prompting", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "after" },
+    ]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      fullAccessAllowed: true,
+    });
+    const session = await agent.createSession();
+    await agent.setSessionFullAccess(session.thebeSessionId, true);
+    const result = await agent.send("run bash", session.thebeSessionId);
+    expect(result.text).toBe("after");
+    expect(agent.pendingPermissionIds()).toHaveLength(0);
+  });
+
+  it("does not apply the full-access preset to a non-interactive turn", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
+      { kind: "text", text: "background" },
+    ]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      fullAccessAllowed: true,
+    });
+    const session = await agent.createSession();
+    await agent.setSessionFullAccess(session.thebeSessionId, true);
+    await agent.prompt("run bash", {
+      thebeSessionId: session.thebeSessionId,
+      nonInteractive: true,
+    });
+    const tool = agent.messages().find((message) => message.role === "tool");
+    expect(tool?.isError).toBe(true);
+    expect(tool?.text).toContain("denied");
+  });
+
+  it("does not inherit the full-access preset into a subagent", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-full-access-subagent-"));
+    const prevCwd = process.cwd();
+    const prevHome = process.env.HOME;
+    process.chdir(dir);
+    process.env.HOME = dir;
+    try {
+      await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
+      await writeFile(
+        join(dir, ".thebe", "agents", "worker.md"),
+        "---\nname: worker\ndescription: Worker\n---\nDo the work.\n"
+      );
+      const fake = createFakeRuntime();
+      const handlers: Array<
+        NonNullable<
+          Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"]
+        >
+      > = [];
+      const agent = createThebeAgent({
+        runtime: {
+          ...fake.runtime,
+          async createSession(options) {
+            if (options.permissionHandler)
+              handlers.push(options.permissionHandler);
+            return fake.runtime.createSession(options);
+          },
+        },
+        provider: emptyProvider(),
+        fullAccessAllowed: true,
+      });
+      const parent = await agent.createSession();
+      await agent.setSessionFullAccess(parent.thebeSessionId, true);
+      fake.queueTurns([{ kind: "text", text: "child done" }]);
+      const run = await agent.spawnSubagent({
+        profileName: "worker",
+        taskPrompt: "do the work",
+        parentSessionId: parent.thebeSessionId,
+      });
+      await agent.waitSubagent(run.runId);
+      const childHandler = handlers[handlers.length - 1]!;
+      const request = {
+        permissionId: "p",
+        toolCallId: "c",
+        toolName: "bash",
+        args: { command: "ls" },
+      };
+      expect(await handlers[0]!.preflight!(request)).toBe("allow");
+      expect(await childHandler.preflight!(request)).toBe("ask");
+    } finally {
+      process.chdir(prevCwd);
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+    }
+  });
+
   it("lists skills, mcp tools, subagent profiles, spawn, and fork messages", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-agent-features-"));
     const prevCwd = process.cwd();
@@ -961,16 +1242,16 @@ describe("Thebe agent service (fake runtime)", () => {
       await mkdir(join(dir, ".thebe", "skills", "demo"), { recursive: true });
       await writeFile(
         join(dir, ".thebe", "skills", "demo", "SKILL.md"),
-        "---\nname: demo-skill\ndescription: Demo skill\n---\nDo the demo.\n",
+        "---\nname: demo-skill\ndescription: Demo skill\n---\nDo the demo.\n"
       );
       await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
       await writeFile(
         join(dir, ".thebe", "agents", "researcher.md"),
-        "---\nname: researcher\ndescription: Research helper\n---\nYou research.\n",
+        "---\nname: researcher\ndescription: Research helper\n---\nYou research.\n"
       );
       await writeFile(
         join(dir, ".thebe", "mcp.json"),
-        JSON.stringify({ mcpServers: { notes: { command: "notes-mcp" } } }),
+        JSON.stringify({ mcpServers: { notes: { command: "notes-mcp" } } })
       );
 
       const fake = createFakeRuntime();
@@ -1005,7 +1286,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
       const tools = await agent.listMcpTools();
       expect(tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["container.list", "list_core_events"]),
+        expect.arrayContaining(["container.list", "list_core_events"])
       );
       const servers = await agent.listMcpServers();
       expect(servers.map((server) => server.name)).toContain("notes");
@@ -1021,28 +1302,33 @@ describe("Thebe agent service (fake runtime)", () => {
       expect(child.parentSessionId).toBe(parent.thebeSessionId);
       expect(child.status).toMatch(/queued|running/);
       const childUpdates: Array<{ event?: { type: string } }> = [];
-      const unsubscribeChild = agent.subscribeSubagent(child.runId, (update) => {
-        childUpdates.push(update);
-      });
+      const unsubscribeChild = agent.subscribeSubagent(
+        child.runId,
+        (update) => {
+          childUpdates.push(update);
+        }
+      );
       const completed = await agent.waitSubagent(child.runId);
       unsubscribeChild();
       expect(completed.status).toBe("completed");
       expect(completed.result).toBe("child-ok");
-      expect(childUpdates.some((update) => update.event?.type === "text_delta")).toBe(true);
+      expect(
+        childUpdates.some((update) => update.event?.type === "text_delta")
+      ).toBe(true);
       const listed = await agent.listSubagents(parent.thebeSessionId);
       expect(
         listed.some(
           (row) =>
             row.runId === child.runId &&
-            row.parentSessionId === parent.thebeSessionId,
-        ),
+            row.parentSessionId === parent.thebeSessionId
+        )
       ).toBe(true);
       expect(await agent.listSessions()).toHaveLength(1);
       expect(await fake.runtime.listSessions()).toHaveLength(1);
 
       const forks = await agent.getForkMessages(parent.thebeSessionId);
       expect(forks.some((turn) => turn.text.includes("parent-turn"))).toBe(
-        true,
+        true
       );
     } finally {
       process.chdir(prevCwd);
@@ -1111,7 +1397,7 @@ describe("Thebe agent service (fake runtime)", () => {
         expect.objectContaining({ kind: "thinking" }),
         expect.objectContaining({ kind: "response" }),
         expect.objectContaining({ kind: "status", title: "completed" }),
-      ]),
+      ])
     );
   });
 
@@ -1164,7 +1450,7 @@ describe("Thebe agent service (fake runtime)", () => {
       await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
       await writeFile(
         join(dir, ".thebe", "agents", "limited.md"),
-        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container.list]\n---\nDo one diagnostic turn.\n",
+        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container.list]\n---\nDo one diagnostic turn.\n"
       );
       const fake = createFakeRuntime();
       fake.queueTurns([
@@ -1172,11 +1458,13 @@ describe("Thebe agent service (fake runtime)", () => {
         { kind: "tools", calls: [{ name: "container.list" }] },
         { kind: "text", text: "must-not-run" },
       ]);
-      const createCalls: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
+      const createCalls: Array<
+        Parameters<typeof fake.runtime.createSession>[0]
+      > = [];
       const runtime = {
         ...fake.runtime,
         async createSession(
-          create: Parameters<typeof fake.runtime.createSession>[0],
+          create: Parameters<typeof fake.runtime.createSession>[0]
         ) {
           createCalls.push(create);
           return fake.runtime.createSession(create);
@@ -1188,7 +1476,9 @@ describe("Thebe agent service (fake runtime)", () => {
         workspacePath: dir,
       });
       const parent = await agent.createSession({ title: "parent" });
-      await agent.prompt("parent task", { thebeSessionId: parent.thebeSessionId });
+      await agent.prompt("parent task", {
+        thebeSessionId: parent.thebeSessionId,
+      });
       const run = await agent.spawnSubagent({
         profileName: "limited",
         taskPrompt: "child task only",

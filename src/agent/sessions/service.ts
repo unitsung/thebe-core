@@ -175,6 +175,21 @@ export function createSessionApi(
       await options.runtime.deleteSession(meta.runtimeSessionId);
       await store.delete(thebeSessionId);
     },
+    /** Whether this host permits the session-scoped full-access preset. */
+    getFullAccessSupport(): { allowed: boolean } {
+      return ctx.getFullAccessSupport();
+    },
+    /**
+     * Enable or disable the full-access preset for one session. Host-gated and
+     * session-scoped; subagents, schedules, background goals and `/mcp` callers
+     * are unaffected.
+     */
+    setSessionFullAccess(
+      thebeSessionId: string,
+      enabled: boolean,
+    ): Promise<{ thebeSessionId: string; fullAccess: boolean }> {
+      return ctx.setSessionFullAccess(thebeSessionId, enabled);
+    },
     async sessionStatus(): Promise<
       Array<AgentSessionMeta & { status: SessionRunStatus; streaming: boolean }>
     > {

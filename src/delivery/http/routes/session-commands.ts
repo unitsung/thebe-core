@@ -4,7 +4,7 @@ import {
 } from "../../../agent/runtime/interface.ts";
 import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { asObject, asStringMap, json, readJson } from "../json.ts";
-import { promptBodyError } from "../parsing/errors.ts";
+import { promptBodyError, agentError } from "../parsing/errors.ts";
 import { asMember, parseThinkingLevel } from "../parsing/query.ts";
 import { readPromptBody } from "../parsing/prompt.ts";
 
@@ -14,7 +14,7 @@ type SessionPatchInput = Parameters<Agent["patchSession"]>[1];
 
 /** Session creation, mutation, prompting, and command routes. */
 export async function handleSessionCommands(
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ): Promise<Response | undefined> {
   const { request, parts, agent } = context;
   if (!agent || parts[0] !== "v1" || parts[1] !== "session") {
@@ -44,7 +44,9 @@ export async function handleSessionCommands(
       title: typeof body.title === "string" ? body.title : undefined,
       labels: asStringMap(body.labels),
       selectedContext: body.selectedContext
-        ? (asObject(body.selectedContext) as SessionPatchInput["selectedContext"])
+        ? (asObject(
+            body.selectedContext
+          ) as SessionPatchInput["selectedContext"])
         : undefined,
       shareMetadata:
         body.shareMetadata && typeof body.shareMetadata === "object"
@@ -74,12 +76,12 @@ export async function handleSessionCommands(
           error: "session is streaming; use steer or followUp",
           code: "session_running",
         },
-        409,
+        409
       );
     }
     const result = await agent.prompt(
       { text: parsed.text, files: parsed.files },
-      { thebeSessionId: id, mode: parsed.mode },
+      { thebeSessionId: id, mode: parsed.mode }
     );
     return json({
       text: result.text,
@@ -91,19 +93,34 @@ export async function handleSessionCommands(
     await agent.interrupt(id);
     return json({ ok: true });
   }
+  if (method === "POST" && action === "full-access") {
+    const body = await readJson(request);
+    if (typeof body.enabled !== "boolean") {
+      return json(
+        { ok: false, error: "enabled must be a boolean", code: "invalid_body" },
+        400
+      );
+    }
+    try {
+      return json(await agent.setSessionFullAccess(id, body.enabled));
+    } catch (error) {
+      return agentError(error);
+    }
+  }
   if (method === "POST" && action === "permission" && extra) {
     const body = await readJson(request);
     const response = asMember(body.response, PERMISSION_RESPONSES);
     if (!response) {
       return json(
         { ok: false, error: "response must be 'allow' or 'deny'" },
-        400,
+        400
       );
     }
     await agent.resolvePermission(id, extra, {
       response,
       remember: Boolean(body.remember),
-      rememberScope: asMember(body.rememberScope, PERMISSION_REMEMBER_SCOPES) ??
+      rememberScope:
+        asMember(body.rememberScope, PERMISSION_REMEMBER_SCOPES) ??
         PERMISSION_REMEMBER_SCOPES[0],
     });
     return json({ ok: true });
@@ -172,7 +189,10 @@ export async function handleSessionCommands(
       typeof model.providerId === "string" ? model.providerId : "";
     const modelId = typeof model.modelId === "string" ? model.modelId : "";
     if (!providerId || !modelId) {
-      return json({ error: "model.providerId and model.modelId required" }, 400);
+      return json(
+        { error: "model.providerId and model.modelId required" },
+        400
+      );
     }
     await agent.setModel(id, { providerId, modelId });
     return json({ ok: true });
@@ -186,17 +206,24 @@ export async function handleSessionCommands(
           error:
             "invalid thinking level; want off, minimal, low, medium, high, xhigh, or max",
         },
-        400,
+        400
       );
     }
-    return json({ ok: true, thinking: await agent.setThinkingLevel(id, level) });
+    return json({
+      ok: true,
+      thinking: await agent.setThinkingLevel(id, level),
+    });
   }
   if (action === "share") {
     if (method === "POST") {
-      return json(await agent.patchSession(id, { shareMetadata: { shared: true } }));
+      return json(
+        await agent.patchSession(id, { shareMetadata: { shared: true } })
+      );
     }
     if (method === "DELETE") {
-      return json(await agent.patchSession(id, { shareMetadata: { shared: false } }));
+      return json(
+        await agent.patchSession(id, { shareMetadata: { shared: false } })
+      );
     }
   }
   return undefined;
@@ -211,10 +238,14 @@ function decodePathPart(value: string | undefined): string | undefined {
   }
 }
 
-async function createSession(request: Request, agent: Agent): Promise<Response> {
+async function createSession(
+  request: Request,
+  agent: Agent
+): Promise<Response> {
   const body = await readJson(request);
   const model = asObject(body.model);
-  const providerId = typeof model.providerId === "string" ? model.providerId : "";
+  const providerId =
+    typeof model.providerId === "string" ? model.providerId : "";
   const modelId = typeof model.modelId === "string" ? model.modelId : "";
   if (body.model !== undefined && (!providerId || !modelId)) {
     return json({ error: "model.providerId and model.modelId required" }, 400);
@@ -223,7 +254,9 @@ async function createSession(request: Request, agent: Agent): Promise<Response> 
     title: typeof body.title === "string" ? body.title : undefined,
     labels: asStringMap(body.labels),
     selectedContext: body.selectedContext
-      ? (asObject(body.selectedContext) as SessionCreateInput["selectedContext"])
+      ? (asObject(
+          body.selectedContext
+        ) as SessionCreateInput["selectedContext"])
       : undefined,
     model: providerId && modelId ? { providerId, modelId } : undefined,
     builtinTools: Array.isArray(body.builtinTools)

@@ -62,6 +62,12 @@ export type AgentSessionMeta = {
   labels?: Record<string, string>;
   shareMetadata?: Record<string, unknown>;
   rememberedPermissions?: Record<string, "allow" | "deny">;
+  /**
+   * Session-scoped full-access preset: command guard and sandbox lifted for
+   * this conversation only. Only settable when the host allows it, and never
+   * inherited by subagents, schedules, background goals, or `/mcp` callers.
+   */
+  fullAccess?: boolean;
   builtinTools?: string[];
   firstMessage?: string;
   messageCount?: number;

@@ -262,12 +262,13 @@ export async function openPiSession(
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
   const sandbox = resolveScenarioSettings();
+  const fullAccessActive = () => create.fullAccess?.() === true;
   const workspacePath = create.cwd ?? cwd;
   const baseBashOperations = backgroundTasks.wrap(
     sdk.createLocalBashOperations()
   );
   const gondolinBash =
-    sandbox.sandboxMode === "gondolin"
+    !fullAccessActive() && sandbox.sandboxMode === "gondolin"
       ? createGondolinBashOperations({
           workspacePath,
           allowedHosts: sandbox.sandboxNetwork ? undefined : [],
@@ -285,7 +286,9 @@ export async function openPiSession(
       env: Record<string, string | undefined>;
     }) => {
       const wrapped = wrapCommandForSandbox(ctx.command, {
-        mode: sandbox.sandboxMode,
+        // The full-access preset lifts the sandbox for this session only; it is
+        // read per command so a mid-conversation toggle takes effect at once.
+        mode: fullAccessActive() ? "off" : sandbox.sandboxMode,
         workspacePath,
         allowNetwork: sandbox.sandboxNetwork,
         image: process.env.THEBE_SANDBOX_IMAGE?.trim() || undefined,
