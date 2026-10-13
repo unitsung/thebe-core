@@ -41,4 +41,18 @@ export type CliCommand =
   | { kind: "session-unrevert"; sessionId?: string }
   | { kind: "session-model"; sessionId: string; model: CliModel }
   | { kind: "session-thinking"; sessionId: string; level: string }
+  | { kind: "mcp-list" }
+  | { kind: "mcp-tools" }
+  | {
+      kind: "mcp-add";
+      name: string;
+      url?: string;
+      command?: string;
+      args: string[];
+      env: Record<string, string>;
+      headers: Record<string, string>;
+    }
+  | { kind: "mcp-enable"; name: string }
+  | { kind: "mcp-disable"; name: string }
+  | { kind: "mcp-remove"; name: string }
   | { kind: "error"; message: string };

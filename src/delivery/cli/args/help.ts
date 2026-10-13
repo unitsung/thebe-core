@@ -8,6 +8,9 @@ Usage:
   thebe --list-models [search]   List models
   thebe session list|create|resume|fork|compact|export|delete|messages|status
   thebe session interrupt|revert|unrevert|model|thinking
+  thebe mcp list|tools                Inventory from ~/.thebe / .thebe/mcp.json
+  thebe mcp add <name> --url <url|--command <cmd>> [--header K=V]...
+  thebe mcp enable|disable|remove <name>
   thebe doctor                   Report the effective isolation posture
 
 Options:
@@ -25,6 +28,11 @@ Options:
   -o, --out <path>         Export output path/prefix
   --provider <id>          Filter models by provider
   --all                    Include unavailable models
+  --url <url>              MCP server URL (mcp add)
+  --command <cmd>          MCP server command (mcp add)
+  --header K=V             MCP request header; repeatable (mcp add)
+  --env K=V                MCP stdio env; repeatable (mcp add)
+  --arg <value>            MCP stdio argument; repeatable (mcp add)
   -h, --help               Show help
 
 Architecture: embeds Pi via createAgentSession / AgentRuntime. Does not spawn

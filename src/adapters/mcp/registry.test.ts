@@ -260,4 +260,104 @@ describe("external MCP client registry", () => {
       registry.close();
     }
   });
+
+  it("carries a server's own custom headers to the wire and keeps them across registration", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-headers-cwd-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-headers-home-"));
+    await mkdir(join(cwd, ".thebe"), { recursive: true });
+    const seen: Array<Record<string, string | string[] | undefined>> = [];
+    const server = createServer(async (request, response) => {
+      seen.push(request.headers);
+      if (request.method !== "POST") {
+        response.statusCode = 405;
+        response.end();
+        return;
+      }
+      let body = "";
+      for await (const chunk of request) body += chunk.toString();
+      const message = JSON.parse(body) as { id?: number; method?: string };
+      response.setHeader("content-type", "application/json");
+      if (message.method === "initialize") {
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              protocolVersion: "2025-06-18",
+              capabilities: { tools: {} },
+              serverInfo: { name: "fixture", version: "1" },
+            },
+          })
+        );
+      } else if (message.method === "tools/list") {
+        response.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: message.id,
+            result: {
+              tools: [{ name: "ping", inputSchema: { type: "object" } }],
+            },
+          })
+        );
+      } else {
+        response.statusCode = 202;
+        response.end();
+      }
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve)
+    );
+    const address = server.address();
+    if (!address || typeof address === "string")
+      throw new Error("HTTP fixture did not bind");
+    const url = `http://127.0.0.1:${address.port}`;
+    await writeFile(
+      join(cwd, ".thebe", "mcp.json"),
+      JSON.stringify({
+        mcpServers: { music: { url, headers: { "X-Sqmusic": "jwt-token" } } },
+      })
+    );
+    const registry = createMcpClientRegistry({
+      cwd,
+      homeDir,
+      timeoutMs: 2_000,
+    });
+    try {
+      expect((await registry.listTools())[0]?.name).toBe("mcp:music/ping");
+      expect(seen.some((headers) => headers["x-sqmusic"] === "jwt-token")).toBe(
+        true
+      );
+      expect(
+        registry.runtimeServers().find((entry) => entry.name === "music")
+          ?.headers
+      ).toEqual({ "X-Sqmusic": "jwt-token" });
+
+      // A provider MCP registered through the product path carries its headers too;
+      // it starts disabled until enabled explicitly.
+      await expect(
+        registry.addServer({
+          name: "extra",
+          url,
+          headers: { "X-Api-Key": "k" },
+        })
+      ).resolves.toMatchObject({ name: "extra", disabled: true });
+      expect(
+        registry.runtimeServers().find((entry) => entry.name === "extra")
+          ?.headers
+      ).toEqual({ "X-Api-Key": "k" });
+      await registry.setServerEnabled("extra", true);
+      expect(
+        registry.runtimeServers().find((entry) => entry.name === "extra")
+          ?.enabled
+      ).toBe(true);
+      expect((await registry.listTools()).map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(["mcp:music/ping", "mcp:extra/ping"])
+      );
+    } finally {
+      registry.close();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  });
 });

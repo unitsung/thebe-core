@@ -41,7 +41,7 @@ describe("parseCliArgs", () => {
         "html",
         "-o",
         "out",
-      ]),
+      ])
     ).toEqual({
       kind: "session-export",
       sessionId: "abc",
@@ -63,7 +63,7 @@ describe("parseCliArgs", () => {
         "opencode/gpt-5",
         "--thinking",
         "high",
-      ]),
+      ])
     ).toMatchObject({
       kind: "print",
       text: "hi",
@@ -80,7 +80,7 @@ describe("parseCliArgs", () => {
 
   it("does not infer a removed OpenCode provider from a bare model ID", () => {
     expect(
-      parseCliArgs(["-p", "hi", "--model", "muse-spark-1.3-free"]),
+      parseCliArgs(["-p", "hi", "--model", "muse-spark-1.3-free"])
     ).toMatchObject({
       kind: "error",
     });
@@ -121,7 +121,102 @@ describe("parseCliArgs", () => {
     });
     expect(parseCliArgs(["--tui-mode", "invalid-mode"])).toMatchObject({
       kind: "error",
-      message: 'invalid --tui-mode: "invalid-mode"; want "regular" or "fullscreen"',
+      message:
+        'invalid --tui-mode: "invalid-mode"; want "regular" or "fullscreen"',
     });
+  });
+
+  it("parses mcp list/tools/enable/disable/remove", () => {
+    expect(parseCliArgs(["mcp", "list"])).toEqual({ kind: "mcp-list" });
+    expect(parseCliArgs(["mcp"])).toEqual({ kind: "mcp-list" });
+    expect(parseCliArgs(["mcp", "tools"])).toEqual({ kind: "mcp-tools" });
+    expect(parseCliArgs(["mcp", "enable", "music"])).toEqual({
+      kind: "mcp-enable",
+      name: "music",
+    });
+    expect(parseCliArgs(["mcp", "disable", "music"])).toEqual({
+      kind: "mcp-disable",
+      name: "music",
+    });
+    expect(parseCliArgs(["mcp", "remove", "music"])).toEqual({
+      kind: "mcp-remove",
+      name: "music",
+    });
+    expect(parseCliArgs(["mcp", "enable"])).toMatchObject({ kind: "error" });
+    expect(parseCliArgs(["mcp", "wat"])).toMatchObject({ kind: "error" });
+  });
+
+  it("parses a URL mcp add with repeated headers", () => {
+    expect(
+      parseCliArgs([
+        "mcp",
+        "add",
+        "music",
+        "--url",
+        "http://127.0.0.1:8099/mcp",
+        "--header",
+        "sqmusic=jwt-token",
+        "--header=X-Api-Key=abc",
+      ])
+    ).toEqual({
+      kind: "mcp-add",
+      name: "music",
+      url: "http://127.0.0.1:8099/mcp",
+      command: undefined,
+      args: [],
+      env: {},
+      headers: { sqmusic: "jwt-token", "X-Api-Key": "abc" },
+    });
+  });
+
+  it("parses a stdio mcp add with args and env, and rejects bad shapes", () => {
+    expect(
+      parseCliArgs([
+        "mcp",
+        "add",
+        "notes",
+        "--command",
+        "notes-mcp",
+        "--arg",
+        "-y",
+        "--arg",
+        "serve",
+        "--env",
+        "TOKEN=t",
+      ])
+    ).toEqual({
+      kind: "mcp-add",
+      name: "notes",
+      url: undefined,
+      command: "notes-mcp",
+      args: ["-y", "serve"],
+      env: { TOKEN: "t" },
+      headers: {},
+    });
+    expect(
+      parseCliArgs([
+        "mcp",
+        "add",
+        "both",
+        "--url",
+        "http://x/mcp",
+        "--command",
+        "y",
+      ])
+    ).toMatchObject({ kind: "error" });
+    expect(parseCliArgs(["mcp", "add", "none"])).toMatchObject({
+      kind: "error",
+    });
+    expect(
+      parseCliArgs([
+        "mcp",
+        "add",
+        "x",
+        "--url",
+        "http://x/mcp",
+        "--header",
+        "novalue",
+      ])
+    ).toMatchObject({ kind: "error" });
   });
 });

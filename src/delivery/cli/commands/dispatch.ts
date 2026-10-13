@@ -24,7 +24,7 @@ export async function runCliCommand(
     }) => void | Promise<void>;
     log?: (line: string) => void;
     error?: (line: string) => void;
-  },
+  }
 ): Promise<number> {
   const log = options?.log ?? ((line) => console.log(line));
   const error = options?.error ?? ((line) => console.error(line));
@@ -92,14 +92,15 @@ export async function runCliCommand(
           });
       const filtered = command.search
         ? rows.filter((row) => {
-            const hay = `${row.providerId}/${row.modelId} ${row.displayName ?? ""}`.toLowerCase();
+            const hay =
+              `${row.providerId}/${row.modelId} ${row.displayName ?? ""}`.toLowerCase();
             return hay.includes(command.search!.toLowerCase());
           })
         : rows;
       for (const row of filtered) {
         const mark = row.available === false ? " (unavailable)" : "";
         log(
-          `${row.providerId}/${row.modelId}${row.displayName ? `  ${row.displayName}` : ""}${mark}`,
+          `${row.providerId}/${row.modelId}${row.displayName ? `  ${row.displayName}` : ""}${mark}`
         );
       }
       return 0;
@@ -119,7 +120,7 @@ export async function runCliCommand(
             row.streaming ? "streaming" : "idle-io",
             row.title ?? "-",
             row.lastActiveAt ?? row.updatedAt ?? row.createdAt ?? "",
-          ].join("\t"),
+          ].join("\t")
         );
       }
       return 0;
@@ -236,6 +237,77 @@ export async function runCliCommand(
       log(applied.level);
       return 0;
     }
+    case "mcp-list": {
+      const servers = await agent.listMcpServers();
+      if (servers.length === 0) {
+        log("(no MCP servers)");
+        return 0;
+      }
+      for (const server of servers) {
+        log(
+          [
+            server.name,
+            server.disabled ? "disabled" : "enabled",
+            server.url ?? server.command ?? "",
+          ].join("\t")
+        );
+      }
+      return 0;
+    }
+    case "mcp-tools": {
+      const tools = (await agent.listMcpTools()).filter(
+        (tool) => tool.source === "external"
+      );
+      if (tools.length === 0) {
+        log("(no MCP tools; are any servers enabled?)");
+        return 0;
+      }
+      for (const tool of tools) {
+        log(
+          [
+            tool.serverName ?? "-",
+            tool.originalName ?? tool.name,
+            tool.permission ?? "",
+            tool.description ?? "",
+          ].join("\t")
+        );
+      }
+      return 0;
+    }
+    case "mcp-add": {
+      const info = await agent.addMcpServer({
+        name: command.name,
+        url: command.url,
+        command: command.command,
+        args: command.args.length > 0 ? command.args : undefined,
+        env: Object.keys(command.env).length > 0 ? command.env : undefined,
+        headers:
+          Object.keys(command.headers).length > 0 ? command.headers : undefined,
+      });
+      log(
+        `added ${info.name} (disabled); enable it with \`thebe mcp enable ${info.name}\``
+      );
+      return 0;
+    }
+    case "mcp-enable":
+    case "mcp-disable": {
+      const enabled = command.kind === "mcp-enable";
+      const server = await agent.setMcpServerEnabled(command.name, enabled);
+      if (!server) {
+        error(`unknown MCP server: ${command.name}`);
+        return 1;
+      }
+      log(`${server.name} ${enabled ? "enabled" : "disabled"}`);
+      return 0;
+    }
+    case "mcp-remove": {
+      if (!(await agent.removeMcpServer(command.name))) {
+        error(`unknown MCP server: ${command.name}`);
+        return 1;
+      }
+      log(`removed ${command.name}`);
+      return 0;
+    }
     case "doctor": {
       // `doctor` runs in main.ts before bootstrap, so it never reaches dispatch.
       error("doctor is handled before the agent starts");
@@ -260,15 +332,15 @@ type SessionResolutionOptions = {
 
 async function resolveSessionId(
   agent: ThebeAgent,
-  opts: SessionResolutionOptions & { createIfMissing: true },
+  opts: SessionResolutionOptions & { createIfMissing: true }
 ): Promise<string>;
 async function resolveSessionId(
   agent: ThebeAgent,
-  opts: SessionResolutionOptions & { createIfMissing: false },
+  opts: SessionResolutionOptions & { createIfMissing: false }
 ): Promise<string | undefined>;
 async function resolveSessionId(
   agent: ThebeAgent,
-  opts: SessionResolutionOptions,
+  opts: SessionResolutionOptions
 ): Promise<string | undefined> {
   if (opts.sessionId) {
     const match = await matchSessionId(agent, opts.sessionId);
@@ -298,16 +370,14 @@ async function resolveSessionId(
 
 async function matchSessionId(
   agent: ThebeAgent,
-  partial: string,
+  partial: string
 ): Promise<string> {
   const rows = await agent.listSessions();
   const exact = rows.find((row) => row.thebeSessionId === partial);
   if (exact) {
     return exact.thebeSessionId;
   }
-  const matches = rows.filter((row) =>
-    row.thebeSessionId.startsWith(partial),
-  );
+  const matches = rows.filter((row) => row.thebeSessionId.startsWith(partial));
   if (matches.length === 1) {
     return matches[0]!.thebeSessionId;
   }
@@ -315,13 +385,11 @@ async function matchSessionId(
     throw new Error(`unknown session: ${partial}`);
   }
   throw new Error(
-    `ambiguous session id ${partial}; matches ${matches.map((m) => m.thebeSessionId).join(", ")}`,
+    `ambiguous session id ${partial}; matches ${matches.map((m) => m.thebeSessionId).join(", ")}`
   );
 }
 
-async function latestSessionId(
-  agent: ThebeAgent,
-): Promise<string | undefined> {
+async function latestSessionId(agent: ThebeAgent): Promise<string | undefined> {
   const rows = await agent.listSessions();
   if (rows.length === 0) {
     return undefined;
@@ -336,7 +404,7 @@ async function latestSessionId(
 
 function exportPath(
   out: string | undefined,
-  ext: "jsonl" | "html",
+  ext: "jsonl" | "html"
 ): string | undefined {
   if (!out) {
     return undefined;
