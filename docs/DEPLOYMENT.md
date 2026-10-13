@@ -375,5 +375,7 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 - Each sandbox backend confines a real process, not just an argument list:
   seatbelt (`sandbox-exec`) and gondolin (QEMU micro-VM) on macOS, `bwrap` on a
   Linux host and in a Linux container, and the docker backend under the Docker
-  daemon. Covered by `src/agent/security/command-sandbox.live.test.ts` and
-  `src/adapters/gondolin/runner.live.test.ts`.
+  daemon. The live checks are opt-in because CI has no bootable VM, no
+  unprivileged user namespaces and only rate-limited image pulls:
+  `THEBE_SANDBOX_IT=1 npx vitest run src/agent/security` (bwrap/docker) and
+  `THEBE_GONDOLIN_IT=1 npx vitest run src/adapters/gondolin` (micro-VM).

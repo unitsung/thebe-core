@@ -163,10 +163,17 @@ describe("seatbelt profile", () => {
 /**
  * bwrap must actually confine a running process, not just build an argument
  * list. The workspace sits under `$HOME` because the backend mounts a tmpfs at
- * `/tmp`, which would mask a workspace created there. Skipped on macOS (bwrap is
- * a Linux tool) and anywhere bwrap is not installed.
+ * `/tmp`, which would mask a workspace created there.
+ *
+ * Opt-in: `THEBE_SANDBOX_IT=1 npx vitest run src/agent/security`. It needs bwrap
+ * plus unprivileged user namespaces, which CI runners usually restrict, so it
+ * does not run by default (skipped on macOS too, where bwrap does not exist).
  */
-describe.skipIf(process.platform === "darwin" || !isBwrapAvailable())(
+describe.skipIf(
+  process.env.THEBE_SANDBOX_IT !== "1" ||
+    process.platform === "darwin" ||
+    !isBwrapAvailable(),
+)(
   "bwrap sandbox execution",
   () => {
     it("confines writes to the workspace and denies the network", () => {
@@ -203,8 +210,15 @@ describe.skipIf(process.platform === "darwin" || !isBwrapAvailable())(
  * The docker backend runs a disposable, unprivileged container. Verified on
  * Linux (Docker Desktop on macOS shares `$HOME` over virtiofs, which shadows a
  * same-path bind mount, so the run is skipped there).
+ *
+ * Opt-in: `THEBE_SANDBOX_IT=1 npx vitest run src/agent/security`. It pulls a
+ * base image, which is fragile on shared CI runners (Docker Hub rate limits).
  */
-describe.skipIf(process.platform === "darwin" || !isDockerAvailable())(
+describe.skipIf(
+  process.env.THEBE_SANDBOX_IT !== "1" ||
+    process.platform === "darwin" ||
+    !isDockerAvailable(),
+)(
   "docker sandbox execution",
   () => {
     it("confines writes to the workspace and denies the network", () => {

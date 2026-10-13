@@ -87,6 +87,11 @@ describe("Gondolin micro-VM (real backend)", () => {
         // The guest is its own machine: the host root is not visible.
         const host = await runner.exec("ls /Users 2>&1 || true");
         expect(host.stdout).not.toContain("Shared");
+        // Egress is denied when the allowlist is empty.
+        const net = await runner.exec(
+          "wget -T3 -qO- http://1.1.1.1 2>&1 || echo NETFAIL",
+        );
+        expect(net.stdout).toContain("NETFAIL");
       } finally {
         await runner.destroy();
       }

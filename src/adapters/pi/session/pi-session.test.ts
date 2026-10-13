@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,13 +36,18 @@ function emptyProvider(): ContainerInfoProvider {
 
 function gondolinMicroVmAvailable(): boolean {
   try {
-    // The micro-VM needs the package plus a VM backend (QEMU images).
     require.resolve("@earendil-works/gondolin");
-    const probe = spawnSync("qemu-img", ["--version"], { stdio: "ignore" });
-    return probe.status === 0;
   } catch {
     return false;
   }
+  // Needs a backend that can actually boot, not just the package: QEMU plus
+  // hardware virtualization (HVF on macOS, KVM on Linux). Shared CI runners
+  // have neither, so the integration test skips instead of hanging.
+  const qemu = ["qemu-system-x86_64", "qemu-system-aarch64"].some(
+    (bin) => spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0,
+  );
+  if (!qemu) return false;
+  return process.platform === "darwin" || existsSync("/dev/kvm");
 }
 
 async function piWithFaux(sessionDir?: string) {
@@ -414,7 +419,9 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
-  it("routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin", async () => {
+  it.skipIf(!gondolinMicroVmAvailable())(
+    "routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin",
+    async () => {
     const previous = process.env.THEBE_SANDBOX;
     process.env.THEBE_SANDBOX = "gondolin";
     try {
@@ -432,21 +439,15 @@ describe("PiCodingAgentRuntime sessions", () => {
       });
       const session = await agent.createSession();
 
-      // @earendil-works/gondolin is an optional runtime dependency: when the
-      // package and a VM backend are present the command runs inside the guest;
-      // otherwise the tool call must fail loudly instead of touching the host.
+      // The command runs inside the guest instead of touching the host.
       await expect(
         agent.send("run uname in the vm", session.thebeSessionId),
       ).resolves.toMatchObject({ text: "done" });
       const transcript = JSON.stringify(
         await agent.loadMessages(session.thebeSessionId),
       );
-      if (gondolinMicroVmAvailable()) {
-        expect(transcript).toContain("Linux");
-        expect(transcript).toContain("toolName\":\"bash");
-      } else {
-        expect(transcript).toContain("Gondolin Micro-VM is unavailable");
-      }
+      expect(transcript).toContain("Linux");
+      expect(transcript).toContain("toolName\":\"bash");
     } finally {
       if (previous === undefined) delete process.env.THEBE_SANDBOX;
       else process.env.THEBE_SANDBOX = previous;
