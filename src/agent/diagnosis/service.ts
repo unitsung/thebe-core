@@ -57,7 +57,7 @@ export function createDiagnosisApi(options: {
   }) => Promise<AgentSessionMeta>;
   prompt: (
     input: string,
-    options?: { thebeSessionId?: string; nonInteractive?: boolean },
+    options?: { thebeSessionId?: string; nonInteractive?: boolean }
   ) => Promise<ThebePromptResult>;
   activityStore?: ActivityStore;
   artifactStore?: ArtifactStore;
@@ -111,7 +111,9 @@ export function createDiagnosisApi(options: {
       policy: options.policy,
       audit: options.audit,
     });
-    const inspect = await invokeNamed(tools, "container.inspect", { id: resource.id });
+    const inspect = await invokeNamed(tools, "container.inspect", {
+      id: resource.id,
+    });
     const logs = await invokeNamed(tools, "container.logs", {
       id: resource.id,
       tail: DIAGNOSIS_LOG_TAIL,
@@ -123,7 +125,10 @@ export function createDiagnosisApi(options: {
       isUnreachableMessage(inspect.error) &&
       isUnreachableMessage(logs.error);
     if (unreachable) {
-      throw new ProviderError("UNREACHABLE", inspect.error || logs.error || "provider unreachable");
+      throw new ProviderError(
+        "UNREACHABLE",
+        inspect.error || logs.error || "provider unreachable"
+      );
     }
     return extractObservations({
       resource,
@@ -143,7 +148,7 @@ export function createDiagnosisApi(options: {
     const runId = randomUUID();
     if (!resource.id) {
       return remember(
-        failedResult(runId, resource, "resource.id is required", "failed"),
+        failedResult(runId, resource, "resource.id is required", "failed")
       );
     }
 
@@ -157,8 +162,8 @@ export function createDiagnosisApi(options: {
           runId,
           resource,
           error instanceof Error ? error.message : String(error),
-          unavailable ? "provider_unavailable" : "failed",
-        ),
+          unavailable ? "provider_unavailable" : "failed"
+        )
       );
     }
 
@@ -177,7 +182,9 @@ export function createDiagnosisApi(options: {
       diagnosis: baseline.diagnosis,
     });
 
-    const hasProviderFacts = collected.observations.some((item) => item.kind !== "error");
+    const hasProviderFacts = collected.observations.some(
+      (item) => item.kind !== "error"
+    );
     const shouldAskModel =
       hasProviderFacts &&
       diagnosis.confidence !== "high" &&
@@ -196,7 +203,7 @@ export function createDiagnosisApi(options: {
         diagnosis = reasoned.diagnosis;
         recommendations = mergeRecommendations(
           baseline.recommendations,
-          reasoned.recommendations,
+          reasoned.recommendations
         );
         sessionId = reasoned.sessionId;
       } catch {
@@ -213,7 +220,8 @@ export function createDiagnosisApi(options: {
     const result: DiagnosisResult = {
       runId,
       actionId: DIAGNOSIS_ACTION_ID,
-      status: collected.observations.length === 0 ? "insufficient_data" : "completed",
+      status:
+        collected.observations.length === 0 ? "insufficient_data" : "completed",
       resource,
       observations: collected.observations,
       diagnosis,
@@ -230,7 +238,10 @@ export function createDiagnosisApi(options: {
     await options.audit
       ?.append({
         method: DIAGNOSIS_ACTION_ID,
-        parameterHash: hashParameters({ id: resource.id, provider: resource.provider }),
+        parameterHash: hashParameters({
+          id: resource.id,
+          provider: resource.provider,
+        }),
         responseBytes: JSON.stringify(result.observations).length,
         budgetConsumed: collected.toolTranscript.length,
         redactionFired: JSON.stringify(result).includes("***REDACTED***"),
@@ -271,7 +282,7 @@ export function createDiagnosisApi(options: {
           },
           recommendations: mergeRecommendations(
             existing.recommendations,
-            reasoned.recommendations,
+            reasoned.recommendations
           ),
           sessionId: reasoned.sessionId ?? existing.sessionId,
         };
@@ -290,7 +301,9 @@ export function createDiagnosisApi(options: {
   };
 }
 
-function diagnosisArtifactPayload(result: DiagnosisResult): Record<string, unknown> {
+function diagnosisArtifactPayload(
+  result: DiagnosisResult
+): Record<string, unknown> {
   return {
     version: 1,
     runId: result.runId,
@@ -308,7 +321,7 @@ function diagnosisArtifactPayload(result: DiagnosisResult): Record<string, unkno
 async function invokeNamed(
   tools: CustomToolDefinition[],
   name: string,
-  args: Record<string, unknown>,
+  args: Record<string, unknown>
 ): Promise<{ ok: true; value: unknown } | { ok: false; error: string }> {
   const tool = tools.find((item) => item.name === name);
   if (!tool) return { ok: false, error: `unknown tool: ${name}` };
@@ -338,7 +351,7 @@ async function reasonWithAgent(input: {
   }) => Promise<AgentSessionMeta>;
   prompt: (
     text: string,
-    options?: { thebeSessionId?: string; nonInteractive?: boolean },
+    options?: { thebeSessionId?: string; nonInteractive?: boolean }
   ) => Promise<ThebePromptResult>;
 }): Promise<{
   diagnosis: DiagnosisResult["diagnosis"];
@@ -366,7 +379,7 @@ async function reasonWithAgent(input: {
         source: item.source,
         observedAt: item.observedAt,
         severity: item.severity,
-      })),
+      }))
     ),
   ]
     .filter(Boolean)
@@ -409,29 +422,36 @@ async function reasonWithAgent(input: {
   };
 }
 
-function parseModelDiagnosis(text: string): {
-  code?: string;
-  title?: string;
-  summary?: string;
-  confidence?: DiagnosisResult["diagnosis"]["confidence"];
-  reasoning?: string;
-  recommendations: Recommendation[];
-} | undefined {
+function parseModelDiagnosis(text: string):
+  | {
+      code?: string;
+      title?: string;
+      summary?: string;
+      confidence?: DiagnosisResult["diagnosis"]["confidence"];
+      reasoning?: string;
+      recommendations: Recommendation[];
+    }
+  | undefined {
   const match = text.match(/\{[\s\S]*\}/);
   if (!match) return undefined;
   try {
     const body = JSON.parse(match[0]) as Record<string, unknown>;
     const confidence =
-      body.confidence === "low" || body.confidence === "medium" || body.confidence === "high"
+      body.confidence === "low" ||
+      body.confidence === "medium" ||
+      body.confidence === "high"
         ? body.confidence
         : undefined;
-    const recs = Array.isArray(body.recommendations) ? body.recommendations : [];
+    const recs = Array.isArray(body.recommendations)
+      ? body.recommendations
+      : [];
     return {
       code: typeof body.code === "string" ? body.code : undefined,
       title: typeof body.title === "string" ? body.title : undefined,
       summary: typeof body.summary === "string" ? body.summary : undefined,
       confidence,
-      reasoning: typeof body.reasoning === "string" ? body.reasoning : undefined,
+      reasoning:
+        typeof body.reasoning === "string" ? body.reasoning : undefined,
       recommendations: recs.flatMap((item, index) => {
         if (!item || typeof item !== "object") return [];
         const row = item as Record<string, unknown>;
@@ -442,7 +462,8 @@ function parseModelDiagnosis(text: string): {
             title: typeof row.title === "string" ? row.title : "Recommendation",
             detail: typeof row.detail === "string" ? row.detail : "",
             kind,
-            requiresApproval: kind === "write" ? true : Boolean(row.requiresApproval),
+            requiresApproval:
+              kind === "write" ? true : Boolean(row.requiresApproval),
           },
         ];
       }),
@@ -454,7 +475,7 @@ function parseModelDiagnosis(text: string): {
 
 function mergeRecommendations(
   base: Recommendation[],
-  extra: Recommendation[],
+  extra: Recommendation[]
 ): Recommendation[] {
   const seen = new Set(base.map((item) => item.id));
   const merged = [...base];
@@ -468,7 +489,9 @@ function mergeRecommendations(
 
 function normalizeResource(input: ResourceRef): ResourceRef {
   const provider =
-    input.provider === "arcane" || input.provider === "portainer"
+    input.provider === "arcane" ||
+    input.provider === "portainer" ||
+    input.provider === "docker"
       ? input.provider
       : "unknown";
   return {
@@ -488,7 +511,7 @@ function failedResult(
   runId: string,
   resource: ResourceRef,
   error: string,
-  status: DiagnosisResult["status"],
+  status: DiagnosisResult["status"]
 ): DiagnosisResult {
   return {
     runId,
@@ -497,7 +520,10 @@ function failedResult(
     resource,
     observations: [],
     diagnosis: {
-      code: status === "provider_unavailable" ? "provider_unavailable" : "insufficient_data",
+      code:
+        status === "provider_unavailable"
+          ? "provider_unavailable"
+          : "insufficient_data",
       title:
         status === "provider_unavailable"
           ? "Container provider unavailable"
@@ -510,7 +536,8 @@ function failedResult(
       {
         id: "rec-retry",
         title: "Retry after the provider is reachable",
-        detail: "Native container status on the detail page does not use the model.",
+        detail:
+          "Native container status on the detail page does not use the model.",
         kind: "read",
         requiresApproval: false,
       },
@@ -529,5 +556,7 @@ function isProviderUnavailable(error: unknown): boolean {
 
 function isUnreachableMessage(message?: string): boolean {
   if (!message) return false;
-  return /unreachable|unavailable|econnrefused|enotfound|\bis down\b|provider down/i.test(message);
+  return /unreachable|unavailable|econnrefused|enotfound|\bis down\b|provider down/i.test(
+    message
+  );
 }

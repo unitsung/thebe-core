@@ -1511,7 +1511,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             name: { type: "string" },
             provider: {
               type: "string",
-              enum: ["arcane", "portainer", "unknown"],
+              enum: ["arcane", "portainer", "docker", "unknown"],
             },
             instanceId: { type: "string" },
             environmentId: { type: "string" },

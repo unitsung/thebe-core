@@ -4,7 +4,7 @@ export const DIAGNOSIS_ACTION_ID = "container.diagnose" as const;
 
 export type ResourceKind = "container";
 
-export type ResourceProvider = "arcane" | "portainer" | "unknown";
+export type ResourceProvider = "arcane" | "portainer" | "docker" | "unknown";
 
 export type ResourceRef = {
   kind: ResourceKind;

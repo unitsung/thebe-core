@@ -3,6 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
+import { createDockerEngineProviderFromEnv } from "../adapters/docker/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
 import { createWebSearchProvider } from "../adapters/web-search/client.ts";
@@ -23,9 +24,7 @@ import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createThebeApp } from "./create.ts";
-import {
-  DEFAULT_SESSION_IDLE_TIMEOUT_MS,
-} from "../agent/index.ts";
+import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../agent/index.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
@@ -43,12 +42,8 @@ import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
   agent: ThebeAgent;
-  prompt: (
-    text: string,
-  ) => Promise<{ text: string; tools: string[] }>;
-  send: (
-    text: string,
-  ) => Promise<{ text: string; tools: string[] }>;
+  prompt: (text: string) => Promise<{ text: string; tools: string[] }>;
+  send: (text: string) => Promise<{ text: string; tools: string[] }>;
   handler: ReturnType<typeof createThebeApp>["handler"];
   version: string;
   model?: { providerId: string; modelId: string };
@@ -60,7 +55,8 @@ export type ThebeBootstrap = {
   tokenPath?: string;
 };
 
-export type BootstrapOptions = {  fromDir?: string;
+export type BootstrapOptions = {
+  fromDir?: string;
   requireArcane?: boolean;
   model?: { providerId: string; modelId: string };
   allowedHosts?: string[];
@@ -71,7 +67,7 @@ export type BootstrapOptions = {  fromDir?: string;
  * AgentRuntime, and returns a agent service — never spawns the Pi CLI.
  */
 export async function bootstrapThebe(
-  options?: BootstrapOptions,
+  options?: BootstrapOptions
 ): Promise<ThebeBootstrap> {
   const fromDir = options?.fromDir ?? dirname(fileURLToPath(import.meta.url));
   loadEnvLocal(fromDir);
@@ -80,11 +76,11 @@ export async function bootstrapThebe(
     userConfig.workspacePath?.trim() || process.env.THEBE_WORKSPACE_DIR?.trim();
   if (!configuredWorkspacePath) {
     throw new Error(
-      "Thebe workspace is not configured. Set workspacePath in ~/.thebe/config.json or THEBE_WORKSPACE_DIR before starting Thebe.",
+      "Thebe workspace is not configured. Set workspacePath in ~/.thebe/config.json or THEBE_WORKSPACE_DIR before starting Thebe."
     );
   }
   const configDir = resolve(
-    process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe"),
+    process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe")
   );
   const tokenResolution = resolveThebeToken({ configDir });
   const resolveConfiguredPath = (path: string): string =>
@@ -142,25 +138,36 @@ export async function bootstrapThebe(
   if (!defaultModel) {
     const available = await runtime.listAvailableModels();
     const selected = available[0];
-    if (selected) defaultModel = { providerId: selected.providerId, modelId: selected.modelId };
+    if (selected)
+      defaultModel = {
+        providerId: selected.providerId,
+        modelId: selected.modelId,
+      };
   }
 
   const arcaneEnvironmentId = arcaneEnvironmentIdFromEnv();
+  // Container panel first; the Docker Engine API through a restricted proxy is
+  // the Arcane-free fallback.
+  const dockerEngineProvider = createDockerEngineProviderFromEnv();
   const provider: ContainerInfoProvider =
     baseUrl && arcaneKey
       ? new ArcaneAdapter({
           baseUrl,
           apiKey: arcaneKey,
-          ...(arcaneEnvironmentId ? { environmentId: arcaneEnvironmentId } : {}),
+          ...(arcaneEnvironmentId
+            ? { environmentId: arcaneEnvironmentId }
+            : {}),
         })
-      : stubProvider();
+      : (dockerEngineProvider ?? stubProvider());
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
   const navidrome = createNavidromeProviderFromEnv();
   const emby = createEmbyProviderFromEnv();
   const jellyfin = createJellyfinProviderFromEnv();
   const immich = createImmichProviderFromEnv();
-  const openListBackgroundTaskProvider = createOpenListBackgroundTaskProviderFromEnv();
-  const arcaneBackgroundTaskProvider = createArcaneBackgroundTaskProviderFromEnv();
+  const openListBackgroundTaskProvider =
+    createOpenListBackgroundTaskProviderFromEnv();
+  const arcaneBackgroundTaskProvider =
+    createArcaneBackgroundTaskProviderFromEnv();
 
   const version = readPackageVersion(fromDir);
   const agentStoreDir =
@@ -189,7 +196,9 @@ export async function bootstrapThebe(
     provider,
     version,
     token: tokenResolution.token,
-    modelResultLimit: resolveModelResultLimit(process.env.THEBE_MODEL_RESULT_LIMIT),
+    modelResultLimit: resolveModelResultLimit(
+      process.env.THEBE_MODEL_RESULT_LIMIT
+    ),
     agentStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
@@ -218,15 +227,22 @@ export async function bootstrapThebe(
       jobStore: createFileJobStore(join(agentStoreDir, "pipeline-jobs.json")),
     },
     musicResearch: createMusicResearchProvider(),
-    webSearch: createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL }),
+    webSearch: createWebSearchProvider({
+      endpoint: process.env.THEBE_WEB_SEARCH_URL,
+    }),
     emby,
     jellyfin,
     immich,
     serviceAPIProviders: createServiceAPIProvidersFromEnv(),
     backgroundTaskProviders: [
-      ...(() => { const provider = createQBittorrentBackgroundTaskProviderFromEnv(); return provider ? [provider] : []; })(),
+      ...(() => {
+        const provider = createQBittorrentBackgroundTaskProviderFromEnv();
+        return provider ? [provider] : [];
+      })(),
       ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
-      ...(openListBackgroundTaskProvider ? [openListBackgroundTaskProvider] : []),
+      ...(openListBackgroundTaskProvider
+        ? [openListBackgroundTaskProvider]
+        : []),
     ],
   });
 
@@ -256,15 +272,17 @@ function failEnv(message: string, fromDir: string): never {
 }
 
 function stubProvider(): ContainerInfoProvider {
+  const notConfigured =
+    "No container provider is configured (set ARCANE_BASE_URL/ARCANE_API_KEY, or THEBE_DOCKER_PROXY_URL for the Docker Engine API)";
   return {
     async listContainers() {
       return [];
     },
     async inspectContainer() {
-      throw new Error("Arcane is not configured");
+      throw new Error(notConfigured);
     },
     async getContainerLogs() {
-      throw new Error("Arcane is not configured");
+      throw new Error(notConfigured);
     },
     async getStatusSummary() {
       return {
@@ -283,7 +301,7 @@ function readPackageVersion(fromDir: string): string {
   for (let i = 0; i < 6; i++) {
     try {
       const parsed = JSON.parse(
-        readFileSync(join(dir, "package.json"), "utf8"),
+        readFileSync(join(dir, "package.json"), "utf8")
       ) as { version?: string };
       if (parsed.version) {
         return parsed.version;
