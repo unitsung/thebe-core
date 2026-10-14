@@ -696,16 +696,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     checkNotQuiesced();
     const mode = promptOptions.mode ?? "prompt";
     const lockId = promptOptions.thebeSessionId;
-    if (lockId && mode === "prompt") {
-      if (state.streaming.has(lockId) || state.promptLocks.has(lockId)) {
-        throw httpError(
-          409,
-          "session is streaming; use steer or followUp",
-          "session_running"
-        );
-      }
-      state.promptLocks.add(lockId);
-    }
+    const sessionRunning = () =>
+      httpError(409, "session is streaming; use steer or followUp", "session_running");
+    const acquirePromptLock = (id: string) => {
+      if (state.streaming.has(id) || state.promptLocks.has(id)) throw sessionRunning();
+      state.promptLocks.add(id);
+    };
+    if (lockId && mode === "prompt") acquirePromptLock(lockId);
     let thebeSessionId = lockId;
     try {
       const opened = await registry.openSession(promptOptions.thebeSessionId);
@@ -713,23 +710,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       autoSummary.cancel(sid);
       thebeSessionId = sid;
       if (mode === "prompt") {
-        if (!lockId) {
-          if (state.streaming.has(sid) || state.promptLocks.has(sid)) {
-            throw httpError(
-              409,
-              "session is streaming; use steer or followUp",
-              "session_running"
-            );
-          }
-          state.promptLocks.add(sid);
-        }
-        if (state.streaming.has(sid)) {
-          throw httpError(
-            409,
-            "session is streaming; use steer or followUp",
-            "session_running"
-          );
-        }
+        if (!lockId) acquirePromptLock(sid);
+        if (state.streaming.has(sid)) throw sessionRunning();
       }
       if (promptOptions.nonInteractive) permissions.nonInteractiveRuns.add(sid);
       const queueOnly =

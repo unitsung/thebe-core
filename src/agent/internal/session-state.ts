@@ -24,7 +24,6 @@ export function createSessionState(input: {
   const streaming = new Set<string>();
   const abortRequested = new Set<string>();
   const promptLocks = new Set<string>();
-  const nonInteractiveRuns = new Set<string>();
 
   function stamp(meta: AgentSessionMeta): AgentSessionMeta {
     const ts = input.now().toISOString();
@@ -80,7 +79,6 @@ export function createSessionState(input: {
     streaming,
     abortRequested,
     promptLocks,
-    nonInteractiveRuns,
     stamp,
     touchMeta,
     persist,

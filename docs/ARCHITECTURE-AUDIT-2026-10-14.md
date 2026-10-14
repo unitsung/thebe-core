@@ -159,7 +159,7 @@
 | 预算和事件跨会话串扰（缺陷 3 及 `lastEvents`） | 已做，带测试（事件串扰的测试在旧行为下确实失败） | core: stop concurrent sessions from sharing run state |
 | `executeBash` 绕过沙箱与环境清理 | 已做，带测试（旧接线下确实泄漏环境变量） | core: run direct bash through the sandbox wrapper and env filter |
 | 前门：畸形 JSON 返回 400、令牌常量时间比较、错误状态不再靠消息猜测 | 已做，带测试 | core: harden the HTTP front door |
-| 死代码和重复的 409 检查 | 未做 | |
+| 死代码（第二份 `nonInteractiveRuns`）和重复的 409 检查 | 已做 | core: remove the duplicate run-state set and fold the repeated lock check |
 | 命令守卫（缺陷 4） | 未做，属第二层 | |
 
 `executeBash` 现在与 bash 工具一样套沙箱包装，但沙箱不可用时仍是失败开放，等第二层“沙箱失败关闭”一起改。
