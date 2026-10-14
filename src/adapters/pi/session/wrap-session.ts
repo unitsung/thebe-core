@@ -29,6 +29,7 @@ import type {
   BackgroundTaskRegistry,
   BashOperations,
 } from "./background-tasks.ts";
+import { httpError } from "../../../agent/types.ts";
 
 const THINKING_LEVELS = [
   "off",
@@ -348,7 +349,7 @@ export function wrapSession(
         resolved = resolveModelRef(model.providerId, model.modelId);
       }
       if (!resolved) {
-        throw new Error(`unknown model: ${model.providerId}/${model.modelId}`);
+        throw httpError(404, `unknown model: ${model.providerId}/${model.modelId}`);
       }
       await session.setModel(resolved);
     },

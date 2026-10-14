@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "../atomic-write.ts";
 import type { GoalRun, SubagentRun, SubagentRunStatus } from "./types.ts";
+import { httpError } from "./types.ts";
 
 export type StoredGoalEvent = {
   event:
@@ -90,7 +91,7 @@ const SESSION_ID_RE = /^[a-zA-Z0-9_-]{1,128}$/;
 
 export function assertValidSessionId(id: string): void {
   if (!SESSION_ID_RE.test(id)) {
-    throw new Error(`invalid session id: ${id}`);
+    throw httpError(404, `invalid session id: ${id}`);
   }
 }
 
@@ -132,7 +133,7 @@ export function createAgentStore(dir?: string) {
   async function load(thebeSessionId: string): Promise<AgentSessionMeta> {
     assertValidSessionId(thebeSessionId);
     if (!dir) {
-      throw new Error("AgentStore has no directory");
+      throw httpError(404, "AgentStore has no directory");
     }
     const text = await readFile(join(dir, `${thebeSessionId}.json`), "utf8");
     const parsed = JSON.parse(text) as AgentSessionMeta;

@@ -10,6 +10,7 @@ import type {
   McpServerRegistration,
 } from "../../agent/extensions/mcp.ts";
 import type { RuntimeMcpServer } from "../../agent/runtime/interface.ts";
+import { httpError } from "../../agent/types.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const activeRegistryCleanups = new Set<() => void>();
@@ -220,10 +221,10 @@ export function createMcpClientRegistry(options: {
       const serverName = rest.slice(0, separator);
       const originalName = rest.slice(separator + 1);
       const state = states.get(serverName);
-      if (!state) throw new Error(`unknown MCP server: ${serverName}`);
+      if (!state) throw httpError(404, `unknown MCP server: ${serverName}`);
       if (serverDisabled(state.config, serverOverrides)) throw new Error(`MCP server disabled: ${serverName}`);
       if (!state.tools.some((tool) => tool.originalName === originalName)) await loadTools(state);
-      if (!state.tools.some((tool) => tool.originalName === originalName)) throw new Error(`unknown MCP tool: ${name}`);
+      if (!state.tools.some((tool) => tool.originalName === originalName)) throw httpError(404, `unknown MCP tool: ${name}`);
       return await state.connection.callToolResult(originalName, args, signal) as unknown as McpCallResult;
     },
     async invokeTool(name: string, args: unknown): Promise<string | undefined> {

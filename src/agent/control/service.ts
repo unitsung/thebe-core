@@ -248,7 +248,7 @@ export function createControlApi(
       // Preserve the JSON control-plane contract. Conversation calls still go
       // through the untrusted-output wrapper and session policy.
       const tool = baseTools().find((item) => item.name === name);
-      if (!tool) throw new Error(`unknown tool: ${name}`);
+      if (!tool) throw httpError(404, `unknown tool: ${name}`);
       const result = await tool.execute("mcp", params);
       return ok(result.content.map((block) => block.text).join("\n"));
     }
@@ -258,7 +258,7 @@ export function createControlApi(
     const tools = wrapCustomTools(baseTools(), { policy, audit });
     const tool = tools.find((item) => item.name === name);
     if (!tool) {
-      throw new Error(`unknown tool: ${name}`);
+      throw httpError(404, `unknown tool: ${name}`);
     }
     const result = await tool.execute("mcp", args ?? {});
     return {

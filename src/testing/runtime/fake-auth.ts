@@ -1,5 +1,6 @@
 import type { RuntimeAuth, RuntimeProvider } from "../../agent/runtime/interface.ts";
 import { FAKE_RUNTIME_PROVIDERS } from "./fixtures.ts";
+import { httpError } from "../../agent/types.ts";
 
 export type FakeAuthState = {
   apiKeys: Map<string, string>;
@@ -38,7 +39,7 @@ export function createFakeRuntimeAuth(state: FakeAuthState): RuntimeAuth {
     },
     async submitOAuthCallback(providerId, input) {
       if (!state.oauthPending.has(providerId)) {
-        throw new Error(`unknown OAuth authorization: ${providerId}`);
+        throw httpError(404, `unknown OAuth authorization: ${providerId}`);
       }
       if (!input.trim()) {
         throw new Error("OAuth callback input required");

@@ -1,5 +1,7 @@
 import type { ThebeAgent } from "../../agent/index.ts";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { json } from "./json.ts";
+import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
 
@@ -38,11 +40,17 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // for X-Thebe-Token through its Authorize control when trying requests.
       if (token && !isDocumentationRequest(request)) {
         const received = request.headers.get("X-Thebe-Token") ?? "";
-        if (received !== token) {
+        if (!tokensEqual(received, token)) {
           return json({ ok: false }, 401);
         }
       }
-      return router.handle(request);
+      try {
+        return await router.handle(request);
+      } catch (error) {
+        // A failure that names its own status (a bad body, an unknown id) is an answer, not a crash.
+        if (hasHttpStatus(error)) return agentError(error);
+        throw error;
+      }
     },
   };
 }
@@ -60,4 +68,15 @@ function isDocumentationRequest(request: Request): boolean {
     pathname === "/swagger" ||
     pathname.startsWith("/docs/")
   );
+}
+
+/** Compares digests, so the time taken does not depend on how much of the token matched. */
+function tokensEqual(received: string, expected: string): boolean {
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(received), digest(expected));
+}
+
+function hasHttpStatus(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && Number.isInteger(status) && status >= 400 && status < 600;
 }

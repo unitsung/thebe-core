@@ -1,3 +1,5 @@
+import { httpError } from "../../agent/types.ts";
+
 export function json(
   body: unknown,
   status = 200,
@@ -13,12 +15,17 @@ export function json(
   });
 }
 
+/**
+ * The request body as an object. No body is `{}`; a body that is not JSON is a 400, not an empty
+ * request: treating it as `{}` turned a client's malformed approval or patch into a silent no-op.
+ */
 export async function readJson(request: Request): Promise<Record<string, unknown>> {
+  const text = await request.text();
+  if (!text.trim()) return {};
   try {
-    const parsed: unknown = await request.json();
-    return asObject(parsed);
+    return asObject(JSON.parse(text));
   } catch {
-    return {};
+    throw httpError(400, "Request body must be valid JSON", "invalid_body");
   }
 }
 

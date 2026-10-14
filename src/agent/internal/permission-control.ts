@@ -9,6 +9,7 @@ import {
 } from "../security/remembered-permissions.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { OpenedSession } from "./session-state.ts";
+import { httpError } from "../types.ts";
 
 const PERMISSION_TTL_MS = 10 * 60 * 1000;
 
@@ -169,7 +170,7 @@ export function createPermissionControl(input: {
   ): Promise<void> {
     const pending = pendingPermissions.get(permissionId);
     if (!pending || pending.thebeSessionId !== thebeSessionId) {
-      throw new Error(`unknown permission: ${permissionId}`);
+      throw httpError(404, `unknown permission: ${permissionId}`);
     }
     pendingPermissions.delete(permissionId);
     if (pending.timer) clearTimeout(pending.timer);

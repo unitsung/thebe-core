@@ -23,6 +23,7 @@ import {
   createBackgroundTaskRegistry,
   type BackgroundTaskRegistry,
 } from "./session/background-tasks.ts";
+import { httpError } from "../../agent/types.ts";
 
 export { sanitizeBashEnv } from "../../agent/security/process-env.ts";
 
@@ -393,7 +394,7 @@ export async function createPiCodingAgentRuntime(
           (row: { id: string; path: string }) => row.id === runtimeSessionId
         );
         if (!info) {
-          throw new Error(`unknown runtime session: ${runtimeSessionId}`);
+          throw httpError(404, `unknown runtime session: ${runtimeSessionId}`);
         }
         const manager = sdk.SessionManager.open(info.path, options.sessionDir);
         if (fork.atEntryId) {
@@ -412,7 +413,7 @@ export async function createPiCodingAgentRuntime(
           (row: { id: string; path: string }) => row.id === runtimeSessionId
         );
         if (!info) {
-          throw new Error(`unknown runtime session: ${runtimeSessionId}`);
+          throw httpError(404, `unknown runtime session: ${runtimeSessionId}`);
         }
         const opened = sdk.SessionManager.open(info.path, options.sessionDir);
         const leaf = fork?.atEntryId ?? opened.getLeafId();

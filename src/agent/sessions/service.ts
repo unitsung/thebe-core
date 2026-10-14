@@ -217,7 +217,7 @@ export function createSessionApi(
         ? await lookup(thebeSessionId)
         : ctx.active?.meta;
       if (!source) {
-        throw new Error("no session to fork");
+        throw httpError(404, "no session to fork");
       }
       const childThebeId = randomUUID();
       const child = await options.runtime.forkSession(

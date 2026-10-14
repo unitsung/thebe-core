@@ -5,6 +5,7 @@ import type { AgentContext } from "../internal/context.ts";
 import { discoverSubagentProfiles, type SubagentProfile } from "./catalog.ts";
 import { createSubagentRunManager } from "./service.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
+import { httpError } from "../types.ts";
 
 const SUBAGENT_WRITE_TOOLS = new Set(["edit", "write"]);
 
@@ -137,7 +138,7 @@ export function createSubagentApi(
       checkNotQuiesced();
       const profiles = await discoverSubagentProfiles({ cwd: workspacePath });
       const profile = profiles.find((item) => item.name === spawn.profileName);
-      if (!profile) throw new Error(`unknown subagent profile: ${spawn.profileName}`);
+      if (!profile) throw httpError(404, `unknown subagent profile: ${spawn.profileName}`);
       if (!spawn.taskPrompt.trim()) throw new Error("subagent task cannot be empty");
       await lookup(spawn.parentSessionId);
       const run = subagentRuns.spawn({ profile, task: spawn.taskPrompt, parentSessionId: spawn.parentSessionId });

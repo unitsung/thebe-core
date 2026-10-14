@@ -69,7 +69,7 @@
 
 **HTTP 前门**：
 - 一个共享令牌，用 `!==` 比较（非常量时间），没有作用域，所以同一个令牌能读审计、改设置、批准权限、通过会话跑任何工具；没有限速；明文 HTTP。
-- `readJson` 吞掉解析错误并返回 `{}`：畸形 JSON 被当成空请求体，而不是 400。没有请求体大小限制。
+- `readJson` 吞掉解析错误并返回 `{}`：畸形 JSON 被当成空请求体，而不是 400。（更正：请求体大小上限 `MAX_HTTP_BODY_BYTES` 在 `listen.ts` 里已有，超限返回 413，此前我说“没有”是说错了。）
 - `agentError` 在没有状态码时用对消息文本的正则（`/unknown|no session|not found|…/`）决定 404，例如 “unknown model” 变 404。
 - Host/Origin 检查只对写方法生效；内网地址和 `.local`/`.ts.net` 不用列入白名单。
 - 路由是约 20 个模块按固定顺序逐个试；2470 行的 `openapi.ts` 手写，与路由实现靠人工保持一致。
@@ -99,7 +99,7 @@
 2. 看门狗：超时时中止传给工具的信号并记一条“超时”审计，工具返回后丢弃结果（缺陷 2）。
 3. 预算：运行状态按会话（或按一次提问）持有，不再是 Agent 全局；`lastEvents` 改为按会话取（缺陷 3 及其同类）。
 4. `executeBash`：要么补上沙箱和环境清理，要么在没有沙箱时明确失败；不要返回假的成功。
-5. `readJson`：畸形 JSON 返回 400；加请求体大小上限；令牌用常量时间比较；`agentError` 不再用消息正则决定状态。
+5. `readJson`：畸形 JSON 返回 400；令牌用常量时间比较；`agentError` 不再用消息正则决定状态（已做，见下“进展”）。
 6. 清理死代码（第二份 `nonInteractiveRuns`）和 3 份重复的 409 检查。
 
 ### 第二层：重做（顺序有依赖）
@@ -148,3 +148,18 @@
 | Hermes 压缩 | `agent/context_compressor*.py`、`agent/conversation_compression*.py` |
 
 我对参考项目只读了 README、目录结构和少量入口代码，上面的对照是据此写的，动手前要读它们的实现再确认细节。
+
+## 9. 进展（2026-10-14，第一层修补）
+
+| 项 | 状态 | 提交主题 |
+|---|---|---|
+| 移除 `adapters/google` | 已做 | core: remove the Google Antigravity provider |
+| 围栏被数据突破（缺陷 1） | 已做，带测试 | core: keep tool output from closing the untrusted-data fence |
+| 看门狗不中止工具（缺陷 2） | 已做，带测试 | core: abort a tool that outlives the watchdog |
+| 预算和事件跨会话串扰（缺陷 3 及 `lastEvents`） | 已做，带测试（事件串扰的测试在旧行为下确实失败） | core: stop concurrent sessions from sharing run state |
+| `executeBash` 绕过沙箱与环境清理 | 已做，带测试（旧接线下确实泄漏环境变量） | core: run direct bash through the sandbox wrapper and env filter |
+| 前门：畸形 JSON 返回 400、令牌常量时间比较、错误状态不再靠消息猜测 | 已做，带测试 | core: harden the HTTP front door |
+| 死代码和重复的 409 检查 | 未做 | |
+| 命令守卫（缺陷 4） | 未做，属第二层 | |
+
+`executeBash` 现在与 bash 工具一样套沙箱包装，但沙箱不可用时仍是失败开放，等第二层“沙箱失败关闭”一起改。

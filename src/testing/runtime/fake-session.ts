@@ -20,6 +20,7 @@ import {
 } from "../../agent/runtime/prompt-files.ts";
 import { isInlineTextFile } from "../../agent/runtime/interface.ts";
 import type { FakeQueuedTurn, FakeSessionState } from "./fixtures.ts";
+import { httpError } from "../../agent/types.ts";
 
 export type FakeInboundToolResult = {
   toolName: string;
@@ -378,7 +379,7 @@ export function createFakeSession(
           row.providerId === model.providerId && row.modelId === model.modelId,
       );
       if (!known) {
-        throw new Error(`unknown model: ${model.providerId}/${model.modelId}`);
+        throw httpError(404, `unknown model: ${model.providerId}/${model.modelId}`);
       }
       state.model = model;
     },

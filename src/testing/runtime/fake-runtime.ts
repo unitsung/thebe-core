@@ -17,6 +17,7 @@ import {
   type FakeQueuedTurn,
   type FakeSessionState,
 } from "./fixtures.ts";
+import { httpError } from "../../agent/types.ts";
 
 export type FakeRuntimeOptions = {
   runtimeId?: string;
@@ -68,7 +69,7 @@ export function createFakeRuntime(
   function getState(id: string): FakeSessionState {
     const state = sessions.get(id);
     if (!state) {
-      throw new Error(`unknown runtime session: ${id}`);
+      throw httpError(404, `unknown runtime session: ${id}`);
     }
     return state;
   }
@@ -144,7 +145,7 @@ export function createFakeRuntime(
           (message) => message.id === fork.atEntryId
         );
         if (index < 0) {
-          throw new Error(`unknown message: ${fork.atEntryId}`);
+          throw httpError(404, `unknown message: ${fork.atEntryId}`);
         }
         copied = copied.slice(0, index + 1);
       }

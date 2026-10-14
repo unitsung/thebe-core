@@ -21,6 +21,7 @@ import {
   DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
   normalizeAgentSubagentLimit,
 } from "../settings/product.ts";
+import { httpError } from "../types.ts";
 
 const DEFAULT_MAX_TURNS = 5;
 const MAX_ALLOWED_TURNS = 50;
@@ -225,7 +226,7 @@ export function createSubagentRunManager(options: {
     if (matches.length > 1) {
       throw new Error(`ambiguous subagent run id: ${requestedId}`);
     }
-    throw new Error(`unknown subagent run: ${requestedId}`);
+    throw httpError(404, `unknown subagent run: ${requestedId}`);
   }
 
   async function cancelRun(

@@ -31,6 +31,7 @@ import {
 } from "./skills.ts";
 import type { AgentArtifact } from "../artifacts/types.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
+import { httpError } from "../types.ts";
 
 /** Skills and MCP extensions exposed through the stable Agent Interface. */
 export function createExtensionApi(
@@ -183,7 +184,7 @@ export function createExtensionApi(
     },
     async enableSkill(name: string): Promise<void> {
       const skill = (await discover()).find((item) => item.name === name);
-      if (!skill) throw new Error(`unknown skill: ${name}`);
+      if (!skill) throw httpError(404, `unknown skill: ${name}`);
       if (skill.enabled) return;
       const resource: EnabledResource = {
         kind: "skill",

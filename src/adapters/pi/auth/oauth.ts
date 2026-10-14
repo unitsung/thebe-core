@@ -1,4 +1,5 @@
 import type { RuntimeAuth, RuntimeProvider } from "../../../agent/runtime/interface.ts";
+import { httpError } from "../../../agent/types.ts";
 
 type PendingOAuthLogin = {
   providerId: string;
@@ -196,7 +197,7 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
     async submitOAuthCallback(providerId, input) {
       const entry = pendingOAuth.get(providerId);
       if (!entry) {
-        throw new Error(`unknown OAuth authorization: ${providerId}`);
+        throw httpError(404, `unknown OAuth authorization: ${providerId}`);
       }
       if (!input.trim()) {
         throw new Error("OAuth callback input required");

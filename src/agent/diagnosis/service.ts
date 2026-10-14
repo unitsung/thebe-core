@@ -32,6 +32,7 @@ import {
   type Recommendation,
   type ResourceRef,
 } from "./types.ts";
+import { httpError } from "../types.ts";
 
 const MAX_RUNS = 32;
 const REASONING_TIMEOUT_MS = 20_000;
@@ -260,7 +261,7 @@ export function createDiagnosisApi(options: {
     async explainDiagnosis(runId: string, question?: string) {
       const existing = runs.get(runId);
       if (!existing) {
-        throw new Error(`unknown diagnosis run: ${runId}`);
+        throw httpError(404, `unknown diagnosis run: ${runId}`);
       }
       if (existing.observations.length === 0) {
         return existing;

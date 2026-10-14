@@ -40,6 +40,6 @@ export function agentError(error: unknown): Response {
   if (typeof extra?.status === "number" && Number.isInteger(extra.status) && extra.status >= 400 && extra.status < 600) {
     return json(body, extra.status);
   }
-  const notFound = /unknown|no session|not found|AgentStore has no directory|invalid session id/i.test(message);
-  return json(body, notFound ? 404 : 500);
+  // No status attached means an unexpected failure: it is a 500, not a guess from the wording.
+  return json(body, 500);
 }
