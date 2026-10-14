@@ -3,9 +3,8 @@ import type { CustomToolDefinition } from "../runtime/interface.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { skippedResearch, type ResearchBudget } from "./research-budget.ts";
 
-export function createWebSearchTools(provider: WebSearchProvider, policy: ReturnType<typeof createPolicyEngine>, callerId: string, enabled: () => Promise<boolean>, budget?: ResearchBudget): CustomToolDefinition[] {
+export function createWebSearchTools(provider: WebSearchProvider, policy: ReturnType<typeof createPolicyEngine>, callerId: string, budget?: ResearchBudget): CustomToolDefinition[] {
   return [{ name: "web_search", label: "Web search", description: WEB_SEARCH_DESCRIPTION, parameters: WEB_SEARCH_SCHEMA, async execute(_id, input) {
-    if (!await enabled()) throw new Error("Web search is disabled for this session. Enable it in Thebe settings.");
     const decision = policy.allow("web_search", callerId);
     if (!decision.ok) throw new Error(decision.reason);
     const query = (input as Record<string, unknown> | null)?.query;

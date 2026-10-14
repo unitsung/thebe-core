@@ -229,9 +229,9 @@ export async function bootstrapThebe(
       jobStore: createFileJobStore(join(agentStoreDir, "pipeline-jobs.json")),
     },
     musicResearch: createMusicResearchProvider(),
-    webSearch: createWebSearchProvider({
-      endpoint: process.env.THEBE_WEB_SEARCH_URL,
-    }),
+    webSearch: process.env.THEBE_WEB_SEARCH_URL?.trim()
+      ? createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL })
+      : undefined,
     emby,
     jellyfin,
     immich,

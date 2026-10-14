@@ -187,6 +187,7 @@ token 只由 Core adapter 使用，不进入 Agent capability 参数。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
 - 新添加的服务器默认禁用；启用、禁用、删除走 `/v1/extensions/mcp/servers`，会话在下次 reload 时生效。
 - 终端也可以：`thebe mcp add <name> --url <url> --header K=V`（`--header`/`--env`/`--arg` 可重复），再 `thebe mcp enable <name>`；`thebe mcp list`、`thebe mcp tools` 看清单，`thebe mcp remove <name>` 删除 Thebe 自己写入的服务器。
+- 不想自建 SearXNG 时，联网搜索接一个搜索 MCP 即可。Parallel 的免密钥端点可这样配：`{"mcpServers": {"parallel": {"url": "https://search.parallel.ai/mcp", "description": "Web search and page fetch", "exposure": "deferred"}}}`，经 `tool_search` 加载后得到 `mcp__parallel__web_search` 和 `mcp__parallel__web_fetch`。搜索词和要读取的网址会发给 Parallel，免费额度有限。2026-10-14 的实测里，给这一项加上 `"permission": "read"` 后工具不再出现在 `tool_search` 里，所以不要加 `permission`；该检查中调用没有弹出审批。
 - 哪些服务自带 MCP（目前是 Home Assistant、Grafana、Docker、GitHub、Kubernetes）见 `PROVIDER-MCP.md`；可选的真实连接检查：`THEBE_MCP_LIVE=1 npx vitest run src/adapters/mcp/live.test.ts`。
 
 ## Navidrome 音乐 provider

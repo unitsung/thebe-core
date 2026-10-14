@@ -267,10 +267,15 @@ try {
     "ordinary turn exposes discovery and workspace tools without homelab schemas"
   );
   const webSession = await createSession();
+  await request(
+    `/v1/session/${webSession}`,
+    { labels: { "thebe.webSearch": "false" } },
+    "PATCH"
+  );
   await request(`/v1/session/${webSession}/prompt`, {
     text: "FIXTURE_WEB disabled",
   });
-  check(searchRequests === 0, "disabled web search sends no query");
+  check(searchRequests === 0, "web search switched off sends no query");
   await request(
     `/v1/session/${webSession}`,
     { labels: { "thebe.webSearch": "true" } },

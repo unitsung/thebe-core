@@ -345,6 +345,7 @@ its own. Tool names are `mcp__<server>__<tool>`.
 - stdio servers inherit only basic variables such as `HOME` and `PATH`, plus their own `env`, never Core's environment.
 - Newly added servers are disabled. Enable, disable, or delete them with `/v1/extensions/mcp/servers`; sessions pick up the change on the next reload.
 - From the terminal: `thebe mcp add <name> --url <url> --header K=V` (repeat `--header`, `--env`, `--arg`), then `thebe mcp enable <name>`; `thebe mcp list` and `thebe mcp tools` show the inventory, and `thebe mcp remove <name>` deletes a server Thebe wrote.
+- Web search without running SearXNG: point Core at a search MCP server. Parallel's keyless endpoint works as `{"mcpServers": {"parallel": {"url": "https://search.parallel.ai/mcp", "description": "Web search and page fetch", "exposure": "deferred"}}}` and gives `mcp__parallel__web_search` and `mcp__parallel__web_fetch` after `tool_search` loads them. Queries and fetched URLs go to Parallel, and its free tier is limited. In a 2026-10-14 check, adding `"permission": "read"` to this entry stopped its tools appearing in `tool_search`, so leave `permission` out; calls ran without an approval prompt in that check.
 - Which services ship their own MCP server (Home Assistant, Grafana, Docker, GitHub, Kubernetes today) is recorded in `PROVIDER-MCP.md`; an opt-in live check connects to real servers with `THEBE_MCP_LIVE=1 npx vitest run src/adapters/mcp/live.test.ts`.
 
 ## Skills

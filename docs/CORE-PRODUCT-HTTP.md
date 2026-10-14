@@ -80,22 +80,21 @@ at `/v1/settings/permissions`.
 
 ## Shipped
 
-Optional general web search (2026-10-06): the composition root supplies
-`web_search`, allowing model-selected queries on any topic. Create or PATCH a
-session with labels containing `"thebe.webSearch": "true"` to enable it;
-missing/false values deny execution before contacting the search provider.
-Permission is read on each execution, so disabling it preserves conversation
-history. Preserve other session labels when updating this value. App clients
-synchronize their saved switch before submitting a prompt. Explicit false also
-blocks built-in music research; older sessions without the label retain their
-previous music-research behavior.
+General web search (2026-10-06, reworked 2026-10-14): when `THEBE_WEB_SEARCH_URL` points to a
+SearXNG instance with JSON output enabled, the composition root supplies `web_search` for
+model-selected queries on any topic; a root URL uses `/search?q=…&format=json`. Without that
+variable Core offers no `web_search` (the public Bing RSS default was removed: poor results, no
+uptime guarantee). For web search without running SearXNG, configure a search MCP server instead,
+for example Parallel's keyless `https://search.parallel.ai/mcp` (`web_search` and `web_fetch`,
+`"exposure": "deferred"`); queries and fetched URLs then go to that provider.
 
-By default the adapter reads the public Bing RSS feed (no supported-API uptime
-guarantee). Set `THEBE_WEB_SEARCH_URL` to a SearXNG instance URL with JSON output
-enabled; a root URL uses `/search?q=…&format=json`. Results contain bounded
-titles, excerpts, source URLs and retrieval time. Remote content is untrusted,
-and failed searches are surfaced as tool errors. This switch does not change
-independently configured MCP permissions or model-provider network access.
+Create or PATCH a session with labels containing `"thebe.webSearch": "false"` to switch
+`web_search` and built-in music research off for that session; a missing or other value leaves
+them on. Permission is read on each execution, so disabling it preserves conversation history.
+Preserve other session labels when updating this value. Results contain bounded titles, excerpts,
+source URLs and retrieval time. Remote content is untrusted, and failed searches are surfaced as
+tool errors. This label does not change independently configured MCP permissions or
+model-provider network access.
 
 Research is budgeted per answer because every result is resent on later turns: at most 5 results of 500 characters per `web_search`, and within a three-minute window at most 3 `web_search` and 2 `music_research` lookups (4 combined), never the same query twice. Beyond that the tool returns a note telling the model to answer from the evidence it has and say what is unverified.
 
