@@ -853,10 +853,10 @@ export function createControlApi(
       options?: { excludeFromContext?: boolean }
     ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
       const opened = await openSession(thebeSessionId);
-      if (opened.session.executeBash) {
-        return opened.session.executeBash(command, onChunk, options);
+      if (!opened.session.executeBash) {
+        throw httpError(501, "This runtime session cannot execute shell commands");
       }
-      return { exitCode: 0, cancelled: false, output: "" };
+      return opened.session.executeBash(command, onChunk, options);
     },
     async quiesce(): Promise<void> {
       await options.runtime.quiesce();

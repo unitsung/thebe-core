@@ -386,13 +386,14 @@ export function wrapSession(
           }
         ) => Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
       };
-      if (typeof raw.executeBash === "function") {
-        const executeOptions = bashOperations
-          ? { ...options, operations: bashOperations }
-          : options;
-        return raw.executeBash(command, onChunk, executeOptions);
+      if (typeof raw.executeBash !== "function") {
+        // Returning an empty success here would tell the caller a command ran.
+        throw new Error("This runtime session cannot execute shell commands");
       }
-      return { exitCode: 0, cancelled: false, output: "" };
+      const executeOptions = bashOperations
+        ? { ...options, operations: bashOperations }
+        : options;
+      return raw.executeBash(command, onChunk, executeOptions);
     },
     dispose: () => {
       session.dispose();

@@ -313,6 +313,23 @@ export async function openPiSession(
       };
     },
   });
+  // `executeBash` (a command the user typed) runs through Pi's session, not through the bash tool
+  // above, so it never saw that tool's spawn hook: no sandbox wrapper and the whole process
+  // environment, including Core's own token. It now crosses the same two filters as the tool.
+  const guardedBashOperations: typeof bashOperations = {
+    exec(command, cwd, execOptions) {
+      const wrapped = wrapCommandForSandbox(command, {
+        mode: fullAccessActive() ? "off" : sandbox.sandboxMode,
+        workspacePath,
+        allowNetwork: sandbox.sandboxNetwork,
+        image: process.env.THEBE_SANDBOX_IMAGE?.trim() || undefined,
+      });
+      return bashOperations.exec(wrapped.command, cwd, {
+        ...execOptions,
+        env: sanitizeBashEnv({ ...process.env, ...execOptions.env }) as NodeJS.ProcessEnv,
+      });
+    },
+  };
   const piCustomTools = [
     ...create.customTools.map((tool) =>
       abortablePiTool(toPiTool(sdk, tool), controllers)
@@ -382,7 +399,7 @@ export async function openPiSession(
     },
     controllers,
     backgroundTasks,
-    bashOperations
+    guardedBashOperations
   );
   if (!gondolinBash) return wrappedSession;
   // Pi's dispose is synchronous, so the Micro-VM is torn down best-effort

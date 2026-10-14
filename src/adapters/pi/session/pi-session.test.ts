@@ -580,6 +580,25 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
+  it("keeps Core's secrets out of a command run through the direct execution seam", async () => {
+    const { runtime } = await piWithFaux();
+    const agent = createThebeAgent({ runtime, provider: emptyProvider() });
+    const session = await agent.createSession();
+    process.env.THEBE_AUDIT_PROBE_SECRET = "must-not-reach-the-shell";
+    process.env.AUDIT_PROBE_API_TOKEN = "must-not-reach-the-shell-either";
+    try {
+      const result = await agent.executeBash(
+        session.thebeSessionId,
+        'printf "[%s|%s|%s]" "$THEBE_AUDIT_PROBE_SECRET" "$AUDIT_PROBE_API_TOKEN" "${PATH:+path-kept}"'
+      );
+      expect(result.output).toContain("[||path-kept]");
+      expect(result.output).not.toContain("must-not-reach");
+    } finally {
+      delete process.env.THEBE_AUDIT_PROBE_SECRET;
+      delete process.env.AUDIT_PROBE_API_TOKEN;
+    }
+  });
+
   it.skipIf(!gondolinMicroVmAvailable())(
     "routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin",
     async () => {
