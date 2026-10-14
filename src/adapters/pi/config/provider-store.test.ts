@@ -52,14 +52,14 @@ describe("provider configuration storage", () => {
     await expect(createProviderConfigurationStore(dir).save(configuration)).rejects.toThrow();
     expect(await readFile(join(dir, "models.json"), "utf8")).toBe("broken");
   });
-  it("preserves model compatibility and maps verified Cline off to none", async () => {
+  it("preserves model compatibility and leaves the thinking-level map to the model entry", async () => {
     const dir = await mkdtemp(join(tmpdir(), "provider-config-"));
     const model = { id: "cline-pass/deepseek-v4.1-flash", reasoning: true, input: ["text"], compat: { supportsDeveloperRole: false } };
     await writeFile(join(dir, "models.json"), JSON.stringify({ providers: { cline: { models: [model] } } }));
     await createProviderConfigurationStore(dir).save({ ...configuration, providerId: "cline", baseUrl: "https://api.cline.bot/api/v1", models: [{ id: model.id, reasoning: true, input: ["text", "image"] }] });
     const stored = JSON.parse(await readFile(join(dir, "models.json"), "utf8")).providers.cline.models[0];
     expect(stored.compat.supportsDeveloperRole).toBe(false);
-    expect(stored.thinkingLevelMap.off).toBe("none");
+    expect(stored.thinkingLevelMap).toBeUndefined();
     expect(stored.input).toEqual(["text", "image"]);
   });
 });

@@ -41,11 +41,6 @@ export function createProviderConfigurationStore(agentDir: string, legacyConfigP
         const models = configuration.models.map(model => {
           const retained = previous?.models?.find((item: any) => item.id === model.id);
           const merged = { ...retained, ...model };
-          // Verified against this service: omitting effort leaves thinking on,
-          // while explicit none disables it. Do not guess this for other models.
-          if (new URL(configuration.baseUrl).hostname === "api.cline.bot" && model.id === "cline-pass/deepseek-v4.1-flash" && model.reasoning === true) {
-            merged.thinkingLevelMap = { ...retained?.thinkingLevelMap, off: "none" };
-          }
           return merged;
         });
         data.providers[providerId] = { ...previous, ...configurationFields, models };

@@ -369,8 +369,9 @@ export async function openPiSession(
     agentDir: args.agentDir,
     modelRuntime: args.modelRuntime,
     model: resolvedModel as never,
-    // New sessions start with Thebe's explicit default. Existing sessions
-    // must omit this option so Pi can restore their persisted level.
+    // New sessions start at `off`, which sends no effort parameter, so the
+    // provider's own default applies. Existing sessions must omit this option
+    // so Pi can restore their persisted level.
     thinkingLevel: sessionManager.getBranch().length === 0 ? "off" : undefined,
     // Newly enabled MCP tools must remain registerable when the session reloads.
     ...(hasDiscovery
