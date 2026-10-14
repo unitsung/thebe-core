@@ -62,24 +62,32 @@ export function wrapCustomTools(
       let timer: NodeJS.Timeout | undefined;
       let timedOut = false;
       const watchdogMs = options.toolWatchdogMs;
-      const executePromise = tool.execute(toolCallId, params, signal);
+      // The tool gets its own signal: it follows the runtime's, and the watchdog can abort it. Without
+      // this a timed-out tool kept running (and kept its side effects) after the model was told it failed.
+      const toolAbort = new AbortController();
+      const followParent = () => toolAbort.abort(signal?.reason);
+      if (signal?.aborted) followParent();
+      else signal?.addEventListener("abort", followParent, { once: true });
+      const executePromise = tool.execute(toolCallId, params, toolAbort.signal);
+      // A tool that finishes or fails after the watchdog fired must not become an unhandled rejection.
+      executePromise.catch(() => {});
       try {
         let result: CustomToolResult;
         if (watchdogMs && watchdogMs > 0) {
           const timeoutPromise = new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
               timedOut = true;
+              const reason = new Error(
+                `tool call exceeded watchdog timeout (${watchdogMs}ms)`
+              );
+              toolAbort.abort(reason);
               options.onEvent?.({
                 type: "tool_watchdog_timeout",
                 toolCallId,
                 toolName: tool.name,
                 elapsedMs: watchdogMs,
               });
-              reject(
-                new Error(
-                  `tool call exceeded watchdog timeout (${watchdogMs}ms)`
-                )
-              );
+              reject(reason);
             }, watchdogMs);
           });
           try {
@@ -122,6 +130,8 @@ export function wrapCustomTools(
           content: [{ type: "text", text: message }],
           details: timedOut ? { watchdogTimeout: true } : {},
         });
+      } finally {
+        signal?.removeEventListener("abort", followParent);
       }
     },
   }));
