@@ -4,6 +4,24 @@ import {
 } from "../context.ts";
 import { json, readJson } from "../json.ts";
 import { oauthCallbackInput } from "../parsing/errors.ts";
+import type { ThinkingLevel } from "../../../agent/index.ts";
+
+const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/** A model's level map: known levels only, each a short provider value or null (unsupported). */
+function thinkingLevelMapFrom(
+  raw: unknown
+): Partial<Record<ThinkingLevel, string | null>> | undefined | "invalid" {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return "invalid";
+  const map: Partial<Record<ThinkingLevel, string | null>> = {};
+  for (const [level, value] of Object.entries(raw)) {
+    if (!THINKING_LEVELS.includes(level as ThinkingLevel)) return "invalid";
+    if (value !== null && (typeof value !== "string" || !value.trim() || value.length > 64)) return "invalid";
+    map[level as ThinkingLevel] = value;
+  }
+  return Object.keys(map).length ? map : undefined;
+}
 
 /** Provider discovery, model discovery, and API-key/OAuth authentication. */
 export async function handleProviderModelAuth(
@@ -50,7 +68,9 @@ export async function handleProviderModelAuth(
         if (raw.contextWindow !== undefined && raw.maxTokens !== undefined && raw.maxTokens > raw.contextWindow) {
           return json({ error: "maxTokens must not exceed contextWindow" }, 400);
         }
-        models.push({ id: raw.id.trim(), name: typeof raw.name === "string" ? raw.name : undefined, contextWindow: raw.contextWindow, maxTokens: raw.maxTokens, reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : undefined, input: raw.input });
+        const levels = thinkingLevelMapFrom(raw.thinkingLevelMap);
+        if (levels === "invalid") return json({ error: "thinkingLevelMap must map thinking levels to a short string or null" }, 400);
+        models.push({ id: raw.id.trim(), name: typeof raw.name === "string" ? raw.name : undefined, contextWindow: raw.contextWindow, maxTokens: raw.maxTokens, reasoning: typeof raw.reasoning === "boolean" ? raw.reasoning : undefined, input: raw.input, thinkingLevelMap: levels });
       }
       await agent.saveProviderConfiguration({ providerId, name: typeof body.name === "string" ? body.name : undefined, baseUrl: endpoint.toString().replace(/\/$/, ""), api, models }, typeof body.apiKey === "string" ? body.apiKey : undefined);
       return json(await agent.providerConfiguration(providerId));

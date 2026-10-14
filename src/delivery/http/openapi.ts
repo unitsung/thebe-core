@@ -970,7 +970,7 @@ const operations: Operation[] = [
   {
     method: "put",
     path: "/v1/provider/{providerId}/config",
-    summary: "Save endpoint and replace custom model definitions",
+    summary: "Save endpoint and replace custom model definitions, including each model's thinkingLevelMap (level to provider value, null when not offered)",
     tag: "providers",
     parameters: [idParameter("providerId")],
     requestBody: { required: true },

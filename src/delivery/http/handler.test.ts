@@ -71,6 +71,42 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
     });
   });
 
+  it("passes a model's thinking-level map to the runtime and rejects a malformed one", async () => {
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const fake = createFakeRuntime();
+    const saved: unknown[] = [];
+    fake.runtime.saveProviderConfiguration = async (configuration) => {
+      saved.push(configuration);
+    };
+    fake.runtime.providerConfiguration = async () => undefined;
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const put = (thinkingLevelMap: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/provider/local/config", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            baseUrl: "http://127.0.0.1:11434/v1",
+            api: "openai-completions",
+            models: [{ id: "m", reasoning: true, thinkingLevelMap }],
+          }),
+        })
+      );
+    expect((await put({ low: null, xhigh: "xhigh" })).status).toBe(200);
+    expect(saved).toHaveLength(1);
+    expect(
+      (saved[0] as { models: Array<{ thinkingLevelMap: unknown }> }).models[0]
+        ?.thinkingLevelMap
+    ).toEqual({ low: null, xhigh: "xhigh" });
+    for (const bad of [{ ultra: "x" }, { low: 3 }, { low: "" }, ["low"], "low"]) {
+      const response = await put(bad);
+      expect(response.status).toBe(400);
+    }
+    expect(saved).toHaveLength(1);
+  });
+
   it("GET /v1/health returns ok and version", async () => {
     const res = await handler().handle(
       new Request("http://127.0.0.1:8787/v1/health")

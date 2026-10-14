@@ -180,6 +180,11 @@ export type RuntimeProviderConfiguration = {
     maxTokens?: number;
     reasoning?: boolean;
     input?: Array<"text" | "image">;
+    /**
+     * Per level, what the provider is sent; `null` marks the level unsupported.
+     * Only the levels the model offers are listed to a client.
+     */
+    thinkingLevelMap?: Partial<Record<ThinkingLevel, string | null>>;
   }>;
 };
 

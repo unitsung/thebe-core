@@ -31,7 +31,7 @@ export function createProviderConfigurationStore(agentDir: string, legacyConfigP
       const p = (await read()).providers?.[providerId];
       if (!p?.baseUrl || !p.api || !Array.isArray(p.models)) return undefined;
       return { providerId, name: p.name, baseUrl: p.baseUrl, api: p.api,
-        models: p.models.map((m: any) => ({ id: m.id, name: m.name, contextWindow: m.contextWindow, maxTokens: m.maxTokens, reasoning: m.reasoning, input: m.input })) };
+        models: p.models.map((m: any) => ({ id: m.id, name: m.name, contextWindow: m.contextWindow, maxTokens: m.maxTokens, reasoning: m.reasoning, input: m.input, thinkingLevelMap: m.thinkingLevelMap })) };
     },
     save(configuration: RuntimeProviderConfiguration) {
       return mutate(configuration.providerId, data => {

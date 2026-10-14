@@ -62,4 +62,19 @@ describe("provider configuration storage", () => {
     expect(stored.thinkingLevelMap).toBeUndefined();
     expect(stored.input).toEqual(["text", "image"]);
   });
+  it("stores the levels a model offers, returns them, and keeps them through a discovery refresh", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "provider-config-"));
+    const store = createProviderConfigurationStore(dir);
+    const thinkingLevelMap = { minimal: null, xhigh: "xhigh" };
+    await store.save({ ...configuration, models: [{ id: "first", reasoning: true, thinkingLevelMap }] });
+    expect((await store.get("custom"))?.models[0]?.thinkingLevelMap).toEqual(thinkingLevelMap);
+    // Discovery saves the listed models without a map; the user's choice must survive it.
+    await store.save({ ...configuration, models: [{ id: "first", contextWindow: 8000 }] });
+    const refreshed = (await store.get("custom"))?.models[0];
+    expect(refreshed?.thinkingLevelMap).toEqual(thinkingLevelMap);
+    expect(refreshed?.contextWindow).toBe(8000);
+    // An explicit save from the editor replaces it, including with no restriction.
+    await store.save({ ...configuration, models: [{ id: "first", thinkingLevelMap: undefined }] });
+    expect((await store.get("custom"))?.models[0]?.thinkingLevelMap).toBeUndefined();
+  });
 });
