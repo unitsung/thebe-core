@@ -350,6 +350,14 @@ describe("external MCP client registry", () => {
         registry.runtimeServers().find((entry) => entry.name === "extra")
           ?.enabled
       ).toBe(true);
+
+      // Description and exposure survive registration so a search server can be made loadable by tool_search.
+      await registry.addServer({ name: "findable", url, description: "Web search", exposure: "deferred" });
+      expect(registry.runtimeServers().find((entry) => entry.name === "findable")).toMatchObject({
+        description: "Web search",
+        exposure: "deferred",
+      });
+      await expect(registry.addServer({ name: "bad", url, exposure: "everywhere" as never })).rejects.toThrow("exposure");
       expect((await registry.listTools()).map((tool) => tool.name)).toEqual(
         expect.arrayContaining(["mcp:music/ping", "mcp:extra/ping"])
       );

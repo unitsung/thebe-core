@@ -26,7 +26,9 @@ export async function handleMcpProductRoutes(
       }
       const input = { name: body.name, url: body.url as string | undefined, command: body.command as string | undefined,
         args: body.args as string[] | undefined, env: body.env as Record<string, string> | undefined,
-        headers: body.headers as Record<string, string> | undefined };
+        headers: body.headers as Record<string, string> | undefined,
+        description: body.description as string | undefined,
+        exposure: body.exposure as "codemode" | "deferred" | "direct" | "hidden" | undefined };
       try { return json(toProductMcpServer(await agent.addMcpServer(input)), 201); }
       catch (error) { return invalidBody(error instanceof Error ? error.message : "MCP registration failed"); }
     }

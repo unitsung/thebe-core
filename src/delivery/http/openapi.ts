@@ -1961,6 +1961,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "object",
               additionalProperties: { type: "string" },
             },
+            description: { type: "string", maxLength: 300 },
+            exposure: {
+              type: "string",
+              enum: ["codemode", "deferred", "direct", "hidden"],
+              description:
+                "How the model reaches the tools. Default codemode; deferred makes them loadable by tool_search.",
+            },
           },
           description:
             "Provide either url or command. Saved disabled; enable separately. Credentials are never returned.",

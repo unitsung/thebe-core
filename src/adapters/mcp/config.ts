@@ -23,6 +23,12 @@ export function validateMcpRegistration(input: McpServerRegistration): void {
   if (input.args !== undefined && (!Array.isArray(input.args) || input.args.some((arg) => typeof arg !== "string"))) {
     throw new Error("MCP arguments must be strings");
   }
+  if (input.description !== undefined && (typeof input.description !== "string" || input.description.length > 300)) {
+    throw new Error("MCP description must be a string of at most 300 characters");
+  }
+  if (input.exposure !== undefined && !EXPOSURES.includes(input.exposure)) {
+    throw new Error("MCP exposure must be codemode, deferred, direct or hidden");
+  }
   for (const map of [input.env, input.headers]) {
     if (map !== undefined && (!map || typeof map !== "object" || Array.isArray(map) || Object.values(map).some((value) => typeof value !== "string"))) {
       throw new Error("MCP environment and headers must contain string values");
