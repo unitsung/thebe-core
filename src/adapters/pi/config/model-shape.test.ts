@@ -18,3 +18,18 @@ describe("provider-scoped model availability", () => {
     expect(resolveModelRef(lookup, "opencode", "muse-spark-1.3-free")).toBeUndefined();
   });
 });
+
+describe("placeholder limits", () => {
+  it("reports Pi's default pair as unknown and leaves real sizes alone", async () => {
+    const { withoutPlaceholderLimits } = await import("./model-shape.ts");
+    expect(withoutPlaceholderLimits({ contextWindow: 128000, maxOutputTokens: 16384 })).toEqual({
+      contextWindow: undefined, maxOutputTokens: undefined,
+    });
+    expect(withoutPlaceholderLimits({ contextWindow: 262144, maxOutputTokens: 32768 })).toEqual({
+      contextWindow: 262144, maxOutputTokens: 32768,
+    });
+    expect(withoutPlaceholderLimits({ contextWindow: 128000, maxOutputTokens: 8192 })).toEqual({
+      contextWindow: 128000, maxOutputTokens: 8192,
+    });
+  });
+});

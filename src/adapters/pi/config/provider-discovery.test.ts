@@ -43,3 +43,25 @@ describe("service model discovery", () => {
     expect(request.mock.calls[0]?.[0]).toBe("https://api.cline.bot/api/v1/ai/cline/recommended-models");
   });
 });
+
+describe("limits in a discovered list", () => {
+  it("takes the sizes the service reports and keeps earlier ones where it reports none", async () => {
+    const saved: RuntimeProviderConfiguration = {
+      ...configuration,
+      models: [{ id: "kept", contextWindow: 64000, maxTokens: 4096 }, { id: "updated", contextWindow: 8000 }],
+    };
+    const request = vi.fn().mockResolvedValue(Response.json({ data: [
+      { id: "kept" },
+      { id: "updated", context_length: 200000, max_completion_tokens: 16000 },
+      { id: "fresh", context_window: 32768 },
+      { id: "bare" },
+    ] }));
+    const models = await discoverProviderModels(saved, {}, request);
+    const byId = Object.fromEntries(models.map(model => [model.id, model]));
+    expect(byId.kept).toMatchObject({ contextWindow: 64000, maxTokens: 4096 });
+    expect(byId.updated).toMatchObject({ contextWindow: 200000, maxTokens: 16000 });
+    expect(byId.fresh).toMatchObject({ contextWindow: 32768 });
+    expect(byId.bare?.contextWindow).toBeUndefined();
+    expect(byId.bare?.maxTokens).toBeUndefined();
+  });
+});

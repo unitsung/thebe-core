@@ -1,4 +1,5 @@
 import type { RuntimeProviderConfiguration } from "../../../agent/runtime/interface.ts";
+import { reportedLimits } from "./model-limits.ts";
 
 /** Discovery uses the configured service origin, never a shared catalogue. */
 export async function discoverProviderModels(
@@ -41,7 +42,14 @@ export async function discoverProviderModels(
       if (seen.has(id)) return [];
       seen.add(id);
       const previous = configuration.models.find(model => model.id === id);
-      return [{ ...previous, id, name: row.displayName ?? row.display_name ?? row.name ?? previous?.name ?? id }];
+      // What the service says about this model wins over what was saved or catalogued before;
+      // a service that reports nothing leaves the earlier values in place.
+      return [{
+        ...previous,
+        id,
+        name: row.displayName ?? row.display_name ?? row.name ?? previous?.name ?? id,
+        ...reportedLimits(row),
+      }];
     });
   }
   throw new Error("Model discovery endpoint is unavailable");

@@ -39,3 +39,18 @@ export function resolveModelRef(
 ): PiModelShape | undefined {
   return getModel(providerId, modelId) as PiModelShape | undefined;
 }
+
+/**
+ * Pi fills a model that has no size in `models.json` with 128000 / 16384. After one discovery round
+ * trip those invented numbers sit in the saved configuration next to real ones, so a client could not
+ * tell a reported window from a placeholder. The exact default pair is therefore reported as unknown.
+ */
+const PI_DEFAULT_CONTEXT_WINDOW = 128_000;
+const PI_DEFAULT_MAX_TOKENS = 16_384;
+
+export function withoutPlaceholderLimits<T extends { contextWindow?: number; maxOutputTokens?: number }>(model: T): T {
+  if (model.contextWindow === PI_DEFAULT_CONTEXT_WINDOW && model.maxOutputTokens === PI_DEFAULT_MAX_TOKENS) {
+    return { ...model, contextWindow: undefined, maxOutputTokens: undefined };
+  }
+  return model;
+}

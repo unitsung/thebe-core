@@ -9,6 +9,7 @@ import {
   modelKey,
   resolveModelRef as resolvePiModel,
   toRuntimeModel,
+  withoutPlaceholderLimits,
   type PiModelShape,
 } from "./config/model-shape.ts";
 import { syncAgentModelsFile } from "./config/agent-dir.ts";
@@ -313,9 +314,11 @@ export async function createPiCodingAgentRuntime(
         const keys = await availableKeys(providerId);
         return discovered.map((model) => {
           const registered = modelRuntime.getModel(providerId, model.id);
-          return toRuntimeModel(
-            registered ?? { ...model, provider: providerId },
-            keys
+          return withoutPlaceholderLimits(
+            toRuntimeModel(
+              registered ?? { ...model, provider: providerId },
+              keys
+            )
           );
         });
       }
