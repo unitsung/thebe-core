@@ -80,7 +80,7 @@
 
 **吞掉的错误**：22 个空 `catch {}`，42 个只有注释的 `catch`；64 处 fire-and-forget 的 `void`；`AgentStore.list()` 每次读取全部会话文件，任何一个文件损坏都会让整个列表失败。
 
-**其他**：`adapters/google` 约 1800 行，用别的产品（Antigravity / Gemini CLI）的公开 OAuth 客户端 ID 并发送其客户端头，因为 Pi 删掉了内置条目。这是账号/条款风险，不是代码质量问题，需要你来决定留不留。
+**其他**：`adapters/google` 约 1800 行，用别的产品（Antigravity / Gemini CLI）的公开 OAuth 客户端 ID 并发送其客户端头，因为 Pi 删掉了内置条目。这是账号/条款风险。**2026-10-14 已按用户决定整体移除**（含 `THEBE_ANTIGRAVITY_ENDPOINT` 等环境变量和文档章节）。
 
 ### 4.3 这次顺手发现、不属于上面分类的
 
@@ -130,7 +130,7 @@
 
 1. bash 走 A 还是 B。
 2. 第一层的修补可以现在开始吗？（每项一个提交、带测试，不动架构。）
-3. `adapters/google` 留不留。
+3. `adapters/google`：已决定移除并已完成。
 4. 第二层的顺序是否同意：权限模型 → 守卫 → 沙箱 → 审批合一 → 上下文 → 目标验证 → 配置 → 拆分。
 
 ## 8. 参考位置

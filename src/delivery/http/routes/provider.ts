@@ -217,7 +217,7 @@ async function handleProviderAction(
     const model = models[0];
     if (!model) {
       // The auth-level probe already reached the provider (that is how
-      // provider-owned sessions such as Antigravity report health); with no
+      // providers that own their sessions report health); with no
       // model to run, report that result instead of failing.
       return json({
         ok: true,

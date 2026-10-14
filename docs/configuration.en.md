@@ -108,43 +108,6 @@ from the TUI settings or through `GET /v1/provider`; credentials are kept in the
 agent directory, never in `config.json`. `POST /v1/provider/{id}/test` checks a
 provider with a real probe.
 
-### Google / Antigravity (OAuth)
-
-`google-antigravity` signs in with a Google account and talks to Cloud Code
-Assist (`https://cloudcode-pa.googleapis.com/v1internal`). It supports OAuth
-only, no API key, and appears in `GET /v1/provider` with `authMethods: ["oauth"]`.
-
-The OAuth client secrets are not bundled with the code. Before sign-in or token
-refresh, set the one for the client you use; otherwise the call fails with a
-clear error:
-
-```bash
-export THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET=...    # Antigravity
-export THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET=...     # Gemini CLI
-```
-
-- **Models:** the offline seed has only `gemini-3-pro` and `gemini-3-flash`; the real list comes from `v1internal:fetchAvailableModels` and is cached (`GET /v1/model?provider=google-antigravity`, or "fetch models" in the TUI or app, refreshes it; with `PI_OFFLINE` only the cache is read).
-- **Auth:** the provider reads Core's credential file, so Pi sessions, HTTP, the TUI, and the mobile app share one Google session. Logging out invalidates the Pi side on its next request; no copy is left in Pi's `auth.json`.
-- **Transport:** `v1internal:streamGenerateContent?alt=sse` with the Cloud Code Assist envelope. `THEBE_ANTIGRAVITY_ENDPOINT` points it at a local proxy or test server.
-
-Headless sign-in (used by the TUI settings and the mobile app):
-
-```bash
-# 1. Get the authorization URL (the response has url / instructions, pending is true)
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/authorize
-# 2. After signing in in a browser, send back the code or the whole callback URL
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/callback \
-  -H 'content-type: application/json' \
-  -d '{"code":"http://localhost:51121/oauth-callback?code=..."}'
-# 3. Sign out
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/logout
-```
-
-Credentials are written to `antigravity.json` in the agent directory (mode 0600),
-with access and refresh tokens, expiry, the Google account email, and the Cloud
-project id (discovered with `loadCodeAssist`, created with `onboardUser` if
-needed).
-
 ## Service connections
 
 Each service appears in the capability catalog only when all of its required

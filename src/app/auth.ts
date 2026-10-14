@@ -2,8 +2,7 @@ import type { RuntimeAuth } from "../agent/runtime/interface.ts";
 
 /**
  * API-key and OAuth lifecycle stay on the runtime.
- * Pi keeps its own OAuth tokens; Antigravity credentials are written by the
- * Google adapter under the agent directory (see `adapters/google/antigravity.ts`).
+ * Pi keeps its own OAuth tokens.
  */
 export async function applyThebeApiKey(
   auth: RuntimeAuth,

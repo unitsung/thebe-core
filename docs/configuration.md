@@ -317,53 +317,6 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 `ResourceRef.provider` 增加 `docker` 取值。日志可能是多路复用流（非 TTY）或纯文本
 （TTY/代理），Core 会自动解复用并在无法识别时按文本处理。
 
-## Google / Antigravity（OAuth 登录）
-
-`google-antigravity` 走 Google 账号 OAuth，API 为 Cloud Code Assist
-（`https://cloudcode-pa.googleapis.com/v1internal`）。它只支持 OAuth，不接受 API key；
-`GET /v1/provider` 里以 `authMethods: ["oauth"]` 出现（Core 自己的 OAuth 条目优先于 Pi 的）。
-
-Pi 在 0.71 移除了内置的 Gemini CLI / Antigravity provider，所以 Core 在**它自己交给
-`createAgentSession` 的 `ModelRuntime` 上**用 `registerNativeProvider` 注册了一个
-（`src/adapters/google/antigravity-provider.ts`）。因此 Pi 会话里 `provider: "google-antigravity"`
-和其它 provider 一样可用：模型可解析、可列出、可对话（工具调用、thinking、用量都在）。
-
-- **模型**：离线种子只有 `gemini-3-pro` / `gemini-3-flash`；真正的清单来自
-  `v1internal:fetchAvailableModels`，通过 provider 的 `fetchModels` 覆盖层发布进 Pi 的模型库
-  （`GET /v1/model?provider=google-antigravity`、App/TUI 的「自动获取模型」都会触发一次联网刷新，
-  结果缓存；`PI_OFFLINE` 时只读缓存）。
-- **认证**：provider 的 `apiKey.resolve` 直接读 Core 的凭据文件，所以 Pi 会话、HTTP 接口、
-  TUI 设置页、手机 App 共用同一个 Google 会话；`/v1/provider/google-antigravity/oauth/logout`
-  一登出，Pi 侧下一次请求即失效（不会在 Pi 的 `auth.json` 里留副本）。
-- **传输**：`v1internal:streamGenerateContent?alt=sse` + Cloud Code Assist 信封，
-  消息/工具转换复用 pi-ai 的 Gemini 实现（Claude 模型自动改用 `parameters` 字段）。
-  `THEBE_ANTIGRAVITY_ENDPOINT` 可把端点指到本机代理/测试服务器（默认 Google）。
-  OAuth 客户端密钥不随代码发布：登录和刷新令牌前需设置 `THEBE_GOOGLE_ANTIGRAVITY_CLIENT_SECRET`（Antigravity）或 `THEBE_GOOGLE_GEMINI_CLI_CLIENT_SECRET`（Gemini CLI），未设置时报明确错误。
-
-Headless 登录流程（TUI 设置页与移动端都用这一套）：
-
-```bash
-# 1. 取授权地址（响应里带 url / instructions，pending 为 true）
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/authorize
-# 2. 浏览器完成登录后，把授权码或整段回调 URL 回传
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/callback \
-  -H 'content-type: application/json' \
-  -d '{"code":"http://localhost:51121/oauth-callback?code=..."}'
-# 3. 退出登录
-curl -s -X POST localhost:8787/v1/provider/google-antigravity/oauth/logout
-```
-
-凭据写在 agent 目录的 `antigravity.json`（0600，与 Pi 的 `auth.json` 同级），包含 access/refresh
-token、到期时间、Google 账号邮箱与 Cloud 项目 id（`loadCodeAssist` 发现，必要时用 `onboardUser` 自动
-开项目）。`POST /v1/provider/{id}/test` 先做令牌 + `fetchAvailableModels` + `generateContent` 探针，
-再用拿到的第一个模型跑一次真实 Pi 会话探测。
-
-两点边界：
-
-- 移动端 App 直接用同一个 Google 客户端在设备上登录（Keychain 存凭据），不需要 Core 在场。
-- pi-ai 的辅助函数（Gemini 消息/工具转换、事件流、成本计算）在运行时从 Pi 自己的依赖树按 URL 载入，
-  所以 Core 仍然只依赖 `@earendil-works/pi-coding-agent` 一个包，也不会打包出第二份 pi-ai。
-
 ## 命令风险守卫（homelab / NAS 启发式）
 
 `bash`、`write`、`edit` 的审批前会先过一遍命令风险守卫（`src/agent/security/command-risk.ts`，
