@@ -10,6 +10,7 @@ export const CARD_EXAMPLES = {
   table: { headers: ["A", "B"], rows: [["1", "2"]] },
   link: { title: "Title", url: "https://example.invalid" },
   todo: { items: [{ text: "Item", checked: false }] },
+  tree: { nodes: [{ name: "folder", isFolder: true, children: [{ name: "file.txt" }] }] },
 } as const;
 
 export const CARDS_CONTRACT_PATH = "contracts/cards.json";

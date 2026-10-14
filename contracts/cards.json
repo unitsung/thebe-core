@@ -44,6 +44,19 @@
           "checked": false
         }
       ]
+    },
+    "tree": {
+      "nodes": [
+        {
+          "name": "folder",
+          "isFolder": true,
+          "children": [
+            {
+              "name": "file.txt"
+            }
+          ]
+        }
+      ]
     }
   }
 }
