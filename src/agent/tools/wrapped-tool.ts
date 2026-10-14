@@ -2,6 +2,7 @@ import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { REDACTED, redactToolOutput } from "../security/redaction.ts";
+import { fenceToolOutput } from "../security/untrusted-fence.ts";
 import { limitModelOutput } from "./model-output-limit.ts";
 import type {
   CustomToolDefinition,
@@ -136,7 +137,12 @@ function wrapResult(
     details: result.details ?? {},
     content: result.content.map((block) => ({
       type: "text" as const,
-      text: `<tool_output tool="${toolName}">\n${limit === undefined ? redactToolOutput(block.text) : limitModelOutput(redactToolOutput(block.text), limit)}\n</tool_output>`,
+      text: fenceToolOutput(
+        toolName,
+        limit === undefined
+          ? redactToolOutput(block.text)
+          : limitModelOutput(redactToolOutput(block.text), limit)
+      ),
     })),
   };
 }

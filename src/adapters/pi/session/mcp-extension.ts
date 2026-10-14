@@ -3,6 +3,7 @@ import type { PermissionRequest, RuntimeMcpOptions, RuntimeMcpServer } from "../
 import { REDACTED, redactToolOutput, summarizeArgs } from "../../../agent/security/redaction.ts";
 import { StdioTransport } from "@earendil-works/pi-mcp";
 import { mcpServerEnv } from "../../mcp/env.ts";
+import { fenceToolOutput } from "../../../agent/security/untrusted-fence.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 
 type Hints = { readOnlyHint?: boolean } | undefined;
@@ -44,7 +45,7 @@ function redactBlocks(blocks: ResultBlock[], wrap?: string): { blocks: ResultBlo
     if (block.type !== "text" || typeof block.text !== "string") return block;
     const text = redactToolOutput(block.text);
     if (text.includes(REDACTED)) redacted = true;
-    return { ...block, text: wrap ? `<tool_output tool="${wrap}">\n${text}\n</tool_output>` : text };
+    return { ...block, text: wrap ? fenceToolOutput(wrap, text) : text };
   });
   return { blocks: next, redacted };
 }
