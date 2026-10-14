@@ -39,12 +39,13 @@ export function createRuntimeMcpOptions(
       // Resource tools (list/read) are not a server's own tools and only read.
       if (!owns(call.toolName)) return undefined;
       options.policy.registerTools([call.toolName]);
-      const decision = await options.policy.beforeToolCall({ toolCall: { name: call.toolName } });
+      const runKey = options.sessionId?.();
+      const decision = await options.policy.beforeToolCall({ toolCall: { name: call.toolName }, runKey });
       if (!decision.block) return undefined;
       await record(call.toolName, call.input, {
         responseBytes: 0, redactionFired: false, result: "denied", durationMs: 0,
       });
-      if (await options.policy.shouldStopAfterTurn()) await options.onStop?.();
+      if (await options.policy.shouldStopAfterTurn(runKey)) await options.onStop?.();
       return { block: decision.reason ?? "denied" };
     },
     async afterCall(call, outcome) {

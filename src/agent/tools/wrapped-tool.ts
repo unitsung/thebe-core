@@ -31,8 +31,10 @@ export function wrapCustomTools(
     ...tool,
     execute: async (toolCallId, params, signal) => {
       const started = Date.now();
+      const runKey = options.sessionId?.();
       const decision = await options.policy.beforeToolCall({
         toolCall: { name: tool.name },
+        runKey,
       });
       if (decision.block) {
         await options.audit?.append({
@@ -45,7 +47,7 @@ export function wrapCustomTools(
           result: "denied",
           durationMs: Date.now() - started,
         });
-        if (await options.policy.shouldStopAfterTurn()) {
+        if (await options.policy.shouldStopAfterTurn(runKey)) {
           await options.onStop?.();
         }
         return wrapResult(tool.name, limit, {

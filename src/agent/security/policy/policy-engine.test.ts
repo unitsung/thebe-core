@@ -139,3 +139,40 @@ describe("PolicyEngine hooks (§4.4 deny-latch via shouldStopAfterTurn, Q9)", ()
     ).resolves.toEqual({});
   });
 });
+
+describe("run state per session", () => {
+  const make = (maxToolCalls = 3) =>
+    createPolicyEngine({ now: () => new Date(), maxToolCalls, allowedToolNames: ["a"] });
+
+  it("keeps one session's budget when another session starts a run", async () => {
+    const policy = make();
+    policy.beginRun("A");
+    await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    policy.beginRun("B");
+    expect(policy.runSnapshot("A").toolCalls).toBe(2);
+    expect(policy.runSnapshot("B").toolCalls).toBe(0);
+  });
+
+  it("exhausts only the session that used its calls", async () => {
+    const policy = make(2);
+    for (let i = 0; i < 2; i += 1) await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    const blockedA = await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    const allowedB = await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "B" });
+    expect(blockedA.block).toBe(true);
+    expect(allowedB.block).toBeUndefined();
+    expect(await policy.shouldStopAfterTurn("A")).toBe(true);
+    expect(await policy.shouldStopAfterTurn("B")).toBe(false);
+  });
+
+  it("forgets a finished run, and callers without a key share the default run", async () => {
+    const policy = make();
+    await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    policy.endRun("A");
+    expect(policy.runSnapshot("A").toolCalls).toBe(0);
+    await policy.beforeToolCall({ toolCall: { name: "a" } });
+    expect(policy.runSnapshot().toolCalls).toBe(1);
+    policy.beginRun();
+    expect(policy.runSnapshot().toolCalls).toBe(0);
+  });
+});

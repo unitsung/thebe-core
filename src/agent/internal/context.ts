@@ -738,9 +738,15 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         await opened.session.reloadResources?.();
         resourcesNeedingReload.delete(sid);
       }
+      // This run's events come from this session's own log. The shared `lastEvents` buffer is
+      // kept for the control-plane view, but a prompt result built from it picked up whatever
+      // another session emitted in the meantime.
+      const runEvents: NormalizedEvent[] = [];
+      const captureRunEvent = (event: NormalizedEvent) => void runEvents.push(event);
       if (!queueOnly) {
-        policy.beginRun();
+        policy.beginRun(sid);
         eventLog.lastEvents.length = 0;
+        eventLog.sessionLog(sid).listeners.add(captureRunEvent);
       }
       const body = asPromptInput(input);
       const promptText = body.text.trim();
@@ -754,7 +760,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       if (queueOnly) {
         if (mode === "steer") await opened.session.steer(body.text);
         else await opened.session.followUp(body.text);
-        return promptResult(opened.session, eventLog.lastEvents, sid);
+        return promptResult(opened.session, eventLog.sessionLog(sid).events, sid);
       }
       const guard = createStreamGuard({
         ttfbMs: options.ttfbMs,
@@ -798,7 +804,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         else if (mode === "followUp") await opened.session.followUp(body.text);
         else await opened.session.prompt(body);
         if (mode === "prompt") autoSummary.schedule(sid);
-        return promptResult(opened.session, eventLog.lastEvents, sid);
+        return promptResult(opened.session, runEvents, sid);
       } catch (error) {
         if (state.abortRequested.delete(sid)) throw error;
         eventLog.appendEvent(sid, {
@@ -810,6 +816,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         state.streaming.delete(sid);
         unsub();
         guard.dispose();
+        policy.endRun(sid);
+        eventLog.sessionLog(sid).listeners.delete(captureRunEvent);
         permissions.nonInteractiveRuns.delete(sid);
         state.promptLocks.delete(sid);
       }

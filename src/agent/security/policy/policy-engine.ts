@@ -60,10 +60,23 @@ export function createPolicyEngine(options: {
   const maxToolCalls = options.maxToolCalls ?? 50;
   const maxBlocks = options.maxBlocks ?? 3;
   const allowedToolNames = [...(options.allowedToolNames ?? CONTAINER_TOOL_NAMES)];
-  // Mutable per-Run state. Hooks close over this; beginRun() resets it.
-  let run: PolicyRunState = createPolicyRunState();
+  // Mutable per-Run state, one per run key (a session id). Concurrent sessions, goals and
+  // subagents each count their own calls; before this, one object was shared and every new
+  // prompt reset everyone else's budget. Callers without a key (control-plane invocations)
+  // share the default entry.
+  const runs = new Map<string, PolicyRunState>();
+  const DEFAULT_RUN = "";
+  const runFor = (runKey: string | undefined): PolicyRunState => {
+    const key = runKey ?? DEFAULT_RUN;
+    let state = runs.get(key);
+    if (!state) {
+      state = createPolicyRunState();
+      runs.set(key, state);
+    }
+    return state;
+  };
 
-  function noteBlock(): void {
+  function noteBlock(run: PolicyRunState): void {
     run.blocks += 1;
     if (run.blocks >= maxBlocks) {
       run.violationLatch = true;
@@ -74,11 +87,15 @@ export function createPolicyEngine(options: {
     registerTools(names: readonly string[]): void {
       for (const name of names) if (!allowedToolNames.includes(name)) allowedToolNames.push(name);
     },
-    beginRun(): void {
-      run = createPolicyRunState();
+    beginRun(runKey?: string): void {
+      runs.set(runKey ?? DEFAULT_RUN, createPolicyRunState());
     },
-    runSnapshot(): PolicyRunState {
-      return { ...run };
+    /** Forget a finished run so the map does not grow with every session ever prompted. */
+    endRun(runKey?: string): void {
+      runs.delete(runKey ?? DEFAULT_RUN);
+    },
+    runSnapshot(runKey?: string): PolicyRunState {
+      return { ...runFor(runKey) };
     },
     allow(
       name: string,
@@ -108,8 +125,11 @@ export function createPolicyEngine(options: {
      */
     async beforeToolCall(context: {
       toolCall: { name: string };
+      runKey?: string;
     }): Promise<{ block?: boolean; reason?: string }> {
+      let run: PolicyRunState | undefined;
       try {
+        run = runFor(context.runKey);
         const decision = decide({
           toolName: context.toolCall.name,
           runState: run,
@@ -130,7 +150,7 @@ export function createPolicyEngine(options: {
               run.violationLatch = true;
             }
           }
-          noteBlock();
+          noteBlock(run);
           return { block: true, reason: decision.reason };
         }
         if (run.toolCalls >= maxToolCalls) {
@@ -138,7 +158,7 @@ export function createPolicyEngine(options: {
         }
         return {};
       } catch (error) {
-        noteBlock();
+        noteBlock(run ?? runFor(undefined));
         return {
           block: true,
           reason:
@@ -147,8 +167,9 @@ export function createPolicyEngine(options: {
       }
     },
     /** Must not throw. True after deny/violation latch; this is how a Run stops. */
-    async shouldStopAfterTurn(): Promise<boolean> {
+    async shouldStopAfterTurn(runKey?: string): Promise<boolean> {
       try {
+        const run = runFor(runKey);
         return run.denyLatch || run.violationLatch;
       } catch {
         return false;

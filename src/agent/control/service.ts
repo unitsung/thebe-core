@@ -252,6 +252,9 @@ export function createControlApi(
       const result = await tool.execute("mcp", params);
       return ok(result.content.map((block) => block.text).join("\n"));
     }
+    // A control-plane invocation is its own run: it has no session key, so without this the shared
+    // default budget would count every invocation since the last diagnosis.
+    policy.beginRun();
     const tools = wrapCustomTools(baseTools(), { policy, audit });
     const tool = tools.find((item) => item.name === name);
     if (!tool) {
