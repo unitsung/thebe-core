@@ -3,7 +3,7 @@
  * "verifying" grows the input quadratically. A run has no turn boundary here, so lookups are
  * counted inside a short window: a new question a few minutes later starts fresh.
  */
-export const RESEARCH_LIMITS = { webSearch: 3, musicResearch: 2, total: 4, windowMs: 3 * 60_000 } as const;
+export const RESEARCH_LIMITS = { webSearch: 8, musicResearch: 6, total: 12, windowMs: 3 * 60_000 } as const;
 
 export type ResearchBudget = {
   /** Returns a note for the model when the lookup must be skipped, or undefined to run it. */
