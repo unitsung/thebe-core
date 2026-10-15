@@ -417,6 +417,29 @@ describe("PiCodingAgentRuntime sessions", () => {
       session.dispose();
     }
   });
+  it("a session with no configured model is a 409 the caller can act on, and an unknown requested model a 404", async () => {
+    const { ModelRuntime } = await loadPiSdk();
+    const modelRuntime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      allowModelNetwork: false,
+      refreshOnCreate: false,
+    });
+    const runtime = await createPiCodingAgentRuntime({
+      cwd: process.cwd(),
+      inMemory: true,
+      modelRuntime,
+    });
+    const agent = createThebeAgent({ runtime, provider: emptyProvider() });
+    await expect(agent.createSession()).rejects.toMatchObject({
+      status: 409,
+      code: "no_model_configured",
+      message: expect.stringContaining("No configured model"),
+    });
+    await expect(
+      agent.createSession({ model: { providerId: "nowhere", modelId: "nothing" } })
+    ).rejects.toMatchObject({ status: 404, code: "model_not_found" });
+  });
+
   it("rejects a terminal model failure and allows the next turn to recover", async () => {
     const { faux, runtime } = await piWithFaux();
     const agent = createThebeAgent({ runtime, provider: emptyProvider() });

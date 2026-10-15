@@ -8,6 +8,7 @@ import type {
   RuntimeSession,
 } from "../../../agent/runtime/interface.ts";
 import { PI_BUILTIN_TOOLS } from "../../../agent/runtime/interface.ts";
+import { httpError } from "../../../agent/types.ts";
 import {
   permissionRisk,
   summarizeArgs,
@@ -349,10 +350,20 @@ export async function openPiSession(
   if (!resolvedModel && !requestedModel) {
     resolvedModel = (await args.modelRuntime.getAvailable())[0];
   }
-  if (!resolvedModel)
-    throw new Error(
-      "No configured model is available. Configure a provider and select a model."
-    );
+  if (!resolvedModel) {
+    // A missing setup is the caller's to fix, not a server fault, so it is not a 500.
+    throw requestedModel
+      ? httpError(
+          404,
+          `Model ${requestedModel.providerId}/${requestedModel.modelId} is not available. Pick one from the configured providers.`,
+          "model_not_found"
+        )
+      : httpError(
+          409,
+          "No configured model is available. Configure a provider and select a model.",
+          "no_model_configured"
+        );
+  }
 
   const { session } = await sdk.createAgentSession({
     cwd: create.cwd ?? cwd,
