@@ -49,7 +49,31 @@ function gondolinMicroVmAvailable(): boolean {
     (bin) => spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0
   );
   if (!qemu) return false;
-  return process.platform === "darwin" || existsSync("/dev/kvm");
+  if (process.platform !== "darwin") return existsSync("/dev/kvm");
+  // The hypervisor can be reported as supported yet refuse to start a VM (HV_NO_DEVICE), so
+  // start an empty paused machine: still running at the timeout means HVF works.
+  const arm = process.arch === "arm64";
+  const probe = spawnSync(
+    arm ? "qemu-system-aarch64" : "qemu-system-x86_64",
+    [
+      "-accel",
+      "hvf",
+      "-machine",
+      arm ? "virt" : "q35",
+      "-cpu",
+      "host",
+      "-m",
+      "64",
+      "-display",
+      "none",
+      "-nodefaults",
+      "-S",
+      "-monitor",
+      "none",
+    ],
+    { stdio: "ignore", timeout: 2500, killSignal: "SIGKILL" }
+  );
+  return probe.signal === "SIGKILL";
 }
 
 async function piWithFaux(sessionDir?: string) {
@@ -436,7 +460,9 @@ describe("PiCodingAgentRuntime sessions", () => {
       message: expect.stringContaining("No configured model"),
     });
     await expect(
-      agent.createSession({ model: { providerId: "nowhere", modelId: "nothing" } })
+      agent.createSession({
+        model: { providerId: "nowhere", modelId: "nothing" },
+      })
     ).rejects.toMatchObject({ status: 404, code: "model_not_found" });
   });
 
