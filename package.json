@@ -14,6 +14,7 @@
   "scripts": {
     "build": "tsdown",
     "start": "node dist/serve.js",
+    "token": "node dist/token.js",
     "start:build": "npm run build && node dist/serve.js",
     "start:lan": "node scripts/start-lan.mjs",
     "start:lan:build": "npm run build && node scripts/start-lan.mjs",

@@ -229,6 +229,31 @@ Rules:
   `THEBE_TOKEN`. Confirm `GET /v1/health` succeeds and the API docs open, then
   open Activity — the App's first product call is `GET /v1/activity`.
 
+### 4.1 Home network mode (no TLS)
+
+The App accepts plain `http://` addresses, and private-network hosts are trusted automatically, so a
+Core used only inside the home needs no certificate. Publish the port on the host's LAN address
+only: set `THEBE_BIND=<LAN address>` in `deploy/.env` and `docker compose up -d`. Then enter
+`http://<LAN address>:8787` and the token in the App.
+
+What this costs: the token crosses your network in plaintext, so anyone on it who captures a request
+holds full access. Keep `THEBE_REMOTE_BASH` off unless you trust the network, never bind `0.0.0.0`,
+and do not forward the port from your router. Use a TLS path above for anything beyond the home.
+
+### 4.2 Managing the token
+
+```bash
+docker compose exec thebe-core node dist/token.js status   # where it comes from, when it changed
+docker compose exec thebe-core node dist/token.js show     # print it
+docker compose exec thebe-core node dist/token.js rotate   # new token; the old one stops at once
+docker compose exec thebe-core node dist/token.js revoke   # close access until you rotate again
+```
+
+Outside a container: `npm run token -- rotate` (same `THEBE_CONFIG_DIR` as the running Core). A running
+Core reads the token file on every request, so rotate and revoke need no restart. A token set through
+`THEBE_TOKEN` belongs to your environment: change it there; the command refuses. A lost device is
+handled by `rotate` and pasting the new token into the devices you still use.
+
 ## 5. Process isolation boundary
 
 Core and its Pi runtime do **not** provide an OS sandbox by themselves. The

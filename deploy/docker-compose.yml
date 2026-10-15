@@ -30,7 +30,9 @@ services:
       THEBE_WORKSPACE_DIR: /workspace
       HOME: /data/home
     ports:
-      - "127.0.0.1:8787:8787"
+      # Loopback by default. For a home LAN set THEBE_BIND to the host's LAN address in .env
+      # (never 0.0.0.0); see docs/DEPLOYMENT.md "Home network mode".
+      - "${THEBE_BIND:-127.0.0.1}:8787:8787"
     volumes:
       - ./data:/data
       - ${THEBE_WORKSPACE:-./workspace}:/workspace

@@ -7,6 +7,11 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ## [Unreleased]
 
+### Added
+
+- `thebe token status|show|rotate|revoke` (`dist/token.js`, `npm run token`). The server reads the token file on every request, so a rotation or revocation applies without a restart; a missing or empty token file refuses every protected request. A `THEBE_TOKEN` environment token is never changed by the command.
+- `THEBE_BIND` in `deploy/.env` publishes the container on the host's LAN address for home-network use (docs/DEPLOYMENT.md §4.1); loopback remains the default.
+
 ### Changed
 
 - The command guard reads a command as shell before its text rules apply. `rm -r -f /`, `r''m -rf /`, `rm -rf "$HOME"`, `cd / && rm -rf *`, `sh -c '…'`, `eval`, `find / -delete` and `chmod -R` on the root are blocked; `curl … | sh`, a run-time-built shell command, a command name known only at run time and reads of SSH or cloud credentials ask first. The parser loads at startup; without it the text rules decide alone.

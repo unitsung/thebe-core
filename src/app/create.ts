@@ -34,7 +34,7 @@ export function createThebeApp(options: {
   runtime: AgentRuntime;
   provider: ContainerInfoProvider;
   version?: string;
-  token?: string;
+  token?: string | import("../delivery/http/token-store.ts").TokenSource;
   auditPath?: string;
   agentStoreDir?: string;
   now?: () => Date;

@@ -4,12 +4,14 @@ import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
+import type { TokenSource } from "./token-store.ts";
 
 export { validateRequestSecurity } from "./security.ts";
 
 export type ThebeHttpHandlerOptions = {
   version: string;
-  token?: string;
+  /** A fixed token, or a source asked on every request so rotation needs no restart. */
+  token?: string | TokenSource;
   agent?: ThebeAgent;
   allowedHosts?: string[];
   deviceStoreDir?: string;
@@ -18,7 +20,12 @@ export type ThebeHttpHandlerOptions = {
 
 /** Stable public composition shell for the HTTP agent. */
 export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
-  const token = options.token?.trim() || undefined;
+  const source: TokenSource | undefined =
+    typeof options.token === "function"
+      ? options.token
+      : options.token?.trim()
+        ? () => (options.token as string).trim()
+        : undefined;
   const allowedHostsSet = options.allowedHosts
     ? new Set(options.allowedHosts)
     : undefined;
@@ -38,9 +45,11 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // Documentation is intentionally readable without the shared token so
       // the iOS "Open API docs" link can launch Safari. Swagger UI still asks
       // for X-Thebe-Token through its Authorize control when trying requests.
-      if (token && !isDocumentationRequest(request)) {
+      if (source && !isDocumentationRequest(request)) {
         const received = request.headers.get("X-Thebe-Token") ?? "";
-        if (!tokensEqual(received, token)) {
+        // A source with no token (revoked, unreadable) refuses everything rather than opening up.
+        const expected = source();
+        if (!expected || !tokensEqual(received, expected)) {
           return json({ ok: false }, 401);
         }
       }
