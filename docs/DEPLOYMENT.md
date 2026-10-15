@@ -240,19 +240,31 @@ What this costs: the token crosses your network in plaintext, so anyone on it wh
 holds full access. Keep `THEBE_REMOTE_BASH` off unless you trust the network, never bind `0.0.0.0`,
 and do not forward the port from your router. Use a TLS path above for anything beyond the home.
 
-### 4.2 Managing the token
+### 4.2 Managing tokens
+
+Give each device its own token, so a lost phone costs one `revoke`, not a new token on every device:
+
+```bash
+docker compose exec thebe-core node dist/token.js create "My iPhone"   # shown once; only a hash is kept
+docker compose exec thebe-core node dist/token.js list                 # name, created, last used
+docker compose exec thebe-core node dist/token.js revoke "My iPhone"   # that device only
+```
+
+The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 
 ```bash
 docker compose exec thebe-core node dist/token.js status   # where it comes from, when it changed
 docker compose exec thebe-core node dist/token.js show     # print it
-docker compose exec thebe-core node dist/token.js rotate   # new token; the old one stops at once
-docker compose exec thebe-core node dist/token.js revoke   # close access until you rotate again
+docker compose exec thebe-core node dist/token.js rotate   # replace it; the old one stops at once
+docker compose exec thebe-core node dist/token.js revoke --all   # every device token, and close the shared one
 ```
 
-Outside a container: `npm run token -- rotate` (same `THEBE_CONFIG_DIR` as the running Core). A running
-Core reads the token file on every request, so rotate and revoke need no restart. A token set through
-`THEBE_TOKEN` belongs to your environment: change it there; the command refuses. A lost device is
-handled by `rotate` and pasting the new token into the devices you still use.
+Outside a container: `npm run token -- <command>` with the same `THEBE_CONFIG_DIR` as the running Core.
+Device tokens live hashed in `{config}/tokens.json` (mode 0600) with last-use times in
+`token-usage.json`; the server re-reads them as they change, so every command applies at once, with no
+restart. If nothing is configured, nothing is accepted. A token set through `THEBE_TOKEN` belongs to
+your environment: `rotate` and `revoke --all` leave it alone. Tokens carry no scopes: every token has
+the same access.
 
 ## 5. Process isolation boundary
 

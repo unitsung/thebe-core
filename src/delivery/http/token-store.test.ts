@@ -4,7 +4,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { runTokenCommand } from "../cli/token.ts";
 import { createThebeHttpHandler } from "./handler.ts";
-import { fileTokenSource, revokeToken, rotateToken, tokenFilePath, tokenStatus } from "./token-store.ts";
+import {
+  createDeviceToken,
+  createTokenVerifier,
+  fileTokenSource,
+  readDeviceTokens,
+  readTokenUsage,
+  revokeDeviceToken,
+  revokeToken,
+  rotateToken,
+  tokenFilePath,
+  tokenStatus,
+} from "./token-store.ts";
 
 async function dir() {
   return mkdtemp(join(tmpdir(), "thebe-token-"));
@@ -77,7 +88,8 @@ describe("thebe token", () => {
     expect(token).toMatch(/^[0-9a-f]{64}$/);
     expect((await run(["show"], configDir)).out[0]).toBe(token);
     expect((await run(["status"], configDir)).out[0]).toContain("changed");
-    const revoked = await run(["revoke"], configDir);
+    expect((await run(["revoke"], configDir)).code).toBe(2);
+    const revoked = await run(["revoke", "--all"], configDir);
     expect(revoked.code).toBe(0);
     expect(revoked.out).toEqual([]);
     expect((await run(["show"], configDir)).out[0]).not.toBe(token);
@@ -88,5 +100,91 @@ describe("thebe token", () => {
     const configDir = await dir();
     expect((await run(["rotate"], configDir, { THEBE_TOKEN: "x" })).code).toBe(1);
     expect((await run(["frobnicate"], configDir)).code).toBe(2);
+  });
+});
+
+describe("per-device tokens", () => {
+  const first = "a".repeat(64);
+  const second = "b".repeat(64);
+
+  it("each device has its own token, and revoking one leaves the others", async () => {
+    const configDir = await dir();
+    await writeFile(tokenFilePath(configDir), "shared-token\n");
+    createDeviceToken({ configDir, name: "iPhone", generate: () => first });
+    createDeviceToken({ configDir, name: "iPad", generate: () => second });
+    const handler = createThebeHttpHandler({ version: "t", token: createTokenVerifier({ configDir, env: {} }) });
+    for (const token of [first, second, "shared-token"]) {
+      expect((await handler.handle(request(token))).status).not.toBe(401);
+    }
+    expect((await handler.handle(request("c".repeat(64)))).status).toBe(401);
+
+    expect(revokeDeviceToken({ configDir, name: "iphone" })).toBe(true);
+    expect((await handler.handle(request(first))).status).toBe(401);
+    expect((await handler.handle(request(second))).status).not.toBe(401);
+    expect((await handler.handle(request("shared-token"))).status).not.toBe(401);
+    expect(revokeDeviceToken({ configDir, name: "iPhone" })).toBe(false);
+  });
+
+  it("only a hash is kept, and the file is private", async () => {
+    const configDir = await dir();
+    createDeviceToken({ configDir, name: "iPhone", generate: () => first });
+    const text = await readFile(join(configDir, "tokens.json"), "utf8");
+    expect(text).not.toContain(first);
+    expect(readDeviceTokens(configDir)[0]?.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect((await stat(join(configDir, "tokens.json"))).mode & 0o777).toBe(0o600);
+  });
+
+  it("names must be unique, plain, and not the reserved ones", async () => {
+    const configDir = await dir();
+    expect(createDeviceToken({ configDir, name: "iPhone" }).ok).toBe(true);
+    expect(createDeviceToken({ configDir, name: "IPHONE" })).toEqual({ ok: false, reason: "exists" });
+    expect(createDeviceToken({ configDir, name: "default" })).toEqual({ ok: false, reason: "reserved-name" });
+    expect(createDeviceToken({ configDir, name: "env" })).toEqual({ ok: false, reason: "reserved-name" });
+    expect(createDeviceToken({ configDir, name: "../x" })).toEqual({ ok: false, reason: "invalid-name" });
+    expect(createDeviceToken({ configDir, name: "" })).toEqual({ ok: false, reason: "invalid-name" });
+  });
+
+  it("the environment token and device tokens work side by side, and nothing configured accepts nothing", async () => {
+    const configDir = await dir();
+    createDeviceToken({ configDir, name: "iPad", generate: () => second });
+    const verify = createTokenVerifier({ configDir, env: { THEBE_TOKEN: "env-token" } });
+    expect(verify.verify("env-token")).toBe("env");
+    expect(verify.verify(second)).toBe("iPad");
+    expect(verify.verify("")).toBeUndefined();
+    expect(createTokenVerifier({ configDir: await dir(), env: {} }).verify("anything")).toBeUndefined();
+  });
+
+  it("records when a device last used its token, at most once a minute", async () => {
+    const configDir = await dir();
+    createDeviceToken({ configDir, name: "iPad", generate: () => second });
+    let clock = Date.parse("2026-10-15T10:00:00Z");
+    const verify = createTokenVerifier({ configDir, env: {}, now: () => clock });
+    verify.verify(second);
+    expect(readTokenUsage(configDir).iPad).toBe("2026-10-15T10:00:00.000Z");
+    clock += 10_000;
+    verify.verify(second);
+    expect(readTokenUsage(configDir).iPad).toBe("2026-10-15T10:00:00.000Z");
+    clock += 60_000;
+    verify.verify(second);
+    expect(readTokenUsage(configDir).iPad).toBe("2026-10-15T10:01:10.000Z");
+  });
+
+  it("create and list through the command", async () => {
+    const configDir = await dir();
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = { log: (l: string) => out.push(l), error: (l: string) => err.push(l), env: {} };
+    expect(runTokenCommand(["create", "My", "iPhone"], configDir, io)).toBe(0);
+    expect(out[0]).toMatch(/^[0-9a-f]{64}$/);
+    out.length = 0;
+    expect(runTokenCommand(["list"], configDir, io)).toBe(0);
+    expect(out[0]).toContain("My iPhone");
+    expect(out[0]).toContain("last used never");
+    expect(runTokenCommand(["create", "my iphone"], configDir, io)).toBe(1);
+    expect(runTokenCommand(["revoke", "nobody"], configDir, io)).toBe(1);
+    expect(runTokenCommand(["revoke", "My iPhone"], configDir, io)).toBe(0);
+    out.length = 0;
+    runTokenCommand(["list"], configDir, io);
+    expect(out).toEqual(["no device tokens"]);
   });
 });

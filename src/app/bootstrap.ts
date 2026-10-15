@@ -1,7 +1,7 @@
 import { parsePermissionMode } from "../agent/runtime/interface.ts";
 import { shellParserReady } from "../agent/security/shell-parse.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createDockerEngineProviderFromEnv } from "../adapters/docker/adapter.ts";
@@ -25,7 +25,7 @@ import {
 import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
-import { fileTokenSource } from "../delivery/http/token-store.ts";
+import { createTokenVerifier } from "../delivery/http/token-store.ts";
 import { createThebeApp } from "./create.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
@@ -197,11 +197,9 @@ export async function bootstrapThebe(
     runtime,
     provider,
     version,
-    // Read from the file on every request, so `thebe token rotate` applies without a restart.
-    token:
-      tokenResolution.path && existsSync(tokenResolution.path)
-        ? fileTokenSource(tokenResolution.path)
-        : tokenResolution.token,
+    // The token file, `THEBE_TOKEN` and the per-device tokens are read as they change, so
+    // `thebe token` commands apply without a restart.
+    token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
