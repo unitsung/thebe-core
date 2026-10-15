@@ -184,7 +184,7 @@ export function createTokenVerifier(options: {
   let listStamp = "";
   let devices: DeviceToken[] = [];
   const used = new Map<string, string>();
-  let lastFlush = 0;
+  const flushed = new Map<string, number>();
 
   const loadDevices = () => {
     try {
@@ -202,8 +202,8 @@ export function createTokenVerifier(options: {
   };
   const noteUse = (name: string) => {
     used.set(name, new Date(now()).toISOString());
-    if (now() - lastFlush >= USAGE_FLUSH_MS) {
-      lastFlush = now();
+    if (now() - (flushed.get(name) ?? 0) >= USAGE_FLUSH_MS) {
+      flushed.set(name, now());
       try {
         writeFileAtomicSync(usagePath(options.configDir), `${JSON.stringify({ ...readTokenUsage(options.configDir), ...Object.fromEntries(used) })}\n`, { mode: 0o600 });
       } catch {
