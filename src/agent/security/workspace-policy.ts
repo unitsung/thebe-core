@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   PermissionPreflightDecision,
   PermissionRequest,
@@ -25,6 +25,37 @@ function isInside(candidate: string, root: string): boolean {
     relativePath === "" ||
     (!relativePath.startsWith("..") && !isAbsolute(relativePath))
   );
+}
+
+/**
+ * Whether a tool may change `rawPath` without asking under `acceptEdits`: it resolves, through
+ * symlinks, to a place inside the workspace and not into `.git`, which Codex's workspace-write
+ * sandbox also keeps read-only. A file that does not exist yet is judged by its nearest existing
+ * parent.
+ */
+export async function isAutoEditablePath(
+  workspacePath: string,
+  rawPath: string
+): Promise<boolean> {
+  const root = await realpath(resolve(workspacePath)).catch(() =>
+    resolve(workspacePath)
+  );
+  let existing = resolve(root, rawPath);
+  const rest: string[] = [];
+  for (;;) {
+    const real = await realpath(existing).catch(() => undefined);
+    if (real) {
+      existing = real;
+      break;
+    }
+    const parent = dirname(existing);
+    if (parent === existing) return false;
+    rest.unshift(basename(existing));
+    existing = parent;
+  }
+  const target = resolve(existing, ...rest);
+  if (!isInside(target, root)) return false;
+  return !relative(root, target).split(sep).includes(".git");
 }
 
 export function createWorkspaceAccessPolicy(workspacePath: string): {

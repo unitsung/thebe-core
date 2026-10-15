@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 import { createJobBook } from "./job-runner.ts";
 import {
   createPipelineAdvancer,
-  pipelineAdvanceIntervalMs,
 } from "./advancer.ts";
 import type { DownloadItem } from "../capabilities/pipeline.ts";
 
@@ -140,20 +139,5 @@ describe("pipeline advancer", () => {
     // A transient failure stays tracked so the next tick retries it.
     expect(advancer.size()).toBe(1);
     spy.mockRestore();
-  });
-});
-
-describe("pipeline advance interval", () => {
-  it("defaults to one minute and can be disabled", () => {
-    expect(pipelineAdvanceIntervalMs({})).toBe(60_000);
-    expect(
-      pipelineAdvanceIntervalMs({ THEBE_PIPELINE_ADVANCE_MS: "1500" })
-    ).toBe(1500);
-    expect(pipelineAdvanceIntervalMs({ THEBE_PIPELINE_ADVANCE_MS: "0" })).toBe(
-      0
-    );
-    expect(
-      pipelineAdvanceIntervalMs({ THEBE_PIPELINE_ADVANCE_MS: "nonsense" })
-    ).toBe(60_000);
   });
 });

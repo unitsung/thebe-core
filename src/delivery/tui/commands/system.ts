@@ -1,7 +1,15 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import type { SelectItem, TuiMode } from "../rendering/adapter.ts";
+import { PERMISSION_MODES, parsePermissionMode } from "../../../agent/runtime/interface.ts";
 import type { PermissionMode, ThebeAgent, ThinkingLevel } from "../../../agent/index.ts";
+
+const PERMISSION_MODE_SUMMARY: Record<PermissionMode, string> = {
+  plan: "read-only; shell and write tools are denied",
+  manual: "risky tools ask before running",
+  acceptEdits: "edits inside the workspace and sandboxed commands run without asking",
+  bypassPermissions: "nothing asks; the command guard and sandbox are lifted",
+};
 import type { ThemeName } from "../theme.ts";
 import {
   ensureThebeConfigFile,
@@ -23,31 +31,18 @@ export async function handleSystemCommand(
   switch (name) {
           case "permissions": {
             const applyPermissionMode = async (mode: PermissionMode): Promise<void> => {
+              if (mode === "bypassPermissions" && !agent.getFullAccessSupport().allowed) {
+                host.notice("bypassPermissions needs THEBE_FULL_ACCESS=on on this host");
+                return;
+              }
               agent.setPermissionMode(mode);
               await saveThebeConfig({ permissionMode: mode });
-              host.notice(
-                mode === "full-access"
-                  ? "permission mode: full-access — approval-gated tools will run without asking"
-                  : mode === "read-only"
-                    ? "permission mode: read-only — shell and write tools are denied"
-                    : "permission mode: ask — approval-gated tools will ask before running",
-              );
-            };
-            const normalizePermissionMode = (value: string): PermissionMode | undefined => {
-              const normalized = value.trim().toLowerCase();
-              if (normalized === "ask") return "ask";
-              if (normalized === "read-only" || normalized === "readonly" || normalized === "deny") {
-                return "read-only";
-              }
-              if (normalized === "full" || normalized === "full-access" || normalized === "auto") {
-                return "full-access";
-              }
-              return undefined;
+              host.notice(`permission mode: ${mode} — ${PERMISSION_MODE_SUMMARY[mode]}`);
             };
             if (arg) {
-              const chosen = normalizePermissionMode(arg);
+              const chosen = parsePermissionMode(arg);
               if (!chosen) {
-                host.notice("usage: /permissions ask|read-only|full-access (aliases: auto, full, readonly)");
+                host.notice("usage: /permissions plan|manual|acceptEdits|bypassPermissions");
               } else {
                 await applyPermissionMode(chosen);
               }
@@ -56,26 +51,16 @@ export async function handleSystemCommand(
             const current = agent.permissionMode();
             const selected = await attachSelectList(
               host.tui,
-              [
-                {
-                  label: `${current === "ask" ? "★ " : "  "}Ask before risky actions`,
-                  value: "ask",
-                },
-                {
-                  label: `${current === "read-only" ? "★ " : "  "}Read-only — deny shell and write tools`,
-                  value: "read-only",
-                },
-                {
-                  label: `${current === "full-access" ? "★ " : "  "}Full access — auto-approve risky tools`,
-                  value: "full-access",
-                },
-              ],
+              PERMISSION_MODES.map((mode) => ({
+                label: `${current === mode ? "★ " : "  "}${mode} — ${PERMISSION_MODE_SUMMARY[mode]}`,
+                value: mode,
+              })),
               host.editor,
               undefined,
-              host.getActiveSelectListTheme(),
+              host.getActiveSelectListTheme()
             );
             if (selected) {
-              await applyPermissionMode(normalizePermissionMode(selected.value) ?? "ask");
+              await applyPermissionMode(parsePermissionMode(selected.value) ?? "manual");
             }
             break;
           }
@@ -209,21 +194,14 @@ export async function handleSystemCommand(
                     await host.options.onTuiModeChange(value as TuiMode);
                   }
                 } else if (id === "permissionMode") {
-                  const mode: PermissionMode =
-                    value === "full-access"
-                      ? "full-access"
-                      : value === "read-only"
-                        ? "read-only"
-                        : "ask";
-                  agent.setPermissionMode(mode);
-                  await saveThebeConfig({ permissionMode: mode });
-                  host.notice(
-                    mode === "full-access"
-                      ? "permission mode: full-access — approval-gated tools will run without asking"
-                      : mode === "read-only"
-                        ? "permission mode: read-only — shell and write tools are denied"
-                        : "permission mode: ask — approval-gated tools will ask before running",
-                  );
+                  const mode = parsePermissionMode(value) ?? "manual";
+                  if (mode === "bypassPermissions" && !agent.getFullAccessSupport().allowed) {
+                    host.notice("bypassPermissions needs THEBE_FULL_ACCESS=on on this host");
+                  } else {
+                    agent.setPermissionMode(mode);
+                    await saveThebeConfig({ permissionMode: mode });
+                    host.notice(`permission mode: ${mode} — ${PERMISSION_MODE_SUMMARY[mode]}`);
+                  }
                 } else if (id === "autoCompact") {
                   const enabled = value === "true";
                   await saveThebeConfig({ autoCompact: enabled });

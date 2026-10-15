@@ -18,6 +18,7 @@ import type { McpRegistry } from "../agent/extensions/mcp.ts";
 import type { JudgmentModel } from "../agent/judgment/interface.ts";
 import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
+import type { AgentMemoryStore } from "../agent/memory/store.ts";
 import type { ArtifactStore } from "../agent/artifacts/store.ts";
 import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
 import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/product.ts";
@@ -47,6 +48,7 @@ export function createThebeApp(options: {
   autoSummaryDelayMs?: number;
   permissionMode?: import("../agent/runtime/interface.ts").PermissionMode;
   fullAccessAllowed?: boolean;
+  remoteBashAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -54,6 +56,7 @@ export function createThebeApp(options: {
   judgment?: JudgmentModel;
   judgmentSites?: JudgmentEnabledSites;
   settingsStore?: AgentSettingsStore;
+  memoryStore?: AgentMemoryStore;
   mcp?: McpRegistry;
   artifactStore?: ArtifactStore;
   strmRepairProvider?: StrmRepairProvider;
@@ -88,6 +91,7 @@ export function createThebeApp(options: {
     autoSummaryDelayMs: options.autoSummaryDelayMs,
     permissionMode: options.permissionMode,
     fullAccessAllowed: options.fullAccessAllowed,
+    remoteBashAllowed: options.remoteBashAllowed,
     maxSubagentConcurrency: options.maxSubagentConcurrency,
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,
@@ -101,6 +105,7 @@ export function createThebeApp(options: {
     judgment: options.judgment,
     judgmentSites: options.judgmentSites,
     settingsStore: options.settingsStore,
+    memoryStore: options.memoryStore,
     artifactStore: options.artifactStore,
     strmRepairProvider: options.strmRepairProvider,
     navidrome: options.navidrome,

@@ -38,7 +38,6 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_STORE_DIR`: session, goal, and subagent metadata. Pi transcripts are not stored here.
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
-- `THEBE_MODEL_RESULT_LIMIT` (optional, off by default): a positive integer (minimum `2000`) that caps how many characters of one custom-tool result enter the model context. JSON keeps the leading entries and states how many were omitted; logs and plain text keep the tail. Unset (or `off` / `0`) sends results as the tool produced them, like the Pi agent. It only affects what the model sees: capability and MCP callers still get the full result, and Pi built-in tools (`read`, `bash`, and so on) are unaffected.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
 ## Managing settings
@@ -57,7 +56,7 @@ effective settings and where each field came from (`configured`, `default`,
 and `autoSummaryDelayMs` (clamped to 60 s to 15 min). Concurrency limits, the
 workspace, and the output directory are startup or authorization boundaries:
 changing concurrency returns `409 restart_required`, and paths are read-only.
-Permission mode uses `GET/PATCH /v1/settings/permissions`. Both write to the same
+The default permission mode uses `GET/PATCH /v1/settings/permissions`; one session's mode uses `GET/PUT /v1/session/{id}/permissions`. Both write to the same
 `config.json`. Enabled skill, extension, and prompt resources are also stored
 there as identity, version, source, and kind metadata, never as skill bodies or
 file contents.
@@ -73,7 +72,7 @@ file contents.
   "autoCompact": true,
   "autoSummary": true,
   "autoSummaryDelayMs": 120000,
-  "permissionMode": "ask",
+  "permissionMode": "manual",
   "maxSubagentConcurrency": 3,
   "maxSubagentsPerParent": 2,
   "enabledResources": [
@@ -96,7 +95,7 @@ file contents.
 ```
 
 - `autoSummaryDelayMs` is in milliseconds; `60000` or `120000` summarizes after the user has been idle for one or two minutes.
-- `permissionMode` is `ask`, `read-only`, or `full-access`. `ask` prompts before approval-gated tools such as `bash`, `write`, and `edit`; `read-only` refuses them; `full-access` allows them automatically. `full-access` only skips the application-level confirmation and is not an OS sandbox. You can also change it at runtime with `/permissions ask|read-only|full-access` or the settings menu.
+- `permissionMode` is the host default for new sessions: `plan`, `manual`, `acceptEdits`, or `bypassPermissions` (see [Permission modes](#permission-modes)). Only these four names are read. You can also change it at runtime with `/permissions` or the settings menu.
 - `maxSubagentConcurrency` and `maxSubagentsPerParent` cap global child concurrency and per-parent concurrency for one-shot in-memory subagents (clamped to 1 to 16; a profile's `maxTurns` is clamped to 1 to 50). Normal sessions are unaffected.
 - `workspacePath` is the mandatory workspace authorization boundary. Absolute paths are used as given; relative paths resolve against the Thebe config directory, not the launch directory. `read`, `ls`, `find`, and `grep` inside the workspace do not prompt; reads outside it need confirmation. `AGENT.md`, `AGENTS.md`, and `CLAUDE.md` are treated like any other file: readable inside the workspace, confirmed outside. `bash`, `write`, and `edit` follow the permission mode.
 - `outputDirectory` is only the default location when the user explicitly asks to save a generated document. Ordinary answers are shown in the message.
@@ -177,7 +176,7 @@ An acquisition job can start from a torrent or from a network-drive transfer:
 `pipeline.acquire` with `kind: "cloud_transfer"` and a `transferSource` fetches
 the share/direct link through OpenList's offline download, then runs the same
 place → scan → verify steps. Core keeps jobs acquired in the running process
-moving on its own (`THEBE_PIPELINE_ADVANCE_MS`, default `60000`; `0` disables),
+moving on its own (every minute),
 so an import finishes while the phone is asleep. A job restored after a Core
 restart is not auto-resumed — call `pipeline.advance` to continue it — and a
 failed job is never retried automatically.
@@ -345,82 +344,76 @@ Before approval, `bash`, `write`, and `edit` pass through a command risk guard
 - Storage systems recognized: ZFS, Btrfs, EXT4 (including xfs and f2fs), NTFS, NFS; the result carries a `storageSystem` field.
 - Workspace escapes: writing outside the workspace, or `rm`/`mv`/`cp`/`chmod`/`chown` on paths outside it, is raised to `dangerous`.
 - Direct calls to the Docker Engine API (`curl --unix-socket /var/run/docker.sock ... /containers/create`, podman remote) go through `docker-api-guard.ts`: `HostConfig.Privileged=true`, `Binds` with the host root or `docker.sock`, `CapAdd: SYS_ADMIN|ALL`, and `/volumes/prune` or `/system/prune` are always `critical`. If the `/containers/create` body cannot be parsed, it is downgraded to `dangerous` (human review), not allowed.
-- `THEBE_COMMAND_GUARD=off` turns this guard off entirely, leaving everything to approval.
+- The guard is always on. Only `bypassPermissions` (below) lifts it, for one session.
+
+## Permission modes
+
+One setting decides how much a session may do without asking. The names are Claude Code's.
+
+| Mode | What runs without asking | What is asked or refused |
+| --- | --- | --- |
+| `plan` | Reads inside the workspace | Everything that changes something is refused |
+| `manual` | Reads inside the workspace | `bash`, `write`, `edit`, memory and write tools of services are asked each time |
+| `acceptEdits` | `write` and `edit` inside the workspace (never `.git`), and `bash` when a sandbox that confines it is in place | Anything the command guard flags, paths outside the workspace, `bash` with no sandbox, `memory`, MCP and service writes |
+| `bypassPermissions` | Everything; the command guard and the sandbox are lifted | Nothing. Host-gated (see below) |
+
+`acceptEdits` follows Codex's on-request policy with a restricted sandbox: the sandbox, not a list of
+"safe" commands, is what makes running a command without asking acceptable, so with no sandbox
+running a command is asked about as usual. Even with one, a script that `tree-sitter-bash` cannot read, or
+that holds a forced `rm` (found through `sudo`, `env`, `trap` and `bash -c`, as Codex's check does), is asked about. `.git` stays read-only as it does in Codex's
+workspace-write sandbox.
+
+- The host default comes from `permissionMode` in `config.json` (default `manual`). A session can set its own with `PUT /v1/session/{id}/permissions` (`{"mode": "plan"}`; `{"mode": null}` returns to the host default), and `GET` on the same path says which mode it runs in.
+- A subagent, a scheduled occurrence, a background goal, an `/mcp` caller and a non-interactive turn take the host default, not the session's own mode.
+- A remembered denial, redaction and the audit log apply in every mode. `critical` commands are refused in every mode except `bypassPermissions`.
+- `POST /v1/session/{id}/full-access` with `{"enabled": true|false}` still works and is `bypassPermissions` on or off.
+
+### `bypassPermissions`
+
+Host-gated and session-scoped. It lifts the command guard, the OS sandbox and tool approval for one
+conversation, and leaves redaction and audit in place.
+
+```bash
+export THEBE_FULL_ACCESS=on   # allow bypassPermissions on this host; default off
+```
+
+Only a host that sets this can use it; the HTTP/App client cannot grant it to itself
+(`GET /v1/settings/full-access` reports `{ "allowed": … }`; a request without the host's permission gets 403
+`full_access_not_allowed`). The model reads untrusted content (web pages, tool output, remote MCP), so in
+this mode a mistaken command can damage the host: use it only when needed. The Gondolin micro-VM backend is
+chosen at session open, so with it a change applies to the next session.
 
 ## Command sandbox
 
-Core and the runtime do not provide an OS sandbox by default. The supported
-boundary is the container; these optional backends isolate the `bash` tool.
-They are off by default.
+Core does not provide an OS sandbox by default; the supported boundary is the container. One variable
+turns a sandbox on for the `bash` tool:
 
-- **bubblewrap** (`THEBE_SANDBOX=bwrap`, Linux): read-only host root, tmpfs `/tmp`, remounted `/dev` and `/proc`, only the workspace writable, `--unshare-all`, `--cap-drop ALL`, `--die-with-parent`. The network stays on unless `THEBE_SANDBOX_NETWORK=deny`. If `bwrap` is missing (macOS, ordinary containers), Core falls back to running unsandboxed and logs a warning.
-- **docker** (`THEBE_SANDBOX=docker`): a throwaway container with `--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`, `--network none` by default, and only the workspace mounted read-write. The image is `THEBE_SANDBOX_IMAGE` (default `alpine:3`). Without a Docker daemon it falls back to local execution with a warning.
-- **seatbelt** (`THEBE_SANDBOX=seatbelt`, macOS development): `sandbox-exec` with a generated profile; writes are limited to the workspace and `TMPDIR`, network denied by default.
-- **gondolin** (`THEBE_SANDBOX=gondolin`): a throwaway micro-VM (QEMU) with hardware isolation. The workspace is mounted at `/workspace` in the guest and paths that leave it throw; HTTP egress is mediated (`THEBE_SANDBOX_NETWORK=deny` means an empty allowlist). Missing package or QEMU gives a clear error with the fix, and never silently falls back to local execution.
+```bash
+THEBE_SANDBOX=auto   # off (default) | auto | bwrap | docker | seatbelt | gondolin
+```
+
+`auto` picks what the machine can run: `seatbelt` on macOS, `bwrap` on Linux, else `docker`. A backend that
+was asked for and is missing **refuses the command** (it does not run bare); install it or set
+`THEBE_SANDBOX=off`. `thebe doctor` and `GET /v1/system/isolation` report whether it is in effect.
+
+- **bubblewrap** (Linux): read-only host root, tmpfs `/tmp`, remounted `/dev` and `/proc`, only the workspace writable, `--unshare-all`, `--cap-drop ALL`, `--die-with-parent`.
+- **docker**: a throwaway `alpine:3` container with `--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`, only the workspace mounted read-write.
+- **seatbelt** (macOS): `sandbox-exec` with a generated profile; writes are limited to the workspace and `TMPDIR`.
+- **gondolin**: a throwaway micro-VM (QEMU) with hardware isolation. The workspace is mounted at `/workspace` in the guest and paths that leave it throw. A missing package or QEMU gives a clear error with the fix, and never falls back to local execution.
+
+The network stays on in every backend: the sandbox confines files, not connections.
 
 ```bash
 # gondolin setup
 npm install @earendil-works/gondolin@0.13.0                   # optional dependency; may already be installed
 brew install qemu                                           # Linux: sudo apt install qemu-system-arm
-THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe     # first start downloads a ~200 MB guest image
+THEBE_SANDBOX=gondolin thebe                                # first start downloads a ~200 MB guest image
 ```
 
 `GONDOLIN_DEFAULT_IMAGE` selects the guest image (default `alpine-base:latest`).
-For the strict NAS setup use `THEBE_SANDBOX=bwrap`, `THEBE_SANDBOX_NETWORK=deny`,
-and leave `THEBE_COMMAND_GUARD` on.
 
-## Scenario profiles
-
-`THEBE_SCENARIO` bundles the safety switches into presets:
-
-| Scenario          | Command guard | Workspace escape | Sandbox                | Docker guard                           |
-| ----------------- | ------------- | ---------------- | ---------------------- | -------------------------------------- |
-| `nas-strict`      | on            | forbidden        | `bwrap`                | all (including volume prune)           |
-| `homelab-host`    | on            | allowed          | off                    | host-root mounts and volume prune only |
-| `microvm-sandbox` | on            | forbidden        | `gondolin`, no network | all                                    |
-| `yolo-guarded`    | on            | forbidden        | `bwrap`                | all                                    |
-
-```bash
-export THEBE_SCENARIO=nas-strict
-```
-
-- An explicit `THEBE_*` variable always overrides the preset (for example `THEBE_SANDBOX=off` overrides only the sandbox).
-- Without `THEBE_SCENARIO` the defaults are: guard on, sandbox off, network on, workspace escape forbidden.
-- `THEBE_ALLOW_WORKSPACE_ESCAPES=true` allows workspace escapes on its own.
-- A scenario is a preset, not a second safety engine; the guard, sandbox, and Docker guard each still decide for themselves.
-
-## Full-access preset (off by default)
-
-The full-access preset is a host-gated, session-scoped switch that lifts the
-command guard, the OS sandbox, and tool approval for one conversation while
-leaving the workspace boundary, redaction, and audit in place. It is not the
-same as `permissionMode: full-access`, which only skips the application-level
-confirmation globally and is not an OS sandbox.
-
-```bash
-export THEBE_FULL_ACCESS=on   # allow the preset on this host; default off
-```
-
-Only a host that sets this can enable the preset; the HTTP/App client cannot
-grant it to itself. `GET /v1/settings/full-access` reports `{ "allowed": … }`
-and `POST /v1/session/{id}/full-access` with `{ "enabled": true|false }` toggles
-one session (403 `full_access_not_allowed` when the host has not allowed it).
-The session metadata carries `fullAccess` while it is active, for the client
-indicator.
-
-Scope and limits:
-
-- It applies to the enabled session only. A new session, a subagent, a scheduled
-  occurrence, a background goal, an `/mcp` caller, and a non-interactive turn do
-  not inherit it.
-- The guard is skipped in the permission preflight and the sandbox mode is read
-  per command, so enabling it mid-conversation takes effect on the next command.
-  The Gondolin micro-VM backend is chosen at session open, so with it the preset
-  applies to a session opened after enabling.
-- An explicit remembered denial and the workspace boundary still win, and audit
-  records are still written.
-- The model reads untrusted content (web pages, tool output, remote MCP). In this
-  mode a mistaken command can damage the host, so enable it only when needed.
+The command guard, the workspace confinement and the Docker API guard (privileged containers, host-root and
+`docker.sock` mounts, volume prune) are always on and have no switches.
 
 ## Judgment Model (off by default)
 

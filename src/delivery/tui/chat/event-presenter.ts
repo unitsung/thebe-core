@@ -25,6 +25,7 @@ import {
   createToolComponent,
   toolResultPayload,
 } from "./transcript.ts";
+import { memoryApprovalNotice } from "./memory-call.ts";
 import { ChatState } from "./state.ts";
 
 export type EventPresenterDeps = {
@@ -49,6 +50,8 @@ export type EventPresenterDeps = {
 /** Owns the mapping from Agent events and messages to transcript widgets. */
 export class EventPresenter {
   private readonly deps: EventPresenterDeps;
+  /** Arguments of tool calls in flight, so an approval prompt can show what the call would do. */
+  private readonly toolArgs = new Map<string, unknown>();
 
   constructor(deps: EventPresenterDeps) {
     this.deps = deps;
@@ -229,6 +232,7 @@ export class EventPresenter {
           state.thinkingBlock.finish();
         state.activeToolName = event.toolName;
         state.working?.setLabel(event.toolName);
+        if (event.toolName === "memory") this.toolArgs.set(event.toolCallId, event.args);
         let component = state.toolComponents.get(event.toolCallId);
         if (!component) {
           component = createToolComponent(
@@ -264,6 +268,7 @@ export class EventPresenter {
       }
       case "tool_end": {
         state.activeToolName = undefined;
+        this.toolArgs.delete(event.toolCallId);
         state.working?.setLabel("Working");
         const component = state.toolComponents.get(event.toolCallId);
         if (component) {
@@ -280,6 +285,10 @@ export class EventPresenter {
       case "permission_requested":
         state.pendingPermissionId = event.permissionId;
         this.deps.updateFooter();
+        if (event.toolName === "memory") {
+          const shown = memoryApprovalNotice(this.toolArgs.get(event.toolCallId));
+          if (shown) this.deps.notice(shown);
+        }
         void this.resolvePermissionInteractively(
           event.permissionId,
           event.toolName,

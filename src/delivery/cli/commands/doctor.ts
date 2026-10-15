@@ -22,7 +22,6 @@ export async function runDoctor(): Promise<number> {
   const lines: string[] = [];
   lines.push("Thebe Core — isolation check");
   lines.push("");
-  lines.push(`scenario:       ${report.scenario ?? "(none)"}`);
   lines.push(`command guard:  ${report.commandGuard ? "on" : "off"}`);
   lines.push(`workspace:      ${workspace.path ?? "(not configured)"}`);
   if (workspace.path) {

@@ -4,11 +4,7 @@ import {
   sandboxUnavailableReason,
   type SandboxMode,
 } from "./command-sandbox.ts";
-import {
-  resolveScenarioSettings,
-  scenarioFromEnv,
-  type ScenarioName,
-} from "./scenario-profile.ts";
+import { resolveHostSecurity } from "./host-security.ts";
 import type { DockerProxyPolicy } from "./docker-api-guard.ts";
 
 /**
@@ -21,7 +17,6 @@ import type { DockerProxyPolicy } from "./docker-api-guard.ts";
  * closed instead. `fallback` is the dangerous case and must be surfaced.
  */
 export type IsolationReport = {
-  scenario: ScenarioName | null;
   commandGuard: boolean;
   workspace: {
     path: string | null;
@@ -55,8 +50,8 @@ export function buildIsolationReport(
 ): IsolationReport {
   const env = options.env ?? process.env;
   const workspacePath = options.workspacePath?.trim() || null;
-  const settings = resolveScenarioSettings(scenarioFromEnv(env), env);
   const backends = sandboxAvailability(options.probes ?? {});
+  const settings = resolveHostSecurity(env, backends);
   const mode = settings.sandboxMode;
   const isMicroVm = mode === "gondolin";
   const available = backends[mode];
@@ -74,16 +69,6 @@ export function buildIsolationReport(
       "THEBE_ALLOWED_HOSTS=* accepts any Host header; the DNS-rebinding check is disabled.",
     );
   }
-  if (!settings.commandGuard) {
-    warnings.push(
-      "The command guard is off; destructive NAS commands are no longer screened.",
-    );
-  }
-  if (settings.workspaceEscapes) {
-    warnings.push(
-      "Workspace escapes are allowed; file tools and commands may write outside the workspace.",
-    );
-  }
   if (fallback) {
     warnings.push(
       `The ${mode} sandbox is unavailable; bash commands run unsandboxed.`,
@@ -91,7 +76,6 @@ export function buildIsolationReport(
   }
 
   return {
-    scenario: settings.scenario ?? null,
     commandGuard: settings.commandGuard,
     workspace: {
       path: workspacePath,

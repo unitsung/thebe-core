@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { parsedCommandRisk } from "./parsed-command-risk.ts";
 import {
   inspectDockerCommandSafety,
 } from "./docker-command-guard.ts";
@@ -55,7 +56,7 @@ export type AssessToolCallOptions = {
   /** Explicit opt-in to escape the workspace (old `allowGlobalEscapes`). */
   allowGlobalEscapes?: boolean;
   cache?: CommandRiskCache | null;
-  /** Docker control-plane policy for direct Docker API calls; see scenario profiles. */
+  /** Docker control-plane policy for direct Docker API calls; see `host-security.ts`. */
   dockerGuard?: DockerProxyPolicy;
 };
 
@@ -472,6 +473,11 @@ export function detectWorkspaceEscape(
   };
 }
 
+/** Whether recursive deletion of `path` is one of the catastrophic cases the critical rules name. */
+function isProtectedPath(path: string): boolean {
+  return CRITICAL_PATTERNS.some((item) => item.pattern.test(`rm -rf ${path}`));
+}
+
 export function assessCommand(
   command: string,
   options: { dockerGuard?: DockerProxyPolicy } = {},
@@ -503,6 +509,20 @@ export function assessCommand(
     }
   }
 
+  // 1b. Read the command as shell: quoting, split flags, nested shells and run-time paths that the
+  // spelling-based rules above and below do not see.
+  const parsed = parsedCommandRisk(trimmed, isProtectedPath);
+  if (parsed?.risk === "critical") {
+    return {
+      allowed: false,
+      risk: "critical",
+      reason: parsed.reason,
+      warnings: [`Critical risk: ${parsed.reason}`],
+      requiresConfirmation: false,
+      category: "filesystem",
+    };
+  }
+
   // 2. Check dedicated Docker container safety
   if (/\b(docker|podman)\b/.test(trimmed)) {
     const dockerAssessment = inspectDockerCommandSafety(trimmed);
@@ -522,6 +542,17 @@ export function assessCommand(
   // rules above never see the `docker` subcommand. `docker-api-guard.ts` decides.
   const apiAssessment = assessDockerApiCall(trimmed, options.dockerGuard);
   if (apiAssessment) return apiAssessment;
+
+  if (parsed?.risk === "dangerous") {
+    return {
+      allowed: false,
+      risk: "dangerous",
+      reason: parsed.reason,
+      warnings: [`High risk: ${parsed.reason}`],
+      requiresConfirmation: true,
+      category: "general",
+    };
+  }
 
   // 3. Check dangerous (requires human confirmation, blocked from automatic YOLO execution)
   for (const item of DANGEROUS_PATTERNS) {
@@ -747,11 +778,4 @@ export function commandGuardPreflight(
   if (assessment.risk === "critical") return "deny";
   if (assessment.risk === "dangerous") return "ask";
   return undefined;
-}
-
-/** Whether the guard runs (`THEBE_COMMAND_GUARD=off` disables it). */
-export function commandGuardEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return env.THEBE_COMMAND_GUARD?.trim().toLowerCase() !== "off";
 }

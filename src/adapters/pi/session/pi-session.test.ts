@@ -463,7 +463,8 @@ describe("PiCodingAgentRuntime sessions", () => {
     const agent = createThebeAgent({
       runtime,
       provider: emptyProvider(),
-      permissionMode: "full-access",
+      permissionMode: "bypassPermissions",
+      fullAccessAllowed: true,
     });
     const session = await agent.createSession();
 
@@ -514,7 +515,8 @@ describe("PiCodingAgentRuntime sessions", () => {
       runtime: first.runtime,
       provider: emptyProvider(),
       agentStoreDir: join(dir, "meta"),
-      permissionMode: "full-access",
+      permissionMode: "bypassPermissions",
+      fullAccessAllowed: true,
     });
     const session = await firstAgent.createSession();
     let taskId: string | undefined;
@@ -531,7 +533,8 @@ describe("PiCodingAgentRuntime sessions", () => {
         runtime: second.runtime,
         provider: emptyProvider(),
         agentStoreDir: join(dir, "meta"),
-        permissionMode: "full-access",
+        permissionMode: "bypassPermissions",
+        fullAccessAllowed: true,
       });
 
       await expect(
@@ -615,7 +618,7 @@ describe("PiCodingAgentRuntime sessions", () => {
         const agent = createThebeAgent({
           runtime,
           provider: emptyProvider(),
-          permissionMode: "full-access",
+          permissionMode: "acceptEdits",
         });
         const session = await agent.createSession();
 
@@ -662,11 +665,14 @@ describe("PiCodingAgentRuntime sessions", () => {
         const agent = createThebeAgent({
           runtime,
           provider: emptyProvider(),
-          permissionMode: "full-access",
           fullAccessAllowed: true,
           workspacePath: workspace,
         });
         const session = await agent.createSession();
+        // Approved ahead of time, so only the sandbox decides whether the command can write.
+        await agent.patchSession(session.thebeSessionId, {
+          rememberedPermissions: { bash: "allow" },
+        });
 
         // With the sandbox on, a write outside the workspace is refused.
         await agent.send("write outside", session.thebeSessionId);

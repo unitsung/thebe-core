@@ -1,4 +1,5 @@
-import { resolveModelResultLimit } from "../agent/tools/model-output-limit.ts";
+import { parsePermissionMode } from "../agent/runtime/interface.ts";
+import { shellParserReady } from "../agent/security/shell-parse.ts";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -25,7 +26,6 @@ import { applyThebeApiKey } from "./auth.ts";
 import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createThebeApp } from "./create.ts";
-import { DEFAULT_SESSION_IDLE_TIMEOUT_MS } from "../agent/index.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
@@ -39,6 +39,7 @@ import {
 import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbittorrent/tasks.ts";
 import { readJudgmentGate } from "../agent/judgment/gate.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
+import { createJsonMemoryStore } from "../agent/memory/store.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -72,6 +73,10 @@ export async function bootstrapThebe(
 ): Promise<ThebeBootstrap> {
   const fromDir = options?.fromDir ?? dirname(fileURLToPath(import.meta.url));
   loadEnvLocal(fromDir);
+  // The command guard reads scripts as shell; without the grammar it falls back to its text rules.
+  await shellParserReady().catch((error: unknown) => {
+    console.error(`Command guard: shell parser unavailable (${String(error)}); using text rules only.`);
+  });
   const userConfig = loadThebeUserConfig();
   const configuredWorkspacePath =
     userConfig.workspacePath?.trim() || process.env.THEBE_WORKSPACE_DIR?.trim();
@@ -187,36 +192,27 @@ export async function bootstrapThebe(
   const judgmentSites =
     judgmentGate.adapter === "jev" ? judgmentGate.sites : undefined;
 
-  const idleRaw = process.env.THEBE_SESSION_IDLE_TIMEOUT_MS;
-  const idleParsed =
-    idleRaw === undefined || idleRaw.trim() === ""
-      ? DEFAULT_SESSION_IDLE_TIMEOUT_MS
-      : Number(idleRaw);
   const app = createThebeApp({
     runtime,
     provider,
     version,
     token: tokenResolution.token,
-    modelResultLimit: resolveModelResultLimit(
-      process.env.THEBE_MODEL_RESULT_LIMIT
-    ),
     agentStoreDir,
     auditPath: process.env.THEBE_AUDIT_PATH,
     model: defaultModel,
     autoCompact: userConfig.autoCompact,
     autoSummary: userConfig.autoSummary,
     autoSummaryDelayMs: userConfig.autoSummaryDelayMs,
-    permissionMode: userConfig.permissionMode,
+    permissionMode: parsePermissionMode(userConfig.permissionMode),
     maxSubagentConcurrency: userConfig.maxSubagentConcurrency,
     maxSubagentsPerParent: userConfig.maxSubagentsPerParent,
     workspacePath,
     outputDirectory,
     allowedHosts: options?.allowedHosts,
-    sessionIdleTimeoutMs:
-      Number.isFinite(idleParsed) && idleParsed > 0 ? idleParsed : 0,
     judgment,
     judgmentSites,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
+    memoryStore: createJsonMemoryStore(join(configDir, "memory.json")),
     strmRepairProvider,
     navidrome,
     pipeline: {

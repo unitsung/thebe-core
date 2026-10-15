@@ -25,7 +25,8 @@ export function loadThebeUserConfig(): {
   autoCompact?: boolean;
   autoSummary?: boolean;
   autoSummaryDelayMs?: number;
-  permissionMode?: "ask" | "read-only" | "full-access";
+  /** As written in config.json. */
+  permissionMode?: string;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -38,7 +39,7 @@ export function loadThebeUserConfig(): {
       autoCompact?: boolean;
       autoSummary?: boolean;
       autoSummaryDelayMs?: number;
-      permissionMode?: "ask" | "read-only" | "full-access";
+      permissionMode?: string;
       maxSubagentConcurrency?: number;
       maxSubagentsPerParent?: number;
       workspacePath?: string;

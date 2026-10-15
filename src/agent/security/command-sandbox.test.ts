@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildBwrapArgs,
   buildBwrapCommandString,
+  sandboxedCommand,
   wrapCommandForSandbox,
 } from "./command-sandbox.ts";
 
@@ -122,5 +123,24 @@ describe("Sandbox modes", () => {
     expect(res.command).toBe("uptime");
     expect(res.applied).toBe(false);
     expect(res.warning).toContain("Micro-VM bash backend");
+  });
+});
+
+describe("sandboxedCommand", () => {
+  it("wraps the command when the backend is there", () => {
+    const wrapped = sandboxedCommand("ls", "bwrap", "/work", true, () => true);
+    expect(wrapped.applied).toBe(true);
+    expect(wrapped.command).toContain("bwrap");
+  });
+
+  it("refuses to run bare when a requested backend is missing", () => {
+    expect(() => sandboxedCommand("ls", "bwrap", "/work", true, () => false)).toThrow(
+      /bwrap sandbox is unavailable/
+    );
+  });
+
+  it("runs directly when no sandbox was asked for, and leaves the micro-VM to its own backend", () => {
+    expect(sandboxedCommand("ls", "off", "/work", true).command).toBe("ls");
+    expect(sandboxedCommand("ls", "gondolin", "/work", true).command).toBe("ls");
   });
 });

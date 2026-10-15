@@ -190,6 +190,17 @@ export function createSessionApi(
     ): Promise<{ thebeSessionId: string; fullAccess: boolean }> {
       return ctx.setSessionFullAccess(thebeSessionId, enabled);
     },
+    /** Set (or with `undefined`, clear) the permission mode of one session. */
+    setSessionPermissionMode(
+      thebeSessionId: string,
+      mode: import("../runtime/interface.ts").PermissionMode | undefined,
+    ) {
+      return ctx.setSessionPermissionMode(thebeSessionId, mode);
+    },
+    /** The permission mode a session runs in now. */
+    sessionPermissionMode(thebeSessionId: string) {
+      return ctx.sessionPermissionMode(thebeSessionId);
+    },
     async sessionStatus(): Promise<
       Array<AgentSessionMeta & { status: SessionRunStatus; streaming: boolean }>
     > {

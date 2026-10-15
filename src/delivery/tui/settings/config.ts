@@ -11,7 +11,8 @@ export type ThebeUserConfig = {
   autoCompact?: boolean;
   autoSummary?: boolean;
   autoSummaryDelayMs?: number;
-  permissionMode?: "ask" | "read-only" | "full-access";
+  /** As written in config.json. */
+  permissionMode?: string;
   steeringMode?: "one-at-a-time" | "all";
   followUpMode?: "one-at-a-time" | "all";
   hideThinking?: boolean;

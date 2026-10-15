@@ -33,7 +33,7 @@ Agent 设置以及每个字段的来源（`configured`、`default`、`environmen
 `derived`）。HTTP 只允许修改 `autoCompact`、`autoSummary` 和
 `autoSummaryDelayMs`；摘要延迟会限制在 60 秒到 15 分钟。并发上限、工作区
 和输出目录属于启动或授权边界：并发修改返回 `409 restart_required`，路径只读。
-权限模式继续使用 `GET/PATCH /v1/settings/permissions`，两类设置都会写入
+默认权限模式使用 `GET/PATCH /v1/settings/permissions`，单个会话的模式使用 `GET/PUT /v1/session/{id}/permissions`，设置都会写入
 同一个 `config.json`。已启用的 skill、extension 和 prompt 资源也会写入该配置；
 重启后 Core 会恢复这些资源的 identity、version、source 和 kind 元数据，不会把
 skill 正文或任意文件内容写入配置。
@@ -73,7 +73,7 @@ export EDITOR=vim
   "autoCompact": true,
   "autoSummary": true,
   "autoSummaryDelayMs": 120000,
-  "permissionMode": "ask",
+  "permissionMode": "manual",
   "maxSubagentConcurrency": 3,
   "maxSubagentsPerParent": 2,
   "enabledResources": [
@@ -97,7 +97,7 @@ export EDITOR=vim
 
 `autoSummaryDelayMs` 的单位是毫秒。建议设置为 `60000` 或 `120000`，表示用户停止操作 1 或 2 分钟后生成自动摘要。
 
-`permissionMode` 可选 `ask`、`read-only` 或 `full-access`。`ask` 会在 `bash`、`write`、`edit` 等 approval-gated tools 执行前询问；`read-only` 拒绝这些工具；`full-access` 会自动允许这些工具，只跳过应用层确认，不提供操作系统级沙箱。运行中也可以使用 `/permissions ask`、`/permissions read-only`、`/permissions full-access` 或设置菜单修改。
+`permissionMode` 是新会话的默认权限模式：`plan`、`manual`、`acceptEdits` 或 `bypassPermissions`（见下文“权限模式”）。只认这四个名字。运行中也可以使用 `/permissions` 或设置菜单修改。
 
 `maxSubagentConcurrency` 和 `maxSubagentsPerParent` 分别控制全局 child 并发数和单个父会话的并发数；它们只限制一次性 in-memory subagent，不影响普通会话。数值会被限制在 1–16，单个 profile 的 `maxTurns` 另行限制在 1–50。
 
@@ -119,7 +119,6 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_DIR` 单独改变 Pi agent 文件目录。
 - `THEBE_AGENT_STORE_DIR` 单独改变 Thebe 的会话与 Goal/子代理元数据目录；不存储 Pi transcript。
 - `THEBE_WORKSPACE_DIR` 在未设置配置文件 `workspacePath` 时提供 Thebe 文件工具和 TUI 的工作区；两者都未设置时 Thebe 拒绝启动，不会回退到进程启动目录。
-- `THEBE_MODEL_RESULT_LIMIT` 可选，默认关闭。设为正整数（最小 `2000`）时，限制单次自定义工具结果进入模型上下文的字符数：JSON 保留靠前条目并标明省略数量，日志和纯文本保留末尾。未设置（或 `off` / `0`）时按工具原样发送，与 Pi agent 行为一致。只影响给模型的文本，capability 与 MCP 调用方仍拿完整结果，Pi 内置工具（`read`、`bash` 等）不受影响。
 - `THEBE_TOOL_RESULT_COMPACTION` 可选，默认关闭。设为 `on` 时，每次调用模型前把模型已经据以回答过的工具结果缩短（本轮约 3000 字符，更早的轮次约 1200 字符，更早轮次的图片会被去掉）；模型最后一条消息之后新到的结果保持完整，会话记录不变。它减小输入，但会改写服务商已经见过的文本，从改写处起丢失提示缓存命中，所以只在输入体积比缓存复用更重要时开启。
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
@@ -151,7 +150,7 @@ Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBitto
 
 采集任务可以从种子开始，也可以从网盘转存开始：`pipeline.acquire` 传 `kind: "cloud_transfer"` 和
 `transferSource` 时，先由 OpenList 的离线下载取回分享/直链，再走同样的 place → scan → verify。Core 会
-自己推进本进程内新建的任务（`THEBE_PIPELINE_ADVANCE_MS`，默认 `60000` 毫秒；`0` 关闭），所以手机休眠时
+自己推进本进程内新建的任务（每分钟一次），所以手机休眠时
 也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline.advance`；失败的任务不会自动重试。
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
@@ -333,97 +332,70 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 - 存储系统识别：ZFS / Btrfs / EXT4（含 xfs/f2fs）/ NTFS / NFS，判定结果会带在 `storageSystem` 上。
 - 工作区越界：写工作区外路径、或 `rm/mv/cp/chmod/chown` 等改动工作区外路径，都会升级为 `dangerous`。
 - 直接打 Docker Engine API 的调用（`curl --unix-socket /var/run/docker.sock ... /containers/create`、podman remote）走 `docker-api-guard.ts`：`HostConfig.Privileged=true`、`Binds` 里的宿主根 / `docker.sock`、`CapAdd: SYS_ADMIN|ALL`、`/volumes/prune` 与 `/system/prune` 一律 `critical`（策略拒绝）；`/containers/create` 的 body 解析不出来时降级为 `dangerous`（转人工）而不是放行。
-- `THEBE_COMMAND_GUARD=off` 完全关闭这层守卫，恢复“一切靠审批”。
+- 这层守卫始终开启；只有 `bypassPermissions`（见下）能为单个会话关掉它。
 - 小模型安全复核不复用这里的启发式：它是 `Judgment Model`（见下节，默认关闭）。
 
-## 命令沙箱（bubblewrap）
+## 权限模式
 
-`THEBE_SANDBOX=bwrap` 会把 `bash` 工具包进 bubblewrap 命名空间（`src/agent/security/command-sandbox.ts`，
-移植自重构前的 `src/sandbox/bwrap.ts` + `runner.ts`）：
+一个设置决定会话不问就能做多少。名字沿用 Claude Code。
 
-- 宿主根只读（`--ro-bind / /`）、`/tmp` 用 tmpfs（退出即丢）、`/dev`、`/proc` 重新挂载；
-- **只有工作区可写**（`--bind <workspace> <workspace>` + `--chdir`）；
-- `--unshare-all` 隔离 PID/IPC/UTS/user 命名空间，`--cap-drop ALL` 去能力，`--die-with-parent` 防僵尸；
-- 网络默认保留，`THEBE_SANDBOX_NETWORK=deny` 加 `--unshare-net` 断网。
+| 模式 | 不问就执行 | 仍会询问或拒绝 |
+| --- | --- | --- |
+| `plan` | 工作区内的读取 | 一切会改动东西的操作都拒绝 |
+| `default` | 工作区内的读取 | `bash`、`write`、`edit`、记忆写入和各服务的写工具，每次都问 |
+| `acceptEdits` | 工作区内的 `write`/`edit`（不含 `.git`），以及有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外的路径、没有沙箱时的 `bash`、`memory`、MCP 与服务写入 |
+| `bypassPermissions` | 一切；命令守卫和沙箱都关闭 | 无。由宿主门控（见下） |
 
-默认关闭；开启但宿主没有 `bwrap`（例如 macOS、普通容器）时会退回不加沙箱执行，并记录 warning。
-推荐组合（NAS 严格模式）：`THEBE_SANDBOX=bwrap` + `THEBE_SANDBOX_NETWORK=deny` + 保持 `THEBE_COMMAND_GUARD` 默认开启。
+`acceptEdits` 照 Codex 的“按需询问 + 受限沙箱”：能让命令不问就执行的是沙箱，而不是一张“安全命令”清单，
+所以没有沙箱时命令照常询问。有沙箱时，`tree-sitter-bash` 读不懂的脚本、或含有强制 `rm`（照 Codex 的检查，穿过 `sudo`、`env`、`trap`、`bash -c` 也能找到）的脚本，同样会询问。`.git` 与 Codex 的工作区可写沙箱一样保持只读。
 
-### 其它后端（docker / seatbelt）
+- 宿主默认值来自 `config.json` 的 `permissionMode`（默认 `manual`）。单个会话用 `PUT /v1/session/{id}/permissions`（`{"mode": "plan"}`；`{"mode": null}` 回到宿主默认值）设自己的模式，同一路径的 `GET` 返回它当前所处的模式。
+- 子代理、定时任务、后台目标、`/mcp` 调用方和非交互轮次取宿主默认值，不取会话自己设的模式。
+- 记住的拒绝、脱敏和审计在所有模式下都生效。除 `bypassPermissions` 外，`critical` 命令在所有模式下都被拒绝。
+- `POST /v1/session/{id}/full-access` 带 `{"enabled": true|false}` 仍可用，等于开关 `bypassPermissions`。
 
-同一层还提供两种宿主无关/开发机可用的后端（`wrapCommandForSandbox` 按 `THEBE_SANDBOX` 分派）：
+### `bypassPermissions`
 
-- `THEBE_SANDBOX=docker`：一次性容器执行——`--rm --read-only --tmpfs /tmp`、
-  `--cap-drop ALL --security-opt no-new-privileges`、默认 `--network none`、只把工作区
-  `-v ws:ws:rw` 挂进去，镜像用 `THEBE_SANDBOX_IMAGE`（默认 `alpine:3`）。
-  适合有 Docker 守护进程的 NAS/宿主；没有守护进程时退回本地执行并记录 warning。
-- `THEBE_SANDBOX=seatbelt`：macOS 开发机用 `sandbox-exec` + 生成的 profile（路径按 `realpath`
-  规范化，兼容 `/var/folders` → `/private/var/folders`）；写只允许工作区与 `TMPDIR`，
-  默认拒绝网络。有真实进程级测试（越界写入被拒 + 断网被拒），`npm test` 覆盖。
-- `sandboxAvailability()` 可以自检当前宿主能跑哪些后端（`off/bwrap/docker/seatbelt/gondolin`）。
-
-### 微虚拟机沙箱（gondolin，已实测可用）
-
-`THEBE_SANDBOX=gondolin` 走硬件虚拟化隔离：`src/adapters/gondolin/runner.ts` 用一个一次性的
-Gondolin micro-VM（QEMU 后端）执行 bash，宿主工作区通过 `RealFSProvider` 挂到 guest 的
-`/workspace`（命令默认在该目录执行，越出工作区的路径会直接抛错），HTTP 出口由
-`createHttpHooks` 中介（`THEBE_SANDBOX_NETWORK=deny` → 空白名单＝断网）。
-`bash-operations.ts` 把它接成 `bash` 工具的执行后端，VM 随会话创建/销毁，`dispose()` 回收。
-
-安装（已验证的步骤）：
+由宿主门控、按会话生效。为一个会话同时关闭命令守卫、操作系统沙箱和工具审批，脱敏与审计照旧。
 
 ```bash
-# 1) 包本体（Core 已把它列为 optionalDependency，可跳过）
-npm install @earendil-works/gondolin@0.13.0
-# 2) VM 后端：QEMU（macOS）
-brew install qemu                     # Linux: sudo apt install qemu-system-arm
-# 3) 首次启动自动下载 guest 镜像（约 200MB），缓存在 ~/.cache/gondolin/images/
-THEBE_SANDBOX=gondolin THEBE_SANDBOX_NETWORK=deny thebe
+export THEBE_FULL_ACCESS=on   # 允许本机使用 bypassPermissions；默认关闭
 ```
 
-- `GONDOLIN_DEFAULT_IMAGE` 选择 guest 镜像（默认 `alpine-base:latest`），`GondolinRunnerOptions.image`
-  会写进该环境变量；`timeoutMs` 映射为启动超时。
-- 缺包或缺 QEMU 时初始化报明确错误（含修复命令），**不会**静默退回本地执行。
-- 实测：`THEBE_GONDOLIN_IT=1 npx vitest run src/adapters/gondolin` 会真的起 VM 跑命令
-  （guest `uname` 返回 Alpine 内核、宿主机 `/workspace` 文件可读写、guest 看不到宿主根目录）；
-  `pi-session.test.ts` 也在 `THEBE_SANDBOX=gondolin` 下验证了 bash 工具确实走 VM。
+只有设置了它的宿主才能使用，HTTP/App 客户端不能自己给自己开（`GET /v1/settings/full-access` 返回
+`{ "allowed": … }`；宿主未允许时请求返回 403 `full_access_not_allowed`）。模型会读到不可信内容（网页、
+工具输出、外部 MCP），该模式下一条误判的命令可能损坏宿主数据，只在需要时开启。Gondolin 微虚拟机后端在会话
+打开时选定，用它时改动对下一个会话生效。
 
-## 部署情景（Scenario Profile）
+## 命令沙箱
 
-`src/agent/security/scenario-profile.ts`（移植自重构前的 `src/policy/scenario-profile.ts`）把多层开关打包成情景：
-
-| 情景              | 命令守卫 | 工作区越界 | 沙箱              | Docker 守卫                   |
-| ----------------- | -------- | ---------- | ----------------- | ----------------------------- |
-| `nas-strict`      | 开       | 禁止       | `bwrap`           | 全开（含 volume prune）       |
-| `homelab-host`    | 开       | 允许       | 关                | 只挡宿主根挂载 + volume prune |
-| `microvm-sandbox` | 开       | 禁止       | `gondolin` + 断网 | 全开                          |
-| `yolo-guarded`    | 开       | 禁止       | `bwrap`           | 全开                          |
+Core 默认不提供操作系统沙箱，受支持的边界是容器。一个变量就能给 `bash` 工具开沙箱：
 
 ```bash
-export THEBE_SCENARIO=nas-strict   # 等价于照抄上表
+THEBE_SANDBOX=auto   # off（默认）| auto | bwrap | docker | seatbelt | gondolin
 ```
 
-- 显式 `THEBE_*` 永远覆盖情景取值（`THEBE_SANDBOX=off` 可以只推翻沙箱这一项）；
-- 不设 `THEBE_SCENARIO` 时保留原有默认（守卫开、沙箱关、联网、禁止越界）；
-- `THEBE_ALLOW_WORKSPACE_ESCAPES=true` 单独放开工作区越界（`homelab-host` 情景的取值）；
-- 情景只是预设，不是第二套安全引擎：判定仍由命令守卫 / 沙箱 / Docker 守卫各自完成。
+`auto` 选这台机器能跑的：macOS 用 `seatbelt`，Linux 用 `bwrap`，都没有则用 `docker`。**要了沙箱却没有这个后端时，
+命令会被拒绝**（不会不带沙箱地执行）；装上它或设 `THEBE_SANDBOX=off`。`thebe doctor` 与
+`GET /v1/system/isolation` 会报告它是否生效。
 
-## 全放开预设（默认关闭）
+- **bubblewrap**（Linux）：宿主根只读、`/tmp` 用 tmpfs、`/dev`/`/proc` 重新挂载、只有工作区可写、`--unshare-all`、`--cap-drop ALL`、`--die-with-parent`。
+- **docker**：一次性 `alpine:3` 容器，`--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`，只把工作区读写挂进去。
+- **seatbelt**（macOS）：`sandbox-exec` 加生成的 profile；写入只允许工作区与 `TMPDIR`。
+- **gondolin**：一次性微虚拟机（QEMU），硬件隔离。宿主工作区挂到 guest 的 `/workspace`，越出工作区的路径直接抛错。缺包或缺 QEMU 时报明确错误并给出修复命令，**不会**退回本地执行。
 
-全放开预设是一个**由 Core 所在机器的配置门控、按会话生效**的开关：对某一个会话同时关闭命令守卫、关闭沙箱、并跳过工具审批，但工作区边界、脱敏与审计照旧。它不是 `/v1/settings/permissions` 里的 `full-access` 权限模式（那个只跳过应用层确认、且是全局的，也不是操作系统沙箱）。
+所有后端都保留网络：沙箱限制的是文件，不是连接。
 
 ```bash
-export THEBE_FULL_ACCESS=on   # 允许本机启用该预设；默认关闭
+# gondolin 安装
+npm install @earendil-works/gondolin@0.13.0   # Core 已列为 optionalDependency，可跳过
+brew install qemu                             # Linux: sudo apt install qemu-system-arm
+THEBE_SANDBOX=gondolin thebe                  # 首次启动下载约 200MB 的 guest 镜像
 ```
 
-只有设置了它的宿主才能启用；HTTP/App 客户端不能自己给自己开。`GET /v1/settings/full-access` 返回 `{ "allowed": … }`；`POST /v1/session/{id}/full-access` 带 `{ "enabled": true|false }` 只切换一个会话（宿主未允许时返回 403 `full_access_not_allowed`）。会话元数据在生效期间带 `fullAccess`，供客户端显示标识。
+`GONDOLIN_DEFAULT_IMAGE` 选择 guest 镜像（默认 `alpine-base:latest`）。
 
-范围与边界：
-
-- 只对启用的那个会话生效。新会话、子代理、定时任务、后台目标、`/mcp` 调用方、非交互轮次都不继承。
-- 命令守卫在权限预检里跳过，沙箱模式在每次命令时读取，因此会话中途启用也在下一条命令生效；Gondolin 微虚拟机后端在会话打开时选定，用该后端时需在启用后新开会话。
-- 显式记住的拒绝和工作区边界仍然生效，审计记录照常写入。
-- 模型会读到不可信内容（网页、工具输出、外部 MCP）。该模式下一条误判的命令可能损坏宿主数据，只在需要时短时开启。
+命令守卫、工作区约束和 Docker API 守卫（特权容器、宿主根与 `docker.sock` 挂载、volume prune）始终开启，没有开关。
 
 ## Judgment Model（默认关闭）
 

@@ -556,6 +556,25 @@ const operations: Operation[] = [
     ],
   },
   {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.memory,
+    summary: "Read Thebe Memory",
+    tag: "settings",
+    responseSchema: "MemoryState",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.memory}/operations`,
+    summary: "Edit Thebe Memory as its owner (no approval)",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "MemoryOperations",
+    responseSchema: "MemoryEditResult",
+    extraStatuses: [
+      { status: 404, description: "Memory is not enabled on this Core" },
+    ],
+  },
+  {
     method: "post",
     path: "/v1/diagnosis",
     summary: "Run a read-only container diagnosis",
@@ -845,9 +864,30 @@ const operations: Operation[] = [
     parameters: [idParameter()],
   },
   {
+    method: "get",
+    path: "/v1/session/{id}/permissions",
+    summary: "The permission mode this session runs in",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "put",
+    path: "/v1/session/{id}/permissions",
+    summary: "Set the permission mode of this session (null returns it to the host default)",
+    tag: "session",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    extraStatuses: [
+      {
+        status: 403,
+        description: "The host does not allow bypassPermissions",
+      },
+    ],
+  },
+  {
     method: "post",
     path: "/v1/session/{id}/full-access",
-    summary: "Enable or disable the session-scoped full-access preset",
+    summary: "Enable or disable bypassPermissions for the session (older form of PUT permissions)",
     tag: "session",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -855,6 +895,21 @@ const operations: Operation[] = [
       {
         status: 403,
         description: "The host does not allow the full-access preset",
+      },
+    ],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/bash",
+    summary: "Run one already-approved command in the session (host-gated)",
+    tag: "session",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    extraStatuses: [
+      {
+        status: 403,
+        description:
+          "The host does not allow remote commands (remote_bash_not_allowed) or the command guard refused the command (command_refused)",
       },
     ],
   },
@@ -2120,7 +2175,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["mode"],
           properties: {
-            mode: { type: "string", enum: ["ask", "read-only", "full-access"] },
+            mode: { type: "string", enum: ["plan", "manual", "acceptEdits", "bypassPermissions"] },
           },
         },
         FullAccessSupport: {
@@ -2143,6 +2198,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             "permissionMode",
             "maxSubagentConcurrency",
             "maxSubagentsPerParent",
+            "instructions",
             "sources",
             "persistence",
             "mutable",
@@ -2157,7 +2213,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             permissionMode: {
               type: "string",
-              enum: ["ask", "read-only", "full-access"],
+              enum: ["plan", "manual", "acceptEdits", "bypassPermissions"],
             },
             maxSubagentConcurrency: {
               type: "integer",
@@ -2167,6 +2223,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             maxSubagentsPerParent: { type: "integer", minimum: 1, maximum: 16 },
             workspacePath: { type: "string" },
             outputDirectory: { type: "string" },
+            instructions: {
+              type: "string",
+              maxLength: 4096,
+              description:
+                "The owner's standing instructions, added to the system prompt of sessions opened after the change. At most 4096 UTF-8 bytes; empty when none.",
+            },
             sources: {
               type: "object",
               required: [
@@ -2178,6 +2240,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 "maxSubagentsPerParent",
                 "workspacePath",
                 "outputDirectory",
+                "instructions",
               ],
               properties: {
                 autoCompact: {
@@ -2212,6 +2275,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   type: "string",
                   enum: ["configured", "default", "environment", "derived"],
                 },
+                instructions: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
               },
             },
             persistence: {
@@ -2230,6 +2297,61 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
         },
+        MemoryStore: {
+          type: "object",
+          required: ["entries", "usedBytes", "limitBytes"],
+          properties: {
+            entries: { type: "array", items: { type: "string" } },
+            usedBytes: { type: "integer" },
+            limitBytes: { type: "integer" },
+          },
+        },
+        MemoryView: {
+          type: "object",
+          required: ["user", "notes"],
+          properties: {
+            user: { $ref: "#/components/schemas/MemoryStore" },
+            notes: { $ref: "#/components/schemas/MemoryStore" },
+          },
+        },
+        MemoryState: {
+          type: "object",
+          required: ["enabled", "memory"],
+          properties: {
+            enabled: { type: "boolean" },
+            memory: { $ref: "#/components/schemas/MemoryView" },
+          },
+        },
+        MemoryOperations: {
+          type: "object",
+          required: ["target", "operations"],
+          additionalProperties: false,
+          properties: {
+            target: { type: "string", enum: ["user", "notes"] },
+            operations: {
+              type: "array",
+              minItems: 1,
+              maxItems: 20,
+              items: {
+                type: "object",
+                required: ["action"],
+                properties: {
+                  action: { type: "string", enum: ["add", "patch", "remove"] },
+                  content: { type: "string" },
+                  old_text: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        MemoryEditResult: {
+          type: "object",
+          required: ["ok", "memory"],
+          properties: {
+            ok: { type: "boolean" },
+            memory: { $ref: "#/components/schemas/MemoryView" },
+          },
+        },
         AgentSettingsPatch: {
           type: "object",
           minProperties: 1,
@@ -2240,6 +2362,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             autoSummaryDelayMs: {
               type: "number",
               description: "Milliseconds; values are clamped to 60000..900000.",
+            },
+            instructions: {
+              type: "string",
+              maxLength: 4096,
+              description:
+                "At most 4096 UTF-8 bytes (400 over the limit). Empty clears them. Applies to sessions opened afterwards.",
             },
           },
         },

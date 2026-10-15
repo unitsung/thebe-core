@@ -5,7 +5,7 @@ import {
   type TUI,
   type TuiMode,
 } from "../rendering/adapter.ts";
-import type { ThinkingLevel } from "../../../agent/index.ts";
+import type { PermissionMode, ThinkingLevel } from "../../../agent/index.ts";
 import { chalk, type ThemeName } from "../theme.ts";
 import { THINKING_LEVELS } from "../commands/registry.ts";
 import { insertOverlay, type DismissibleOverlay } from "./base.ts";
@@ -33,7 +33,7 @@ export function attachSettingsMenu(
     theme: ThemeName;
     thinking: ThinkingLevel;
     tuiMode: TuiMode;
-    permissionMode?: "ask" | "read-only" | "full-access";
+    permissionMode?: PermissionMode;
     autoCompact?: boolean;
     autoSummary?: boolean;
     autoSummaryDelayMs?: number;
@@ -61,7 +61,7 @@ export function attachSettingsMenu(
       { id: "theme", label: "Theme", description: "TUI color theme (applied immediately)", currentValue: options.theme, values: ["dark", "light"] },
       { id: "thinking", label: "Thinking", description: "Reasoning level for the current session", currentValue: options.thinking, values: Array.from(THINKING_LEVELS) },
       { id: "tui", label: "TUI mode", description: "regular scrolling terminal or fullscreen viewport", currentValue: options.tuiMode, values: ["regular", "fullscreen"] },
-      { id: "permissionMode", label: "Permissions", description: "Ask before risky tools, or auto-approve them (not a sandbox)", currentValue: options.permissionMode ?? "ask", values: ["ask", "read-only", "full-access"] },
+      { id: "permissionMode", label: "Permissions", description: "plan: read-only · manual: ask before risky tools · acceptEdits: workspace edits and sandboxed commands run unasked · bypassPermissions: ask nothing, no sandbox", currentValue: options.permissionMode ?? "manual", values: ["plan", "manual", "acceptEdits", "bypassPermissions"] },
       { id: "autoCompact", label: "Auto-compact", description: "Automatically compact context when threshold reached", currentValue: String(options.autoCompact ?? true), values: ["true", "false"] },
       { id: "autoSummary", label: "Auto-summary", description: "Summarize a completed task after an idle delay", currentValue: String(options.autoSummary ?? true), values: ["true", "false"] },
       { id: "autoSummaryDelay", label: "Summary delay", description: "Idle seconds before generating the task summary", currentValue: `${Math.round((options.autoSummaryDelayMs ?? 120_000) / 1000)}s`, values: ["60s", "120s", "300s"] },

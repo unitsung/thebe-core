@@ -58,6 +58,7 @@ import {
 import { createCapabilityRunStore } from "../capabilities/runs.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { redactToolOutput } from "../security/redaction.ts";
+import { REMOTE_BASH_OUTPUT_LIMIT } from "../security/remote-bash.ts";
 import {
   toProductBackgroundTask,
   providerBackgroundTaskSessionId,
@@ -413,6 +414,21 @@ export function createControlApi(
     },
     getAgentSettings() {
       return ctx.getAgentSettings();
+    },
+    getMemory() {
+      return { enabled: Boolean(options.memoryStore), memory: ctx.memoryView() };
+    },
+    async editMemory(
+      target: import("../memory/memory.ts").MemoryTarget,
+      operations: import("../memory/memory.ts").MemoryOperation[]
+    ) {
+      ctx.checkNotQuiesced();
+      const result = await ctx.applyMemory(target, operations, "owner");
+      return {
+        ok: result.ok,
+        ...(result.ok ? {} : { error: result.error }),
+        memory: result.view,
+      };
     },
     updateAgentSettings(
       patch: import("../settings/product.ts").AgentSettingsPatch
@@ -857,6 +873,86 @@ export function createControlApi(
         throw httpError(501, "This runtime session cannot execute shell commands");
       }
       return opened.session.executeBash(command, onChunk, options);
+    },
+    async runRemoteCommand(
+      thebeSessionId: string,
+      command: string
+    ): Promise<{
+      exitCode?: number;
+      cancelled: boolean;
+      output: string;
+      truncated: boolean;
+    }> {
+      if (!ctx.remoteBashAllowed) {
+        throw httpError(
+          403,
+          "remote commands are not enabled on this Core host",
+          "remote_bash_not_allowed"
+        );
+      }
+      const trimmed = command.trim();
+      if (!trimmed) throw httpError(400, "command is required", "invalid_body");
+      const parameterHash = hashParameters({ command: trimmed });
+      if (ctx.remoteCommandDecision(trimmed) === "deny") {
+        await audit?.append({
+          method: "session.bash",
+          parameterHash,
+          responseBytes: 0,
+          budgetConsumed: 0,
+          redactionFired: false,
+          sessionId: thebeSessionId,
+          result: "denied",
+        });
+        throw httpError(
+          403,
+          "the command guard refused this command",
+          "command_refused"
+        );
+      }
+      const startedAt = Date.now();
+      let result: { exitCode?: number; cancelled: boolean; output: string };
+      try {
+        const opened = await openSession(thebeSessionId);
+        if (!opened.session.executeBash) {
+          throw httpError(501, "This runtime session cannot execute shell commands");
+        }
+        result = await opened.session.executeBash(trimmed, undefined, {
+          excludeFromContext: true,
+        });
+      } catch (error) {
+        await audit?.append({
+          method: "session.bash",
+          parameterHash,
+          responseBytes: 0,
+          budgetConsumed: 0,
+          redactionFired: false,
+          sessionId: thebeSessionId,
+          result: "error",
+          durationMs: Date.now() - startedAt,
+        });
+        throw error;
+      }
+      const redacted = redactToolOutput(result.output);
+      const truncated = redacted.length > REMOTE_BASH_OUTPUT_LIMIT;
+      const output = truncated
+        ? redacted.slice(-REMOTE_BASH_OUTPUT_LIMIT)
+        : redacted;
+      await audit?.append({
+        method: "session.bash",
+        parameterHash,
+        responseBytes: output.length,
+        budgetConsumed: 0,
+        redactionFired: redacted !== result.output,
+        sessionId: thebeSessionId,
+        result: result.exitCode === 0 ? "ok" : "error",
+        durationMs: Date.now() - startedAt,
+      });
+      return {
+        exitCode: result.exitCode,
+        cancelled: result.cancelled,
+        output,
+        truncated,
+      };
     },
     async quiesce(): Promise<void> {
       await options.runtime.quiesce();

@@ -18,9 +18,8 @@ import { resolve } from "node:path";
  * - `gondolin` (phase 3, Pi's official micro-VM extension): routed in
  *   `open-session.ts`, not by rewriting the command string.
  *
- * `THEBE_SANDBOX` selects the mode (or inherits it from a `THEBE_SCENARIO`
- * preset). Every backend degrades to the raw command with a warning when its
- * binary or daemon is missing, so Core keeps working everywhere.
+ * `THEBE_SANDBOX` selects the mode. A backend that is asked for but missing refuses the command
+ * (`sandboxedCommand`) rather than running it bare.
  */
 
 export type SandboxMode = "off" | "bwrap" | "docker" | "seatbelt" | "gondolin";
@@ -328,4 +327,26 @@ export function wrapCommandForSandbox(
     mode,
     applied: true,
   };
+}
+
+/**
+ * `wrapCommandForSandbox`, except that a sandbox that was asked for and cannot run here refuses the
+ * command instead of running it bare: a sandbox that is not there is not a sandbox. The micro-VM
+ * backend runs the command itself and already refuses on its own.
+ */
+export function sandboxedCommand(
+  command: string,
+  mode: SandboxMode,
+  workspacePath: string,
+  allowNetwork: boolean,
+  probe?: () => boolean
+): WrappedCommand {
+  const wrapped = wrapCommandForSandbox(command, { mode, workspacePath, allowNetwork, probe });
+  if (mode !== "off" && mode !== "gondolin" && !wrapped.applied) {
+    throw new Error(
+      `Command not run: the ${mode} sandbox is unavailable on this host (${sandboxUnavailableReason(mode)}). ` +
+        "Install it, or set THEBE_SANDBOX=off to run commands without one."
+    );
+  }
+  return wrapped;
 }

@@ -1,4 +1,5 @@
-import { PERMISSION_MODES } from "../../../agent/runtime/interface.ts";
+import { PERMISSION_MODES, parsePermissionMode } from "../../../agent/runtime/interface.ts";
+import { checkAgentInstructions } from "../../../agent/settings/instructions.ts";
 import type { AgentSettingsPatch } from "../../../agent/settings/product.ts";
 import {
   agentUnavailable,
@@ -7,7 +8,6 @@ import {
 } from "../context.ts";
 import { json, readJson } from "../json.ts";
 import { agentError, invalidBody, restartRequired } from "../parsing/errors.ts";
-import { asMember } from "../parsing/query.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
 
 export async function handleSettingsRoutes(
@@ -42,6 +42,7 @@ export async function handleSettingsRoutes(
           "autoCompact",
           "autoSummary",
           "autoSummaryDelayMs",
+          "instructions",
         ]);
         if (
           Object.prototype.hasOwnProperty.call(body, "maxSubagentConcurrency")
@@ -99,6 +100,11 @@ export async function handleSettingsRoutes(
           }
           patch.autoSummaryDelayMs = body.autoSummaryDelayMs;
         }
+        if (Object.prototype.hasOwnProperty.call(body, "instructions")) {
+          const checked = checkAgentInstructions(body.instructions);
+          if (!checked.ok) return invalidBody(checked.message);
+          patch.instructions = checked.value;
+        }
         if (Object.keys(patch).length === 0) {
           return invalidBody("at least one Agent setting is required");
         }
@@ -113,7 +119,7 @@ export async function handleSettingsRoutes(
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
       const body = await readJson(request);
-      const mode = asMember(body.mode, PERMISSION_MODES);
+      const mode = parsePermissionMode(body.mode);
       if (!mode) {
         return invalidBody(`mode must be ${PERMISSION_MODES.join(", ")}`);
       }

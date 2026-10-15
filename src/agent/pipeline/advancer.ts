@@ -10,7 +10,8 @@ import type { Job, JobBook } from "./job-runner.ts";
  * (done/failed) stop being tracked; failures still need an explicit retry.
  */
 
-const DEFAULT_INTERVAL_MS = 60_000;
+/** How often the background advancer checks the jobs it tracks. */
+export const DEFAULT_INTERVAL_MS = 60_000;
 
 export type PipelineAdvancer = {
   /** Track a job acquired in this process so it keeps moving without a client. */
@@ -84,13 +85,3 @@ export function createPipelineAdvancer(input: {
   };
 }
 
-/** `THEBE_PIPELINE_ADVANCE_MS`; 0 disables the background advancer. */
-export function pipelineAdvanceIntervalMs(
-  env: NodeJS.ProcessEnv = process.env
-): number {
-  const raw = env.THEBE_PIPELINE_ADVANCE_MS?.trim();
-  if (raw === undefined || raw === "") return DEFAULT_INTERVAL_MS;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_INTERVAL_MS;
-  return parsed;
-}

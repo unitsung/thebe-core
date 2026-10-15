@@ -18,6 +18,7 @@ import { handleScheduleRoutes } from "./routes/schedules.ts";
 import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
 import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
+import { handleMemoryRoutes } from "./routes/memory.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
@@ -114,6 +115,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const settingsResponse = await handleSettingsRoutes(context);
       if (settingsResponse) {
         return settingsResponse;
+      }
+      const memoryResponse = await handleMemoryRoutes(context);
+      if (memoryResponse) {
+        return memoryResponse;
       }
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {

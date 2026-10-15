@@ -445,17 +445,17 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         new Request("http://127.0.0.1:8787/v1/settings/permissions"),
       ),
     );
-    expect(got.mode).toBe("ask");
+    expect(got.mode).toBe("manual");
     const patched = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/settings/permissions", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "read-only" }),
+        body: JSON.stringify({ mode: "plan" }),
       }),
     );
     expect(patched.status).toBe(200);
-    expect((await json(patched)).mode).toBe("read-only");
-    expect(app.agent.permissionMode()).toBe("read-only");
+    expect((await json(patched)).mode).toBe("plan");
+    expect(app.agent.permissionMode()).toBe("plan");
   });
 
   it("OpenAPI names the new product paths and schemas", async () => {

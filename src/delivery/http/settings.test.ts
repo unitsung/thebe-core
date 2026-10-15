@@ -47,11 +47,12 @@ describe("Agent settings product HTTP", () => {
       autoCompact: true,
       autoSummary: true,
       autoSummaryDelayMs: 120_000,
-      permissionMode: "ask",
+      permissionMode: "manual",
       maxSubagentConcurrency: 3,
       maxSubagentsPerParent: 2,
       workspacePath: "/tmp/thebe-settings-workspace",
       outputDirectory: "/tmp/thebe-settings-workspace/.thebe/outputs",
+      instructions: "",
       sources: {
         autoCompact: "default",
         autoSummary: "default",
@@ -61,10 +62,46 @@ describe("Agent settings product HTTP", () => {
         maxSubagentsPerParent: "default",
         workspacePath: "configured",
         outputDirectory: "configured",
+        instructions: "default",
       },
       persistence: { enabled: false },
-      mutable: ["autoCompact", "autoSummary", "autoSummaryDelayMs"],
+      mutable: ["autoCompact", "autoSummary", "autoSummaryDelayMs", "instructions"],
     });
+  });
+
+  it("updates the owner instructions and refuses text over 4096 bytes", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: "/tmp/thebe-settings-workspace",
+    });
+    const patch = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/settings/agent", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+
+    const ok = await patch({ instructions: "  Reply in Chinese.\r\n" });
+    expect(ok.status).toBe(200);
+    expect((await json(ok)).instructions).toBe("Reply in Chinese.");
+
+    const tooLong = await patch({ instructions: "a".repeat(4_097) });
+    expect(tooLong.status).toBe(400);
+    expect(JSON.stringify(await json(tooLong))).toContain("4097 bytes");
+
+    const wrongType = await patch({ instructions: 5 });
+    expect(wrongType.status).toBe(400);
+
+    const read = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/settings/agent")
+    );
+    expect((await json(read)).instructions).toBe("Reply in Chinese.");
+
+    const cleared = await patch({ instructions: "" });
+    expect((await json(cleared)).instructions).toBe("");
   });
 
   it("updates mutable settings and clamps the summary delay to the safe range", async () => {
@@ -311,7 +348,7 @@ describe("Agent settings product HTTP", () => {
       new Request("http://127.0.0.1:8787/v1/settings/permissions", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ mode: "full-access" }),
+        body: JSON.stringify({ mode: "acceptEdits" }),
       })
     );
     expect(patched.status).toBe(200);
@@ -332,10 +369,10 @@ describe("Agent settings product HTTP", () => {
       )
     );
 
-    expect(permissionSettings).toEqual({ mode: "full-access" });
+    expect(permissionSettings).toEqual({ mode: "acceptEdits" });
     expect(agentSettings).toEqual(
       expect.objectContaining({
-        permissionMode: "full-access",
+        permissionMode: "acceptEdits",
         sources: expect.objectContaining({ permissionMode: "configured" }),
       })
     );
@@ -366,7 +403,7 @@ describe("Agent settings product HTTP", () => {
     expect(refused.status).toBe(403);
     expect(await json(refused)).toEqual({
       ok: false,
-      error: "full-access preset is not enabled on this Core host",
+      error: "bypassPermissions is not enabled on this Core host",
       code: "full_access_not_allowed",
     });
 
@@ -417,7 +454,7 @@ describe("Agent settings product HTTP", () => {
         )
       )
     );
-    expect(readBack.fullAccess).toBe(true);
+    expect(readBack.permissionMode).toBe("bypassPermissions");
 
     const disabled = await open.handler.handle(
       new Request(
@@ -440,6 +477,68 @@ describe("Agent settings product HTTP", () => {
         )
       )
     );
-    expect(afterDisable.fullAccess).toBeUndefined();
+    expect(afterDisable.permissionMode).toBeUndefined();
+  });
+
+  it("sets and reads the permission mode of one session, and lets bypassPermissions in only where the host allows it", async () => {
+    const closed = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const session = await closed.agent.createSession();
+    const url = `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/permissions`;
+    const put = (app: typeof closed, mode: unknown) =>
+      app.handler.handle(
+        new Request(url, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ mode }),
+        })
+      );
+
+    expect(await json(await closed.handler.handle(new Request(url)))).toEqual({
+      thebeSessionId: session.thebeSessionId,
+      mode: "manual",
+      inherited: true,
+    });
+    expect(await json(await put(closed, "plan"))).toEqual({
+      thebeSessionId: session.thebeSessionId,
+      mode: "plan",
+    });
+    expect(await json(await closed.handler.handle(new Request(url)))).toEqual({
+      thebeSessionId: session.thebeSessionId,
+      mode: "plan",
+      inherited: false,
+    });
+    // Another session is untouched.
+    const other = await closed.agent.createSession();
+    expect(
+      (await closed.agent.sessionPermissionMode(other.thebeSessionId)).mode
+    ).toBe("manual");
+
+    // Only the four names are accepted.
+    expect((await put(closed, "read-only")).status).toBe(400);
+    expect((await put(closed, "bypassPermissions")).status).toBe(403);
+    expect((await put(closed, "nonsense")).status).toBe(400);
+    expect(await json(await put(closed, null))).toEqual({
+      thebeSessionId: session.thebeSessionId,
+      mode: "manual",
+    });
+
+    const open = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      fullAccessAllowed: true,
+    });
+    const openSession = await open.agent.createSession();
+    const openUrl = `http://127.0.0.1:8787/v1/session/${openSession.thebeSessionId}/permissions`;
+    const response = await open.handler.handle(
+      new Request(openUrl, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode: "bypassPermissions" }),
+      })
+    );
+    expect(await json(response)).toEqual({
+      thebeSessionId: openSession.thebeSessionId,
+      mode: "bypassPermissions",
+    });
   });
 });

@@ -29,6 +29,13 @@ export function createPermissionControl(input: {
     fullAccess?: boolean
   ): PermissionPreflightDecision | Promise<PermissionPreflightDecision>;
   workspaceReadTools: readonly string[];
+  /** The mode one session has set for itself (or that the host default grants it), if any. */
+  sessionMode?(thebeSessionId?: string): PermissionMode | undefined;
+  /**
+   * Whether `acceptEdits` may run this request without asking: the caller decides from what the
+   * request does (a file write inside the workspace, a command the sandbox contains).
+   */
+  autoApprove?(request: PermissionRequest): Promise<boolean>;
   lookupRemembered(
     thebeSessionId: string
   ): Promise<Record<string, "allow" | "deny"> | undefined>;
@@ -38,7 +45,7 @@ export function createPermissionControl(input: {
   persist(meta: AgentSessionMeta): Promise<void>;
   touchMeta(meta: AgentSessionMeta): AgentSessionMeta;
 }) {
-  let mode: PermissionMode = input.initialMode ?? "ask";
+  let mode: PermissionMode = input.initialMode ?? "manual";
   const nonInteractiveRuns = new Set<string>();
   const pendingPermissions = new Map<string, PendingPermission>();
 
@@ -73,25 +80,33 @@ export function createPermissionControl(input: {
     }
   }
 
+  /**
+   * The mode a session runs in: its own when it has one, else the host's. A background, scheduled
+   * or subagent turn on the same session does not take the session's own mode, only the host's.
+   */
+  function modeFor(thebeSessionId?: string): PermissionMode {
+    if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId)) return mode;
+    return input.sessionMode?.(thebeSessionId) ?? mode;
+  }
+
+  /**
+   * `explicitSessionId` is the session approvals are filed under. `modeScope` names the session whose
+   * mode applies, which differs for a subagent: it asks under its parent but is not given the parent's mode.
+   */
   function permissionHandler(
     explicitSessionId?: string,
-    isFullAccess?: () => boolean
+    modeScope?: () => string | undefined
   ) {
-    function fullAccessFor(thebeSessionId?: string): boolean {
-      if (isFullAccess?.() !== true) return false;
-      // A background goal/scheduled turn on the same session is not full-access.
-      if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
-        return false;
-      return true;
-    }
+    const sessionOf = () => explicitSessionId ?? input.active()?.meta.thebeSessionId;
+    const modeOf = () => modeFor(modeScope ? modeScope() : sessionOf());
     return {
       async preflight(
         request: PermissionRequest
       ): Promise<PermissionPreflightDecision> {
-        const thebeSessionId =
-          explicitSessionId ?? input.active()?.meta.thebeSessionId;
-        const fullAccess = fullAccessFor(thebeSessionId);
-        const policy = await input.preflight(request, fullAccess);
+        const thebeSessionId = sessionOf();
+        const effective = modeOf();
+        const bypass = effective === "bypassPermissions";
+        const policy = await input.preflight(request, bypass);
         if (policy === "deny") return "deny";
         const remembered = rememberedDecision(
           thebeSessionId
@@ -100,18 +115,18 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return "deny";
-        // Full-access lifts the command guard and the sandbox; an explicit
-        // remembered denial and the workspace boundary still win.
-        if (fullAccess) return "allow";
+        // Bypass lifts the command guard and the sandbox; an explicit remembered
+        // denial and the workspace boundary still win.
+        if (bypass) return "allow";
         if (
-          mode === "read-only" &&
+          effective === "plan" &&
           !input.workspaceReadTools.includes(request.toolName)
         )
           return "deny";
+        if (policy === "allow" || remembered === "allow") return "allow";
         if (
-          policy === "allow" ||
-          mode === "full-access" ||
-          remembered === "allow"
+          effective === "acceptEdits" &&
+          (await input.autoApprove?.(request)) === true
         )
           return "allow";
         if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
@@ -119,9 +134,8 @@ export function createPermissionControl(input: {
         return "ask";
       },
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
-        const thebeSessionId =
-          explicitSessionId ?? input.active()?.meta.thebeSessionId;
-        const fullAccess = fullAccessFor(thebeSessionId);
+        const thebeSessionId = sessionOf();
+        const effective = modeOf();
         const remembered = rememberedDecision(
           thebeSessionId
             ? await input.lookupRemembered(thebeSessionId)
@@ -129,13 +143,12 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return "deny";
-        if (fullAccess) return "allow";
-        if (mode === "read-only") {
+        if (effective === "bypassPermissions") return "allow";
+        if (effective === "plan") {
           return input.workspaceReadTools.includes(request.toolName)
             ? "allow"
             : "deny";
         }
-        if (mode === "full-access") return "allow";
         if (remembered === "allow") return remembered;
         if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
           return "deny";
@@ -197,6 +210,7 @@ export function createPermissionControl(input: {
     pendingPermissions,
     permissionMode,
     setPermissionMode,
+    modeFor,
     permissionHandler,
     hasPendingFor,
     rejectPendingFor,

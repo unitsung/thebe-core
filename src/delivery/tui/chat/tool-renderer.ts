@@ -6,6 +6,7 @@ import {
   type Theme,
 } from "../rendering/adapter.ts";
 import { activityGlyph } from "../display/activity.ts";
+import { formatMemoryArgs } from "./memory-call.ts";
 
 class SingleLineText {
   constructor(private readonly text: string) {}
@@ -19,6 +20,10 @@ function formatToolArgs(toolName: string, args: unknown): string {
   if (!args || typeof args !== "object")
     return typeof args === "string" ? args : "";
   const record = args as Record<string, unknown>;
+  if (toolName === "memory") {
+    const memory = formatMemoryArgs(args);
+    if (memory) return memory;
+  }
   if (typeof record.command === "string") return record.command;
   if (typeof record.path === "string") return record.path;
   if (typeof record.file_path === "string") return record.file_path;

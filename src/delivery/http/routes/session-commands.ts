@@ -7,6 +7,10 @@ import { asObject, asStringMap, json, readJson } from "../json.ts";
 import { promptBodyError, agentError } from "../parsing/errors.ts";
 import { asMember, parseThinkingLevel } from "../parsing/query.ts";
 import { readPromptBody } from "../parsing/prompt.ts";
+import {
+  PERMISSION_MODES,
+  parsePermissionMode,
+} from "../../../agent/runtime/interface.ts";
 
 type Agent = NonNullable<ThebeHttpContext["agent"]>;
 type SessionCreateInput = NonNullable<Parameters<Agent["createSession"]>[0]>;
@@ -93,6 +97,29 @@ export async function handleSessionCommands(
     await agent.interrupt(id);
     return json({ ok: true });
   }
+  if (action === "permissions" && parts.length === 4) {
+    try {
+      if (method === "GET") return json(await agent.sessionPermissionMode(id));
+      if (method === "PUT") {
+        const body = await readJson(request);
+        // `mode: null` returns the session to the host default.
+        const mode = body.mode === null ? undefined : parsePermissionMode(body.mode);
+        if (body.mode !== null && !mode) {
+          return json(
+            {
+              ok: false,
+              error: `mode must be ${PERMISSION_MODES.join(", ")} or null`,
+              code: "invalid_body",
+            },
+            400
+          );
+        }
+        return json(await agent.setSessionPermissionMode(id, mode));
+      }
+    } catch (error) {
+      return agentError(error);
+    }
+  }
   if (method === "POST" && action === "full-access") {
     const body = await readJson(request);
     if (typeof body.enabled !== "boolean") {
@@ -103,6 +130,20 @@ export async function handleSessionCommands(
     }
     try {
       return json(await agent.setSessionFullAccess(id, body.enabled));
+    } catch (error) {
+      return agentError(error);
+    }
+  }
+  if (method === "POST" && action === "bash" && !extra) {
+    const body = await readJson(request);
+    if (typeof body.command !== "string" || !body.command.trim()) {
+      return json(
+        { ok: false, error: "command must be a non-empty string", code: "invalid_body" },
+        400
+      );
+    }
+    try {
+      return json(await agent.runRemoteCommand(id, body.command));
     } catch (error) {
       return agentError(error);
     }

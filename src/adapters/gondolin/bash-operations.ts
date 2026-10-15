@@ -7,7 +7,7 @@ import {
  * Bash backend that runs every command inside a disposable Micro-VM.
  *
  * `THEBE_SANDBOX=gondolin` selects this instead of local execution, which is the
- * strongest option in the scenario table (`microvm-sandbox`). The VM starts
+ * strongest option in the sandbox options (`THEBE_SANDBOX=gondolin`). The VM starts
  * lazily on the first command and is destroyed with the session; when the
  * gondolin package or QEMU/KVM is missing, initialization fails once and the
  * caller reports the reason instead of silently running unsandboxed.

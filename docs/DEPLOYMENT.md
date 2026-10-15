@@ -238,9 +238,11 @@ container is the release boundary:
   `no-new-privileges:true`, `/tmp` on tmpfs.
 - Only `/data` and `/workspace` are writable; `/workspace` is the single
   authorization boundary (`THEBE_WORKSPACE_DIR`).
-- Inside a container, `THEBE_SANDBOX=bwrap` is unavailable; use the guard layers
-  that do work there (`THEBE_COMMAND_GUARD`, the Docker API guard) and see
-  `docs/configuration.md` for `THEBE_SCENARIO`. `THEBE_SANDBOX=gondolin` needs
+- Inside a container, `THEBE_SANDBOX=bwrap` is unavailable (a command would be
+  refused, not run bare), so leave `THEBE_SANDBOX` unset there and rely on the
+  guard layers that do work (the command guard, the Docker API guard) and the
+  container itself; see `docs/configuration.md` for the permission modes.
+  `THEBE_SANDBOX=gondolin` needs
   KVM/QEMU and is not available in the default container — run Core on the host
   if you need micro-VM isolation.
 - Choosing the host-service path instead means you provide the dedicated user

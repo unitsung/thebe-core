@@ -69,6 +69,11 @@ export type AgentSessionMeta = {
    * inherited by subagents, schedules, background goals, or `/mcp` callers.
    */
   fullAccess?: boolean;
+  /**
+   * The permission mode this session set for itself; the host default applies when absent.
+   * `bypassPermissions` is only honoured while the host allows it.
+   */
+  permissionMode?: import("./runtime/interface.ts").PermissionMode;
   builtinTools?: string[];
   firstMessage?: string;
   messageCount?: number;

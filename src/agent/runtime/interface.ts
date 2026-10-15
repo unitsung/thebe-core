@@ -203,9 +203,25 @@ export const PERMISSION_REMEMBER_SCOPES = [
 export type PermissionRememberScope =
   (typeof PERMISSION_REMEMBER_SCOPES)[number];
 
-export const PERMISSION_MODES = ["ask", "read-only", "full-access"] as const;
+/**
+ * Permission modes, named as Claude Code names its own so the vocabulary is one people already know:
+ * `plan` looks but changes nothing; `manual` asks before each risky action; `acceptEdits` lets
+ * edits inside the workspace and commands the sandbox can contain run without asking; and
+ * `bypassPermissions` asks nothing and lifts the command guard and sandbox (host-gated).
+ */
+export const PERMISSION_MODES = [
+  "plan",
+  "manual",
+  "acceptEdits",
+  "bypassPermissions",
+] as const;
 /** Approval policy for tools that the runtime marks as requiring confirmation. */
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
+
+/** A mode from its exact name; undefined for anything else. */
+export function parsePermissionMode(value: unknown): PermissionMode | undefined {
+  return PERMISSION_MODES.find((mode) => mode === value);
+}
 
 export const PERMISSION_RESPONSES = ["allow", "deny"] as const;
 export type PermissionResponse = (typeof PERMISSION_RESPONSES)[number];

@@ -7,6 +7,19 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ## [Unreleased]
 
+### Changed
+
+- The command guard reads a command as shell before its text rules apply. `rm -r -f /`, `r''m -rf /`, `rm -rf "$HOME"`, `cd / && rm -rf *`, `sh -c '…'`, `eval`, `find / -delete` and `chmod -R` on the root are blocked; `curl … | sh`, a run-time-built shell command, a command name known only at run time and reads of SSH or cloud credentials ask first. The parser loads at startup; without it the text rules decide alone.
+- Permission modes are read by their four names only. The old `ask`, `read-only`, `full-access` and `default` spellings are no longer accepted: a `config.json` that still holds one falls back to `manual`, and an API call with one gets `400`. `POST /v1/session/{id}/full-access` still switches `bypassPermissions`.
+- Research budget per answer raised to 8 `web_search` and 6 `music_research` lookups (12 combined, was 3, 2 and 4) so a search for a song or a release can try several queries; the same query is still never run twice.
+- The system prompt now says `tool_search` matches English words only, because its ranker drops non-ASCII text and a Chinese query found nothing. This changes the prompt once; it is the same text on every later call.
+- `THEBE_SANDBOX` accepts `auto`. A sandbox that was asked for and is not available now refuses the command instead of running it unsandboxed.
+
+### Removed
+
+- Environment variables `THEBE_SCENARIO` (and its four presets), `THEBE_COMMAND_GUARD`, `THEBE_ALLOW_WORKSPACE_ESCAPES`, `THEBE_SANDBOX_NETWORK`, `THEBE_SANDBOX_IMAGE`, `THEBE_SESSION_IDLE_TIMEOUT_MS`, `THEBE_MODEL_RESULT_LIMIT` and `THEBE_PIPELINE_ADVANCE_MS`. The command guard, workspace confinement and Docker API guard are always on; the sandbox keeps the network.
+- The `scenario` field of `GET /v1/system/isolation`.
+
 ### Added
 
 - Terminal UI, one-shot CLI, HTTP API (`/v1`), and an MCP endpoint (`/mcp`).
@@ -15,13 +28,15 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 - External MCP servers from `.thebe/mcp.json`, and skills.
 - Goals, subagents, schedules, and an Activity feed.
 - Approvals, risk-graded shell commands, and redaction of tool and MCP output.
-- A host-gated, session-scoped full-access preset. `THEBE_FULL_ACCESS=on` allows
-  it; `GET /v1/settings/full-access` reports the gate and
-  `POST /v1/session/{id}/full-access` toggles one conversation. While active it
-  lifts the command guard, the OS sandbox, and tool approval for that session
-  only; it is not inherited by subagents, schedules, background goals, `/mcp`
-  callers, or non-interactive turns, and audit stays on. See
-  `docs/FULL-ACCESS-DESIGN.md`.
+- Permission modes named as Claude Code names them: `plan`, `manual`,
+  `acceptEdits`, `bypassPermissions`, set for the host (`PATCH
+  /v1/settings/permissions`) and per session (`PUT /v1/session/{id}/permissions`).
+  `acceptEdits` lets workspace edits and commands that an enforcing sandbox
+  contains run unasked, after Codex's on-request policy. `bypassPermissions`
+  lifts the command guard, the OS sandbox, and tool approval for one session; it
+  needs `THEBE_FULL_ACCESS=on` on the host and is not inherited by subagents,
+  schedules, background goals, `/mcp` callers, or non-interactive turns. See
+  `docs/adr/0004-permission-model.md`.
 - A `cloud_transfer` acquisition-job kind. The durable pipeline state machine
   (`agent/pipeline/job-runner.ts`) now runs either a torrent download or a
   network-drive transfer through a `CloudTransferProvider` seam, wired to

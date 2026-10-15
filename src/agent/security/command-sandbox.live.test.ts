@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { resolveScenarioSettings } from "./scenario-profile.ts";
+import { resolveHostSecurity } from "./host-security.ts";
 import {
   buildDockerArgs,
   buildSeatbeltProfile,
@@ -133,9 +133,9 @@ describe("sandbox probes and warnings", () => {
 
   it("accepts every THEBE_SANDBOX value", () => {
     for (const mode of ["off", "bwrap", "docker", "seatbelt", "gondolin"] as const) {
-      expect(resolveScenarioSettings(undefined, { THEBE_SANDBOX: mode }).sandboxMode).toBe(mode);
+      expect(resolveHostSecurity({ THEBE_SANDBOX: mode }).sandboxMode).toBe(mode);
     }
-    expect(resolveScenarioSettings(undefined, { THEBE_SANDBOX: "nonsense" }).sandboxMode).toBe("off");
+    expect(resolveHostSecurity({ THEBE_SANDBOX: "nonsense" }).sandboxMode).toBe("off");
   });
 });
 

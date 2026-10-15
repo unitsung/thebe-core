@@ -1,120 +1,72 @@
-# 权限模型：沙箱范围、审批策略、命令规则分开，由一个决策函数裁定
+# 权限模型：一个模式设置，沙箱只是实现
 
-状态：**草案，待用户确认（2026-10-14）。** 本文只提方案，不含代码。依据是 `docs/ARCHITECTURE-AUDIT-2026-10-14.md` 里读到的现状，以及对 Codex、dsh、Hermes 实现的阅读。
+状态：**已采纳（2026-10-14），部分实现。** 取代 `FULL-ACCESS-DESIGN.md` 和之前的 ADR 草案（三个维度加四个预设）。
 
 ## 背景
 
-Core 现在管“能不能执行”的开关有四套，彼此不联动：
+之前面向用户的有四套互不联动的开关：审批模式 `ask | read-only | full-access`（全局）、会话级“完全访问预设”（名字重复、含义更大）、场景预设 `THEBE_SCENARIO`（四个）、沙箱后端 `THEBE_SANDBOX`（五个），外加六七个环境变量。用户要的是别的 agent 工具里那样一个熟悉的设置，沙箱不该是让人去挑的东西。
 
-1. **审批模式** `ask | read-only | full-access`（`PERMISSION_MODES`）：Agent 全局一个值，经 `/v1/settings/permissions` 改。
-2. **会话级 `fullAccess` 预设**（`FULL-ACCESS-DESIGN.md`）：宿主用 `THEBE_FULL_ACCESS` 放行，单个会话打开，同时关掉命令守卫和沙箱，并免审批。
-3. **场景预设** `THEBE_SCENARIO`（`nas-strict`、`homelab-host`、`microvm-sandbox`、`yolo-guarded`）：只靠环境变量，整个进程一个，决定命令守卫、工作区约束、沙箱后端、Docker 守卫。
-4. **沙箱后端** `THEBE_SANDBOX=off|bwrap|docker|seatbelt|gondolin`：这其实是“用什么机制强制”，不是“允许什么”。
-
-再加上记住的权限、非交互运行的拒绝、`preflight()` 与 `request()` 各算一遍同一个决定。后果（均已在审计里读到或复现）：
-
-- 命令守卫是 46 条字面正则，常见写法（`rm -r -f /`、`sh -c '…'`、`$HOME`）放行。
-- 沙箱默认关闭，不可用时退回裸命令只给警告。
-- 没有统一回答“这条命令为什么被放行/询问/拒绝”的地方。
-- 要新增 `POST /v1/shell/exec` 这类入口时，没有一个地方能让它复用同一套判定。
-
-## 参考实现里相同的做法
-
-- **Codex**：两个正交设置。审批策略 `AskForApproval` = `untrusted | on-request | granular | never`；沙箱策略 `SandboxPolicy` = `read-only | workspace-write | external-sandbox | danger-full-access`，带网络开关。默认是 `read-only` 加 `on-request`。命令规则独立成 `execpolicy`（`allow | prompt | forbidden`，带 `justification`，`match`/`not_match` 示例在加载时校验）。
-- **dsh**：`sandbox-policy`（`read-only` 默认、`workspace-write`、`danger-full-access`，每会话可切换并记入会话日志，所有受限能力共用）与 `user-approval`（`ask`/`never`）分开，再由 `permission-presets` 捆成命名预设。受限 bash **没有任何可强制的后端时失败**（`SANDBOX_UNAVAILABLE`），不会悄悄不受限地运行；沙箱拒绝作为结果里的事实返回，模型可对同一条命令重试一次并说明理由，由用户审批后才升级。
-- **Hermes**：判定分层。**地板**（`approval_floors`）在任何模式之前执行：绝不放行的 hardline、用户自己的 deny 通配、`sudo -S`；匹配前先把命令规范化并去混淆（`r\m`、`git st""atus`）。之后才是审批模式 `manual | smart | off`；未知模式回退到 `manual` 并报警。有连续拒绝的熔断。
+别的工具的做法：Codex 内部是审批策略和沙箱范围两个旋钮，用户看到三档；Claude Code 是一个模式切换（manual〔旧称 default〕、acceptEdits、plan、auto、bypassPermissions）；opencode 是每个工具 allow/ask/deny，并明说权限系统不是沙箱。
 
 ## 决定
 
-### 1. 三个独立的维度，加一条地板
+### 1. 一个设置，四个模式，名字用 Claude Code 的
 
-| 维度 | 取值 | 回答的问题 |
-|---|---|---|
-| **confinement**（沙箱范围） | `read-only` / `workspace-write` / `full-access`，各带 `network: on/off` | 一条命令**最多能碰什么**（文件、网络） |
-| **approval**（审批策略） | `ask` / `auto` / `never` | 超出已允许范围的动作**由谁决定** |
-| **rules**（命令规则） | `allow` / `prompt` / `forbidden` | 某类命令**固定怎么处理**，与前两项无关 |
-| **floor**（地板） | 只有一个“绝不放行”集合，加用户自己的 deny 规则 | 任何模式下都不能做的事 |
+| 模式 | 不问就执行 | 仍会询问或拒绝 |
+| --- | --- | --- |
+| `plan` | 工作区内读取 | 其余一律拒绝 |
+| `manual` | 工作区内读取 | `bash`、`write`、`edit`、记忆与服务写入每次问 |
+| `acceptEdits` | 工作区内 `write`/`edit`（不含 `.git`）；有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外、没有沙箱的 `bash`、`memory`、MCP 与服务写入 |
+| `bypassPermissions` | 一切，命令守卫与沙箱关闭 | 无；宿主门控 |
 
-- `ask`：不在允许范围内的动作逐次询问（现在的默认行为）。
-- `auto`：在 confinement 内执行的命令直接运行，只有超出范围（升级）才询问。**必须配一个确实能强制 confinement 的后端**才可选。
-- `never`：从不询问；需要询问的一律拒绝，把拒绝作为结果返回给模型（Codex 的 `never` 语义；与 dsh 的 `never` 不同——dsh 的是“拒绝所有需要审批的请求”，不会放行沙箱内的命令，两者要分清）。
-- `full-access` 这个 confinement 值就是今天的“全权限”：只能由宿主 `THEBE_FULL_ACCESS` 放行，保持 `FULL-ACCESS-DESIGN.md` 的 8 条不变量（默认关、宿主门控、会话级、不继承、审计不关、可见、范围窄）。
+- 按会话保存（`AgentSessionMeta.permissionMode`），宿主默认值来自 `config.json` 的 `permissionMode`（默认 `manual`）。
+- 只认这四个名字，不留别名；`config.json` 里的旧值按未设置处理（回到 `manual`），接口收到旧值返回 `400`。`POST /v1/session/{id}/full-access` 保留，等于开关 `bypassPermissions`。
+- Claude Code 的 `auto`（由模型审批）没有做：见“不做”。名字不占用。
 
-### 2. 命名预设（给用户看的就是这几个）
+### 2. `acceptEdits` 的规则取自 Codex，不另造
 
-| 预设 | confinement | approval | 说明 |
-|---|---|---|---|
-| `inspect` | `read-only`，网络关 | `ask` | 默认。读可以，写和联网都要问。 |
-| `workspace` | `workspace-write`，网络开 | `ask` | 工作区内可改，其余要问。 |
-| `workspace-auto` | `workspace-write`，网络开 | `auto` | 工作区内不再逐次问，只在越界时问。需要可强制的沙箱后端。 |
-| `unrestricted` | `full-access` | `never` | 现在的 `fullAccess` 预设，宿主门控。 |
+Codex 的做法（`core/src/exec_policy.rs`、`core/src/safety.rs`）是：在受限沙箱下，没有被判为危险、也没有申请越出沙箱的命令不再询问，**让沙箱来拦**；文件补丁只有在所有路径都落在可写根内、且沙箱存在时才自动通过；工作区里的 `.git` 保持只读。Core 照此做，没有写“安全命令清单”：
 
-预设只是两个值的捆绑；用户也可以分别设 confinement 和 approval，客户端遇到不在表里的组合显示为 `custom`（dsh 同样处理）。
+- `bash`：有一个真正能强制隔离的沙箱后端时才自动放行；命令守卫没有标成 `dangerous`/`critical`；脚本能被 `tree-sitter-bash` 完整解析（解析不了就问，这比 Codex 更严）；并且 Codex 的危险命令检查（强制 `rm`，穿过 `sudo`、`env`、`trap` 和 `bash -c`/`-lc` 的任意嵌套）没有命中。没有沙箱就照常询问。解析用现成的 `web-tree-sitter` 加 `tree-sitter-bash`（opencode 与 Codex 用的同一个语法），危险命令检查是 Codex `is_dangerous_command.rs` 的移植，测试用例照搬 Codex 的（`src/agent/security/shell-parse.ts`、`dangerous-command.ts`）。
+- `write`/`edit`：路径经符号链接解析后在工作区内、不在 `.git` 里，且命令守卫没有标出。
+- 其余工具（`memory`、MCP、服务写入）永远不由 `acceptEdits` 放行。
 
-### 3. 一个决策函数
+代码：`src/agent/security/accept-edits.ts`（只做这一个判断），接入点是 `permission-control.ts` 的统一判定。
 
-所有会产生副作用的请求（Pi 工具调用、`POST /v1/shell/exec`、MCP 写调用）都走同一个函数，返回 `allow | ask | deny`，并带**原因**：
+### 3. 判定顺序（`permission-control.ts`，`preflight` 与 `request` 共用同一套模式）
 
-```
-decide(request, session) → { outcome, reason, rule?, facts }
-1. 地板：hardline 与用户 deny 通配。对规范化、去混淆后的命令各变体匹配。命中即 deny，不受模式影响。
-2. 记住的拒绝（按参数哈希；现有 remembered-permissions 保留）。
-3. 命令规则：forbidden → deny；prompt → ask；allow → allow。
-4. 已知安全的只读命令（短白名单）→ allow。
-5. confinement：文件工具按路径判；shell 命令交给沙箱强制，不在这里猜。
-6. approval：记住的允许 → allow；否则按 ask / auto / never 处理。
-```
+1. 策略拒绝（`critical` 命令）→ 拒绝；`bypassPermissions` 下命令守卫关闭，此步只剩工作区策略。
+2. 记住的拒绝 → 拒绝。
+3. `bypassPermissions` → 允许。
+4. `plan` 且不是读工具 → 拒绝。
+5. 策略允许或记住的允许 → 允许。
+6. `acceptEdits` 且 `acceptEditsApproves` 为真 → 允许。
+7. 非交互运行 → 拒绝；否则询问。
 
-`permission-control` 里 `preflight()` 与 `request()` 合并为它的两个调用点。原因写进审计，也返回给客户端（Codex 记录“为什么”的做法）。
+子代理、定时任务、后台目标、`/mcp` 调用方和非交互轮次取宿主默认值，不取会话自己的模式。
 
-### 4. 命令规则和解析
+### 4. `bypassPermissions` 的不变量（承接 `FULL-ACCESS-DESIGN.md`）
 
-- 先把命令解析成词（拆开 `&&`、`;`、管道、`$(…)`、`sh -c '…'`、`eval`），对每一段判定，取最严的结果；解析不了就按 `prompt`，不放行。参考 Codex `shell-command`、Hermes 的规范化。
-- 规则格式取 Codex 的前缀规则（`pattern`、`decision`、`justification`、`match`、`not_match`），`match`/`not_match` 示例在加载时校验，等于规则自带单元测试。
-- 现有 46 条正则保留，但降为 **hardline 层**（地板的一部分），不再是主要机制。`docs/audit-probes/command-guard.mts` 里的绕过清单变成这一层的表驱动测试：每条命令一个期望结果。
+默认关；只有宿主 `THEBE_FULL_ACCESS=on` 才能用，HTTP/App 客户端不能给自己开（`403 full_access_not_allowed`）；只对被设置的会话生效，不继承给子代理、定时任务、后台目标、`/mcp`、非交互轮次；审计照写；`GET /v1/session/{id}/permissions` 随时可见当前模式；只关命令守卫、沙箱和审批，不动脱敏和审计。
 
-### 5. 沙箱：失败关闭，结果带事实
+### 5. 沙箱：一个变量，请求了却没有就拒绝
 
-- 运行 shell 前先问“有没有后端能强制当前 confinement”。**没有就拒绝执行**，返回 `SANDBOX_UNAVAILABLE` 与原因；`full-access` 例外（本来就不受限）。
-- 结果带 `sandbox: { confinement, backend, enforced, denied }`，`denied: true` 表示沙箱拦了某个文件或网络操作。
-- 模型看到 `denied` 后可以对**同一条命令**提出一次升级请求（更宽的 confinement 加一句理由），走审批；批准前不执行。
-- 沙箱内整个宿主可读的问题：`read-only`/`workspace-write` 下把 Core 自己的配置和令牌目录从可读范围里排除（bwrap 用 `--tmpfs` 覆盖，seatbelt 加 `deny file-read*` 子路径）。
-- `THEBE_SANDBOX` 保留，语义改为“选哪个后端”，不再决定要不要沙箱；要不要由 confinement 决定。`isolation` 报告改为回答“当前预设能否被强制”。
+`THEBE_SANDBOX=off|auto|bwrap|docker|seatbelt|gondolin`（默认 `off`）。`auto` 选这台机器能跑的后端。要了沙箱却没有这个后端时，**命令被拒绝**，不再悄悄不带沙箱地执行（`sandboxedCommand`）。网络在所有后端保持开启。
 
-### 6. 作用域与持久化
+### 6. 环境变量精简
 
-- 预设**按会话**保存（会话元数据里一个字段），新会话取宿主默认；切换写进会话日志，立即对下一次调用生效。
-- 宿主默认由配置给出（取代全局 `PermissionMode` 和进程级 `THEBE_SCENARIO`）。`THEBE_SCENARIO` 保留为设宿主默认预设和后端的一个简写，并在文档里标为兼容项。
-- 子代理、调度、后台目标、`/mcp` 调用：**不继承**会话的放宽，各取自己的预设（延续现有不变量）。子代理档案里的工具表只是上限，confinement 取父会话和档案中更窄的那个。
-- 现有字段的兼容：`PermissionMode` 的 `ask` → `workspace` 加 `ask`；`read-only` → `inspect`；`full-access` → `workspace-auto`（不是 `unrestricted`，保持原来“工具免审批但守卫和沙箱仍在”的含义）；会话 `fullAccess: true` → `unrestricted`。注意：`workspace-auto` 要求有可强制的沙箱后端，没有后端的主机上旧的 `full-access` 模式没有等价物，升级时要给出明确提示，而不是悄悄放宽。保留 `/v1/settings/permissions` 与 `/v1/session/{id}/full-access` 作为别名，新增 `GET/PUT /v1/session/{id}/permissions`。
+删除：`THEBE_SCENARIO` 及四个场景预设、`THEBE_COMMAND_GUARD`、`THEBE_ALLOW_WORKSPACE_ESCAPES`、`THEBE_SANDBOX_NETWORK`、`THEBE_SANDBOX_IMAGE`、`THEBE_SESSION_IDLE_TIMEOUT_MS`、`THEBE_MODEL_RESULT_LIMIT`、`THEBE_PIPELINE_ADVANCE_MS`。命令守卫、工作区约束和 Docker API 守卫始终开启，取原来的默认值；其余取原来的默认值。`scenario-profile.ts` 改为 `host-security.ts`，只剩沙箱选择。隔离报告里的 `scenario` 字段随之去掉。
 
-## 不做什么
+## 不做（以及原因）
 
-- 不做模型审批（Hermes 的 smart、dsh 的 Auto review），第一阶段不引入第二个模型。
-- 不做网络代理和域名白名单，网络只有开/关。
-- 不做 Windows 沙箱。
-- 不改审计日志格式，只多记“决策原因”和沙箱事实。
+- **模型审批（Claude Code 的 `auto`、Hermes 的 `smart`、dsh 的 auto-review）**：每次调用多一次模型请求；审批模型会读到同样不可信的内容，被注入后同样会被骗；失败必须按拒绝处理；dsh 为此写了完整的风险分级与授权来源政策，仍标为实验性。以后可以作为 `acceptEdits` 里“本来要问你”那一小部分的可选附加项，默认关。Core 现有的 `judgment` 是调外部 jev 服务回答是非题，不适用。
+- **Codex 的 `execpolicy`（Starlark 前缀规则，用户自己写 allow/prompt/forbidden）**：未做；没有现成的 JS 实现。`acceptEdits` 现在只用 Codex 内置的那一小段危险判断，加沙箱。
+- **替换已有的 `command-risk.ts`**：它是自写的正则表，审计里已指出能被 `rm -r -f /`、`sh -c '…'` 之类绕过，仍留在命令守卫里（`critical` 直接拒绝、`dangerous` 询问），因为它的 NAS 专用规则（ZFS、`mdadm`、`docker.sock`）Codex 没有。`acceptEdits` 不再单靠它：真正让命令可以不问就执行的是沙箱。2026-10-15 起命令守卫先把脚本按 shell 解析（`parsed-command-risk.ts`），再交给这些正则：引号拆字（`r''m`）、拆开的参数（`rm -r -f`）、嵌套的 `sh -c`/`eval`、`$HOME` 与 `cd / && rm -rf *`、`find … -delete`、`curl … | sh`、读取密钥文件，都按实际执行的命令判定；解析器未加载或脚本解析不了时只用正则。它只会抬高判定，不会把任何命令判为安全。
+- **沙箱内排除 Core 自己的配置和令牌目录**：可能影响依赖该目录的工具，未做。
+- **网络开关**：随 `THEBE_SANDBOX_NETWORK` 一起去掉；需要隔离网络请用 `gondolin` 之外的容器级网络策略。
 
 ## 后果
 
-- **对 App 的影响**：设置里的“权限”从三个值变成预设选择器，会话里要显示当前预设和沙箱事实；旧接口别名保证旧版 App 继续可用。
-- **bash 入口**：`POST /v1/shell/exec` 直接建在 `decide()` 和失败关闭的沙箱上，不再另造判定。
-- **行为变化**：以前沙箱请求了但不可用时命令照跑，之后会被拒绝。这是有意的，升级说明要写清；`THEBE_SANDBOX=off` 加 `unrestricted` 之外没有别的办法回到旧行为。
-- **风险**：解析 shell 是最大的新增复杂度；解析失败一律询问，不放行，所以最坏结果是多问几次。规则格式一旦对外就要保持兼容。
-
-## 分步实施（每步独立可交付）
-
-1. 类型与预设表、会话字段、兼容映射、`decide()` 的骨架（先复现现有行为，加测试锁定）。
-2. 命令解析与规则，hardline 层改为表驱动，绕过清单全部变成期望结果。
-3. 沙箱失败关闭、结果事实、配置目录排除、`isolation` 报告更新。
-4. 审批合一：`preflight`/`request` 合并，决策原因进审计与客户端。
-5. 新增 `POST /v1/shell/exec` 与 `GET/PUT /v1/session/{id}/permissions`。
-6. App 侧：预设选择器、会话里显示沙箱事实、直连路由的 bash 工具。
-
-## 需要用户确认
-
-1. 三个维度加四个预设的划分是否同意；预设名要不要换。
-2. `auto` 第一阶段是否一起做，还是先只做 `ask` 和 `never`。
-3. 沙箱不可用时“拒绝执行”这条是否接受（它会让现在没装 bwrap 却设了 `THEBE_SANDBOX=bwrap` 的部署从“照跑”变成“拒绝”）。
-4. 第 3 节里 `full-access` 旧模式映射到 `workspace-auto` 是否合适。
-5. 沙箱内是否要排除 Core 配置目录的可读性（可能影响依赖该目录的工具）。
+- App 的“权限”从三个值变成四个，取值换成新名字；旧值经别名仍被 Core 接受，但旧版 App 读 `GET /v1/settings/permissions` 会看到新名字。
+- 以前设了 `THEBE_SANDBOX=bwrap` 却没装 bwrap 的主机，命令从“照跑”变成“拒绝”，这是有意的。
+- 以前依赖 `THEBE_SCENARIO`、`THEBE_COMMAND_GUARD=off`、`THEBE_SANDBOX_NETWORK=deny` 的部署，这些变量不再生效（默认值即原来的默认）。

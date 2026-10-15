@@ -795,10 +795,15 @@ describe("Thebe TUI agent slash commands", () => {
       const tui: TUI = new TuiMainScreen(new MemoryTerminal());
       const { handleSlash } = attachThebeChat(tui, { agent });
 
-      await handleSlash("/permissions read-only");
-      expect(agent.permissionMode()).toBe("read-only");
-      await handleSlash("/permissions full-access");
-      expect(agent.permissionMode()).toBe("full-access");
+      await handleSlash("/permissions plan");
+      expect(agent.permissionMode()).toBe("plan");
+      await handleSlash("/permissions acceptEdits");
+      expect(agent.permissionMode()).toBe("acceptEdits");
+      await handleSlash("/permissions manual");
+      expect(agent.permissionMode()).toBe("manual");
+      // bypassPermissions needs the host to allow it.
+      await handleSlash("/permissions bypassPermissions");
+      expect(agent.permissionMode()).toBe("manual");
     } finally {
       if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
       else process.env.THEBE_CONFIG_DIR = previousConfigDir;

@@ -15,8 +15,8 @@ import {
 import { createExplicitResourceLoader } from "../sdk/explicit-loader.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 import { sanitizeBashEnv } from "../../../agent/security/process-env.ts";
-import { wrapCommandForSandbox } from "../../../agent/security/command-sandbox.ts";
-import { resolveScenarioSettings } from "../../../agent/security/scenario-profile.ts";
+import { sandboxedCommand } from "../../../agent/security/command-sandbox.ts";
+import { resolveHostSecurity } from "../../../agent/security/host-security.ts";
 import { createGondolinBashOperations } from "../../gondolin/bash-operations.ts";
 import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
@@ -272,7 +272,7 @@ export async function openPiSession(
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
-  const sandbox = resolveScenarioSettings();
+  const sandbox = resolveHostSecurity();
   const fullAccessActive = () => create.fullAccess?.() === true;
   const workspacePath = create.cwd ?? cwd;
   const baseBashOperations = backgroundTasks.wrap(
@@ -296,14 +296,9 @@ export async function openPiSession(
       cwd: string;
       env: Record<string, string | undefined>;
     }) => {
-      const wrapped = wrapCommandForSandbox(ctx.command, {
-        // The full-access preset lifts the sandbox for this session only; it is
-        // read per command so a mid-conversation toggle takes effect at once.
-        mode: fullAccessActive() ? "off" : sandbox.sandboxMode,
-        workspacePath,
-        allowNetwork: sandbox.sandboxNetwork,
-        image: process.env.THEBE_SANDBOX_IMAGE?.trim() || undefined,
-      });
+      // bypassPermissions lifts the sandbox for this session only; it is read per
+      // command so a mid-conversation change takes effect at once.
+      const wrapped = sandboxedCommand(ctx.command, fullAccessActive() ? "off" : sandbox.sandboxMode, workspacePath, sandbox.sandboxNetwork);
       // bwrap re-enters the workspace with --chdir, so ctx.cwd stays the
       // tool's own working directory.
       return {
@@ -318,12 +313,7 @@ export async function openPiSession(
   // environment, including Core's own token. It now crosses the same two filters as the tool.
   const guardedBashOperations: typeof bashOperations = {
     exec(command, cwd, execOptions) {
-      const wrapped = wrapCommandForSandbox(command, {
-        mode: fullAccessActive() ? "off" : sandbox.sandboxMode,
-        workspacePath,
-        allowNetwork: sandbox.sandboxNetwork,
-        image: process.env.THEBE_SANDBOX_IMAGE?.trim() || undefined,
-      });
+      const wrapped = sandboxedCommand(command, fullAccessActive() ? "off" : sandbox.sandboxMode, workspacePath, sandbox.sandboxNetwork);
       return bashOperations.exec(wrapped.command, cwd, {
         ...execOptions,
         env: sanitizeBashEnv({ ...process.env, ...execOptions.env }) as NodeJS.ProcessEnv,

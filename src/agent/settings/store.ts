@@ -9,7 +9,7 @@ import { basename, dirname, join } from "node:path";
 import {
   ENABLED_RESOURCE_KINDS,
   type EnabledResource,
-  type PermissionMode,
+  parsePermissionMode,
 } from "../runtime/interface.ts";
 import type {
   AgentSettingsStore,
@@ -26,6 +26,7 @@ const SETTING_KEYS = [
   "maxSubagentsPerParent",
   "workspacePath",
   "outputDirectory",
+  "instructions",
   "enabledResources",
   "mcpServerStates",
 ] as const;
@@ -72,7 +73,8 @@ function pickSettings(config: Record<string, unknown>): AgentSettingsValues {
   if (typeof config.autoSummaryDelayMs === "number" && Number.isFinite(config.autoSummaryDelayMs)) {
     values.autoSummaryDelayMs = config.autoSummaryDelayMs;
   }
-  if (isPermissionMode(config.permissionMode)) values.permissionMode = config.permissionMode;
+  const permissionMode = parsePermissionMode(config.permissionMode);
+  if (permissionMode) values.permissionMode = permissionMode;
   if (typeof config.maxSubagentConcurrency === "number" && Number.isFinite(config.maxSubagentConcurrency)) {
     values.maxSubagentConcurrency = config.maxSubagentConcurrency;
   }
@@ -81,6 +83,7 @@ function pickSettings(config: Record<string, unknown>): AgentSettingsValues {
   }
   if (typeof config.workspacePath === "string") values.workspacePath = config.workspacePath;
   if (typeof config.outputDirectory === "string") values.outputDirectory = config.outputDirectory;
+  if (typeof config.instructions === "string") values.instructions = config.instructions;
   if (Array.isArray(config.enabledResources)) {
     values.enabledResources = config.enabledResources.filter(isEnabledResource);
   }
@@ -88,10 +91,6 @@ function pickSettings(config: Record<string, unknown>): AgentSettingsValues {
     values.mcpServerStates = config.mcpServerStates.filter(isMcpServerState);
   }
   return values;
-}
-
-function isPermissionMode(value: unknown): value is PermissionMode {
-  return value === "ask" || value === "read-only" || value === "full-access";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

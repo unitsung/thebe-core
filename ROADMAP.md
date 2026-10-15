@@ -47,7 +47,7 @@ terminal, the HTTP API, and MCP, and no other UI.
   and `cloud_transfer`, which fetches a share/direct link through a
   `CloudTransferProvider` (OpenList offline download) before the same
   place → scan → verify steps. An Agent-owned background advancer
-  (`agent/pipeline/advancer.ts`, tuned by `THEBE_PIPELINE_ADVANCE_MS`) keeps jobs
+  (`agent/pipeline/advancer.ts`) keeps jobs
   acquired in the running process moving without a client, so a network-drive
   import finishes while the phone sleeps; a job restored after a Core restart
   still needs an explicit `pipeline.advance`.
@@ -59,14 +59,15 @@ terminal, the HTTP API, and MCP, and no other UI.
 
 **Safety**
 
-- Approval / permission flow (`ask` / `read-only` / `full-access`), `CommandRisk`
-  grading, workspace confinement, Docker command and API guards, `bwrap` and
-  Gondolin micro-VM sandbox options, ScenarioProfiles, output redaction before
-  the model and before disk, and an append-only audit log.
-- Host-gated, session-scoped full-access preset (`docs/FULL-ACCESS-DESIGN.md`):
-  `THEBE_FULL_ACCESS` allows it, `POST /v1/session/{id}/full-access` toggles one
-  conversation, and it is never inherited by subagents, schedules, background
-  goals, `/mcp`, or non-interactive turns.
+- Permission modes (`plan` / `manual` / `acceptEdits` / `bypassPermissions`,
+  `docs/adr/0004-permission-model.md`), `CommandRisk` grading, workspace
+  confinement, Docker command and API guards, one `THEBE_SANDBOX` switch over
+  `bwrap` / docker / seatbelt / Gondolin micro-VM backends, output redaction
+  before the model and before disk, and an append-only audit log.
+- `bypassPermissions` is host-gated and session-scoped: `THEBE_FULL_ACCESS`
+  allows it, `PUT /v1/session/{id}/permissions` sets it for one conversation, and
+  it is never inherited by subagents, schedules, background goals, `/mcp`, or
+  non-interactive turns.
 
 **Product contract**
 

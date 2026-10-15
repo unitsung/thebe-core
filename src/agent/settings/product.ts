@@ -23,6 +23,7 @@ export const AGENT_SETTING_KEYS = [
   "maxSubagentsPerParent",
   "workspacePath",
   "outputDirectory",
+  "instructions",
 ] as const;
 
 export type AgentSettingKey = (typeof AGENT_SETTING_KEYS)[number];
@@ -41,16 +42,23 @@ export type AgentSettings = {
   maxSubagentsPerParent: number;
   workspacePath?: string;
   outputDirectory?: string;
+  /** The owner's standing instructions; empty when none are set. */
+  instructions: string;
   sources: Record<AgentSettingKey, AgentSettingSource>;
   persistence: {
     enabled: boolean;
   };
-  mutable: readonly ["autoCompact", "autoSummary", "autoSummaryDelayMs"];
+  mutable: readonly [
+    "autoCompact",
+    "autoSummary",
+    "autoSummaryDelayMs",
+    "instructions",
+  ];
 };
 
 export type AgentSettingsPatch = Partial<Pick<
   AgentSettings,
-  "autoCompact" | "autoSummary" | "autoSummaryDelayMs"
+  "autoCompact" | "autoSummary" | "autoSummaryDelayMs" | "instructions"
 >>;
 
 export type AgentSettingsValues = Partial<{
@@ -62,6 +70,7 @@ export type AgentSettingsValues = Partial<{
   maxSubagentsPerParent: number;
   workspacePath: string;
   outputDirectory: string;
+  instructions: string;
   enabledResources: EnabledResource[];
   mcpServerStates: McpServerState[];
 }>;

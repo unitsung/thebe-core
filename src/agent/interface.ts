@@ -77,6 +77,9 @@ import type {
   AgentSettingsPatch,
   AgentSettingsStore,
 } from "./settings/product.ts";
+import type { AgentMemoryStore } from "./memory/store.ts";
+import type { MemoryOperation, MemoryTarget } from "./memory/memory.ts";
+import type { MemoryView } from "./tools/memory-tool.ts";
 
 export type ThebeSession = AgentSessionMeta & {
   status: SessionRunStatus;
@@ -115,6 +118,8 @@ export type CreateThebeAgentOptions = {
   modelResultLimit?: number;
   sessionIdleTimeoutMs?: number;
   systemPrompt?: string;
+  /** The owner's standing instructions, added after the built-in system prompt. */
+  instructions?: string;
   builtinTools?: readonly string[];
   enabledResources?: EnabledResource[];
   model?: RuntimeModelRef;
@@ -127,6 +132,11 @@ export type CreateThebeAgentOptions = {
    * `THEBE_FULL_ACCESS`. Only a host that allows it can enable the preset.
    */
   fullAccessAllowed?: boolean;
+  /**
+   * Host gate for running a client-supplied command in a session. Defaults to
+   * `THEBE_REMOTE_BASH`; off unless the host turns it on.
+   */
+  remoteBashAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -156,6 +166,8 @@ export type CreateThebeAgentOptions = {
   judgmentSites?: JudgmentEnabledSites;
   /** Optional persistence boundary for product-facing Agent settings. */
   settingsStore?: AgentSettingsStore;
+  /** Where Thebe Memory is kept. Without one the agent has no memory tool and no memory section. */
+  memoryStore?: AgentMemoryStore;
   /** Optional persistence boundary for product-facing Artifacts. */
   artifactStore?: ArtifactStore;
 };
@@ -333,12 +345,28 @@ export interface ThebeAgent {
    * rejected with 403 when the host has not allowed it. Session-scoped and
    * never inherited by subagents, schedules, background goals, or `/mcp`.
    */
+  setSessionPermissionMode(
+    thebeSessionId: string,
+    mode: PermissionMode | undefined
+  ): Promise<{ thebeSessionId: string; mode: PermissionMode }>;
+  sessionPermissionMode(thebeSessionId: string): Promise<{
+    thebeSessionId: string;
+    mode: PermissionMode;
+    inherited: boolean;
+  }>;
   setSessionFullAccess(
     thebeSessionId: string,
     enabled: boolean
   ): Promise<{ thebeSessionId: string; fullAccess: boolean }>;
   getAgentSettings(): AgentSettings;
   updateAgentSettings(patch: AgentSettingsPatch): Promise<AgentSettings>;
+  /** Thebe Memory as saved now; empty when no memory store is configured. */
+  getMemory(): { enabled: boolean; memory: MemoryView };
+  /** The owner's edit of Thebe Memory (no approval: the owner is the one asking). */
+  editMemory(
+    target: MemoryTarget,
+    operations: MemoryOperation[]
+  ): Promise<{ ok: boolean; error?: string; memory: MemoryView }>;
   listModels(query?: {
     all?: boolean;
     providerId?: string;
@@ -406,6 +434,19 @@ export interface ThebeAgent {
     onChunk?: (chunk: string) => void,
     options?: { excludeFromContext?: boolean }
   ): Promise<{ exitCode?: number; cancelled: boolean; output: string }>;
+  /**
+   * Run one command the client has already had approved. Host-gated; refused when the command
+   * guard rates it dangerous or critical; the output is redacted and bounded; every run is audited.
+   */
+  runRemoteCommand(
+    thebeSessionId: string,
+    command: string
+  ): Promise<{
+    exitCode?: number;
+    cancelled: boolean;
+    output: string;
+    truncated: boolean;
+  }>;
   quiesce(): Promise<void>;
   unquiesce(): Promise<void>;
   reapIdleSessions(idleMs?: number): Promise<{ reaped: number }>;

@@ -1,4 +1,6 @@
 import { assessCommand } from "../../src/agent/security/command-risk.ts";
+import { shellParserReady } from "../../src/agent/security/shell-parse.ts";
+await shellParserReady();
 const cmds = [
   "rm -rf /",
   "rm -rf /*",

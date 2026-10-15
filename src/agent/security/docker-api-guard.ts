@@ -5,7 +5,7 @@
  * Docker-API-shaped requests (container create, volume/system prune) so a proxy
  * or the command guard can refuse container breakout and NAS data loss before
  * the daemon sees it. `command-risk.ts` uses it for docker-socket calls made
- * through curl, and `scenario-profile.ts` supplies the policy per scenario.
+ * through curl, and `host-security.ts` supplies the policy.
  */
 
 export interface DockerApiValidationResult {

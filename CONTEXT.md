@@ -13,23 +13,19 @@ Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the 
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code
 
 **CommandRisk**:
-Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`), and Docker Engine API calls issued straight at `docker.sock` (curl/podman) go through `docker-api-guard.ts`. `THEBE_COMMAND_GUARD=off` disables the layer.
+Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`), and Docker Engine API calls issued straight at `docker.sock` (curl/podman) go through `docker-api-guard.ts`. The layer is always on; only `bypassPermissions` lifts it, for one session.
 _Avoid_: putting model-based review here (that is `JudgmentModel`), blocking inside the adapter instead of the preflight
 
-**ScenarioProfile**:
-Deployment presets in `src/agent/security/scenario-profile.ts`, ported from the pre-refactor `src/policy/scenario-profile.ts`: `nas-strict`, `homelab-host`, `microvm-sandbox`, `yolo-guarded`. `THEBE_SCENARIO=<name>` sets the guard, workspace-escape, sandbox, and Docker-API-guard defaults; explicit `THEBE_*` variables always win.
-_Avoid_: a second safety engine behind the profiles, per-session scenario state that delivery code mutates directly
-
-**FullAccessPreset**:
-Host-gated, session-scoped switch that lifts the command guard, the sandbox, and tool approval for one conversation. Off unless the host sets `THEBE_FULL_ACCESS` (`src/agent/security/full-access.ts`); stored as `AgentSessionMeta.fullAccess`; toggled by `ThebeAgent.setSessionFullAccess` via `POST /v1/session/{id}/full-access`; `GET /v1/settings/full-access` reports the gate and the session metadata carries `fullAccess` for the App indicator. Not inherited by subagents, schedules, background goals, `/mcp` callers, or non-interactive turns; workspace boundary, redaction, and audit stay on.
-_Avoid_: treating it as the global `full-access` permission mode, a remote-controlled global switch, or a second permission-mode name
+**PermissionMode**:
+The one setting that decides how much a session may do without asking: `plan` (read-only), `manual` (ask each time), `acceptEdits` (workspace edits and sandboxed commands run unasked), `bypassPermissions` (nothing asked, command guard and sandbox lifted). Names are Claude Code's; the rules for `acceptEdits` follow Codex's on-request policy with a restricted sandbox (`src/agent/security/accept-edits.ts`, ADR 0004). Stored per session as `AgentSessionMeta.permissionMode`, the host default in `config.json`; `bypassPermissions` only where the host sets `THEBE_FULL_ACCESS` and never inherited by subagents, schedules, background goals, `/mcp` callers, or non-interactive turns. Only the four names are read.
+_Avoid_: a second permission-mode name, a remote-controlled switch for `bypassPermissions`, command-safety lists (the sandbox is what makes running unasked acceptable)
 
 **GondolinMicroVM**:
 Micro-VM execution path in `src/adapters/gondolin`: `runner.ts` maps the workspace to `/workspace` (escaping the jail throws) and owns the VM lifecycle, `bash-operations.ts` makes it the `bash` backend behind `THEBE_SANDBOX=gondolin`. The VM provider is injectable, so tests run without QEMU/KVM; `@earendil-works/gondolin` stays an optional dynamic import (clear failure, no silent unsandboxed run).
 _Avoid_: importing Pi types outside `src/adapters/pi`, falling back to local execution without telling the caller
 
 **CommandSandbox**:
-Optional bubblewrap jail for the `bash` tool in `src/agent/security/command-sandbox.ts`, enabled by `THEBE_SANDBOX=bwrap`: read-only host, ephemeral `/tmp`, workspace-only writes, dropped capabilities, `THEBE_SANDBOX_NETWORK=deny` for an unshared network. Wrapping happens in the Pi session's bash `spawnHook`; it degrades to the raw command when `bwrap` is absent. `THEBE_SANDBOX=gondolin` (same variable) instead routes bash through `src/adapters/gondolin` for hardware-VM isolation.
+Optional jail for the `bash` tool in `src/agent/security/command-sandbox.ts`, chosen by one variable, `THEBE_SANDBOX=off|auto|bwrap|docker|seatbelt|gondolin` (`auto` picks what the host can run). bubblewrap: read-only host, ephemeral `/tmp`, workspace-only writes, dropped capabilities. Wrapping happens in the Pi session's bash `spawnHook`; a backend that was asked for and is missing refuses the command (`sandboxedCommand`) rather than running it bare. `THEBE_SANDBOX=gondolin` (same variable) instead routes bash through `src/adapters/gondolin` for hardware-VM isolation.
 _Avoid_: forcing the sandbox on by default, sandboxing through the tool layer instead of the spawn hook
 
 **PiCodingAgentRuntime**:
@@ -140,7 +136,7 @@ Durable media-import state machine in `src/agent/pipeline/job-runner.ts`: `submi
 _Avoid_: putting vendor endpoints in the state machine, a second job runner per service, or running the transfer only while a client is connected
 
 **PipelineAdvancer**:
-Agent-owned background loop in `src/agent/pipeline/advancer.ts` that steps acquisition jobs acquired in the running process so they finish without a client (`THEBE_PIPELINE_ADVANCE_MS`, default one minute; `0` disables). It never auto-resumes a job restored after a Core restart (that needs an explicit `pipeline.advance`) and stops while quiesced.
+Agent-owned background loop in `src/agent/pipeline/advancer.ts` that steps acquisition jobs acquired in the running process so they finish without a client (every minute). It never auto-resumes a job restored after a Core restart (that needs an explicit `pipeline.advance`) and stops while quiesced.
 _Avoid_: a second scheduler, auto-retrying a failed job, or replaying a restored write-capable job silently
 
 **PolicyEngine**:

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -42,7 +42,7 @@ describe("Thebe agent service (fake runtime)", () => {
         },
       },
       provider: emptyProvider(),
-      permissionMode: "full-access",
+      permissionMode: "manual",
     });
     const session = await agent.createSession();
     const request = {
@@ -51,7 +51,7 @@ describe("Thebe agent service (fake runtime)", () => {
       toolName: "bash",
       args: { command: "ls" },
     };
-    expect(await handler!.preflight!(request)).toBe("allow");
+    expect(await handler!.preflight!(request)).toBe("ask");
     await agent.patchSession(session.thebeSessionId, {
       rememberedPermissions: { bash: "deny" },
     });
@@ -59,17 +59,53 @@ describe("Thebe agent service (fake runtime)", () => {
     await agent.patchSession(session.thebeSessionId, {
       rememberedPermissions: { bash: "allow" },
     });
-    agent.setPermissionMode("ask");
+    agent.setPermissionMode("manual");
     expect(await handler!.preflight!(request)).toBe("allow");
-    agent.setPermissionMode("read-only");
+    agent.setPermissionMode("plan");
     expect(await handler!.preflight!(request)).toBe("deny");
-    agent.setPermissionMode("full-access");
+    agent.setPermissionMode("acceptEdits");
     expect(
       await handler!.preflight!({
         ...request,
         args: { command: "zpool destroy tank" },
       })
     ).toBe("deny");
+  });
+
+  it("acceptEdits lets workspace edits through and asks about the rest", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "thebe-accept-edits-agent-"));
+    const fake = createFakeRuntime();
+    let handler: Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"];
+    const agent = createThebeAgent({
+      runtime: {
+        ...fake.runtime,
+        async createSession(options) {
+          handler = options.permissionHandler;
+          return fake.runtime.createSession(options);
+        },
+      },
+      provider: emptyProvider(),
+      permissionMode: "acceptEdits",
+      workspacePath: workspace,
+    });
+    await agent.createSession();
+    const call = (toolName: string, args: unknown) => ({
+      permissionId: "p",
+      toolCallId: "c",
+      toolName,
+      args,
+    });
+    expect(await handler!.preflight!(call("write", { path: "notes.md", content: "x" }))).toBe("allow");
+    expect(await handler!.preflight!(call("write", { path: "../outside.md", content: "x" }))).toBe("ask");
+    // No sandbox is running in this test, so a command is still asked about.
+    expect(await handler!.preflight!(call("bash", { command: "ls" }))).toBe("ask");
+    expect(await handler!.preflight!(call("memory", { target: "user", operations: [] }))).toBe("ask");
+
+    // A session can narrow itself to plan, and the others keep the host's mode.
+    const planned = await agent.createSession();
+    await agent.setSessionPermissionMode(planned.thebeSessionId, "plan");
+    expect((await agent.sessionPermissionMode(planned.thebeSessionId)).mode).toBe("plan");
+    await rm(workspace, { recursive: true, force: true });
   });
 
   it("refreshes an existing conversation when a resource is enabled, updated or removed", async () => {
@@ -196,38 +232,6 @@ describe("Thebe agent service (fake runtime)", () => {
         args: { path: "/etc/sudoers", content: "x" },
       })
     ).toBe("ask");
-  });
-
-  it("lets THEBE_COMMAND_GUARD=off fall back to plain approvals", async () => {
-    vi.stubEnv("THEBE_COMMAND_GUARD", "off");
-    try {
-      const fake = createFakeRuntime();
-      const createCalls: Array<
-        Parameters<typeof fake.runtime.createSession>[0]
-      > = [];
-      const runtime = {
-        ...fake.runtime,
-        async createSession(
-          create: Parameters<typeof fake.runtime.createSession>[0]
-        ) {
-          createCalls.push(create);
-          return fake.runtime.createSession(create);
-        },
-      };
-      const agent = createThebeAgent({ runtime, provider: emptyProvider() });
-      await agent.createSession();
-      const preflight = createCalls[0]!.permissionHandler!.preflight!;
-      expect(
-        await preflight({
-          permissionId: "p",
-          toolName: "bash",
-          toolCallId: "c",
-          args: { command: "zpool destroy tank" },
-        })
-      ).toBe("ask");
-    } finally {
-      vi.unstubAllEnvs();
-    }
   });
 
   it("never treats the host process directory as an implicit workspace", async () => {
@@ -1051,11 +1055,12 @@ describe("Thebe agent service (fake runtime)", () => {
     const agent = createThebeAgent({
       runtime: fake.runtime,
       provider: emptyProvider(),
-      permissionMode: "full-access",
+      permissionMode: "bypassPermissions",
+      fullAccessAllowed: true,
     });
     const result = await agent.send("run bash");
     expect(result.text).toBe("after");
-    expect(agent.permissionMode()).toBe("full-access");
+    expect(agent.permissionMode()).toBe("bypassPermissions");
     expect(agent.pendingPermissionIds()).toHaveLength(0);
 
     const denied = createFakeRuntime();
@@ -1066,7 +1071,8 @@ describe("Thebe agent service (fake runtime)", () => {
     const guarded = createThebeAgent({
       runtime: denied.runtime,
       provider: emptyProvider(),
-      permissionMode: "full-access",
+      permissionMode: "bypassPermissions",
+      fullAccessAllowed: true,
     });
     const session = await guarded.createSession();
     await guarded.patchSession(session.thebeSessionId, {
@@ -1089,11 +1095,11 @@ describe("Thebe agent service (fake runtime)", () => {
     const agent = createThebeAgent({
       runtime: fake.runtime,
       provider: emptyProvider(),
-      permissionMode: "read-only",
+      permissionMode: "plan",
     });
     const result = await agent.send("run bash");
     expect(result.text).toBe("read-only");
-    expect(agent.permissionMode()).toBe("read-only");
+    expect(agent.permissionMode()).toBe("plan");
     expect(agent.pendingPermissionIds()).toHaveLength(0);
   });
 
@@ -1150,8 +1156,8 @@ describe("Thebe agent service (fake runtime)", () => {
     // The command guard is lifted for the enabled session only.
     expect(await firstHandler.preflight!(critical)).toBe("allow");
     expect(await secondHandler.preflight!(request)).toBe("ask");
-    expect((await agent.getSession(first.thebeSessionId)).fullAccess).toBe(
-      true
+    expect((await agent.getSession(first.thebeSessionId)).permissionMode).toBe(
+      "bypassPermissions"
     );
 
     await agent.setSessionFullAccess(first.thebeSessionId, false);
