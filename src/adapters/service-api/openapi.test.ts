@@ -472,4 +472,70 @@ describe("dynamic OpenAPI service capability", () => {
         })
     ).toThrow("Invalid OpenAPI document URL");
   });
+
+  it("matches every word of a query in any order", async () => {
+    const provider = new OpenAPIService(
+      {
+        id: "anything",
+        baseURL: "https://service.invalid",
+        openapiPath: "/spec.json",
+      },
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(JSON.stringify(spec(paths))))
+    );
+    const found = (await provider.catalog({ query: "status job read" })) as {
+      operations: Array<{ id: string }>;
+    };
+    expect(found.operations.map((op) => op.id)).toEqual(["getJob"]);
+    const none = (await provider.catalog({ query: "job nothing" })) as {
+      total: number;
+    };
+    expect(none.total).toBe(0);
+  });
+
+  it("hides excluded operations and tags and refuses them on every route", async () => {
+    const tagged = spec({
+      ...paths,
+      "/admin/reset": {
+        post: {
+          operationId: "resetAll",
+          tags: ["admin"],
+          summary: "Reset everything",
+        },
+      },
+    });
+    const make = () =>
+      new OpenAPIService(
+        {
+          id: "anything",
+          baseURL: "https://service.invalid",
+          openapiPath: "/spec.json",
+          readMethods: ["GET"],
+          excludeOperations: ["getJob"],
+          excludeTags: ["admin"],
+        },
+        vi
+          .fn<typeof fetch>()
+          .mockImplementation(async () => new Response(JSON.stringify(tagged)))
+      );
+    const provider = make();
+    const listed = (await provider.catalog({})) as {
+      operations: Array<{ id: string }>;
+    };
+    expect(listed.operations.map((op) => op.id)).toEqual(["createJob"]);
+    expect((await provider.operations()).map((op) => op.id)).toEqual([
+      "createJob",
+    ]);
+    await expect(
+      provider.request({ method: "GET", path: "/jobs/1", readOnly: true })
+    ).rejects.toThrow("excluded");
+    await expect(
+      provider.request({
+        method: "POST",
+        path: "/admin/reset",
+        readOnly: false,
+      })
+    ).rejects.toThrow("excluded");
+  });
 });

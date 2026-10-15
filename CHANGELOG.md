@@ -9,12 +9,14 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Added
 
+- HTTP services accept `excludeOperations` and `excludeTags`: matching operations are hidden from discovery and refused on every route.
 - Per-device tokens: `thebe token create <name>|list|revoke <name>`. Each is shown once and stored only as a hash in `tokens.json`; last use goes to `token-usage.json`. Revoking one leaves the others working. No scopes: every token has the same access.
 - `thebe token status|show|rotate|revoke --all` (`dist/token.js`, `npm run token`) for the shared token. The server reads the token file on every request, so a rotation or revocation applies without a restart; a missing or empty token file refuses every protected request. A `THEBE_TOKEN` environment token is never changed by the command.
 - `THEBE_BIND` in `deploy/.env` publishes the container on the host's LAN address for home-network use (docs/DEPLOYMENT.md §4.1); loopback remains the default.
 
 ### Fixed
 
+- `service_api_discover` matches every word of a query in any order; "list containers" no longer needs the exact phrase.
 - Creating a session with no configured model answers `409 no_model_configured`, and asking for a model that is not available answers `404 model_not_found`; both were an unexplained `500`.
 
 ### Changed

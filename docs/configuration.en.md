@@ -266,6 +266,10 @@ sent to the model.
   `trustReadOnlyAnnotations: true` additionally trusts the document's own
   read-only hints. Both are **off unless you set them** — a remote document can
   never mark itself read-only on its own.
+- `excludeOperations` (operation IDs or `METHOD /path`) and `excludeTags` hide
+  operations from discovery and the named tools, and every request that matches
+  one is refused — reads, writes and approved calls alike. Use them for admin or
+  destructive endpoints that the model should never reach, whatever it asks.
 - `writeOperations` (operation IDs or `METHOD /path`) exposes chosen writes as
   two-phase tools. Calling one performs **no change**: it returns a
   `preview` (`method`, `path`, `body`) and a single-use `confirmToken` that
@@ -350,12 +354,12 @@ Before approval, `bash`, `write`, and `edit` pass through a command risk guard
 
 One setting decides how much a session may do without asking. The names are Claude Code's.
 
-| Mode | What runs without asking | What is asked or refused |
-| --- | --- | --- |
-| `plan` | Reads inside the workspace | Everything that changes something is refused |
-| `manual` | Reads inside the workspace | `bash`, `write`, `edit`, memory and write tools of services are asked each time |
-| `acceptEdits` | `write` and `edit` inside the workspace (never `.git`), and `bash` when a sandbox that confines it is in place | Anything the command guard flags, paths outside the workspace, `bash` with no sandbox, `memory`, MCP and service writes |
-| `bypassPermissions` | Everything; the command guard and the sandbox are lifted | Nothing. Host-gated (see below) |
+| Mode                | What runs without asking                                                                                       | What is asked or refused                                                                                                |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `plan`              | Reads inside the workspace                                                                                     | Everything that changes something is refused                                                                            |
+| `manual`            | Reads inside the workspace                                                                                     | `bash`, `write`, `edit`, memory and write tools of services are asked each time                                         |
+| `acceptEdits`       | `write` and `edit` inside the workspace (never `.git`), and `bash` when a sandbox that confines it is in place | Anything the command guard flags, paths outside the workspace, `bash` with no sandbox, `memory`, MCP and service writes |
+| `bypassPermissions` | Everything; the command guard and the sandbox are lifted                                                       | Nothing. Host-gated (see below)                                                                                         |
 
 `acceptEdits` follows Codex's on-request policy with a restricted sandbox: the sandbox, not a list of
 "safe" commands, is what makes running a command without asking acceptable, so with no sandbox

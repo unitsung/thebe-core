@@ -22,6 +22,10 @@ export type OpenAPIConnection = {
   trustReadOnlyAnnotations?: boolean;
   /** Operator allow-list of operations exposed as preview + confirm write tools. */
   writeOperations?: string[];
+  /** Operator deny-list: operation IDs or `METHOD /path`. Hidden from discovery and refused on every route. */
+  excludeOperations?: string[];
+  /** Operator deny-list by OpenAPI tag, same effect as excludeOperations. */
+  excludeTags?: string[];
 };
 type Operation = {
   id: string;
@@ -103,20 +107,24 @@ export class OpenAPIService implements ServiceAPIProvider {
     input: Parameters<ServiceAPIProvider["catalog"]>[0] = {}
   ): Promise<unknown> {
     const schema = await this.loadSchema(input.refresh === true, input.signal);
-    const query = (input.query ?? "").toLowerCase();
-    const selected = schema.operations.filter((op) =>
-      input.operationId
-        ? op.id === input.operationId
-        : JSON.stringify([
-            op.id,
-            op.path,
-            op.definition.summary,
-            op.definition.description,
-            op.definition.tags,
-          ])
-            .toLowerCase()
-            .includes(query)
-    );
+    // Every word of the query must appear somewhere in the operation, in any order, so
+    // "list containers" finds `GET /containers` instead of needing the exact phrase.
+    const words = (input.query ?? "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+    const selected = schema.operations.filter((op) => {
+      if (this.excluded(op)) return false;
+      if (input.operationId) return op.id === input.operationId;
+      const text = JSON.stringify([
+        op.id,
+        op.path,
+        op.definition.summary,
+        op.definition.description,
+        op.definition.tags,
+      ]).toLowerCase();
+      return words.every((word) => text.includes(word));
+    });
     if (input.operationId && !selected.length)
       throw new Error(
         "Operation not found; refresh discovery if the API changed"
@@ -174,7 +182,11 @@ export class OpenAPIService implements ServiceAPIProvider {
       );
     }
     const path = this.relativePath(input.path);
-    if (input.readOnly) {
+    const denies = !!(
+      this.connection.excludeOperations?.length ||
+      this.connection.excludeTags?.length
+    );
+    if (input.readOnly || denies) {
       const schema = await this.loadSchema(false, input.signal);
       const pathname = path.split("?")[0]!;
       const op =
@@ -191,7 +203,9 @@ export class OpenAPIService implements ServiceAPIProvider {
               b.path.split("/").filter((part) => !part.startsWith("{")).length -
               a.path.split("/").filter((part) => !part.startsWith("{")).length
           )[0];
-      if (!op || !this.readable(op))
+      if (op && this.excluded(op))
+        throw new Error("This operation is excluded by the operator");
+      if (input.readOnly && (!op || !this.readable(op)))
         throw new Error(
           "Use service_api_write and runtime approval for this operation"
         );
@@ -248,76 +262,91 @@ export class OpenAPIService implements ServiceAPIProvider {
   }
   async operations(): Promise<ServiceAPIOperation[]> {
     const schema = await this.loadSchema(false);
-    return schema.operations.map((op) => {
-      const rawParameters = [
-        ...(Array.isArray(op.pathItem.parameters)
-          ? op.pathItem.parameters
-          : []),
-        ...(Array.isArray(op.definition.parameters)
-          ? op.definition.parameters
-          : []),
-      ];
-      const parameters: ServiceAPIParameter[] = rawParameters.flatMap(
-        (value) => {
-          const row = object(this.resolveLocal(value, schema.document));
-          const name = typeof row.name === "string" ? row.name : "";
-          const location =
-            row.in === "path" || row.in === "query" || row.in === "header"
-              ? row.in
-              : undefined;
-          if (!name || !location) return [];
-          const paramSchema = object(
-            this.resolveLocal(row.schema, schema.document)
-          );
-          return [
-            {
-              name,
-              in: location,
-              required: row.required === true,
-              ...(Object.keys(paramSchema).length > 0
-                ? { schema: paramSchema }
-                : {}),
-              ...(typeof row.description === "string"
-                ? { description: row.description }
-                : {}),
-            },
-          ];
-        }
-      );
-      const requestBody = object(
-        this.resolveLocal(op.definition.requestBody, schema.document)
-      );
-      const content = object(requestBody.content);
-      const contentType = Object.keys(content)[0];
-      const bodySchema = contentType
-        ? object(object(content[contentType]).schema)
-        : {};
-      return {
-        id: op.id,
-        method: op.method,
-        path: op.path,
-        ...(typeof op.definition.summary === "string"
-          ? { summary: op.definition.summary }
-          : {}),
-        ...(typeof op.definition.description === "string"
-          ? { description: op.definition.description }
-          : {}),
-        readOnly: this.readable(op),
-        writable: this.isWritable(op),
-        parameters,
-        ...(Object.keys(requestBody).length > 0
-          ? {
-              requestBody: {
-                required: requestBody.required === true,
-                ...(contentType ? { contentType } : {}),
-                ...(Object.keys(bodySchema).length > 0
-                  ? { schema: bodySchema }
+    return schema.operations
+      .filter((op) => !this.excluded(op))
+      .map((op) => {
+        const rawParameters = [
+          ...(Array.isArray(op.pathItem.parameters)
+            ? op.pathItem.parameters
+            : []),
+          ...(Array.isArray(op.definition.parameters)
+            ? op.definition.parameters
+            : []),
+        ];
+        const parameters: ServiceAPIParameter[] = rawParameters.flatMap(
+          (value) => {
+            const row = object(this.resolveLocal(value, schema.document));
+            const name = typeof row.name === "string" ? row.name : "";
+            const location =
+              row.in === "path" || row.in === "query" || row.in === "header"
+                ? row.in
+                : undefined;
+            if (!name || !location) return [];
+            const paramSchema = object(
+              this.resolveLocal(row.schema, schema.document)
+            );
+            return [
+              {
+                name,
+                in: location,
+                required: row.required === true,
+                ...(Object.keys(paramSchema).length > 0
+                  ? { schema: paramSchema }
+                  : {}),
+                ...(typeof row.description === "string"
+                  ? { description: row.description }
                   : {}),
               },
-            }
-          : {}),
-      };
-    });
+            ];
+          }
+        );
+        const requestBody = object(
+          this.resolveLocal(op.definition.requestBody, schema.document)
+        );
+        const content = object(requestBody.content);
+        const contentType = Object.keys(content)[0];
+        const bodySchema = contentType
+          ? object(object(content[contentType]).schema)
+          : {};
+        return {
+          id: op.id,
+          method: op.method,
+          path: op.path,
+          ...(typeof op.definition.summary === "string"
+            ? { summary: op.definition.summary }
+            : {}),
+          ...(typeof op.definition.description === "string"
+            ? { description: op.definition.description }
+            : {}),
+          readOnly: this.readable(op),
+          writable: this.isWritable(op),
+          parameters,
+          ...(Object.keys(requestBody).length > 0
+            ? {
+                requestBody: {
+                  required: requestBody.required === true,
+                  ...(contentType ? { contentType } : {}),
+                  ...(Object.keys(bodySchema).length > 0
+                    ? { schema: bodySchema }
+                    : {}),
+                },
+              }
+            : {}),
+        };
+      });
+  }
+  private excluded(op: Operation): boolean {
+    const { excludeOperations, excludeTags } = this.connection;
+    if (
+      excludeOperations?.includes(op.id) ||
+      excludeOperations?.includes(`${op.method} ${op.path}`)
+    )
+      return true;
+    const tags = Array.isArray(op.definition.tags) ? op.definition.tags : [];
+    return (
+      !!excludeTags?.length &&
+      tags.some((tag) => excludeTags.includes(String(tag)))
+    );
   }
   private isWritable(op: Operation): boolean {
     return (
@@ -656,6 +685,16 @@ export function openAPIConnectionsFromEnv(
       trustReadOnlyAnnotations: entry.trustReadOnlyAnnotations === true,
       writeOperations: Array.isArray(entry.writeOperations)
         ? entry.writeOperations.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : undefined,
+      excludeOperations: Array.isArray(entry.excludeOperations)
+        ? entry.excludeOperations.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : undefined,
+      excludeTags: Array.isArray(entry.excludeTags)
+        ? entry.excludeTags.filter(
             (item): item is string => typeof item === "string"
           )
         : undefined,
