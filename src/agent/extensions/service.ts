@@ -70,6 +70,8 @@ export function createExtensionApi(
         strmRepairProvider: ctx.options.strmRepairProvider,
         navidrome: Boolean(ctx.options.navidrome),
         musicResearch: Boolean(ctx.options.musicResearch),
+        netease: Boolean(ctx.options.musicSources?.netease),
+        sqmusic: Boolean(ctx.options.musicSources?.sqmusic),
         emby: Boolean(ctx.options.emby),
         jellyfin: Boolean(ctx.options.jellyfin),
         immich: Boolean(ctx.options.immich),

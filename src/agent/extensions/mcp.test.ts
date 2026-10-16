@@ -20,7 +20,9 @@ describe("capability product metadata", () => {
 
   it("publishes Navidrome capabilities only when the provider is configured", () => {
     const disabled = listCoreMcpTools();
-    expect(disabled.some((tool) => tool.id.startsWith("navidrome."))).toBe(false);
+    expect(disabled.some((tool) => tool.id.startsWith("navidrome."))).toBe(
+      false
+    );
 
     const enabled = listCoreMcpTools({ navidrome: true });
     expect(enabled).toEqual(
@@ -47,7 +49,25 @@ describe("capability product metadata", () => {
           risk: "disruptive",
           approval: "required",
         }),
-      ]),
+      ])
     );
+  });
+});
+
+describe("SQMusic capabilities", () => {
+  it("lists the lookup as read-only and the download as a write that needs runtime approval", () => {
+    const tools = listCoreMcpTools({ sqmusic: true });
+    expect(tools.find((tool) => tool.id === "sqmusic_search")).toMatchObject({
+      permission: "read",
+    });
+    expect(tools.find((tool) => tool.id === "sqmusic_download")).toMatchObject({
+      effect: "write",
+      approval: "required",
+      permission: "confirm",
+      destructive: true,
+    });
+    expect(
+      listCoreMcpTools({}).some((tool) => tool.id.startsWith("sqmusic"))
+    ).toBe(false);
   });
 });

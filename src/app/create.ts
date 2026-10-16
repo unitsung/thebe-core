@@ -4,6 +4,7 @@ import type { ServiceAPIProvider } from "../agent/capabilities/service-api.ts";
 import type { NavidromeProvider } from "../agent/capabilities/navidrome.ts";
 import type { PipelineProviders } from "../agent/tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "../agent/capabilities/music-research.ts";
+import type { MusicSourcesProvider } from "../agent/capabilities/music-sources.ts";
 import type { WebSearchProvider } from "../agent/capabilities/web-search.ts";
 import type {
   MediaLibraryProvider,
@@ -66,6 +67,7 @@ export function createThebeApp(options: {
   navidrome?: NavidromeProvider;
   pipeline?: PipelineProviders;
   musicResearch?: MusicResearchProvider;
+  musicSources?: MusicSourcesProvider;
   webSearch?: WebSearchProvider;
   emby?: MediaLibraryProvider;
   jellyfin?: MediaLibraryProvider;
@@ -114,6 +116,7 @@ export function createThebeApp(options: {
     navidrome: options.navidrome,
     pipeline: options.pipeline,
     musicResearch: options.musicResearch,
+    musicSources: options.musicSources,
     webSearch: options.webSearch,
     emby: options.emby,
     jellyfin: options.jellyfin,

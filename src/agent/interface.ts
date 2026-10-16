@@ -22,6 +22,7 @@ import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { PipelineProviders } from "./tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
+import type { MusicSourcesProvider } from "./capabilities/music-sources.ts";
 import type { WebSearchProvider } from "./capabilities/web-search.ts";
 import type {
   MediaLibraryProvider,
@@ -150,6 +151,8 @@ export type CreateThebeAgentOptions = {
   /** Optional download → files → library providers exposed as pipeline tools. */
   pipeline?: PipelineProviders;
   musicResearch?: MusicResearchProvider;
+  /** Optional NetEase Cloud Music / SQMusic read-only sources. */
+  musicSources?: MusicSourcesProvider;
   webSearch?: WebSearchProvider;
   /** Optional Emby library. Exposes search and item detail when present. */
   emby?: MediaLibraryProvider;

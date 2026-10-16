@@ -27,6 +27,12 @@ import { resolveHostSecurity } from "../security/host-security.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
+import { createMusicSourcesTools } from "../tools/music-sources-tools.ts";
+import {
+  NETEASE_TOOL_NAME,
+  SQMUSIC_DOWNLOAD_TOOL_NAME,
+  SQMUSIC_TOOL_NAME,
+} from "../capabilities/music-sources.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
 import { createServiceAPITools } from "../tools/service-api-tools.ts";
 import {
@@ -287,6 +293,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     allowedToolNames: [
       ...Object.keys(CORE_EVENT_TOOLS),
       ...(options.musicResearch ? ["music_research"] : []),
+      ...(options.musicSources?.netease ? [NETEASE_TOOL_NAME] : []),
+      ...(options.musicSources?.sqmusic
+        ? [SQMUSIC_TOOL_NAME, SQMUSIC_DOWNLOAD_TOOL_NAME]
+        : []),
       ...(options.webSearch ? ["web_search"] : []),
       ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
       ...CONTAINER_TOOL_NAMES,
@@ -754,6 +764,14 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           researchBudget
         ).map(unlessWebSearchOff)
       );
+    if (options.musicSources)
+      tools.push(
+        ...createMusicSourcesTools(
+          options.musicSources,
+          toolPolicy,
+          toolCallerId
+        )
+      );
     if (options.webSearch)
       tools.push(
         ...createWebSearchTools(
@@ -888,6 +906,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         ...TOOLS_REQUIRING_APPROVAL,
         ...WORKSPACE_READ_TOOLS,
         ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
+        ...(options.musicSources?.sqmusic ? [SQMUSIC_DOWNLOAD_TOOL_NAME] : []),
         ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
         ...(options.serviceAPIProviders?.length
           ? [SERVICE_API_WRITE_TOOL_NAME]

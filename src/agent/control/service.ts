@@ -416,7 +416,10 @@ export function createControlApi(
       return ctx.getAgentSettings();
     },
     getMemory() {
-      return { enabled: Boolean(options.memoryStore), memory: ctx.memoryView() };
+      return {
+        enabled: Boolean(options.memoryStore),
+        memory: ctx.memoryView(),
+      };
     },
     async editMemory(
       target: import("../memory/memory.ts").MemoryTarget,
@@ -546,6 +549,8 @@ export function createControlApi(
           strmRepairProvider: options.strmRepairProvider,
           navidrome: Boolean(options.navidrome),
           musicResearch: Boolean(options.musicResearch),
+          netease: Boolean(options.musicSources?.netease),
+          sqmusic: Boolean(options.musicSources?.sqmusic),
           emby: Boolean(options.emby),
           jellyfin: Boolean(options.jellyfin),
           immich: Boolean(options.immich),
@@ -870,7 +875,10 @@ export function createControlApi(
     ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
       const opened = await openSession(thebeSessionId);
       if (!opened.session.executeBash) {
-        throw httpError(501, "This runtime session cannot execute shell commands");
+        throw httpError(
+          501,
+          "This runtime session cannot execute shell commands"
+        );
       }
       return opened.session.executeBash(command, onChunk, options);
     },
@@ -914,7 +922,10 @@ export function createControlApi(
       try {
         const opened = await openSession(thebeSessionId);
         if (!opened.session.executeBash) {
-          throw httpError(501, "This runtime session cannot execute shell commands");
+          throw httpError(
+            501,
+            "This runtime session cannot execute shell commands"
+          );
         }
         result = await opened.session.executeBash(trimmed, undefined, {
           excludeFromContext: true,

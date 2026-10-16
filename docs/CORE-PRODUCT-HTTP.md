@@ -137,6 +137,20 @@ Model discovery with `/v1/model?provider=…&refresh=true` queries that configur
 provider's model endpoint. Explicit custom definitions remain editable, and
 deleting a custom provider removes its stored credentials and legacy overrides.
 
+Optional personal music sources are read-only and enabled by environment variables:
+`THEBE_NETEASE_API_URL` (a NeteaseCloudMusicApi service, no login) registers
+`netease_music` (search, lyrics, comments, playlist, toplist), and
+`THEBE_SQMUSIC_URL` + `THEBE_SQMUSIC_USERNAME` + `THEBE_SQMUSIC_PASSWORD` registers
+`sqmusic_search` (plugins, search, download-task list). SQMusic's own `/mcp` endpoint
+is not reachable through its web proxy, so Core calls its `/api/*` routes directly and
+re-logs in once when the token is refused. `sqmusic_download` queues one song (`plugin`, `id`, the `query` it was found with, optional
+`quality`). It is a write: it is in the session's approval list, is listed as
+`approval: required`, and direct capability invocation or `/mcp` refuses it with 403 like the
+Navidrome playlist writes. Core re-searches to get SQMusic's own record (so the model cannot
+supply one), rejects a quality the search did not offer, never queues albums or artists in bulk,
+and reads the task back from SQMusic. Results are bounded and remote text is untrusted data.
+The App's direct mode exposes the same lookups; its own download buttons are user actions.
+
 The composition root supplies the read-only `music_research` capability even
 without a local music server. Agent tools, capability discovery and invocation
 share its contract. MusicBrainz and Wikipedia adapters return bounded candidate

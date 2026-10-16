@@ -7,7 +7,21 @@ import {
   CONTAINER_TOOL_NAMES,
   CONTAINER_TOOL_SCHEMAS,
 } from "../capabilities/containers.ts";
-import { MUSIC_RESEARCH_DESCRIPTION, MUSIC_RESEARCH_SCHEMA } from "../capabilities/music-research.ts";
+import {
+  MUSIC_RESEARCH_DESCRIPTION,
+  MUSIC_RESEARCH_SCHEMA,
+} from "../capabilities/music-research.ts";
+import {
+  NETEASE_DESCRIPTION,
+  NETEASE_SCHEMA,
+  NETEASE_TOOL_NAME,
+  SQMUSIC_DESCRIPTION,
+  SQMUSIC_DOWNLOAD_DESCRIPTION,
+  SQMUSIC_DOWNLOAD_SCHEMA,
+  SQMUSIC_DOWNLOAD_TOOL_NAME,
+  SQMUSIC_SCHEMA,
+  SQMUSIC_TOOL_NAME,
+} from "../capabilities/music-sources.ts";
 import {
   EMBY_LOOKUP_TOOL_NAMES,
   EMBY_TOOL_NAMES,
@@ -54,18 +68,28 @@ export const HOMELAB_CAPABILITY_CATEGORIES = [
 export type HomelabCapabilityCategory =
   (typeof HOMELAB_CAPABILITY_CATEGORIES)[number];
 
-export const HOMELAB_CAPABILITY_PERMISSIONS = ["read", "confirm", "admin"] as const;
+export const HOMELAB_CAPABILITY_PERMISSIONS = [
+  "read",
+  "confirm",
+  "admin",
+] as const;
 export type HomelabCapabilityPermission =
   (typeof HOMELAB_CAPABILITY_PERMISSIONS)[number];
 
-export const HOMELAB_CAPABILITY_EXECUTIONS = ["direct", "agent", "goal", "either"] as const;
+export const HOMELAB_CAPABILITY_EXECUTIONS = [
+  "direct",
+  "agent",
+  "goal",
+  "either",
+] as const;
 export type HomelabCapabilityExecution =
   (typeof HOMELAB_CAPABILITY_EXECUTIONS)[number];
 export const DEFAULT_CAPABILITY_EXECUTION =
   "direct" satisfies HomelabCapabilityExecution;
 
 export const HOMELAB_CAPABILITY_SOURCES = ["core", "external"] as const;
-export type HomelabCapabilitySource = (typeof HOMELAB_CAPABILITY_SOURCES)[number];
+export type HomelabCapabilitySource =
+  (typeof HOMELAB_CAPABILITY_SOURCES)[number];
 export const CORE_CAPABILITY_SOURCE = HOMELAB_CAPABILITY_SOURCES[0];
 export const EXTERNAL_CAPABILITY_SOURCE = HOMELAB_CAPABILITY_SOURCES[1];
 
@@ -153,13 +177,20 @@ export type McpRegistry = {
   addServer?(input: McpServerRegistration): Promise<McpServerInfo>;
   listTools(): Promise<McpToolInfo[]>;
   listServers(): Promise<McpServerInfo[]>;
-  setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined>;
+  setServerEnabled(
+    name: string,
+    enabled: boolean
+  ): Promise<McpServerInfo | undefined>;
   /** Deletes a server Thebe registered. Resolves false when no such server exists. */
   removeServer?(name: string): Promise<boolean>;
   /** Servers for the runtime's own MCP client. Synchronous because the runtime reads it on session start. */
   runtimeServers?(): RuntimeMcpServer[];
   invokeTool(name: string, args: unknown): Promise<string | undefined>;
-  invokeToolResult?(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult>;
+  invokeToolResult?(
+    name: string,
+    args: unknown,
+    signal?: AbortSignal
+  ): Promise<McpCallResult>;
   close(): void;
 };
 
@@ -172,10 +203,18 @@ export type McpCallResult = {
 
 export function createEmptyMcpRegistry(): McpRegistry {
   return {
-    async listTools(): Promise<McpToolInfo[]> { return []; },
-    async listServers(): Promise<McpServerInfo[]> { return []; },
-    async setServerEnabled(): Promise<McpServerInfo | undefined> { return undefined; },
-    async invokeTool(): Promise<string | undefined> { return undefined; },
+    async listTools(): Promise<McpToolInfo[]> {
+      return [];
+    },
+    async listServers(): Promise<McpServerInfo[]> {
+      return [];
+    },
+    async setServerEnabled(): Promise<McpServerInfo | undefined> {
+      return undefined;
+    },
+    async invokeTool(): Promise<string | undefined> {
+      return undefined;
+    },
     close(): void {},
   };
 }
@@ -225,7 +264,9 @@ export type McpWireTool = {
  * external tools. Hosts treat these as hints; Core's policy engine remains the enforcement point.
  */
 export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
-  const readOnly = (capability.effect ?? (capability.permission === "read" ? "read" : "write")) === "read";
+  const readOnly =
+    (capability.effect ??
+      (capability.permission === "read" ? "read" : "write")) === "read";
   return {
     name: capability.name,
     description: capability.description,
@@ -233,17 +274,23 @@ export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
     annotations: {
       readOnlyHint: readOnly,
       destructiveHint: !readOnly && capability.risk !== "low",
-      openWorldHint: capability.source === EXTERNAL_CAPABILITY_SOURCE || capability.service === "public-music",
+      openWorldHint:
+        capability.source === EXTERNAL_CAPABILITY_SOURCE ||
+        capability.service === "public-music",
     },
     _meta: {
       "thebe/category": capability.category,
-      ...(capability.resourceKinds?.length ? { "thebe/resourceKinds": capability.resourceKinds } : {}),
+      ...(capability.resourceKinds?.length
+        ? { "thebe/resourceKinds": capability.resourceKinds }
+        : {}),
       ...(capability.approval ? { "thebe/approval": capability.approval } : {}),
     },
   };
 }
 
-export function withProductMetadata(capability: HomelabCapability): HomelabCapability {
+export function withProductMetadata(
+  capability: HomelabCapability
+): HomelabCapability {
   return {
     ...capability,
     resourceKinds: capability.resourceKinds ?? defaultResourceKinds(capability),
@@ -256,7 +303,10 @@ export function withProductMetadata(capability: HomelabCapability): HomelabCapab
   };
 }
 
-const MEDIA_RESOURCE_KINDS: Record<(typeof MEDIA_READ_TOOL_NAMES)[number], string[]> = {
+const MEDIA_RESOURCE_KINDS: Record<
+  (typeof MEDIA_READ_TOOL_NAMES)[number],
+  string[]
+> = {
   "emby.libraries": [HOMELAB_RESOURCE_KINDS.mediaLibrary],
   "emby.recent": [HOMELAB_RESOURCE_KINDS.mediaItem],
   "emby.sessions": [HOMELAB_RESOURCE_KINDS.playbackSession],
@@ -290,97 +340,178 @@ const NAVIDROME_RESOURCE_KINDS: Record<NavidromeToolName, string[]> = {
 };
 
 function defaultResourceKinds(capability: HomelabCapability): string[] {
-  if (capability.category === "containers") return [HOMELAB_RESOURCE_KINDS.container];
+  if (capability.category === "containers")
+    return [HOMELAB_RESOURCE_KINDS.container];
   if (capability.id.startsWith("strm.")) return [HOMELAB_RESOURCE_KINDS.strm];
-  const mediaKinds = MEDIA_RESOURCE_KINDS[capability.id as (typeof MEDIA_READ_TOOL_NAMES)[number]];
+  const mediaKinds =
+    MEDIA_RESOURCE_KINDS[
+      capability.id as (typeof MEDIA_READ_TOOL_NAMES)[number]
+    ];
   if (mediaKinds) return mediaKinds;
-  if (capability.category === "media") return [HOMELAB_RESOURCE_KINDS.mediaLibrary];
+  if (capability.category === "media")
+    return [HOMELAB_RESOURCE_KINDS.mediaLibrary];
   return [];
 }
 
-function mediaServiceForTool(name: (typeof MEDIA_READ_TOOL_NAMES)[number]): string {
-  if ((EMBY_TOOL_NAMES as readonly string[]).includes(name)) return MEDIA_PROVIDER_IDS.emby;
-  if ((JELLYFIN_TOOL_NAMES as readonly string[]).includes(name)) return MEDIA_PROVIDER_IDS.jellyfin;
+function mediaServiceForTool(
+  name: (typeof MEDIA_READ_TOOL_NAMES)[number]
+): string {
+  if ((EMBY_TOOL_NAMES as readonly string[]).includes(name))
+    return MEDIA_PROVIDER_IDS.emby;
+  if ((JELLYFIN_TOOL_NAMES as readonly string[]).includes(name))
+    return MEDIA_PROVIDER_IDS.jellyfin;
   return MEDIA_PROVIDER_IDS.immich;
 }
 
-export function listCoreMcpTools(options: {
-  strmRepairProvider?: StrmRepairProvider;
-  navidrome?: boolean;
-  musicResearch?: boolean;
-  emby?: boolean;
-  jellyfin?: boolean;
-  immich?: boolean;
-} = {}): McpToolInfo[] {
+export function listCoreMcpTools(
+  options: {
+    strmRepairProvider?: StrmRepairProvider;
+    navidrome?: boolean;
+    musicResearch?: boolean;
+    netease?: boolean;
+    sqmusic?: boolean;
+    emby?: boolean;
+    jellyfin?: boolean;
+    immich?: boolean;
+  } = {}
+): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
-  if (options.musicResearch) tools.push(withProductMetadata({ id: "music_research", name: "music_research", description: MUSIC_RESEARCH_DESCRIPTION, inputSchema: MUSIC_RESEARCH_SCHEMA, category: "media", permission: "read", service: "public-music", source: CORE_CAPABILITY_SOURCE, serverName: CORE_CAPABILITY_SERVER }));
+  if (options.musicResearch)
+    tools.push(
+      withProductMetadata({
+        id: "music_research",
+        name: "music_research",
+        description: MUSIC_RESEARCH_DESCRIPTION,
+        inputSchema: MUSIC_RESEARCH_SCHEMA,
+        category: "media",
+        permission: "read",
+        service: "public-music",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
+
+  if (options.netease)
+    tools.push(
+      withProductMetadata({
+        id: NETEASE_TOOL_NAME,
+        name: NETEASE_TOOL_NAME,
+        description: NETEASE_DESCRIPTION,
+        inputSchema: NETEASE_SCHEMA,
+        category: "media",
+        permission: "read",
+        service: "netease",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
+  if (options.sqmusic)
+    tools.push(
+      withProductMetadata({
+        id: SQMUSIC_TOOL_NAME,
+        name: SQMUSIC_TOOL_NAME,
+        description: SQMUSIC_DESCRIPTION,
+        inputSchema: SQMUSIC_SCHEMA,
+        category: "media",
+        permission: "read",
+        service: "sqmusic",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
+  if (options.sqmusic)
+    tools.push(
+      withProductMetadata({
+        id: SQMUSIC_DOWNLOAD_TOOL_NAME,
+        name: SQMUSIC_DOWNLOAD_TOOL_NAME,
+        description: SQMUSIC_DOWNLOAD_DESCRIPTION,
+        inputSchema: SQMUSIC_DOWNLOAD_SCHEMA,
+        category: "downloads",
+        permission: "confirm",
+        effect: "write",
+        risk: "low",
+        approval: "required",
+        service: "sqmusic",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
 
   for (const name of CONTAINER_TOOL_NAMES) {
     const meta = CONTAINER_CAPABILITY_METADATA[name];
-    tools.push(withProductMetadata({
-      id: name,
-      name,
-      description:
-        CONTAINER_TOOL_DESCRIPTIONS[name] || `Core container tool ${name}`,
-      inputSchema: CONTAINER_TOOL_SCHEMAS[name],
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description:
+          CONTAINER_TOOL_DESCRIPTIONS[name] || `Core container tool ${name}`,
+        inputSchema: CONTAINER_TOOL_SCHEMAS[name],
+        category: "containers",
+        permission: meta.permission,
+        effect: meta.effect,
+        risk: meta.risk,
+        approval: meta.approval,
+        service: CORE_CONTAINER_SERVICE,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
+  }
+  const restartMeta =
+    CONTAINER_CAPABILITY_METADATA[CONTAINER_RESTART_ACTION_ID];
+  tools.push(
+    withProductMetadata({
+      id: CONTAINER_RESTART_ACTION_ID,
+      name: CONTAINER_RESTART_ACTION_ID,
+      description: CONTAINER_TOOL_DESCRIPTIONS[CONTAINER_RESTART_ACTION_ID],
+      inputSchema: CONTAINER_RESTART_SCHEMA,
       category: "containers",
-      permission: meta.permission,
-      effect: meta.effect,
-      risk: meta.risk,
-      approval: meta.approval,
+      permission: restartMeta.permission,
+      effect: restartMeta.effect,
+      risk: restartMeta.risk,
+      approval: restartMeta.approval,
       service: CORE_CONTAINER_SERVICE,
       source: CORE_CAPABILITY_SOURCE,
       serverName: CORE_CAPABILITY_SERVER,
-    }));
-  }
-  const restartMeta = CONTAINER_CAPABILITY_METADATA[CONTAINER_RESTART_ACTION_ID];
-  tools.push(withProductMetadata({
-    id: CONTAINER_RESTART_ACTION_ID,
-    name: CONTAINER_RESTART_ACTION_ID,
-    description: CONTAINER_TOOL_DESCRIPTIONS[CONTAINER_RESTART_ACTION_ID],
-    inputSchema: CONTAINER_RESTART_SCHEMA,
-    category: "containers",
-    permission: restartMeta.permission,
-    effect: restartMeta.effect,
-    risk: restartMeta.risk,
-    approval: restartMeta.approval,
-    service: CORE_CONTAINER_SERVICE,
-    source: CORE_CAPABILITY_SOURCE,
-    serverName: CORE_CAPABILITY_SERVER,
-    destructive: true,
-    background: false,
-  }));
+      destructive: true,
+      background: false,
+    })
+  );
 
   for (const [name, meta] of Object.entries(CORE_EVENT_TOOLS)) {
-    tools.push(withProductMetadata({
-      id: name,
-      name,
-      description: meta.description,
-      inputSchema: meta.schema,
-      category: "diagnostics",
-      permission: "read",
-      service: CORE_CAPABILITY_SERVER,
-      source: CORE_CAPABILITY_SOURCE,
-      serverName: CORE_CAPABILITY_SERVER,
-      background: true,
-    }));
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: meta.description,
+        inputSchema: meta.schema,
+        category: "diagnostics",
+        permission: "read",
+        service: CORE_CAPABILITY_SERVER,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        background: true,
+      })
+    );
   }
 
   for (const name of MEDIA_READ_TOOL_NAMES) {
-    tools.push(withProductMetadata({
-      id: name,
-      name,
-      description: MEDIA_READ_DESCRIPTIONS[name],
-      inputSchema: MEDIA_READ_SCHEMAS[name],
-      category: "media",
-      permission: "read",
-      effect: "read",
-      risk: "low",
-      approval: "none",
-      service: mediaServiceForTool(name),
-      source: CORE_CAPABILITY_SOURCE,
-      serverName: CORE_CAPABILITY_SERVER,
-    }));
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: MEDIA_READ_DESCRIPTIONS[name],
+        inputSchema: MEDIA_READ_SCHEMAS[name],
+        category: "media",
+        permission: "read",
+        effect: "read",
+        risk: "low",
+        approval: "none",
+        service: mediaServiceForTool(name),
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+      })
+    );
   }
 
   const lookupNames: MediaLookupToolName[] = [
@@ -394,70 +525,76 @@ export function listCoreMcpTools(options: {
       : name.startsWith("jellyfin.")
         ? MEDIA_PROVIDER_IDS.jellyfin
         : MEDIA_PROVIDER_IDS.immich;
-    tools.push(withProductMetadata({
-      id: name,
-      name,
-      description: MEDIA_LOOKUP_DESCRIPTIONS[name],
-      inputSchema: MEDIA_LOOKUP_SCHEMAS[name],
-      category: "media",
-      permission: "read",
-      effect: "read",
-      risk: "low",
-      approval: "none",
-      service,
-      source: CORE_CAPABILITY_SOURCE,
-      serverName: CORE_CAPABILITY_SERVER,
-      resourceKinds: [
-        name.startsWith("immich.")
-          ? HOMELAB_RESOURCE_KINDS.photo
-          : HOMELAB_RESOURCE_KINDS.mediaItem,
-      ],
-      execution: "direct",
-      background: false,
-    }));
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: MEDIA_LOOKUP_DESCRIPTIONS[name],
+        inputSchema: MEDIA_LOOKUP_SCHEMAS[name],
+        category: "media",
+        permission: "read",
+        effect: "read",
+        risk: "low",
+        approval: "none",
+        service,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        resourceKinds: [
+          name.startsWith("immich.")
+            ? HOMELAB_RESOURCE_KINDS.photo
+            : HOMELAB_RESOURCE_KINDS.mediaItem,
+        ],
+        execution: "direct",
+        background: false,
+      })
+    );
   }
 
   if (options.navidrome) {
     for (const name of NAVIDROME_TOOL_NAMES) {
       const meta = NAVIDROME_CAPABILITY_METADATA[name];
-      tools.push(withProductMetadata({
-        id: name,
-        name,
-        description: NAVIDROME_TOOL_DESCRIPTIONS[name],
-        inputSchema: NAVIDROME_TOOL_SCHEMAS[name],
-        category: "media",
-        permission: meta.permission,
-        effect: meta.effect,
-        risk: meta.risk,
-        approval: meta.approval,
-        service: NAVIDROME_PROVIDER_ID,
-        source: CORE_CAPABILITY_SOURCE,
-        serverName: CORE_CAPABILITY_SERVER,
-        resourceKinds: NAVIDROME_RESOURCE_KINDS[name],
-        execution: meta.effect === "write" ? "agent" : "direct",
-        background: false,
-        outputKind: name === "navidrome.queue" ? "audio_queue" : "json",
-      }));
+      tools.push(
+        withProductMetadata({
+          id: name,
+          name,
+          description: NAVIDROME_TOOL_DESCRIPTIONS[name],
+          inputSchema: NAVIDROME_TOOL_SCHEMAS[name],
+          category: "media",
+          permission: meta.permission,
+          effect: meta.effect,
+          risk: meta.risk,
+          approval: meta.approval,
+          service: NAVIDROME_PROVIDER_ID,
+          source: CORE_CAPABILITY_SOURCE,
+          serverName: CORE_CAPABILITY_SERVER,
+          resourceKinds: NAVIDROME_RESOURCE_KINDS[name],
+          execution: meta.effect === "write" ? "agent" : "direct",
+          background: false,
+          outputKind: name === "navidrome.queue" ? "audio_queue" : "json",
+        })
+      );
     }
   }
 
   if (options.strmRepairProvider) {
-    tools.push(withProductMetadata({
-      id: STRM_REPAIR_CAPABILITY_ID,
-      name: STRM_REPAIR_CAPABILITY_ID,
-      description: STRM_REPAIR_DESCRIPTION,
-      inputSchema: STRM_REPAIR_SCHEMA,
-      category: "media",
-      permission: "confirm",
-      effect: "write",
-      risk: "low",
-      approval: "none",
-      service: options.strmRepairProvider.service,
-      source: CORE_CAPABILITY_SOURCE,
-      serverName: CORE_CAPABILITY_SERVER,
-      execution: "either",
-      background: true,
-    }));
+    tools.push(
+      withProductMetadata({
+        id: STRM_REPAIR_CAPABILITY_ID,
+        name: STRM_REPAIR_CAPABILITY_ID,
+        description: STRM_REPAIR_DESCRIPTION,
+        inputSchema: STRM_REPAIR_SCHEMA,
+        category: "media",
+        permission: "confirm",
+        effect: "write",
+        risk: "low",
+        approval: "none",
+        service: options.strmRepairProvider.service,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        execution: "either",
+        background: true,
+      })
+    );
   }
 
   return tools;

@@ -7,6 +7,7 @@ import { ArcaneAdapter } from "../adapters/arcane/adapter.ts";
 import { createDockerEngineProviderFromEnv } from "../adapters/docker/adapter.ts";
 import { createNavidromeProviderFromEnv } from "../adapters/navidrome/index.ts";
 import { createMusicResearchProvider } from "../adapters/music-research/client.ts";
+import { createMusicSourcesFromEnv } from "../adapters/music-sources/index.ts";
 import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
@@ -76,7 +77,9 @@ export async function bootstrapThebe(
   loadEnvLocal(fromDir);
   // The command guard reads scripts as shell; without the grammar it falls back to its text rules.
   await shellParserReady().catch((error: unknown) => {
-    console.error(`Command guard: shell parser unavailable (${String(error)}); using text rules only.`);
+    console.error(
+      `Command guard: shell parser unavailable (${String(error)}); using text rules only.`
+    );
   });
   const userConfig = loadThebeUserConfig();
   const configuredWorkspacePath =
@@ -228,6 +231,7 @@ export async function bootstrapThebe(
       jobStore: createFileJobStore(join(agentStoreDir, "pipeline-jobs.json")),
     },
     musicResearch: createMusicResearchProvider(),
+    musicSources: createMusicSourcesFromEnv(),
     webSearch: process.env.THEBE_WEB_SEARCH_URL?.trim()
       ? createWebSearchProvider({ endpoint: process.env.THEBE_WEB_SEARCH_URL })
       : undefined,
