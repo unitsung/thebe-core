@@ -873,7 +873,8 @@ const operations: Operation[] = [
   {
     method: "put",
     path: "/v1/session/{id}/permissions",
-    summary: "Set the permission mode of this session (null returns it to the host default)",
+    summary:
+      "Set the permission mode of this session (null returns it to the host default)",
     tag: "session",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -887,7 +888,8 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/session/{id}/full-access",
-    summary: "Enable or disable bypassPermissions for the session (older form of PUT permissions)",
+    summary:
+      "Enable or disable bypassPermissions for the session (older form of PUT permissions)",
     tag: "session",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -1025,7 +1027,8 @@ const operations: Operation[] = [
   {
     method: "put",
     path: "/v1/provider/{providerId}/config",
-    summary: "Save endpoint and replace custom model definitions, including each model's thinkingLevelMap (level to provider value, null when not offered)",
+    summary:
+      "Save endpoint and replace custom model definitions, including each model's thinkingLevelMap (level to provider value, null when not offered)",
     tag: "providers",
     parameters: [idParameter("providerId")],
     requestBody: { required: true },
@@ -2175,7 +2178,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["mode"],
           properties: {
-            mode: { type: "string", enum: ["plan", "manual", "acceptEdits", "bypassPermissions"] },
+            mode: {
+              type: "string",
+              enum: ["plan", "manual", "acceptEdits", "bypassPermissions"],
+            },
           },
         },
         FullAccessSupport: {
@@ -2418,6 +2424,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               maximum: 525600,
               description:
                 "Fixed elapsed minutes; omitted means one shot. Missed intervals are not replayed.",
+            },
+            cron: {
+              type: "string",
+              maxLength: 100,
+              description:
+                "Five-field cron (minute hour day-of-month month day-of-week) read in timeZone, instead of intervalMinutes. startAt is the earliest run. Missed runs are not replayed.",
+            },
+            timeZone: {
+              type: "string",
+              description:
+                "IANA zone the cron is read in, such as Asia/Shanghai; defaults to the Core host's zone.",
             },
             criteria: {
               type: "array",

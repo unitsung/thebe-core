@@ -54,6 +54,32 @@ describe("schedule product HTTP", () => {
     expect(
       (await request("", "POST", { ...input, intervalMinutes: -1 })).status
     ).toBe(400);
+    // A cron schedule starts at its first match at or after startAt, read in its own zone.
+    const { intervalMinutes: _unused, ...base } = input;
+    const cronRow = await request("", "POST", {
+      ...base,
+      cron: "0 9 * * *",
+      timeZone: "Asia/Shanghai",
+    });
+    expect(cronRow.status).toBe(201);
+    const cronCreated = (await cronRow.json()) as {
+      id: string;
+      cron: string;
+      timeZone: string;
+      nextRunAt: string;
+    };
+    expect(cronCreated.cron).toBe("0 9 * * *");
+    expect(cronCreated.nextRunAt).toBe("2099-01-01T01:00:00.000Z");
+    expect((await request(`/${cronCreated.id}`, "DELETE")).status).toBeLessThan(
+      300
+    );
+    for (const bad of [
+      { ...base, cron: "0 9 * *" },
+      { ...base, cron: "0 9 * * *", intervalMinutes: 60 },
+      { ...base, cron: "0 9 * * *", timeZone: "Mars/Base" },
+    ]) {
+      expect((await request("", "POST", bad)).status).toBe(400);
+    }
     const updated = (await (
       await request(`/${created.id}`, "PUT", { ...input, title: "Updated" })
     ).json()) as { title: string };
