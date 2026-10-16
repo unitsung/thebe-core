@@ -8,9 +8,7 @@
 >
 > - `unitsung/thebe/docs/PRODUCT-THESIS.md`
 > - `unitsung/thebe/docs/AGENT-NAS-DESIGN-PRINCIPLES.md`
-> - `unitsung/thebe/docs/AGENT-NATIVE-REFACTOR.md`
-
-
+> - `unitsung/thebe/ui/docs/archive/AGENT-NATIVE-REFACTOR.md`
 
 ## Shipped product contracts (dev implementation)
 
@@ -31,7 +29,6 @@ The following HTTP product objects are implemented on `dev` and are the current 
 Provider-native background tasks (OpenList, Arcane, qBittorrent) and the `task_output` Artifact kind are shipped. The iOS client already covers the shipped product HTTP. Still explicitly out of scope: a Goal `/runs` identity rewrite, replacing raw `/mcp`, and a competing `/v1/approvals` Activity feed. Authoritative surface list: `docs/CORE-PRODUCT-HTTP.md`. Deployment runbook: `docs/DEPLOYMENT.md`.
 
 The App must not call raw MCP `tools/call` for these workflows.
-
 
 ---
 
@@ -103,24 +100,24 @@ Core becomes mandatory when the operation requires Core-owned runtime semantics 
 
 ## 3. Ownership matrix
 
-| Concern | App | Core | Notes |
-| --- | --- | --- | --- |
-| Native UI/presentation | **Owner** | No | SwiftUI |
-| Fast provider reads | **Owner where native client exists** | Optional | Avoid unnecessary proxying |
-| Device-native features | **Owner** | No | Keychain, iOS integrations, presentation |
-| View/domain stores | **Owner** | No | Presentation/domain state |
-| Model/runtime orchestration | No | **Owner** | No duplicate full Agent loop |
-| Goal lifecycle | Consumer | **Owner** | Durable |
-| Run lifecycle | Consumer | **Owner** | Durable |
-| Worker/subagent lifecycle | Consumer | **Owner** | Expose product schema |
-| Model selection/context | UI/config consumer | **Owner** | Runtime concern |
-| Skills/MCP runtime | Consumer/admin UI | **Owner** | MCP not product API |
-| Policy/permission authority | UI resolution surface | **Owner** | App must not override |
-| Approval rendering | **Owner** | State owner | App displays + resolves |
-| Cross-service planning | No | **Owner** | Core |
-| Verification definitions | Shared contract | **Owner for Core actions** / local for local capability | Must be deterministic |
-| Runtime audit | Cache/presentation | **Owner** | Avoid two authoritative audits |
-| Resource presentation | **Owner** | Context consumer | Stable ResourceRef shared |
+| Concern                     | App                                  | Core                                                    | Notes                                    |
+| --------------------------- | ------------------------------------ | ------------------------------------------------------- | ---------------------------------------- |
+| Native UI/presentation      | **Owner**                            | No                                                      | SwiftUI                                  |
+| Fast provider reads         | **Owner where native client exists** | Optional                                                | Avoid unnecessary proxying               |
+| Device-native features      | **Owner**                            | No                                                      | Keychain, iOS integrations, presentation |
+| View/domain stores          | **Owner**                            | No                                                      | Presentation/domain state                |
+| Model/runtime orchestration | No                                   | **Owner**                                               | No duplicate full Agent loop             |
+| Goal lifecycle              | Consumer                             | **Owner**                                               | Durable                                  |
+| Run lifecycle               | Consumer                             | **Owner**                                               | Durable                                  |
+| Worker/subagent lifecycle   | Consumer                             | **Owner**                                               | Expose product schema                    |
+| Model selection/context     | UI/config consumer                   | **Owner**                                               | Runtime concern                          |
+| Skills/MCP runtime          | Consumer/admin UI                    | **Owner**                                               | MCP not product API                      |
+| Policy/permission authority | UI resolution surface                | **Owner**                                               | App must not override                    |
+| Approval rendering          | **Owner**                            | State owner                                             | App displays + resolves                  |
+| Cross-service planning      | No                                   | **Owner**                                               | Core                                     |
+| Verification definitions    | Shared contract                      | **Owner for Core actions** / local for local capability | Must be deterministic                    |
+| Runtime audit               | Cache/presentation                   | **Owner**                                               | Avoid two authoritative audits           |
+| Resource presentation       | **Owner**                            | Context consumer                                        | Stable ResourceRef shared                |
 
 ---
 
@@ -134,11 +131,11 @@ A stable identity that both App and Core understand.
 
 ```ts
 interface ResourceRef {
-  id: string
-  kind: string
-  provider?: string
-  instanceId?: string
-  displayName?: string
+  id: string;
+  kind: string;
+  provider?: string;
+  instanceId?: string;
+  displayName?: string;
 }
 ```
 
@@ -172,11 +169,11 @@ Bounded structured evidence supplied to reasoning.
 
 ```ts
 interface AgentFact {
-  key: string
-  value: unknown
-  source?: string
-  observedAt?: string
-  confidence?: number
+  key: string;
+  value: unknown;
+  source?: string;
+  observedAt?: string;
+  confidence?: number;
 }
 ```
 
@@ -190,15 +187,15 @@ The fact/observation layer must preserve enough provenance for debugging and exp
 
 ```ts
 interface CapabilityDescriptor {
-  id: string
-  title: string
-  description?: string
-  inputSchema?: unknown
-  resourceKinds?: string[]
-  effect: "read" | "write"
-  risk?: string
-  approval: "never" | "conditional" | "required"
-  supportsVerification?: boolean
+  id: string;
+  title: string;
+  description?: string;
+  inputSchema?: unknown;
+  resourceKinds?: string[];
+  effect: "read" | "write";
+  risk?: string;
+  approval: "never" | "conditional" | "required";
+  supportsVerification?: boolean;
 }
 ```
 
@@ -210,11 +207,11 @@ Capability risk/approval metadata is runtime policy input, not model prose.
 
 ```ts
 interface CapabilityInvocation {
-  capabilityId: string
-  resource?: ResourceRef
-  input?: unknown
-  idempotencyKey?: string
-  requestedBy?: "user" | "agent" | "automation" | "system"
+  capabilityId: string;
+  resource?: ResourceRef;
+  input?: unknown;
+  idempotencyKey?: string;
+  requestedBy?: "user" | "agent" | "automation" | "system";
 }
 ```
 
@@ -224,11 +221,11 @@ interface CapabilityInvocation {
 
 ```ts
 interface ActionResult<T = unknown> {
-  actionId: string
-  status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
-  result?: T
-  error?: ProductError
-  verification?: VerificationResult
+  actionId: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  result?: T;
+  error?: ProductError;
+  verification?: VerificationResult;
 }
 ```
 
@@ -238,17 +235,17 @@ interface ActionResult<T = unknown> {
 
 ```ts
 interface VerificationResult {
-  status: "verified" | "failed" | "partial" | "not_applicable"
-  checks: VerificationCheck[]
+  status: "verified" | "failed" | "partial" | "not_applicable";
+  checks: VerificationCheck[];
 }
 
 interface VerificationCheck {
-  id: string
-  title: string
-  passed: boolean
-  observed?: unknown
-  expected?: unknown
-  message?: string
+  id: string;
+  title: string;
+  passed: boolean;
+  observed?: unknown;
+  expected?: unknown;
+  message?: string;
 }
 ```
 
@@ -260,13 +257,20 @@ The model may explain verification results but must not fabricate them.
 
 ```ts
 interface Goal {
-  id: string
-  title: string
-  status: "queued" | "running" | "waiting_approval" | "paused" | "succeeded" | "failed" | "cancelled"
-  resourceRefs?: ResourceRef[]
-  currentRunId?: string
-  createdAt: string
-  updatedAt: string
+  id: string;
+  title: string;
+  status:
+    | "queued"
+    | "running"
+    | "waiting_approval"
+    | "paused"
+    | "succeeded"
+    | "failed"
+    | "cancelled";
+  resourceRefs?: ResourceRef[];
+  currentRunId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 ```
 
@@ -278,15 +282,15 @@ Goal is the durable user objective.
 
 ```ts
 interface Run {
-  id: string
-  goalId?: string
-  sessionId?: string
-  status: string
-  progress?: number
-  currentStep?: string
-  createdAt: string
-  updatedAt: string
-  error?: ProductError
+  id: string;
+  goalId?: string;
+  sessionId?: string;
+  status: string;
+  progress?: number;
+  currentStep?: string;
+  createdAt: string;
+  updatedAt: string;
+  error?: ProductError;
 }
 ```
 
@@ -300,11 +304,17 @@ Product-facing representation of subagent/background delegated work.
 
 ```ts
 interface Worker {
-  id: string
-  runId: string
-  title: string
-  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled"
-  role?: string
+  id: string;
+  runId: string;
+  title: string;
+  status:
+    | "queued"
+    | "running"
+    | "waiting"
+    | "succeeded"
+    | "failed"
+    | "cancelled";
+  role?: string;
 }
 ```
 
@@ -316,16 +326,16 @@ The App should not require Pi/subagent internal types to render Workers.
 
 ```ts
 interface Approval {
-  id: string
-  runId?: string
-  actionId?: string
-  capabilityId: string
-  resource?: ResourceRef
-  status: "pending" | "approved" | "denied" | "expired" | "cancelled"
-  reason: string
-  risk?: string
-  createdAt: string
-  resolvedAt?: string
+  id: string;
+  runId?: string;
+  actionId?: string;
+  capabilityId: string;
+  resource?: ResourceRef;
+  status: "pending" | "approved" | "denied" | "expired" | "cancelled";
+  reason: string;
+  risk?: string;
+  createdAt: string;
+  resolvedAt?: string;
 }
 ```
 
@@ -337,16 +347,23 @@ Approval must be discoverable after the original request is gone.
 
 ```ts
 interface ActivityEvent {
-  id: string
-  runId?: string
-  goalId?: string
-  type: string
-  phase?: "observe" | "reason" | "plan" | "approval" | "execute" | "verify" | "result"
-  title: string
-  detail?: string
-  resource?: ResourceRef
-  timestamp: string
-  payload?: unknown
+  id: string;
+  runId?: string;
+  goalId?: string;
+  type: string;
+  phase?:
+    | "observe"
+    | "reason"
+    | "plan"
+    | "approval"
+    | "execute"
+    | "verify"
+    | "result";
+  title: string;
+  detail?: string;
+  resource?: ResourceRef;
+  timestamp: string;
+  payload?: unknown;
 }
 ```
 
@@ -358,11 +375,11 @@ interface ActivityEvent {
 
 ```ts
 interface ProductError {
-  code: string
-  message: string
-  retryable?: boolean
-  resource?: ResourceRef
-  details?: unknown
+  code: string;
+  message: string;
+  retryable?: boolean;
+  resource?: ResourceRef;
+  details?: unknown;
 }
 ```
 
