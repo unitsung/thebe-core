@@ -1,4 +1,5 @@
 import { createStaleToolResultExtension } from "./stale-tool-results.ts";
+import { createRelevantToolSearchExtension } from "./tool-search.ts";
 import { randomUUID } from "node:crypto";
 import type {
   CreateRuntimeSessionOptions,
@@ -227,7 +228,7 @@ export async function openPiSession(
     if (hasDiscovery) {
       permissionExtension.push(
         await sdk.loadExtensionFromFactory(
-          sdk.createToolSearchExtension(),
+          createRelevantToolSearchExtension() as never,
           create.cwd ?? cwd,
           sdk.createEventBus(),
           extensionRuntime,
@@ -299,7 +300,12 @@ export async function openPiSession(
     }) => {
       // bypassPermissions lifts the sandbox for this session only; it is read per
       // command so a mid-conversation change takes effect at once.
-      const wrapped = sandboxedCommand(ctx.command, fullAccessActive() ? "off" : sandbox.sandboxMode, workspacePath, sandbox.sandboxNetwork);
+      const wrapped = sandboxedCommand(
+        ctx.command,
+        fullAccessActive() ? "off" : sandbox.sandboxMode,
+        workspacePath,
+        sandbox.sandboxNetwork
+      );
       // bwrap re-enters the workspace with --chdir, so ctx.cwd stays the
       // tool's own working directory.
       return {
@@ -314,10 +320,18 @@ export async function openPiSession(
   // environment, including Core's own token. It now crosses the same two filters as the tool.
   const guardedBashOperations: typeof bashOperations = {
     exec(command, cwd, execOptions) {
-      const wrapped = sandboxedCommand(command, fullAccessActive() ? "off" : sandbox.sandboxMode, workspacePath, sandbox.sandboxNetwork);
+      const wrapped = sandboxedCommand(
+        command,
+        fullAccessActive() ? "off" : sandbox.sandboxMode,
+        workspacePath,
+        sandbox.sandboxNetwork
+      );
       return bashOperations.exec(wrapped.command, cwd, {
         ...execOptions,
-        env: sanitizeBashEnv({ ...process.env, ...execOptions.env }) as NodeJS.ProcessEnv,
+        env: sanitizeBashEnv({
+          ...process.env,
+          ...execOptions.env,
+        }) as NodeJS.ProcessEnv,
       });
     },
   };
