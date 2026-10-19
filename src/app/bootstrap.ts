@@ -42,7 +42,7 @@ import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbit
 import { readJudgmentGate } from "../agent/judgment/gate.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
-import { disposeMicroVms } from "../adapters/gondolin/lifecycle.ts";
+import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -59,10 +59,9 @@ export type ThebeBootstrap = {
   tokenGenerated: boolean;
   tokenPath?: string;
   /**
-   * Closes every live Gondolin Micro-VM. Entry points await this once in-flight
-   * work has drained, so stopping Core cannot leave a VM running with no owner.
-   * Exposed here because delivery must not import adapters (see
-   * `architecture.test.ts`).
+   * Stops the OS-sandbox proxies. Entry points await this once in-flight work
+   * has drained. Exposed here because delivery must not import the sandbox
+   * library (see `architecture.test.ts`).
    */
   disposeSandboxVms: () => Promise<void>;
 };
@@ -272,7 +271,7 @@ export async function bootstrapThebe(
     token: tokenResolution.token,
     tokenGenerated: tokenResolution.generated,
     tokenPath: tokenResolution.path,
-    disposeSandboxVms: disposeMicroVms,
+    disposeSandboxVms: disposeOsSandbox,
   };
 }
 

@@ -878,12 +878,6 @@ const operations: Operation[] = [
     tag: "session",
     parameters: [idParameter()],
     requestBody: { required: true },
-    extraStatuses: [
-      {
-        status: 403,
-        description: "The host does not allow bypassPermissions",
-      },
-    ],
   },
   {
     method: "post",
@@ -893,12 +887,6 @@ const operations: Operation[] = [
     tag: "session",
     parameters: [idParameter()],
     requestBody: { required: true },
-    extraStatuses: [
-      {
-        status: 403,
-        description: "The host does not allow the full-access preset",
-      },
-    ],
   },
   {
     method: "post",
@@ -2191,7 +2179,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             allowed: {
               type: "boolean",
               description:
-                "Whether this Core host permits the session-scoped full-access preset (THEBE_FULL_ACCESS).",
+                "Always true. bypassPermissions is selectable; the TUI and the App confirm before turning it on. THEBE_FULL_ACCESS is ignored.",
             },
           },
         },
@@ -2205,6 +2193,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             "maxSubagentConcurrency",
             "maxSubagentsPerParent",
             "instructions",
+            "sandboxEnabled",
+            "sandboxAllowedDomains",
+            "sandboxDeniedDomains",
             "sources",
             "persistence",
             "mutable",
@@ -2235,6 +2226,23 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "The owner's standing instructions, added to the system prompt of sessions opened after the change. At most 4096 UTF-8 bytes; empty when none.",
             },
+            sandboxEnabled: {
+              type: "boolean",
+              description:
+                "Effective OS sandbox for host bash. False inside a container, when THEBE_SANDBOX=off, or when turned off here. Default true on a host.",
+            },
+            sandboxAllowedDomains: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Hosts remembered from an allow. Empty until the user allows one. A new host still asks.",
+            },
+            sandboxDeniedDomains: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Hosts remembered from a denial. Checked before the user is asked.",
+            },
             sources: {
               type: "object",
               required: [
@@ -2247,6 +2255,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 "workspacePath",
                 "outputDirectory",
                 "instructions",
+                "sandboxEnabled",
               ],
               properties: {
                 autoCompact: {
@@ -2285,6 +2294,10 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   type: "string",
                   enum: ["configured", "default", "environment", "derived"],
                 },
+                sandboxEnabled: {
+                  type: "string",
+                  enum: ["configured", "default", "environment", "derived"],
+                },
               },
             },
             persistence: {
@@ -2298,7 +2311,15 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: {
                 type: "string",
-                enum: ["autoCompact", "autoSummary", "autoSummaryDelayMs"],
+                enum: [
+                  "autoCompact",
+                  "autoSummary",
+                  "autoSummaryDelayMs",
+                  "instructions",
+                  "sandboxEnabled",
+                  "sandboxAllowedDomains",
+                  "sandboxDeniedDomains",
+                ],
               },
             },
           },
@@ -2375,6 +2396,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "At most 4096 UTF-8 bytes (400 over the limit). Empty clears them. Applies to sessions opened afterwards.",
             },
+            sandboxEnabled: { type: "boolean" },
+            sandboxAllowedDomains: { type: "array", items: { type: "string" } },
+            sandboxDeniedDomains: { type: "array", items: { type: "string" } },
           },
         },
         ProductGoalRun: {

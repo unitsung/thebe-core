@@ -19,7 +19,10 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
   let activeModel = options.model;
 
   const launch = (): TUI => {
-    tui = mode === "fullscreen" ? new TuiAltScreen(terminal, true) : new TuiMainScreen(terminal);
+    tui =
+      mode === "fullscreen"
+        ? new TuiAltScreen(terminal, true)
+        : new TuiMainScreen(terminal);
     tui.setClearOnShrink(true);
     let chat!: ChatHandle;
     chat = attachThebeChat(tui, {
@@ -51,9 +54,8 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
       if (matchesKey(data, "ctrl+c")) {
         tui?.stop();
         if (options.agent) {
-          // A hung drain must not trap the terminal, but the window has to fit the
-          // sandbox teardown: quitting with a session open used to leave its VM
-          // running with no owner.
+          // A hung drain must not trap the terminal, but the window has to fit
+          // stopping the OS-sandbox proxies.
           const force = setTimeout(() => process.exit(0), 4_000);
           force.unref?.();
           void options.agent
@@ -82,7 +84,10 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
           return { consume: true };
         }
         if (chat.isResponding() && options.agent) {
-          const id = activeChat?.getSessionState().sessionId ?? activeSessionId ?? options.agent.lastThebeSessionId();
+          const id =
+            activeChat?.getSessionState().sessionId ??
+            activeSessionId ??
+            options.agent.lastThebeSessionId();
           if (id) void options.agent.interrupt(id).catch(() => {});
           return { consume: true };
         }

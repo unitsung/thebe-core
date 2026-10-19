@@ -359,7 +359,7 @@ One setting decides how much a session may do without asking. The names are Clau
 | `plan`              | Reads inside the workspace                                                                                     | Everything that changes something is refused                                                                            |
 | `manual`            | Reads inside the workspace                                                                                     | `bash`, `write`, `edit`, memory and write tools of services are asked each time                                         |
 | `acceptEdits`       | `write` and `edit` inside the workspace (never `.git`), and `bash` when a sandbox that confines it is in place | Anything the command guard flags, paths outside the workspace, `bash` with no sandbox, `memory`, MCP and service writes |
-| `bypassPermissions` | Everything; the command guard and the sandbox are lifted                                                       | Nothing. Host-gated (see below)                                                                                         |
+| `bypassPermissions` | Everything; the command guard and the sandbox are lifted                                                       | Nothing. Turn it on in the TUI or the App; both ask first                                                               |
 
 `acceptEdits` follows Codex's on-request policy with a restricted sandbox: the sandbox, not a list of
 "safe" commands, is what makes running a command without asking acceptable, so with no sandbox
@@ -374,47 +374,28 @@ workspace-write sandbox.
 
 ### `bypassPermissions`
 
-Host-gated and session-scoped. It lifts the command guard, the OS sandbox and tool approval for one
-conversation, and leaves redaction and audit in place.
+Session-scoped, and it can also be the host default. It lifts the command guard, the OS sandbox and tool approval, and leaves redaction and audit in place.
 
-```bash
-export THEBE_FULL_ACCESS=on   # allow bypassPermissions on this host; default off
-```
+No environment variable is required. `THEBE_FULL_ACCESS` is ignored, the same as leaving it unset: it does not start the process in bypass. Choosing it with `/permissions` or the settings menu in the TUI, or in the App's Agent settings, asks first. A confirmed host default is saved in `config.json`. Schedules, subagents, background goals and `/mcp` use the host default; they do not inherit bypass that one session turned on for itself.
 
-Only a host that sets this can use it; the HTTP/App client cannot grant it to itself
-(`GET /v1/settings/full-access` reports `{ "allowed": … }`; a request without the host's permission gets 403
-`full_access_not_allowed`). The model reads untrusted content (web pages, tool output, remote MCP), so in
-this mode a mistaken command can damage the host: use it only when needed. The Gondolin micro-VM backend is
-chosen at session open, so with it a change applies to the next session.
+The model reads untrusted content (web pages, tool output, remote MCP), so in this mode a mistaken command can damage the host: use it only when needed. Full access applies on the next command; a new session is not required.
 
 ## Command sandbox
 
-Core does not provide an OS sandbox by default; the supported boundary is the container. One variable
-turns a sandbox on for the `bash` tool:
+Model `bash` and the Core process are different boundaries. There is no backend menu.
 
-```bash
-THEBE_SANDBOX=auto   # off (default) | auto | bwrap | docker | seatbelt | gondolin
-```
+- **Container deployment** (the release shape): `/.dockerenv` or `/run/.containerenv` means no sandbox is started. Leave `THEBE_SANDBOX` unset. Do not nest bubblewrap or a VM inside the container.
+- **Host install**: the default is pinned `@anthropic-ai/sandbox-runtime` (the same Seatbelt / bubblewrap Claude Code uses). The TUI settings menu and the App's Agent settings can turn it off, and both ask first; the command guard stays on. That is not bypass, and there is no automatic bypass. `THEBE_SANDBOX=off` and a container force it off, and the switch cannot override that. Full access (`bypassPermissions`, confirmed in the TUI or the App) also lifts the sandbox.
 
-`auto` picks what the machine can run: `seatbelt` on macOS, `bwrap` on Linux, else `docker`. A backend that
-was asked for and is missing **refuses the command** (it does not run bare); install it or set
-`THEBE_SANDBOX=off`. `thebe doctor` and `GET /v1/system/isolation` report whether it is in effect.
+`os`, `auto`, `vm`, `gondolin`, `bwrap`, `docker`, `seatbelt` and any other value are ignored, the same as leaving the variable unset: a host still uses the OS sandbox, and a container still stays off. They are not mapped, and they do not fail startup.
 
-- **bubblewrap** (Linux): read-only host root, tmpfs `/tmp`, remounted `/dev` and `/proc`, only the workspace writable, `--unshare-all`, `--cap-drop ALL`, `--die-with-parent`.
-- **docker**: a throwaway `alpine:3` container with `--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`, only the workspace mounted read-write.
-- **seatbelt** (macOS): `sandbox-exec` with a generated profile; writes are limited to the workspace and `TMPDIR`.
-- **gondolin**: a throwaway micro-VM (QEMU) with hardware isolation. The workspace is mounted at `/workspace` in the guest and paths that leave it throw. A missing package or QEMU gives a clear error with the fix, and never falls back to local execution. Its VM is destroyed when the session ends, and Core's exit path closes any still live, so stopping Core leaves no ownerless QEMU process.
+The policy is fixed, not an environment variable:
 
-The network stays on in every backend: the sandbox confines files, not connections.
+- Write: the workspace and the temp directory.
+- Read: open, except `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.thebe`.
+- Network: an allowlist, empty by default, the same shape as Claude Code. Sandboxed `bash` asks the first time it reaches a host. Allowing once covers that command; remembering the host writes `sandboxAllowedDomains` in `config.json` and later commands are not asked. A remembered denial writes `sandboxDeniedDomains`. Two sandboxed commands at once cannot be told apart, so that connection is denied. `web_search` does not use this list. Bypass does not enter the sandbox, so its network is open.
 
-```bash
-# gondolin setup
-npm install @earendil-works/gondolin@0.13.0                   # optional dependency; may already be installed
-brew install qemu                                           # Linux: sudo apt install qemu-system-arm
-THEBE_SANDBOX=gondolin thebe                                # first start downloads a ~200 MB guest image
-```
-
-`GONDOLIN_DEFAULT_IMAGE` selects the guest image (default `alpine-base:latest`).
+A missing dependency refuses the command instead of running it bare. Linux needs bubblewrap, socat and ripgrep; macOS uses `sandbox-exec` and does not need ripgrep. `thebe doctor` exits 1 in that case. `GET /v1/system/isolation` reports `sandbox.mode` as `off` or `os` and no longer returns `backends`.
 
 The command guard, the workspace confinement and the Docker API guard (privileged containers, host-root and
 `docker.sock` mounts, volume prune) are always on and have no switches.

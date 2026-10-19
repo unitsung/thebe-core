@@ -180,9 +180,8 @@ export function createSessionApi(
       return ctx.getFullAccessSupport();
     },
     /**
-     * Enable or disable the full-access preset for one session. Host-gated and
-     * session-scoped; subagents, schedules, background goals and `/mcp` callers
-     * are unaffected.
+     * Enable or disable bypass for one session. Subagents, schedules, background
+     * goals and `/mcp` callers are unaffected.
      */
     setSessionFullAccess(
       thebeSessionId: string,

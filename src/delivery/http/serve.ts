@@ -26,8 +26,12 @@ const {
   allowedHosts: listen.allowedHosts,
 });
 
-for (const warning of buildIsolationReport({ workspacePath }).warnings) {
+const isolation = buildIsolationReport({ workspacePath });
+for (const warning of isolation.warnings) {
   console.warn(`SECURITY: ${warning}`);
+}
+if (isolation.sandbox.reason) {
+  console.warn(`SECURITY: ${isolation.sandbox.reason}`);
 }
 
 const { server, url, bind } = await listenThebeHttp(app, {
@@ -42,7 +46,7 @@ if (tokenGenerated) {
     console.log(`THEBE_TOKEN_FILE ${tokenPath}`);
   }
   console.log(
-    "New token generated; paste it into the app. It is saved and reused on restart.",
+    "New token generated; paste it into the app. It is saved and reused on restart."
   );
 }
 
@@ -58,9 +62,8 @@ const shutdown = (signal: string) => {
   void drainThebeHttpServer(server, () => agent.quiesce())
     .catch(() => {})
     .finally(async () => {
-      // Requests have drained, so nothing is running in a sandbox any more. Their
-      // lifetime is the process, and an orphaned VM outlives Core holding memory
-      // and disk with no owner to close it.
+      // Requests have drained. Close the OS-sandbox proxies so they do not
+      // outlive Core.
       await disposeSandboxVms().catch(() => {});
       clearTimeout(force);
       process.exit(0);

@@ -1,6 +1,10 @@
-import { PERMISSION_MODES, parsePermissionMode } from "../../../agent/runtime/interface.ts";
+import {
+  PERMISSION_MODES,
+  parsePermissionMode,
+} from "../../../agent/runtime/interface.ts";
 import { checkAgentInstructions } from "../../../agent/settings/instructions.ts";
 import type { AgentSettingsPatch } from "../../../agent/settings/product.ts";
+import { parseNetworkHostList } from "../../../agent/security/network-policy.ts";
 import {
   agentUnavailable,
   quiescedWrite,
@@ -43,6 +47,9 @@ export async function handleSettingsRoutes(
           "autoSummary",
           "autoSummaryDelayMs",
           "instructions",
+          "sandboxEnabled",
+          "sandboxAllowedDomains",
+          "sandboxDeniedDomains",
         ]);
         if (
           Object.prototype.hasOwnProperty.call(body, "maxSubagentConcurrency")
@@ -104,6 +111,32 @@ export async function handleSettingsRoutes(
           const checked = checkAgentInstructions(body.instructions);
           if (!checked.ok) return invalidBody(checked.message);
           patch.instructions = checked.value;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "sandboxEnabled")) {
+          if (typeof body.sandboxEnabled !== "boolean") {
+            return invalidBody("sandboxEnabled must be a boolean");
+          }
+          patch.sandboxEnabled = body.sandboxEnabled;
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(body, "sandboxAllowedDomains")
+        ) {
+          const parsed = parseNetworkHostList(
+            body.sandboxAllowedDomains,
+            "sandboxAllowedDomains"
+          );
+          if (!parsed.ok) return invalidBody(parsed.message);
+          patch.sandboxAllowedDomains = parsed.hosts;
+        }
+        if (
+          Object.prototype.hasOwnProperty.call(body, "sandboxDeniedDomains")
+        ) {
+          const parsed = parseNetworkHostList(
+            body.sandboxDeniedDomains,
+            "sandboxDeniedDomains"
+          );
+          if (!parsed.ok) return invalidBody(parsed.message);
+          patch.sandboxDeniedDomains = parsed.hosts;
         }
         if (Object.keys(patch).length === 0) {
           return invalidBody("at least one Agent setting is required");

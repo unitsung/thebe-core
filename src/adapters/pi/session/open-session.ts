@@ -17,9 +17,13 @@ import {
 import { createExplicitResourceLoader } from "../sdk/explicit-loader.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 import { sanitizeBashEnv } from "../../../agent/security/process-env.ts";
-import { sandboxedCommand } from "../../../agent/security/command-sandbox.ts";
 import { resolveHostSecurity } from "../../../agent/security/host-security.ts";
-import { createGondolinBashOperations } from "../../gondolin/bash-operations.ts";
+import { wrapOsSandboxCommand } from "../../../agent/security/os-sandbox.ts";
+import {
+  NETWORK_PERMISSION_TOOL,
+  trackSandboxedCommand,
+  type NetworkDecision,
+} from "../../../agent/security/network-policy.ts";
 import { loadThebeUserConfig } from "../config/user-config.ts";
 import type { PiSession } from "./pi-session.ts";
 import {
@@ -274,67 +278,88 @@ export async function openPiSession(
   });
   settingsManager.setDefaultProjectTrust?.("always");
   const controllers = new Map<string, AbortController>();
-  const sandbox = resolveHostSecurity();
   const fullAccessActive = () => create.fullAccess?.() === true;
   const workspacePath = create.cwd ?? cwd;
-  const baseBashOperations = backgroundTasks.wrap(
-    sdk.createLocalBashOperations()
-  );
-  const gondolinBash =
-    !fullAccessActive() && sandbox.sandboxMode === "gondolin"
-      ? createGondolinBashOperations({
-          workspacePath,
-          allowedHosts: sandbox.sandboxNetwork ? undefined : [],
-        })
-      : undefined;
-  const bashOperations = gondolinBash ?? baseBashOperations;
-  // `THEBE_SANDBOX=bwrap` jails bash in a bubblewrap namespace: read-only host,
-  // ephemeral /tmp, one writable workspace. Off by default (and it degrades to
-  // the raw command when bwrap is missing, e.g. on macOS).
+  // Pi's spawn hook is synchronous, and wrapWithSandbox is not, so the wrap
+  // lives in exec. The hook only strips secrets. Full access, a container,
+  // THEBE_SANDBOX=off and a saved sandbox off skip the wrap per command; a
+  // missing dependency throws inside the wrap and the command is not run bare.
+  const localBash = sdk.createLocalBashOperations();
+  const confinedBash = {
+    exec(
+      command: string,
+      cwd: string,
+      execOptions: {
+        onData: (data: Buffer) => void;
+        signal?: AbortSignal;
+        timeout?: number;
+        env?: NodeJS.ProcessEnv;
+      }
+    ) {
+      return (async () => {
+        const sandboxed =
+          !fullAccessActive() && resolveHostSecurity().sandboxMode !== "off";
+        const decisions = new Map<string, Promise<NetworkDecision>>();
+        const release = sandboxed
+          ? trackSandboxedCommand((params) => {
+              const key = params.host.trim().toLowerCase();
+              const pending = decisions.get(key);
+              if (pending) return pending;
+              const asked = askForNetworkHost(params.host, params.port);
+              decisions.set(key, asked);
+              return asked;
+            })
+          : undefined;
+        try {
+          const next = sandboxed
+            ? await wrapOsSandboxCommand(command, workspacePath)
+            : command;
+          const env = sanitizeBashEnv(
+            execOptions.env ?? { ...process.env }
+          ) as NodeJS.ProcessEnv;
+          return await localBash.exec(next, cwd, { ...execOptions, env });
+        } finally {
+          release?.();
+        }
+      })();
+    },
+  };
+  async function askForNetworkHost(
+    host: string,
+    port: number | undefined
+  ): Promise<NetworkDecision> {
+    if (!permissionHandler) {
+      return { allow: false, reason: "no permission handler" };
+    }
+    const permissionId = randomUUID();
+    const request = {
+      permissionId,
+      toolName: NETWORK_PERMISSION_TOOL,
+      toolCallId: permissionId,
+      args: { host, ...(port === undefined ? {} : { port }) },
+      argsSummary: port === undefined ? host : `${host} port ${port}`,
+      risk: "standard" as const,
+    };
+    const preflight = await permissionHandler.preflight(request);
+    if (preflight === "allow") return true;
+    if (preflight === "deny")
+      return { allow: false, reason: "denied by policy" };
+    const decision = await permissionHandler.request(request);
+    if (decision === "allow") return true;
+    return { allow: false, reason: "user denied" };
+  }
+  const bashOperations = backgroundTasks.wrap(confinedBash);
   const sanitizedBash = sdk.createBashTool(workspacePath, {
     operations: bashOperations,
     spawnHook: (ctx: {
       command: string;
       cwd: string;
       env: Record<string, string | undefined>;
-    }) => {
-      // bypassPermissions lifts the sandbox for this session only; it is read per
-      // command so a mid-conversation change takes effect at once.
-      const wrapped = sandboxedCommand(
-        ctx.command,
-        fullAccessActive() ? "off" : sandbox.sandboxMode,
-        workspacePath,
-        sandbox.sandboxNetwork
-      );
-      // bwrap re-enters the workspace with --chdir, so ctx.cwd stays the
-      // tool's own working directory.
-      return {
-        ...ctx,
-        command: wrapped.command,
-        env: sanitizeBashEnv(ctx.env),
-      };
-    },
+    }) => ({
+      ...ctx,
+      env: sanitizeBashEnv(ctx.env),
+    }),
   });
-  // `executeBash` (a command the user typed) runs through Pi's session, not through the bash tool
-  // above, so it never saw that tool's spawn hook: no sandbox wrapper and the whole process
-  // environment, including Core's own token. It now crosses the same two filters as the tool.
-  const guardedBashOperations: typeof bashOperations = {
-    exec(command, cwd, execOptions) {
-      const wrapped = sandboxedCommand(
-        command,
-        fullAccessActive() ? "off" : sandbox.sandboxMode,
-        workspacePath,
-        sandbox.sandboxNetwork
-      );
-      return bashOperations.exec(wrapped.command, cwd, {
-        ...execOptions,
-        env: sanitizeBashEnv({
-          ...process.env,
-          ...execOptions.env,
-        }) as NodeJS.ProcessEnv,
-      });
-    },
-  };
   const piCustomTools = [
     ...create.customTools.map((tool) =>
       abortablePiTool(toPiTool(sdk, tool), controllers)
@@ -415,17 +440,7 @@ export async function openPiSession(
     },
     controllers,
     backgroundTasks,
-    guardedBashOperations
+    bashOperations
   );
-  if (!gondolinBash) return wrappedSession;
-  // Pi's dispose is synchronous, so this teardown cannot be awaited here. Starting
-  // it still frees the VM the moment a session ends mid-run; the guarantee for the
-  // case this cannot cover — Core stopping with the session still open — is
-  // `adapters/gondolin/lifecycle.ts`, reached through the bootstrap teardown.
-  const dispose = wrappedSession.dispose.bind(wrappedSession);
-  wrappedSession.dispose = () => {
-    dispose();
-    void gondolinBash.dispose();
-  };
   return wrappedSession;
 }

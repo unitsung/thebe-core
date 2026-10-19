@@ -61,12 +61,14 @@ terminal, the HTTP API, and MCP, and no other UI.
 
 - Permission modes (`plan` / `manual` / `acceptEdits` / `bypassPermissions`,
   `docs/adr/0004-permission-model.md`), `CommandRisk` grading, workspace
-  confinement, Docker command and API guards, one `THEBE_SANDBOX` switch over
-  `bwrap` / docker / seatbelt / Gondolin micro-VM backends, output redaction
+  confinement, Docker command and API guards, host bash isolation via
+  `@anthropic-ai/sandbox-runtime` (`THEBE_SANDBOX=off` is the only escape hatch;
+  a container leaves it unset), output redaction
   before the model and before disk, and an append-only audit log.
-- `bypassPermissions` is host-gated and session-scoped: `THEBE_FULL_ACCESS`
-  allows it, `PUT /v1/session/{id}/permissions` sets it for one conversation, and
-  it is never inherited by subagents, schedules, background goals, `/mcp`, or
+- `bypassPermissions` is session-scoped and always selectable. The TUI and the
+  App ask before turning it on. `THEBE_FULL_ACCESS` is ignored.
+  `PUT /v1/session/{id}/permissions` sets it for one conversation, and it is
+  never inherited by subagents, schedules, background goals, `/mcp`, or
   non-interactive turns.
 
 **Product contract**
@@ -109,8 +111,8 @@ research.
   Thebe's APNs credentials.
 - **Open-source release prep.** Scan commit history, remove personal information,
   finish the README set, publish the Docker image, and add maintenance notes.
-- **Sandbox evolution.** Harden the staged `bwrap` / Gondolin micro-VM path; see
-  `docs/thebe_nas_isolation_and_microvm_research.md`.
+- **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
+  `@anthropic-ai/sandbox-runtime` (ADR 0005). The release container does not nest it.
 
 ## Candidate directions (identified, not scheduled)
 

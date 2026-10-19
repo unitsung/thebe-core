@@ -33,6 +33,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.80",
     "@earendil-works/pi-coding-agent": "^1.2.0",
     "@earendil-works/pi-mcp": "^1.2.0",
     "@earendil-works/pi-tui": "^1.2.0",
@@ -55,9 +56,6 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
-  },
-  "optionalDependencies": {
-    "@earendil-works/gondolin": "^0.13.0"
   },
   "engines": {
     "node": ">=24.0.0"

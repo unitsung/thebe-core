@@ -232,7 +232,8 @@ export class EventPresenter {
           state.thinkingBlock.finish();
         state.activeToolName = event.toolName;
         state.working?.setLabel(event.toolName);
-        if (event.toolName === "memory") this.toolArgs.set(event.toolCallId, event.args);
+        if (event.toolName === "memory")
+          this.toolArgs.set(event.toolCallId, event.args);
         let component = state.toolComponents.get(event.toolCallId);
         if (!component) {
           component = createToolComponent(
@@ -286,13 +287,16 @@ export class EventPresenter {
         state.pendingPermissionId = event.permissionId;
         this.deps.updateFooter();
         if (event.toolName === "memory") {
-          const shown = memoryApprovalNotice(this.toolArgs.get(event.toolCallId));
+          const shown = memoryApprovalNotice(
+            this.toolArgs.get(event.toolCallId)
+          );
           if (shown) this.deps.notice(shown);
         }
         void this.resolvePermissionInteractively(
           event.permissionId,
           event.toolName,
-          event.risk
+          event.risk,
+          event.argsSummary
         );
         break;
       case "interrupted":
@@ -342,7 +346,8 @@ export class EventPresenter {
   private async resolvePermissionInteractively(
     permissionId: string,
     toolName: string,
-    risk?: "high" | "standard"
+    risk?: "high" | "standard",
+    argsSummary?: string
   ): Promise<void> {
     const { agent, state, tui, editor } = this.deps;
     if (!agent) return;
@@ -355,24 +360,36 @@ export class EventPresenter {
       return;
     }
     const picker = tui.hasOverlay() ? attachModalSelectList : attachSelectList;
+    const host = argsSummary?.trim() || "this host";
+    const choices =
+      toolName === "network"
+        ? [
+            { label: `Deny ${host}`, value: "deny" },
+            { label: `Allow ${host} for this command`, value: "allow" },
+            { label: `Always allow ${host}`, value: "remember-request" },
+          ]
+        : [
+            {
+              label: `Deny ${toolName}${risk === "high" ? " (high risk)" : ""}`,
+              value: "deny",
+            },
+            { label: `Allow ${toolName} once`, value: "allow" },
+            {
+              label: `Always allow ${toolName} for this session${risk === "high" ? " (high risk)" : ""}`,
+              value: "remember-tool",
+            },
+            {
+              label: `Allow this exact ${toolName} request only`,
+              value: "remember-request",
+            },
+            {
+              label: "Allow this conversation",
+              value: "remember-conversation",
+            },
+          ];
     const selected = await picker(
       tui,
-      [
-        {
-          label: `Deny ${toolName}${risk === "high" ? " (high risk)" : ""}`,
-          value: "deny",
-        },
-        { label: `Allow ${toolName} once`, value: "allow" },
-        {
-          label: `Always allow ${toolName} for this session${risk === "high" ? " (high risk)" : ""}`,
-          value: "remember-tool",
-        },
-        {
-          label: `Allow this exact ${toolName} request only`,
-          value: "remember-request",
-        },
-        { label: "Allow this conversation", value: "remember-conversation" },
-      ],
+      choices,
       tui.hasOverlay() ? undefined : editor,
       undefined,
       this.deps.getActiveSelectListTheme()

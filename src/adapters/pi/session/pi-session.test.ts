@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -13,14 +12,26 @@ import {
   fauxToolCall,
   getCurrentTools,
 } from "@earendil-works/pi-ai";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createThebeAgent } from "../../../agent/index.ts";
 import type { ContainerInfoProvider } from "../../../agent/capabilities/containers.ts";
 import { PI_RUNTIME_ID } from "../../../agent/runtime/interface.ts";
-import { isSeatbeltAvailable } from "../../../agent/security/command-sandbox.ts";
-import { disposeMicroVms } from "../../gondolin/lifecycle.ts";
+import { coreRunsInContainer } from "../../../agent/security/host-security.ts";
+import {
+  disposeOsSandbox,
+  osSandboxDependencies,
+} from "../../../agent/security/os-sandbox.ts";
 import { loadPiSdk } from "../sdk/load-pi.ts";
 import { createPiCodingAgentRuntime } from "../runtime.ts";
+
+const sandboxEnv = process.env.THEBE_SANDBOX;
+beforeEach(() => {
+  process.env.THEBE_SANDBOX = "off";
+});
+afterEach(() => {
+  if (sandboxEnv === undefined) delete process.env.THEBE_SANDBOX;
+  else process.env.THEBE_SANDBOX = sandboxEnv;
+});
 
 function emptyProvider(): ContainerInfoProvider {
   return {
@@ -35,46 +46,6 @@ function emptyProvider(): ContainerInfoProvider {
       throw new Error("summary not used");
     },
   };
-}
-
-function gondolinMicroVmAvailable(): boolean {
-  try {
-    require.resolve("@earendil-works/gondolin");
-  } catch {
-    return false;
-  }
-  // Needs a backend that can actually boot, not just the package: QEMU plus
-  // hardware virtualization (HVF on macOS, KVM on Linux). Shared CI runners
-  // have neither, so the integration test skips instead of hanging.
-  const qemu = ["qemu-system-x86_64", "qemu-system-aarch64"].some(
-    (bin) => spawnSync(bin, ["--version"], { stdio: "ignore" }).status === 0
-  );
-  if (!qemu) return false;
-  if (process.platform !== "darwin") return existsSync("/dev/kvm");
-  // The hypervisor can be reported as supported yet refuse to start a VM (HV_NO_DEVICE), so
-  // start an empty paused machine: still running at the timeout means HVF works.
-  const arm = process.arch === "arm64";
-  const probe = spawnSync(
-    arm ? "qemu-system-aarch64" : "qemu-system-x86_64",
-    [
-      "-accel",
-      "hvf",
-      "-machine",
-      arm ? "virt" : "q35",
-      "-cpu",
-      "host",
-      "-m",
-      "64",
-      "-display",
-      "none",
-      "-nodefaults",
-      "-S",
-      "-monitor",
-      "none",
-    ],
-    { stdio: "ignore", timeout: 2500, killSignal: "SIGKILL" }
-  );
-  return probe.signal === "SIGKILL";
 }
 
 async function piWithFaux(sessionDir?: string) {
@@ -652,57 +623,11 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
-  it.skipIf(!gondolinMicroVmAvailable())(
-    "routes bash through the Micro-VM backend when THEBE_SANDBOX=gondolin",
-    async () => {
-      const previous = process.env.THEBE_SANDBOX;
-      process.env.THEBE_SANDBOX = "gondolin";
-      let cleanup: (() => Promise<void>) | undefined;
-      try {
-        const { faux, runtime } = await piWithFaux();
-        faux.setResponses([
-          fauxAssistantMessage([
-            fauxToolCall("bash", { command: "uname -a" }, { id: "call_vm" }),
-          ]),
-          fauxAssistantMessage("done"),
-        ]);
-        const agent = createThebeAgent({
-          runtime,
-          provider: emptyProvider(),
-          permissionMode: "acceptEdits",
-        });
-        const session = await agent.createSession();
-        // This boots a real Micro-VM, so the test has to end like Core does: dispose
-        // the session, then drain the process-level registry. Pi's dispose is
-        // synchronous and cannot await a VM teardown, so without the drain the QEMU
-        // process outlives the test with no owner.
-        cleanup = async () => {
-          await agent.deleteSession(session.thebeSessionId).catch(() => {});
-          await disposeMicroVms();
-        };
-
-        // The command runs inside the guest instead of touching the host.
-        await expect(
-          agent.send("run uname in the vm", session.thebeSessionId)
-        ).resolves.toMatchObject({ text: "done" });
-        const transcript = JSON.stringify(
-          await agent.loadMessages(session.thebeSessionId)
-        );
-        expect(transcript).toContain("Linux");
-        expect(transcript).toContain('toolName":"bash');
-      } finally {
-        await cleanup?.();
-        if (previous === undefined) delete process.env.THEBE_SANDBOX;
-        else process.env.THEBE_SANDBOX = previous;
-      }
-    }
-  );
-
-  it.skipIf(!isSeatbeltAvailable())(
+  it.skipIf(coreRunsInContainer() || osSandboxDependencies().errors.length > 0)(
     "lifts the OS sandbox for a session under the full-access preset",
     async () => {
       const previousSandbox = process.env.THEBE_SANDBOX;
-      process.env.THEBE_SANDBOX = "seatbelt";
+      delete process.env.THEBE_SANDBOX;
       const workspace = await mkdtemp(
         join(tmpdir(), "thebe-full-access-sandbox-")
       );
@@ -754,6 +679,7 @@ describe("PiCodingAgentRuntime sessions", () => {
         expect(existsSync(target)).toBe(true);
       } finally {
         await rm(target, { force: true });
+        await disposeOsSandbox();
         if (previousSandbox === undefined) delete process.env.THEBE_SANDBOX;
         else process.env.THEBE_SANDBOX = previousSandbox;
       }

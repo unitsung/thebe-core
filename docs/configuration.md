@@ -339,12 +339,12 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 
 一个设置决定会话不问就能做多少。名字沿用 Claude Code。
 
-| 模式 | 不问就执行 | 仍会询问或拒绝 |
-| --- | --- | --- |
-| `plan` | 工作区内的读取 | 一切会改动东西的操作都拒绝 |
-| `default` | 工作区内的读取 | `bash`、`write`、`edit`、记忆写入和各服务的写工具，每次都问 |
-| `acceptEdits` | 工作区内的 `write`/`edit`（不含 `.git`），以及有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外的路径、没有沙箱时的 `bash`、`memory`、MCP 与服务写入 |
-| `bypassPermissions` | 一切；命令守卫和沙箱都关闭 | 无。由宿主门控（见下） |
+| 模式                | 不问就执行                                                          | 仍会询问或拒绝                                                                |
+| ------------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `plan`              | 工作区内的读取                                                      | 一切会改动东西的操作都拒绝                                                    |
+| `default`           | 工作区内的读取                                                      | `bash`、`write`、`edit`、记忆写入和各服务的写工具，每次都问                   |
+| `acceptEdits`       | 工作区内的 `write`/`edit`（不含 `.git`），以及有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外的路径、没有沙箱时的 `bash`、`memory`、MCP 与服务写入 |
+| `bypassPermissions` | 一切；命令守卫和沙箱都关闭                                          | 无。在 TUI 或 App 里打开，并先确认                                            |
 
 `acceptEdits` 照 Codex 的“按需询问 + 受限沙箱”：能让命令不问就执行的是沙箱，而不是一张“安全命令”清单，
 所以没有沙箱时命令照常询问。有沙箱时，`tree-sitter-bash` 读不懂的脚本、或含有强制 `rm`（照 Codex 的检查，穿过 `sudo`、`env`、`trap`、`bash -c` 也能找到）的脚本，同样会询问。`.git` 与 Codex 的工作区可写沙箱一样保持只读。
@@ -356,44 +356,28 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 
 ### `bypassPermissions`
 
-由宿主门控、按会话生效。为一个会话同时关闭命令守卫、操作系统沙箱和工具审批，脱敏与审计照旧。
+按会话生效，也可以写成宿主默认。为一个会话同时关闭命令守卫、操作系统沙箱和工具审批，脱敏与审计照旧。
 
-```bash
-export THEBE_FULL_ACCESS=on   # 允许本机使用 bypassPermissions；默认关闭
-```
+不需要环境变量。`THEBE_FULL_ACCESS` 忽略，等同未设置：它不会让进程以 bypass 启动。在 TUI 的 `/permissions` 或设置菜单里选它，或在 App 的 Agent 设置里选它，都会先确认。确认后的宿主默认会保存到 `config.json`，定时任务、子代理、后台目标和 `/mcp` 用的是宿主默认，不继承某个会话自己开的 bypass。
 
-只有设置了它的宿主才能使用，HTTP/App 客户端不能自己给自己开（`GET /v1/settings/full-access` 返回
-`{ "allowed": … }`；宿主未允许时请求返回 403 `full_access_not_allowed`）。模型会读到不可信内容（网页、
-工具输出、外部 MCP），该模式下一条误判的命令可能损坏宿主数据，只在需要时开启。Gondolin 微虚拟机后端在会话
-打开时选定，用它时改动对下一个会话生效。
+模型会读到不可信内容（网页、工具输出、外部 MCP），该模式下一条误判的命令可能损坏宿主数据，只在需要时开启。完全访问在下一条命令生效，不必新开会话。
 
 ## 命令沙箱
 
-Core 默认不提供操作系统沙箱，受支持的边界是容器。一个变量就能给 `bash` 工具开沙箱：
+模型跑的 `bash` 和 Core 进程不是同一层边界。没有后端菜单。
 
-```bash
-THEBE_SANDBOX=auto   # off（默认）| auto | bwrap | docker | seatbelt | gondolin
-```
+- **容器部署**（发布形态）：检测到 `/.dockerenv` 或 `/run/.containerenv` 就不启动沙箱。不要设置 `THEBE_SANDBOX`。不要在容器里再套 bubblewrap 或虚拟机。
+- **装在宿主上**：默认用钉死的 `@anthropic-ai/sandbox-runtime`（和 Claude Code 同一套 Seatbelt / bubblewrap）。TUI 设置和 App 的 Agent 设置里可以关掉，关掉前会确认；命令守卫仍然开着。这不是 bypass，也没有自动跳过权限。`THEBE_SANDBOX=off` 和容器部署会强制关闭，界面改不了。会话或宿主默认里的完全访问（`bypassPermissions`，TUI 和 App 会先确认）同样会拿掉沙箱。
 
-`auto` 选这台机器能跑的：macOS 用 `seatbelt`，Linux 用 `bwrap`，都没有则用 `docker`。**要了沙箱却没有这个后端时，
-命令会被拒绝**（不会不带沙箱地执行）；装上它或设 `THEBE_SANDBOX=off`。`thebe doctor` 与
-`GET /v1/system/isolation` 会报告它是否生效。
+`os`、`auto`、`vm`、`gondolin`、`bwrap`、`docker`、`seatbelt` 以及任何其它值都当作没设置：宿主仍用 OS 沙箱，容器里仍关闭。不再映射，也不再因此启动失败。
 
-- **bubblewrap**（Linux）：宿主根只读、`/tmp` 用 tmpfs、`/dev`/`/proc` 重新挂载、只有工作区可写、`--unshare-all`、`--cap-drop ALL`、`--die-with-parent`。
-- **docker**：一次性 `alpine:3` 容器，`--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`，只把工作区读写挂进去。
-- **seatbelt**（macOS）：`sandbox-exec` 加生成的 profile；写入只允许工作区与 `TMPDIR`。
-- **gondolin**：一次性微虚拟机（QEMU），硬件隔离。宿主工作区挂到 guest 的 `/workspace`，越出工作区的路径直接抛错。缺包或缺 QEMU 时报明确错误并给出修复命令，**不会**退回本地执行。虚拟机随会话结束而销毁；Core 停止时也会由退出路径统一关闭，不会留下无主的 QEMU 进程。
+策略写死，不是环境变量：
 
-所有后端都保留网络：沙箱限制的是文件，不是连接。
+- 写：工作区和临时目录。
+- 读：默认放开，拒绝 `~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.thebe`。
+- 网络：允许名单，默认空，跟 Claude Code 一样。沙箱里的 `bash` 第一次访问某个域名会问你。允许一次只对这条命令有效；记住之后写入 `config.json` 的 `sandboxAllowedDomains`，以后不再问。拒绝并记住写入 `sandboxDeniedDomains`。同时有两条沙箱命令时无法判断是哪一条，这次访问直接拒绝。`web_search` 不走这份名单。bypass 不进沙箱，网络全开。
 
-```bash
-# gondolin 安装
-npm install @earendil-works/gondolin@0.13.0   # Core 已列为 optionalDependency，可跳过
-brew install qemu                             # Linux: sudo apt install qemu-system-arm
-THEBE_SANDBOX=gondolin thebe                  # 首次启动下载约 200MB 的 guest 镜像
-```
-
-`GONDOLIN_DEFAULT_IMAGE` 选择 guest 镜像（默认 `alpine-base:latest`）。
+依赖没装齐时命令会被拒绝，不会退回去直接执行。Linux 需要 bubblewrap、socat 和 ripgrep；macOS 用系统的 `sandbox-exec`，不需要 ripgrep。`thebe doctor` 在这种情况下退出码为 1。`GET /v1/system/isolation` 的 `sandbox.mode` 只有 `off` 和 `os`，不再返回 `backends`。
 
 命令守卫、工作区约束和 Docker API 守卫（特权容器、宿主根与 `docker.sock` 挂载、volume prune）始终开启，没有开关。
 

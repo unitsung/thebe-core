@@ -21,13 +21,19 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Changed
 
+- Host bash isolation is pinned `@anthropic-ai/sandbox-runtime` 0.0.80 (Seatbelt / bubblewrap). Unset `THEBE_SANDBOX` means on for a host and off inside a container. The TUI and the App can turn that host sandbox off; the command guard stays on. There is no automatic bypass. `THEBE_SANDBOX=off` still forces it off. `os`, `auto`, `vm`, `gondolin`, `bwrap`, `docker`, `seatbelt` and any other value are ignored, the same as leaving the variable unset.
+- Sandboxed bash asks before reaching a host that is not allowed yet, the same shape as Claude Code. Allowing once covers that command. Remembering the host stores it on the Core. Two sandboxed commands at once are not asked, because the connection cannot be attributed. Bypass does not enter the sandbox, so its network stays open.
+- `GET /v1/system/isolation` `sandbox.mode` is `off` or `os`. `sandbox.backends` is gone, and `fallback` is always false. A missing dependency refuses commands; `thebe doctor` exits 1.
+
 - The command guard reads a command as shell before its text rules apply. `rm -r -f /`, `r''m -rf /`, `rm -rf "$HOME"`, `cd / && rm -rf *`, `sh -c '…'`, `eval`, `find / -delete` and `chmod -R` on the root are blocked; `curl … | sh`, a run-time-built shell command, a command name known only at run time and reads of SSH or cloud credentials ask first. The parser loads at startup; without it the text rules decide alone.
 - Permission modes are read by their four names only. The old `ask`, `read-only`, `full-access` and `default` spellings are no longer accepted: a `config.json` that still holds one falls back to `manual`, and an API call with one gets `400`. `POST /v1/session/{id}/full-access` still switches `bypassPermissions`.
+- `bypassPermissions` no longer needs `THEBE_FULL_ACCESS`. The variable is ignored and does not start the process in bypass. The TUI and the App ask before turning it on. A session's own mode is still not inherited by subagents, schedules, background goals, `/mcp`, or non-interactive turns.
 - Research budget per answer raised to 8 `web_search` and 6 `music_research` lookups (12 combined, was 3, 2 and 4) so a search for a song or a release can try several queries; the same query is still never run twice.
 - The system prompt now says `tool_search` matches English words only, because its ranker drops non-ASCII text and a Chinese query found nothing. This changes the prompt once; it is the same text on every later call.
-- `THEBE_SANDBOX` accepts `auto`. A sandbox that was asked for and is not available now refuses the command instead of running it unsandboxed.
 
 ### Removed
+
+- The Gondolin micro-VM adapter and the handwritten Seatbelt, bubblewrap and disposable-Docker sandbox. `@earendil-works/gondolin` is no longer a dependency.
 
 - Environment variables `THEBE_SCENARIO` (and its four presets), `THEBE_COMMAND_GUARD`, `THEBE_ALLOW_WORKSPACE_ESCAPES`, `THEBE_SANDBOX_NETWORK`, `THEBE_SANDBOX_IMAGE`, `THEBE_SESSION_IDLE_TIMEOUT_MS`, `THEBE_MODEL_RESULT_LIMIT` and `THEBE_PIPELINE_ADVANCE_MS`. The command guard, workspace confinement and Docker API guard are always on; the sandbox keeps the network.
 - The `scenario` field of `GET /v1/system/isolation`.
@@ -45,8 +51,8 @@ There is no tagged release yet. The entries below are what `dev` currently conta
   /v1/settings/permissions`) and per session (`PUT /v1/session/{id}/permissions`).
   `acceptEdits` lets workspace edits and commands that an enforcing sandbox
   contains run unasked, after Codex's on-request policy. `bypassPermissions`
-  lifts the command guard, the OS sandbox, and tool approval for one session; it
-  needs `THEBE_FULL_ACCESS=on` on the host and is not inherited by subagents,
+  lifts the command guard, the OS sandbox, and tool approval for one session. It
+  does not need `THEBE_FULL_ACCESS` and is not inherited by subagents,
   schedules, background goals, `/mcp` callers, or non-interactive turns. See
   `docs/adr/0004-permission-model.md`.
 - A `cloud_transfer` acquisition-job kind. The durable pipeline state machine

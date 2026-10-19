@@ -1,20 +1,22 @@
 import { existsSync } from "node:fs";
-import {
-  sandboxAvailability,
-  sandboxUnavailableReason,
-  type SandboxMode,
-} from "./command-sandbox.ts";
-import { resolveHostSecurity } from "./host-security.ts";
 import type { DockerProxyPolicy } from "./docker-api-guard.ts";
+import {
+  coreRunsInContainer,
+  resolveHostSecurity,
+  type SandboxMode,
+} from "./host-security.ts";
+import {
+  osSandboxDependencies,
+  osSandboxUnavailableReason,
+  type OsSandboxDependencyCheck,
+} from "./os-sandbox.ts";
 
 /**
  * The effective isolation posture, for operators and clients.
  *
- * The point of this report is to answer one question that the environment
- * variables cannot: **is the requested sandbox actually in effect, or would the
- * bash tool silently run unsandboxed?** `bwrap`, `docker`, and `seatbelt` fall
- * back to the raw command when their backend is missing; `gondolin` fails
- * closed instead. `fallback` is the dangerous case and must be surfaced.
+ * `fallback` stays false: a sandbox that cannot run refuses the command
+ * instead of executing it unsandboxed. `enforced` is true only for a host
+ * `os` sandbox whose dependencies are present.
  */
 export type IsolationReport = {
   commandGuard: boolean;
@@ -26,14 +28,12 @@ export type IsolationReport = {
   };
   sandbox: {
     mode: SandboxMode;
-    /** Bash is isolated (or, for gondolin, would refuse rather than run raw). */
+    /** Bash commands are wrapped by the OS sandbox. */
     enforced: boolean;
-    /** A requested backend is unavailable: commands would run UNSANDBOXED. */
+    /** Always false. A missing sandbox refuses commands; it does not run them bare. */
     fallback: boolean;
-    /** Whether the backend was probed on this host (false for the micro-VM). */
+    /** Dependencies were probed on this host. */
     verified: boolean;
-    /** Which backends this host can run right now. */
-    backends: Record<SandboxMode, boolean>;
     reason?: string;
   };
   dockerGuard: Required<DockerProxyPolicy>;
@@ -41,37 +41,41 @@ export type IsolationReport = {
   warnings: string[];
 };
 
+export { coreRunsInContainer };
+
 export function buildIsolationReport(
   options: {
     env?: NodeJS.ProcessEnv;
     workspacePath?: string | null;
-    probes?: Partial<Record<SandboxMode, () => boolean>>;
-  } = {},
+    /** Test seam. Defaults to detecting `/.dockerenv` or `/run/.containerenv`. */
+    inContainer?: boolean;
+    /** Test seam. Defaults to `SandboxManager.checkDependencies()`. */
+    dependencies?: OsSandboxDependencyCheck;
+  } = {}
 ): IsolationReport {
   const env = options.env ?? process.env;
   const workspacePath = options.workspacePath?.trim() || null;
-  const backends = sandboxAvailability(options.probes ?? {});
-  const settings = resolveHostSecurity(env, backends);
+  const inContainer = options.inContainer ?? coreRunsInContainer();
+  const settings = resolveHostSecurity(env, { inContainer });
   const mode = settings.sandboxMode;
-  const isMicroVm = mode === "gondolin";
-  const available = backends[mode];
-  const enforced = mode === "off" ? false : isMicroVm ? true : available;
-  const fallback = mode !== "off" && !isMicroVm && !available;
-  const reason = fallback
-    ? sandboxUnavailableReason(mode)
-    : isMicroVm
-      ? "readiness is confirmed by the gondolin adapter on first use; it fails closed rather than running unsandboxed"
+  const dependencies =
+    mode === "os"
+      ? (options.dependencies ?? osSandboxDependencies())
+      : undefined;
+  const enforced = mode === "os" && (dependencies?.errors.length ?? 0) === 0;
+  const reason =
+    mode === "os" && !enforced
+      ? osSandboxUnavailableReason(dependencies ?? { errors: [], warnings: [] })
       : undefined;
 
   const warnings: string[] = [];
-  if ((env.THEBE_ALLOWED_HOSTS ?? "").split(",").some((value) => value.trim() === "*")) {
+  if (
+    (env.THEBE_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .some((value) => value.trim() === "*")
+  ) {
     warnings.push(
-      "THEBE_ALLOWED_HOSTS=* accepts any Host header; the DNS-rebinding check is disabled.",
-    );
-  }
-  if (fallback) {
-    warnings.push(
-      `The ${mode} sandbox is unavailable; bash commands run unsandboxed.`,
+      "THEBE_ALLOWED_HOSTS=* accepts any Host header; the DNS-rebinding check is disabled."
     );
   }
 
@@ -86,9 +90,8 @@ export function buildIsolationReport(
     sandbox: {
       mode,
       enforced,
-      fallback,
-      verified: !isMicroVm,
-      backends,
+      fallback: false,
+      verified: true,
       ...(reason ? { reason } : {}),
     },
     dockerGuard: settings.dockerGuard,

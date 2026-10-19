@@ -53,6 +53,9 @@ describe("Agent settings product HTTP", () => {
       workspacePath: "/tmp/thebe-settings-workspace",
       outputDirectory: "/tmp/thebe-settings-workspace/.thebe/outputs",
       instructions: "",
+      sandboxEnabled: true,
+      sandboxAllowedDomains: [],
+      sandboxDeniedDomains: [],
       sources: {
         autoCompact: "default",
         autoSummary: "default",
@@ -63,10 +66,77 @@ describe("Agent settings product HTTP", () => {
         workspacePath: "configured",
         outputDirectory: "configured",
         instructions: "default",
+        sandboxEnabled: "default",
       },
       persistence: { enabled: false },
-      mutable: ["autoCompact", "autoSummary", "autoSummaryDelayMs", "instructions"],
+      mutable: [
+        "autoCompact",
+        "autoSummary",
+        "autoSummaryDelayMs",
+        "instructions",
+        "sandboxEnabled",
+        "sandboxAllowedDomains",
+        "sandboxDeniedDomains",
+      ],
     });
+  });
+
+  it("turns the host sandbox off and remembers an allowed host", async () => {
+    const { mkdtemp, writeFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { createJsonAgentSettingsStore } =
+      await import("../../agent/settings/store.ts");
+    const { resolveHostSecurity, setConfiguredSandboxEnabled } =
+      await import("../../agent/security/host-security.ts");
+    const { resetNetworkAllowlist } =
+      await import("../../agent/security/network-policy.ts");
+    const dir = await mkdtemp(join(tmpdir(), "thebe-sandbox-settings-"));
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, "{}\n");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      settingsStore: createJsonAgentSettingsStore(configPath),
+    });
+    const patch = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/settings/agent", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+    const off = (await json(await patch({ sandboxEnabled: false }))) as {
+      sandboxEnabled: boolean;
+      sources: { sandboxEnabled: string };
+    };
+    expect(off.sandboxEnabled).toBe(false);
+    expect(off.sources.sandboxEnabled).toBe("configured");
+    expect(resolveHostSecurity({}, { inContainer: false }).sandboxMode).toBe(
+      "off"
+    );
+    const hosts = (await json(
+      await patch({
+        sandboxAllowedDomains: ["Example.COM"],
+        sandboxDeniedDomains: [],
+      })
+    )) as { sandboxAllowedDomains: string[] };
+    expect(hosts.sandboxAllowedDomains).toEqual(["example.com"]);
+    const again = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      settingsStore: createJsonAgentSettingsStore(configPath),
+    });
+    const restored = (await json(
+      await again.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/settings/agent")
+      )
+    )) as { sandboxEnabled: boolean; sandboxAllowedDomains: string[] };
+    expect(restored.sandboxEnabled).toBe(false);
+    expect(restored.sandboxAllowedDomains).toEqual(["example.com"]);
+    setConfiguredSandboxEnabled(undefined);
+    resetNetworkAllowlist();
   });
 
   it("updates the owner instructions and refuses text over 4096 bytes", async () => {
@@ -379,34 +449,6 @@ describe("Agent settings product HTTP", () => {
   });
 
   it("reports the full-access host gate and enables it per session", async () => {
-    const closed = createThebeApp({
-      runtime: createFakeRuntime().runtime,
-      provider: provider(),
-    });
-    const closedSupport = await json(
-      await closed.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/settings/full-access")
-      )
-    );
-    expect(closedSupport).toEqual({ allowed: false });
-    const closedSession = await closed.agent.createSession();
-    const refused = await closed.handler.handle(
-      new Request(
-        `http://127.0.0.1:8787/v1/session/${closedSession.thebeSessionId}/full-access`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ enabled: true }),
-        }
-      )
-    );
-    expect(refused.status).toBe(403);
-    expect(await json(refused)).toEqual({
-      ok: false,
-      error: "bypassPermissions is not enabled on this Core host",
-      code: "full_access_not_allowed",
-    });
-
     const open = createThebeApp({
       runtime: createFakeRuntime().runtime,
       provider: provider(),
@@ -480,8 +522,11 @@ describe("Agent settings product HTTP", () => {
     expect(afterDisable.permissionMode).toBeUndefined();
   });
 
-  it("sets and reads the permission mode of one session, and lets bypassPermissions in only where the host allows it", async () => {
-    const closed = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+  it("sets and reads the permission mode of one session, and lets bypassPermissions in without a host environment variable", async () => {
+    const closed = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
     const session = await closed.agent.createSession();
     const url = `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/permissions`;
     const put = (app: typeof closed, mode: unknown) =>
@@ -515,7 +560,10 @@ describe("Agent settings product HTTP", () => {
 
     // Only the four names are accepted.
     expect((await put(closed, "read-only")).status).toBe(400);
-    expect((await put(closed, "bypassPermissions")).status).toBe(403);
+    expect(await json(await put(closed, "bypassPermissions"))).toEqual({
+      thebeSessionId: session.thebeSessionId,
+      mode: "bypassPermissions",
+    });
     expect((await put(closed, "nonsense")).status).toBe(400);
     expect(await json(await put(closed, null))).toEqual({
       thebeSessionId: session.thebeSessionId,

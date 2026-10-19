@@ -33,14 +33,18 @@ if (command.kind === "doctor") {
   process.exit(await runDoctor());
 }
 
-const { agent, workspacePath, model: bootModel, disposeSandboxVms } =
-  await bootstrapThebe({ fromDir: here });
+const {
+  agent,
+  workspacePath,
+  model: bootModel,
+  disposeSandboxVms,
+} = await bootstrapThebe({ fromDir: here });
 
 const userConfig = await loadThebeConfig();
 const resolvedTuiMode =
   command.kind === "tui" && command.tuiMode
     ? command.tuiMode
-    : userConfig.tuiMode ?? "regular";
+    : (userConfig.tuiMode ?? "regular");
 
 const code = await runCliCommand(agent, command, {
   startTui: ({ agent: p, sessionId, title }) => {
@@ -52,7 +56,9 @@ const code = await runCliCommand(agent, command, {
       model:
         command.kind === "tui" && command.model
           ? `${command.model.providerId}/${command.model.modelId}`
-          : bootModel ? `${bootModel.providerId}/${bootModel.modelId}` : undefined,
+          : bootModel
+            ? `${bootModel.providerId}/${bootModel.modelId}`
+            : undefined,
       tuiMode: resolvedTuiMode,
       disposeSandboxVms,
     });
@@ -60,7 +66,7 @@ const code = await runCliCommand(agent, command, {
 });
 
 if (command.kind !== "tui") {
-  // A one-shot command runs agent turns too, so it can have booted a sandbox VM.
+  // A one-shot command can start the OS-sandbox proxies. Close them with the process.
   await disposeSandboxVms().catch(() => {});
   process.exit(code);
 }

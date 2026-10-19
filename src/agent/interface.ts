@@ -129,8 +129,8 @@ export type CreateThebeAgentOptions = {
   autoSummaryDelayMs?: number;
   permissionMode?: PermissionMode;
   /**
-   * Host gate for the session-scoped full-access preset. Defaults to
-   * `THEBE_FULL_ACCESS`. Only a host that allows it can enable the preset.
+   * Ignored. `bypassPermissions` is always selectable. The TUI and the App
+   * confirm before turning it on. `THEBE_FULL_ACCESS` does not start bypass.
    */
   fullAccessAllowed?: boolean;
   /**
@@ -344,9 +344,8 @@ export interface ThebeAgent {
   /** Whether this host permits the session-scoped full-access preset. */
   getFullAccessSupport(): { allowed: boolean };
   /**
-   * Enable or disable the full-access preset for one session. Host-gated;
-   * rejected with 403 when the host has not allowed it. Session-scoped and
-   * never inherited by subagents, schedules, background goals, or `/mcp`.
+   * Set one session's permission mode. Session-scoped and never inherited by
+   * subagents, schedules, background goals, or `/mcp`.
    */
   setSessionPermissionMode(
     thebeSessionId: string,

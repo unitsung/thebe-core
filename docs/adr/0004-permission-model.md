@@ -2,6 +2,8 @@
 
 状态：**已采纳（2026-10-14），部分实现。** 取代 `FULL-ACCESS-DESIGN.md` 和之前的 ADR 草案（三个维度加四个预设）。
 
+2026-10-19 更新：`THEBE_FULL_ACCESS` 不再是开关，设置了也不等于以 bypass 启动。bypass 在 TUI 或 App 里打开，并先确认。下面「只有宿主设置了该变量才能用」和 `403 full_access_not_allowed` 作废。会话自己的模式仍不继承给子代理、定时任务、后台目标、`/mcp` 和非交互轮次。
+
 ## 背景
 
 之前面向用户的有四套互不联动的开关：审批模式 `ask | read-only | full-access`（全局）、会话级“完全访问预设”（名字重复、含义更大）、场景预设 `THEBE_SCENARIO`（四个）、沙箱后端 `THEBE_SANDBOX`（五个），外加六七个环境变量。用户要的是别的 agent 工具里那样一个熟悉的设置，沙箱不该是让人去挑的东西。
@@ -12,12 +14,12 @@
 
 ### 1. 一个设置，四个模式，名字用 Claude Code 的
 
-| 模式 | 不问就执行 | 仍会询问或拒绝 |
-| --- | --- | --- |
-| `plan` | 工作区内读取 | 其余一律拒绝 |
-| `manual` | 工作区内读取 | `bash`、`write`、`edit`、记忆与服务写入每次问 |
-| `acceptEdits` | 工作区内 `write`/`edit`（不含 `.git`）；有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外、没有沙箱的 `bash`、`memory`、MCP 与服务写入 |
-| `bypassPermissions` | 一切，命令守卫与沙箱关闭 | 无；宿主门控 |
+| 模式                | 不问就执行                                                    | 仍会询问或拒绝                                                        |
+| ------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `plan`              | 工作区内读取                                                  | 其余一律拒绝                                                          |
+| `manual`            | 工作区内读取                                                  | `bash`、`write`、`edit`、记忆与服务写入每次问                         |
+| `acceptEdits`       | 工作区内 `write`/`edit`（不含 `.git`）；有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外、没有沙箱的 `bash`、`memory`、MCP 与服务写入 |
+| `bypassPermissions` | 一切，命令守卫与沙箱关闭                                      | 无；宿主门控                                                          |
 
 - 按会话保存（`AgentSessionMeta.permissionMode`），宿主默认值来自 `config.json` 的 `permissionMode`（默认 `manual`）。
 - 只认这四个名字，不留别名；`config.json` 里的旧值按未设置处理（回到 `manual`），接口收到旧值返回 `400`。`POST /v1/session/{id}/full-access` 保留，等于开关 `bypassPermissions`。

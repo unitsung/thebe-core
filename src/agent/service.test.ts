@@ -73,9 +73,15 @@ describe("Thebe agent service (fake runtime)", () => {
   });
 
   it("acceptEdits lets workspace edits through and asks about the rest", async () => {
-    const workspace = await mkdtemp(join(tmpdir(), "thebe-accept-edits-agent-"));
+    const previousSandbox = process.env.THEBE_SANDBOX;
+    process.env.THEBE_SANDBOX = "off";
+    const workspace = await mkdtemp(
+      join(tmpdir(), "thebe-accept-edits-agent-")
+    );
     const fake = createFakeRuntime();
-    let handler: Parameters<typeof fake.runtime.createSession>[0]["permissionHandler"];
+    let handler: Parameters<
+      typeof fake.runtime.createSession
+    >[0]["permissionHandler"];
     const agent = createThebeAgent({
       runtime: {
         ...fake.runtime,
@@ -95,17 +101,35 @@ describe("Thebe agent service (fake runtime)", () => {
       toolName,
       args,
     });
-    expect(await handler!.preflight!(call("write", { path: "notes.md", content: "x" }))).toBe("allow");
-    expect(await handler!.preflight!(call("write", { path: "../outside.md", content: "x" }))).toBe("ask");
-    // No sandbox is running in this test, so a command is still asked about.
-    expect(await handler!.preflight!(call("bash", { command: "ls" }))).toBe("ask");
-    expect(await handler!.preflight!(call("memory", { target: "user", operations: [] }))).toBe("ask");
+    expect(
+      await handler!.preflight!(
+        call("write", { path: "notes.md", content: "x" })
+      )
+    ).toBe("allow");
+    expect(
+      await handler!.preflight!(
+        call("write", { path: "../outside.md", content: "x" })
+      )
+    ).toBe("ask");
+    // THEBE_SANDBOX=off, so a command is still asked about.
+    expect(await handler!.preflight!(call("bash", { command: "ls" }))).toBe(
+      "ask"
+    );
+    expect(
+      await handler!.preflight!(
+        call("memory", { target: "user", operations: [] })
+      )
+    ).toBe("ask");
 
     // A session can narrow itself to plan, and the others keep the host's mode.
     const planned = await agent.createSession();
     await agent.setSessionPermissionMode(planned.thebeSessionId, "plan");
-    expect((await agent.sessionPermissionMode(planned.thebeSessionId)).mode).toBe("plan");
+    expect(
+      (await agent.sessionPermissionMode(planned.thebeSessionId)).mode
+    ).toBe("plan");
     await rm(workspace, { recursive: true, force: true });
+    if (previousSandbox === undefined) delete process.env.THEBE_SANDBOX;
+    else process.env.THEBE_SANDBOX = previousSandbox;
   });
 
   it("refreshes an existing conversation when a resource is enabled, updated or removed", async () => {
@@ -867,17 +891,27 @@ describe("Thebe agent service (fake runtime)", () => {
         lastUpdated: 1,
       }),
     };
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider, version: "0.1.0" });
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider,
+      version: "0.1.0",
+    });
     const rpc = async (method: string, params?: unknown) =>
-      (await app.handler.handle(
-        new Request("http://127.0.0.1:8787/mcp", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-        })
-      ).then((res) => res.json())) as {
+      (await app.handler
+        .handle(
+          new Request("http://127.0.0.1:8787/mcp", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+          })
+        )
+        .then((res) => res.json())) as {
         result?: {
-          tools?: Array<{ name: string; annotations?: Record<string, boolean>; _meta?: Record<string, unknown> }>;
+          tools?: Array<{
+            name: string;
+            annotations?: Record<string, boolean>;
+            _meta?: Record<string, unknown>;
+          }>;
           content?: Array<{ text?: string }>;
           structuredContent?: Record<string, unknown>;
           isError?: boolean;
@@ -886,18 +920,33 @@ describe("Thebe agent service (fake runtime)", () => {
       };
 
     const listed = await rpc("tools/list");
-    const summary = listed.result?.tools?.find((tool) => tool.name === "container.status_summary");
-    expect(summary?.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false });
+    const summary = listed.result?.tools?.find(
+      (tool) => tool.name === "container.status_summary"
+    );
+    expect(summary?.annotations).toMatchObject({
+      readOnlyHint: true,
+      destructiveHint: false,
+    });
     expect(summary?._meta?.["thebe/category"]).toBe("containers");
-    const restart = listed.result?.tools?.find((tool) => tool.name === "container.restart");
-    expect(restart?.annotations).toMatchObject({ readOnlyHint: false, destructiveHint: true });
+    const restart = listed.result?.tools?.find(
+      (tool) => tool.name === "container.restart"
+    );
+    expect(restart?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
 
     const ok = await rpc("tools/call", { name: "container.status_summary" });
-    expect(ok.result?.structuredContent).toMatchObject({ runningContainers: 2 });
+    expect(ok.result?.structuredContent).toMatchObject({
+      runningContainers: 2,
+    });
     expect(ok.result?.content?.[0]?.text).toContain("runningContainers");
 
     // A failing tool is a result the model can read, not a protocol error.
-    const failed = await rpc("tools/call", { name: "container.logs", arguments: { id: "x" } });
+    const failed = await rpc("tools/call", {
+      name: "container.logs",
+      arguments: { id: "x" },
+    });
     expect(failed.error).toBeUndefined();
     expect(failed.result?.isError).toBe(true);
     expect(failed.result?.content?.[0]?.text).toBeTruthy();
@@ -1103,20 +1152,7 @@ describe("Thebe agent service (fake runtime)", () => {
     expect(agent.pendingPermissionIds()).toHaveLength(0);
   });
 
-  it("host-gates the full-access preset and applies it to one session only", async () => {
-    const disabled = createThebeAgent({
-      runtime: createFakeRuntime().runtime,
-      provider: emptyProvider(),
-    });
-    expect(disabled.getFullAccessSupport()).toEqual({ allowed: false });
-    const disabledSession = await disabled.createSession();
-    await expect(
-      disabled.setSessionFullAccess(disabledSession.thebeSessionId, true)
-    ).rejects.toMatchObject({
-      status: 403,
-      code: "full_access_not_allowed",
-    });
-
+  it("applies bypass to one session only", async () => {
     const fake = createFakeRuntime();
     const handlers: Array<
       NonNullable<

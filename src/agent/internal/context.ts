@@ -21,9 +21,19 @@ import { createStreamGuard } from "../../agent/security/stream-guard/stream-guar
 import { commandGuardPreflight } from "../security/command-risk.ts";
 import { acceptEditsApproves } from "../security/accept-edits.ts";
 import { buildIsolationReport } from "../security/isolation.ts";
-import { fullAccessPresetAllowed } from "../security/full-access.ts";
 import { remoteBashAllowed as remoteBashHostAllowed } from "../security/remote-bash.ts";
-import { resolveHostSecurity } from "../security/host-security.ts";
+import {
+  resolveHostSecurity,
+  sandboxForcedOff,
+  setConfiguredSandboxEnabled,
+} from "../security/host-security.ts";
+import {
+  configureNetworkAllowlist,
+  networkAllowedDomains,
+  networkDeniedDomains,
+  parseNetworkHostList,
+  setNetworkAllowlist,
+} from "../security/network-policy.ts";
 import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
@@ -214,7 +224,19 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       storedSettings.instructions !== undefined
         ? "configured"
         : "default",
+    sandboxEnabled: sandboxForcedOff()
+      ? sandboxForcedOff()!.source
+      : storedSettings.sandboxEnabled !== undefined
+        ? "configured"
+        : "default",
   };
+  setConfiguredSandboxEnabled(storedSettings.sandboxEnabled);
+  let sandboxEnabledSetting = storedSettings.sandboxEnabled;
+  configureNetworkAllowlist({
+    allowedDomains: storedSettings.sandboxAllowedDomains ?? [],
+    deniedDomains: storedSettings.sandboxDeniedDomains ?? [],
+    persist: (patch) => options.settingsStore?.save(patch),
+  });
   const workspaceAccess = workspacePath
     ? createWorkspaceAccessPolicy(workspacePath)
     : {
@@ -226,9 +248,6 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   // The guard is always on and files stay in the workspace; the host only picks the sandbox.
   const hostSecurity = resolveHostSecurity();
   const commandGuard = hostSecurity.commandGuard;
-  // Host-only gate for the session-scoped full-access preset (THEBE_FULL_ACCESS).
-  const fullAccessAllowed =
-    options.fullAccessAllowed ?? fullAccessPresetAllowed();
   // Host-only gate for running a client-supplied command (THEBE_REMOTE_BASH).
   const remoteBashAllowed =
     options.remoteBashAllowed ?? remoteBashHostAllowed();
@@ -431,32 +450,29 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   });
 
   /**
-   * Whether the session-scoped full-access preset is active for this session.
-   * Host-gated (off by default) and read from live metadata, so a toggle takes
-   * effect on the next tool call without reopening the session.
+   * Whether this session is in bypass. Read from live metadata, so a toggle
+   * takes effect on the next tool call without reopening the session.
    */
   function isSessionFullAccess(thebeSessionId?: string): boolean {
-    return (
-      fullAccessAllowed &&
-      permissions.modeFor(thebeSessionId) === "bypassPermissions"
-    );
+    return permissions.modeFor(thebeSessionId) === "bypassPermissions";
   }
 
-  /** The mode a session set for itself, ignoring one the host does not allow. */
+  /** The mode a session set for itself. */
   function sessionModeOf(
     thebeSessionId?: string
   ): import("../runtime/interface.ts").PermissionMode | undefined {
     if (!thebeSessionId) return undefined;
     const meta = state.memory.get(thebeSessionId);
-    const own =
+    return (
       meta?.permissionMode ??
-      (meta?.fullAccess === true ? "bypassPermissions" : undefined);
-    return own === "bypassPermissions" && !fullAccessAllowed ? undefined : own;
+      (meta?.fullAccess === true ? "bypassPermissions" : undefined)
+    );
   }
 
   let sandboxChecked: { at: number; enforced: boolean } | undefined;
   /** Whether a sandbox that really confines commands will run them (probed, then kept for a minute). */
   function sandboxEnforced(): boolean {
+    if (resolveHostSecurity().sandboxMode !== "os") return false;
     const now = Date.now();
     if (!sandboxChecked || now - sandboxChecked.at > 60_000) {
       const { sandbox } = buildIsolationReport({ workspacePath });
@@ -479,10 +495,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   const permissions = createPermissionControl({
-    initialMode:
-      options.permissionMode === "bypassPermissions" && !fullAccessAllowed
-        ? "manual"
-        : options.permissionMode,
+    initialMode: options.permissionMode,
     sessionMode: sessionModeOf,
     autoApprove: (request) =>
       acceptEditsApproves(request, {
@@ -543,14 +556,38 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       workspacePath,
       outputDirectory,
       instructions,
-      sources: { ...settingSources },
+      sandboxEnabled: sandboxForcedOff()
+        ? false
+        : (sandboxEnabledSetting ?? true),
+      sandboxAllowedDomains: [...networkAllowedDomains()],
+      sandboxDeniedDomains: [...networkDeniedDomains()],
+      sources: {
+        ...settingSources,
+        sandboxEnabled: sandboxForcedOff()
+          ? sandboxForcedOff()!.source
+          : sandboxEnabledSetting !== undefined
+            ? "configured"
+            : "default",
+      },
       persistence: { enabled: Boolean(options.settingsStore) },
-      mutable: [
-        "autoCompact",
-        "autoSummary",
-        "autoSummaryDelayMs",
-        "instructions",
-      ],
+      mutable: sandboxForcedOff()
+        ? [
+            "autoCompact",
+            "autoSummary",
+            "autoSummaryDelayMs",
+            "instructions",
+            "sandboxAllowedDomains",
+            "sandboxDeniedDomains",
+          ]
+        : [
+            "autoCompact",
+            "autoSummary",
+            "autoSummaryDelayMs",
+            "instructions",
+            "sandboxEnabled",
+            "sandboxAllowedDomains",
+            "sandboxDeniedDomains",
+          ],
     };
   }
 
@@ -580,7 +617,46 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       nextInstructions = checked.value;
       normalizedPatch.instructions = nextInstructions;
     }
+    if (patch.sandboxEnabled !== undefined) {
+      const forced = sandboxForcedOff();
+      if (forced) throw httpError(400, forced.message, "invalid_body");
+      normalizedPatch.sandboxEnabled = patch.sandboxEnabled;
+    }
+    if (patch.sandboxAllowedDomains !== undefined) {
+      const parsed = parseNetworkHostList(
+        patch.sandboxAllowedDomains,
+        "sandboxAllowedDomains"
+      );
+      if (!parsed.ok) throw httpError(400, parsed.message, "invalid_body");
+      normalizedPatch.sandboxAllowedDomains = parsed.hosts;
+    }
+    if (patch.sandboxDeniedDomains !== undefined) {
+      const parsed = parseNetworkHostList(
+        patch.sandboxDeniedDomains,
+        "sandboxDeniedDomains"
+      );
+      if (!parsed.ok) throw httpError(400, parsed.message, "invalid_body");
+      normalizedPatch.sandboxDeniedDomains = parsed.hosts;
+    }
     await options.settingsStore?.save(normalizedPatch);
+    if (normalizedPatch.sandboxEnabled !== undefined) {
+      sandboxEnabledSetting = normalizedPatch.sandboxEnabled;
+      setConfiguredSandboxEnabled(normalizedPatch.sandboxEnabled);
+      settingSources.sandboxEnabled = "configured";
+    }
+    if (
+      normalizedPatch.sandboxAllowedDomains !== undefined ||
+      normalizedPatch.sandboxDeniedDomains !== undefined
+    ) {
+      setNetworkAllowlist({
+        ...(normalizedPatch.sandboxAllowedDomains !== undefined
+          ? { allowedDomains: normalizedPatch.sandboxAllowedDomains }
+          : {}),
+        ...(normalizedPatch.sandboxDeniedDomains !== undefined
+          ? { deniedDomains: normalizedPatch.sandboxDeniedDomains }
+          : {}),
+      });
+    }
     if (nextInstructions !== undefined) {
       instructions = nextInstructions;
       settingSources.instructions = "configured";
@@ -610,13 +686,6 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     value: import("../runtime/interface.ts").PermissionMode
   ): Promise<import("../runtime/interface.ts").PermissionMode> {
     checkNotQuiesced();
-    if (value === "bypassPermissions" && !fullAccessAllowed) {
-      throw httpError(
-        403,
-        "bypassPermissions is not enabled on this Core host",
-        "full_access_not_allowed"
-      );
-    }
     await options.settingsStore?.save({ permissionMode: value });
     setPermissionMode(value);
     return permissions.permissionMode();
@@ -631,14 +700,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
 
   /** Whether this host permits the full-access preset at all (read-only). */
   function getFullAccessSupport(): { allowed: boolean } {
-    return { allowed: fullAccessAllowed };
+    return { allowed: true };
   }
 
   /**
    * Set the permission mode of one session, or return it to the host's default with `undefined`.
-   * `bypassPermissions` is rejected when the host has not allowed it. The mode belongs to the single
-   * session and never changes the host default, so schedules, background goals, subagents and `/mcp`
-   * callers are unaffected.
+   * The mode belongs to the single session and never changes the host default, so schedules,
+   * background goals, subagents and `/mcp` callers are unaffected.
    */
   async function setSessionPermissionMode(
     thebeSessionId: string,
@@ -648,13 +716,6 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     mode: import("../runtime/interface.ts").PermissionMode;
   }> {
     checkNotQuiesced();
-    if (mode === "bypassPermissions" && !fullAccessAllowed) {
-      throw httpError(
-        403,
-        "bypassPermissions is not enabled on this Core host",
-        "full_access_not_allowed"
-      );
-    }
     const current = await state.lookup(thebeSessionId);
     const next = state.touchMeta({
       ...current,

@@ -801,9 +801,35 @@ describe("Thebe TUI agent slash commands", () => {
       expect(agent.permissionMode()).toBe("acceptEdits");
       await handleSlash("/permissions manual");
       expect(agent.permissionMode()).toBe("manual");
-      // bypassPermissions needs the host to allow it.
-      await handleSlash("/permissions bypassPermissions");
+      const bypassPromise = handleSlash("/permissions bypassPermissions");
+      await vi.waitFor(() => {
+        expect(
+          tui.children.some((child) => child.constructor.name === "SelectList")
+        ).toBe(true);
+      });
+      const list = tui.children.find(
+        (child) => child.constructor.name === "SelectList"
+      ) as {
+        handleInput: (data: string) => void;
+        render: (width: number) => string[];
+      };
+      expect(list.render(80).join("\n")).toContain("Turn on bypassPermissions");
+      list.handleInput("\x1b");
+      await bypassPromise;
       expect(agent.permissionMode()).toBe("manual");
+      const confirmPromise = handleSlash("/permissions bypassPermissions");
+      await vi.waitFor(() => {
+        expect(
+          tui.children.some((child) => child.constructor.name === "SelectList")
+        ).toBe(true);
+      });
+      const confirm = tui.children.find(
+        (child) => child.constructor.name === "SelectList"
+      ) as { handleInput: (data: string) => void };
+      confirm.handleInput("\x1b[B");
+      confirm.handleInput("\r");
+      await confirmPromise;
+      expect(agent.permissionMode()).toBe("bypassPermissions");
     } finally {
       if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
       else process.env.THEBE_CONFIG_DIR = previousConfigDir;
@@ -1769,6 +1795,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       "thinking",
       "tui",
       "permissionMode",
+      "sandboxEnabled",
       "autoCompact",
       "autoSummary",
       "autoSummaryDelay",

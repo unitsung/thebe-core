@@ -275,13 +275,13 @@ container is the release boundary:
   `no-new-privileges:true`, `/tmp` on tmpfs.
 - Only `/data` and `/workspace` are writable; `/workspace` is the single
   authorization boundary (`THEBE_WORKSPACE_DIR`).
-- Inside a container, `THEBE_SANDBOX=bwrap` is unavailable (a command would be
-  refused, not run bare), so leave `THEBE_SANDBOX` unset there and rely on the
-  guard layers that do work (the command guard, the Docker API guard) and the
-  container itself; see `docs/configuration.md` for the permission modes.
-  `THEBE_SANDBOX=gondolin` needs
-  KVM/QEMU and is not available in the default container — run Core on the host
-  if you need micro-VM isolation.
+- Leave `THEBE_SANDBOX` unset in the container. Core sees `/.dockerenv` or
+  `/run/.containerenv` and does not start a second sandbox. A host install
+  uses the OS sandbox by default; `THEBE_SANDBOX=off` is the only escape
+  hatch. See `docs/configuration.md` and ADR 0005.
+- `THEBE_FULL_ACCESS` is ignored. It does not start Core in bypass. Turn
+  bypass on in the TUI or the App; both ask first. That choice is the host
+  default when saved from settings, so schedules and subagents follow it.
 - Choosing the host-service path instead means you provide the dedicated user
   (no login shell, no sudo) and the filesystem permissions yourself.
 
@@ -293,15 +293,14 @@ thebe doctor                              # the CLI prints the same report offli
 curl -s -H "X-Thebe-Token: $THEBE_TOKEN" http://127.0.0.1:8787/v1/system/isolation
 ```
 
-The report shows the effective sandbox mode and whether it is **enforced** or
-would silently **fall back** to running bash unsandboxed — `bwrap`, `docker`, and
-`seatbelt` degrade to the raw command when their backend is missing, so a set
-`THEBE_SANDBOX` is not proof of isolation. The micro-VM (`gondolin`) fails closed
-instead. It also lists a `warnings` array for every relaxed safety layer
-(`THEBE_ALLOWED_HOSTS=*`, command guard off, allowed workspace escapes, sandbox
-fallback), and Core prints each as a `SECURITY:` line at startup. `thebe doctor`
-exits non-zero when a requested sandbox would fall back or the workspace is
-missing.
+The report shows `sandbox.mode` (`off` or `os`) and whether it is **enforced**.
+Inside the container the mode stays `off` when the variable is unset. On a host,
+`os` is enforced only when the sandbox dependencies are present; if they are
+missing, bash commands are refused and `thebe doctor` exits 1. There is no
+silent unsandboxed run. `warnings` lists relaxed layers (`THEBE_ALLOWED_HOSTS=*`),
+and Core prints each as a `SECURITY:` line at startup. `thebe doctor` also exits
+non-zero when the workspace is missing. A leftover `THEBE_SANDBOX` value other
+than `off` is ignored.
 
 ## 6. Health check and graceful shutdown
 
@@ -430,10 +429,6 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
   compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
   `scripts/check-pi-resolution.mjs` and `scripts/smoke.mjs` (8/8) inside the
   running container.
-- Each sandbox backend confines a real process, not just an argument list:
-  seatbelt (`sandbox-exec`) and gondolin (QEMU micro-VM) on macOS, `bwrap` on a
-  Linux host and in a Linux container, and the docker backend under the Docker
-  daemon. The live checks are opt-in because CI has no bootable VM, no
-  unprivileged user namespaces and only rate-limited image pulls:
-  `THEBE_SANDBOX_IT=1 npx vitest run src/agent/security` (bwrap/docker) and
-  `THEBE_GONDOLIN_IT=1 npx vitest run src/adapters/gondolin` (micro-VM).
+- The handwritten Seatbelt, bubblewrap, disposable-Docker and Gondolin checks
+  are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime` (ADR 0005).
+  The container still does not nest that sandbox.

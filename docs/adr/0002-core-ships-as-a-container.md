@@ -36,8 +36,8 @@ gets no support claim.
 - Isolation is the container's, not the agent's: operators must not add host
   mounts beyond `/data` and `/workspace`, and must not run the container as root
   on the host or with the Docker socket mounted.
-- `bwrap`-based sandboxing is unavailable inside the container; `gondolin`
-  micro-VM isolation requires running Core on a host with KVM/QEMU.
+- The release container does not start a second sandbox. A host install
+  sandboxes bash with `@anthropic-ai/sandbox-runtime` (ADR 0005).
 - Upgrades are "swap the image, keep `/data`", which requires the store formats
   to stay additive (documented in the runbook's compatibility policy).
 - The image carries Node only for installation; the process runs the prebuilt

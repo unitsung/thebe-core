@@ -10,6 +10,10 @@ import {
 import type { AgentSessionMeta } from "../store.ts";
 import type { OpenedSession } from "./session-state.ts";
 import { httpError } from "../types.ts";
+import {
+  NETWORK_PERMISSION_TOOL,
+  rememberNetworkHost,
+} from "../security/network-policy.ts";
 
 const PERMISSION_TTL_MS = 10 * 60 * 1000;
 
@@ -97,7 +101,8 @@ export function createPermissionControl(input: {
     explicitSessionId?: string,
     modeScope?: () => string | undefined
   ) {
-    const sessionOf = () => explicitSessionId ?? input.active()?.meta.thebeSessionId;
+    const sessionOf = () =>
+      explicitSessionId ?? input.active()?.meta.thebeSessionId;
     const modeOf = () => modeFor(modeScope ? modeScope() : sessionOf());
     return {
       async preflight(
@@ -187,6 +192,20 @@ export function createPermissionControl(input: {
     }
     pendingPermissions.delete(permissionId);
     if (pending.timer) clearTimeout(pending.timer);
+    if (pending.request.toolName === NETWORK_PERMISSION_TOOL) {
+      if (decision.remember) {
+        const host = networkHost(pending.request.args);
+        if (host) {
+          try {
+            await rememberNetworkHost(host, decision.response);
+          } catch {
+            // The decision still applies to this connection if remembering fails.
+          }
+        }
+      }
+      pending.resolve(decision.response);
+      return;
+    }
     if (decision.remember) {
       const meta = await input.lookup(thebeSessionId);
       const key = rememberedPermissionKey(
@@ -220,3 +239,9 @@ export function createPermissionControl(input: {
 }
 
 export type PermissionControl = ReturnType<typeof createPermissionControl>;
+
+function networkHost(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const host = (args as { host?: unknown }).host;
+  return typeof host === "string" ? host : undefined;
+}

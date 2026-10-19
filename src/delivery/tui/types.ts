@@ -19,8 +19,8 @@ export type ThebeTuiOptions = {
   /** Invoked after `/tui` persists a mode so the host can swap the live screen. */
   onTuiModeChange?: (mode: TuiMode) => void | Promise<void>;
   /**
-   * Closes live sandbox Micro-VMs. The host that bootstrapped Core supplies it;
-   * delivery never reaches adapters itself (see `architecture.test.ts`).
+   * Stops the OS-sandbox proxies. The host that bootstrapped Core supplies it;
+   * delivery never imports the sandbox library (see `architecture.test.ts`).
    */
   disposeSandboxVms?: () => Promise<void>;
 };
