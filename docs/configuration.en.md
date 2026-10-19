@@ -403,7 +403,7 @@ was asked for and is missing **refuses the command** (it does not run bare); ins
 - **bubblewrap** (Linux): read-only host root, tmpfs `/tmp`, remounted `/dev` and `/proc`, only the workspace writable, `--unshare-all`, `--cap-drop ALL`, `--die-with-parent`.
 - **docker**: a throwaway `alpine:3` container with `--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`, only the workspace mounted read-write.
 - **seatbelt** (macOS): `sandbox-exec` with a generated profile; writes are limited to the workspace and `TMPDIR`.
-- **gondolin**: a throwaway micro-VM (QEMU) with hardware isolation. The workspace is mounted at `/workspace` in the guest and paths that leave it throw. A missing package or QEMU gives a clear error with the fix, and never falls back to local execution.
+- **gondolin**: a throwaway micro-VM (QEMU) with hardware isolation. The workspace is mounted at `/workspace` in the guest and paths that leave it throw. A missing package or QEMU gives a clear error with the fix, and never falls back to local execution. Its VM is destroyed when the session ends, and Core's exit path closes any still live, so stopping Core leaves no ownerless QEMU process.
 
 The network stays on in every backend: the sandbox confines files, not connections.
 

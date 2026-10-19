@@ -52,6 +52,64 @@ describe("Gondolin Micro-VM Runner (Layer 3 Virtualization)", () => {
     await runner.destroy();
     expect(mockVm.close).toHaveBeenCalled();
   });
+
+  it("closes a VM that finishes booting after the session was destroyed", async () => {
+    const lateVm: IMicroVMInstance = {
+      exec: vi.fn(),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    let releaseBoot!: (value: IMicroVMInstance) => void;
+    const booted = new Promise<IMicroVMInstance>((resolve) => {
+      releaseBoot = resolve;
+    });
+    const runner = new GondolinMicroVMRunner({
+      workspacePath: "/volume1/docker/test",
+    });
+
+    const booting = runner.init(() => booted);
+    // The session ends while its first command is still booting the VM.
+    await runner.destroy();
+    releaseBoot(lateVm);
+    await booting;
+
+    expect(lateVm.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not boot a VM once the runner is retired", async () => {
+    const provider = vi.fn(async () => {
+      throw new Error("must not boot");
+    });
+    const runner = new GondolinMicroVMRunner({
+      workspacePath: "/volume1/docker/test",
+    });
+
+    await runner.destroy();
+    await runner.init(provider);
+
+    expect(provider).not.toHaveBeenCalled();
+  });
+
+  it("lets a later command retry after a failed boot", async () => {
+    const vm: IMicroVMInstance = {
+      exec: vi.fn().mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" }),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const runner = new GondolinMicroVMRunner({
+      workspacePath: "/volume1/docker/test",
+    });
+
+    await expect(
+      runner.init(async () => {
+        throw new Error("qemu is missing");
+      })
+    ).rejects.toThrow("qemu is missing");
+
+    // The backend was installed; the next command must be able to boot.
+    await runner.init(async () => vm);
+    expect(await runner.exec("true")).toMatchObject({ exitCode: 0 });
+
+    await runner.destroy();
+  });
 });
 
 /**

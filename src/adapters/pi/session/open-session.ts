@@ -418,8 +418,10 @@ export async function openPiSession(
     guardedBashOperations
   );
   if (!gondolinBash) return wrappedSession;
-  // Pi's dispose is synchronous, so the Micro-VM is torn down best-effort
-  // (its lifetime is the session; the VM is disposable either way).
+  // Pi's dispose is synchronous, so this teardown cannot be awaited here. Starting
+  // it still frees the VM the moment a session ends mid-run; the guarantee for the
+  // case this cannot cover — Core stopping with the session still open — is
+  // `adapters/gondolin/lifecycle.ts`, reached through the bootstrap teardown.
   const dispose = wrappedSession.dispose.bind(wrappedSession);
   wrappedSession.dispose = () => {
     dispose();

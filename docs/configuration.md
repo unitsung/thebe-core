@@ -382,7 +382,7 @@ THEBE_SANDBOX=auto   # off（默认）| auto | bwrap | docker | seatbelt | gondo
 - **bubblewrap**（Linux）：宿主根只读、`/tmp` 用 tmpfs、`/dev`/`/proc` 重新挂载、只有工作区可写、`--unshare-all`、`--cap-drop ALL`、`--die-with-parent`。
 - **docker**：一次性 `alpine:3` 容器，`--rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges`，只把工作区读写挂进去。
 - **seatbelt**（macOS）：`sandbox-exec` 加生成的 profile；写入只允许工作区与 `TMPDIR`。
-- **gondolin**：一次性微虚拟机（QEMU），硬件隔离。宿主工作区挂到 guest 的 `/workspace`，越出工作区的路径直接抛错。缺包或缺 QEMU 时报明确错误并给出修复命令，**不会**退回本地执行。
+- **gondolin**：一次性微虚拟机（QEMU），硬件隔离。宿主工作区挂到 guest 的 `/workspace`，越出工作区的路径直接抛错。缺包或缺 QEMU 时报明确错误并给出修复命令，**不会**退回本地执行。虚拟机随会话结束而销毁；Core 停止时也会由退出路径统一关闭，不会留下无主的 QEMU 进程。
 
 所有后端都保留网络：沙箱限制的是文件，不是连接。
 

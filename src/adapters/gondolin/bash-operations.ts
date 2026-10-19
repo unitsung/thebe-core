@@ -8,8 +8,9 @@ import {
  *
  * `THEBE_SANDBOX=gondolin` selects this instead of local execution, which is the
  * strongest option in the sandbox options (`THEBE_SANDBOX=gondolin`). The VM starts
- * lazily on the first command and is destroyed with the session; when the
- * gondolin package or QEMU/KVM is missing, initialization fails once and the
+ * lazily on the first command; `dispose()` retires it when the session ends, and
+ * `./lifecycle.ts` is the backstop for a session that never disposed (Core stopping).
+ * When the gondolin package or QEMU/KVM is missing, initialization fails once and the
  * caller reports the reason instead of silently running unsandboxed.
  *
  * The returned shape is Pi's `BashOperations` (exec + streaming callback) without
@@ -67,8 +68,11 @@ export function createGondolinBashOperations(
       return { exitCode: result.exitCode };
     },
     async dispose(): Promise<void> {
+      // A VM may still be booting here — the first command started it. Letting that
+      // boot land before retiring the runner is what stops it from appearing after
+      // the session is gone; the runner's `disposed` flag closes it if it is late.
+      await ready?.catch(() => {});
       await runner.destroy();
-      ready = undefined;
     },
   };
 }

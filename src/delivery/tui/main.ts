@@ -37,6 +37,7 @@ const {
   version,
   model: bootModel,
   workspacePath,
+  disposeSandboxVms,
 } = await bootstrapThebe({ fromDir: here });
 
 const defaultModelRef =
@@ -82,4 +83,5 @@ startThebeTui({
   tuiMode,
   theme: userConfig.theme,
   cwd: workspacePath,
+  disposeSandboxVms,
 });

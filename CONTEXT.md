@@ -21,7 +21,7 @@ The one setting that decides how much a session may do without asking: `plan` (r
 _Avoid_: a second permission-mode name, a remote-controlled switch for `bypassPermissions`, command-safety lists (the sandbox is what makes running unasked acceptable)
 
 **GondolinMicroVM**:
-Micro-VM execution path in `src/adapters/gondolin`: `runner.ts` maps the workspace to `/workspace` (escaping the jail throws) and owns the VM lifecycle, `bash-operations.ts` makes it the `bash` backend behind `THEBE_SANDBOX=gondolin`. The VM provider is injectable, so tests run without QEMU/KVM; `@earendil-works/gondolin` stays an optional dynamic import (clear failure, no silent unsandboxed run).
+Micro-VM execution path in `src/adapters/gondolin`: `runner.ts` maps the workspace to `/workspace` (escaping the jail throws) and owns the VM lifecycle, `bash-operations.ts` makes it the `bash` backend behind `THEBE_SANDBOX=gondolin`. A VM's lifetime is the process, not the session that booted it: every boot registers in `lifecycle.ts`, which `bootstrapThebe().disposeSandboxVms` drains on the way out, so stopping Core cannot leave a hypervisor behind with no owner. The VM provider is injectable, so tests run without QEMU/KVM; `@earendil-works/gondolin` stays an optional dynamic import (clear failure, no silent unsandboxed run).
 _Avoid_: importing Pi types outside `src/adapters/pi`, falling back to local execution without telling the caller
 
 **CommandSandbox**:

@@ -13,6 +13,7 @@
  */
 
 import { isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { trackMicroVm } from "./lifecycle.ts";
 
 const GUEST_WORKSPACE = "/workspace";
 const SESSION_LABEL = "thebe-sandbox";
@@ -80,9 +81,17 @@ export interface IMicroVMInstance {
 
 /**
  * Gondolin Micro-VM Runner managing isolated task execution.
+ *
+ * Booted VMs are registered with `./lifecycle.ts`, so the process exit path can
+ * close one whose session never disposed. `destroy()` retires the runner: a VM
+ * that is still booting when it runs closes itself rather than being adopted.
  */
 export class GondolinMicroVMRunner {
   private activeVm?: IMicroVMInstance;
+  private booting?: Promise<void>;
+  private untrack?: () => void;
+  /** Set by `destroy()`; a boot that lands after it closes its own VM. */
+  private disposed = false;
   private readonly options: GondolinRunnerOptions;
 
   constructor(options: GondolinRunnerOptions) {
@@ -101,15 +110,45 @@ export class GondolinMicroVMRunner {
   async init(
     customVmProvider?: () => Promise<IMicroVMInstance>
   ): Promise<void> {
-    if (this.activeVm) {
+    if (this.activeVm || this.disposed) {
       return;
     }
+    // One boot at a time: a second command waits for the VM instead of racing a
+    // second one. A failed boot is not cached — a missing backend is fixable, so
+    // the next command gets to retry.
+    if (!this.booting) {
+      const booting = this.boot(customVmProvider);
+      this.booting = booting;
+      booting.catch(() => {
+        if (this.booting === booting) {
+          this.booting = undefined;
+        }
+      });
+    }
+    await this.booting;
+  }
 
-    if (customVmProvider) {
-      this.activeVm = await customVmProvider();
+  /**
+   * Boots the VM and adopts it, unless `destroy()` happened meanwhile. Then the
+   * boot's owner is already gone and adopting it would let it outlive the
+   * process as an orphaned hypervisor child.
+   */
+  private async boot(
+    customVmProvider?: () => Promise<IMicroVMInstance>
+  ): Promise<void> {
+    const vm = customVmProvider
+      ? await customVmProvider()
+      : await this.createVm();
+    if (this.disposed) {
+      await vm.close().catch(() => {});
       return;
     }
+    this.activeVm = vm;
+    this.untrack = trackMicroVm(vm);
+  }
 
+  /** Creates the real VM, turning any failure into the install-or-fix hint. */
+  private async createVm(): Promise<IMicroVMInstance> {
     try {
       const gondolin =
         (await import("@earendil-works/gondolin")) as unknown as GondolinModule;
@@ -122,7 +161,7 @@ export class GondolinMicroVMRunner {
       if (this.options.image) {
         process.env.GONDOLIN_DEFAULT_IMAGE = this.options.image;
       }
-      const vm = await gondolin.VM.create({
+      return await gondolin.VM.create({
         httpHooks,
         env,
         vfs: {
@@ -137,7 +176,6 @@ export class GondolinMicroVMRunner {
           : {}),
         sessionLabel: SESSION_LABEL,
       });
-      this.activeVm = vm;
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       throw new Error(
@@ -177,12 +215,18 @@ export class GondolinMicroVMRunner {
   }
 
   /**
-   * Tears down and destroys the disposable Micro-VM.
+   * Tears down and destroys the disposable Micro-VM, and retires this runner so
+   * nothing boots again under it.
    */
   async destroy(): Promise<void> {
-    if (this.activeVm) {
-      await this.activeVm.close().catch(() => {});
-      this.activeVm = undefined;
+    this.disposed = true;
+    const vm = this.activeVm;
+    const untrack = this.untrack;
+    this.activeVm = undefined;
+    this.untrack = undefined;
+    untrack?.();
+    if (vm) {
+      await vm.close().catch(() => {});
     }
   }
 }

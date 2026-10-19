@@ -51,12 +51,19 @@ export function startThebeTui(options: ThebeTuiOptions): TUI {
       if (matchesKey(data, "ctrl+c")) {
         tui?.stop();
         if (options.agent) {
-          const force = setTimeout(() => process.exit(0), 1_000);
+          // A hung drain must not trap the terminal, but the window has to fit the
+          // sandbox teardown: quitting with a session open used to leave its VM
+          // running with no owner.
+          const force = setTimeout(() => process.exit(0), 4_000);
           force.unref?.();
-          void options.agent.quiesce().catch(() => {}).finally(() => {
-            clearTimeout(force);
-            process.exit(0);
-          });
+          void options.agent
+            .quiesce()
+            .catch(() => {})
+            .then(() => options.disposeSandboxVms?.().catch(() => {}))
+            .finally(() => {
+              clearTimeout(force);
+              process.exit(0);
+            });
           return { consume: true };
         }
         process.exit(0);

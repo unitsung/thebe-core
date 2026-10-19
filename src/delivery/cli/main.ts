@@ -33,7 +33,8 @@ if (command.kind === "doctor") {
   process.exit(await runDoctor());
 }
 
-const { agent, workspacePath, model: bootModel } = await bootstrapThebe({ fromDir: here });
+const { agent, workspacePath, model: bootModel, disposeSandboxVms } =
+  await bootstrapThebe({ fromDir: here });
 
 const userConfig = await loadThebeConfig();
 const resolvedTuiMode =
@@ -53,10 +54,13 @@ const code = await runCliCommand(agent, command, {
           ? `${command.model.providerId}/${command.model.modelId}`
           : bootModel ? `${bootModel.providerId}/${bootModel.modelId}` : undefined,
       tuiMode: resolvedTuiMode,
+      disposeSandboxVms,
     });
   },
 });
 
 if (command.kind !== "tui") {
+  // A one-shot command runs agent turns too, so it can have booted a sandbox VM.
+  await disposeSandboxVms().catch(() => {});
   process.exit(code);
 }

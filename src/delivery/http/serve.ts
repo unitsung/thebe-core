@@ -20,6 +20,7 @@ const {
   tokenGenerated,
   tokenPath,
   workspacePath,
+  disposeSandboxVms,
 } = await bootstrapThebe({
   fromDir: here,
   allowedHosts: listen.allowedHosts,
@@ -56,7 +57,11 @@ const shutdown = (signal: string) => {
   force.unref?.();
   void drainThebeHttpServer(server, () => agent.quiesce())
     .catch(() => {})
-    .finally(() => {
+    .finally(async () => {
+      // Requests have drained, so nothing is running in a sandbox any more. Their
+      // lifetime is the process, and an orphaned VM outlives Core holding memory
+      // and disk with no owner to close it.
+      await disposeSandboxVms().catch(() => {});
       clearTimeout(force);
       process.exit(0);
     });
