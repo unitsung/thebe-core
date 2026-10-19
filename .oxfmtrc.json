@@ -20,6 +20,7 @@
     "sessions",
     ".thebe",
     "package-lock.json",
+    "contracts/*.json",
     "*.log"
   ]
 }
