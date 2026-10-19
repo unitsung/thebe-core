@@ -18,6 +18,7 @@ import { createThebeAgent } from "../../../agent/index.ts";
 import type { ContainerInfoProvider } from "../../../agent/capabilities/containers.ts";
 import { PI_RUNTIME_ID } from "../../../agent/runtime/interface.ts";
 import { isSeatbeltAvailable } from "../../../agent/security/command-sandbox.ts";
+import { disposeMicroVms } from "../../gondolin/lifecycle.ts";
 import { loadPiSdk } from "../sdk/load-pi.ts";
 import { createPiCodingAgentRuntime } from "../runtime.ts";
 
@@ -656,6 +657,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     async () => {
       const previous = process.env.THEBE_SANDBOX;
       process.env.THEBE_SANDBOX = "gondolin";
+      let cleanup: (() => Promise<void>) | undefined;
       try {
         const { faux, runtime } = await piWithFaux();
         faux.setResponses([
@@ -670,6 +672,14 @@ describe("PiCodingAgentRuntime sessions", () => {
           permissionMode: "acceptEdits",
         });
         const session = await agent.createSession();
+        // This boots a real Micro-VM, so the test has to end like Core does: dispose
+        // the session, then drain the process-level registry. Pi's dispose is
+        // synchronous and cannot await a VM teardown, so without the drain the QEMU
+        // process outlives the test with no owner.
+        cleanup = async () => {
+          await agent.deleteSession(session.thebeSessionId).catch(() => {});
+          await disposeMicroVms();
+        };
 
         // The command runs inside the guest instead of touching the host.
         await expect(
@@ -681,6 +691,7 @@ describe("PiCodingAgentRuntime sessions", () => {
         expect(transcript).toContain("Linux");
         expect(transcript).toContain('toolName":"bash');
       } finally {
+        await cleanup?.();
         if (previous === undefined) delete process.env.THEBE_SANDBOX;
         else process.env.THEBE_SANDBOX = previous;
       }
