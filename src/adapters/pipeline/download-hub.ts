@@ -9,8 +9,15 @@ const DIRECT_ENGINE = "aria2";
 const TORRENT_ID = /^[a-f0-9]{40,64}$/i;
 const DIRECT_ID = /^[a-f0-9]{16}$/i;
 
+/** An indexer's own download address (Prowlarr's `/<id>/download?apikey=…&link=…`, Jackett's `/dl/<name>/?jackett_apikey=…`). */
+const INDEXER_DOWNLOAD =
+  /^https?:\/\/[^?#]*(?:\/(?:\d+\/)?download\/?\?[^#]*\b(?:apikey|link)=|\/dl\/[^/?#]+\/?\?[^#]*\bjackett_apikey=)/i;
+
+/** A magnet, a .torrent file, or an indexer's download address: every one of them is a torrent. */
 const isTorrentLink = (url: string) =>
-  /^magnet:\?/i.test(url) || /\.torrent(?:[?#].*)?$/i.test(url);
+  /^magnet:\?/i.test(url) ||
+  /\.torrent(?:[?#].*)?$/i.test(url) ||
+  INDEXER_DOWNLOAD.test(url);
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error);

@@ -215,7 +215,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
         type: "string",
         enum: ["qbittorrent", "aria2"],
         description:
-          "Which engine takes the links. Omit it: magnets and .torrent URLs go to qBittorrent, every other link to aria2.",
+          "Which engine takes the links. Omit it: magnets, .torrent URLs and an indexer's download address (a release's downloadUrl from resource.search) go to qBittorrent, every other link to aria2.",
       },
       savePath: {
         type: "string",

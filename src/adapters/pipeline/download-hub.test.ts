@@ -94,6 +94,34 @@ describe("download hub", () => {
     expect(result).toEqual({ submitted: 4, engine: "qbittorrent+aria2" });
   });
 
+  it("treats an indexer's download address as a torrent although it ends in no .torrent", async () => {
+    const qb = engine("qbittorrent");
+    const aria = engine("aria2");
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    await hub.add({
+      urls: [
+        "http://prowlarr.lan:9696/3/download?apikey=KEY&link=abc&file=Dune",
+        "http://jackett.lan:9117/dl/tracker/?jackett_apikey=KEY&path=abc&file=Dune",
+        "https://files.example/download?file=movie.mkv",
+      ],
+    });
+
+    expect(qb.calls.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: [
+          "http://prowlarr.lan:9696/3/download?apikey=KEY&link=abc&file=Dune",
+          "http://jackett.lan:9117/dl/tracker/?jackett_apikey=KEY&path=abc&file=Dune",
+        ],
+      })
+    );
+    expect(aria.calls.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: ["https://files.example/download?file=movie.mkv"],
+      })
+    );
+  });
+
   it("lets a named engine take the links, and refuses one that is not set up", async () => {
     const qb = engine("qbittorrent");
     const aria = engine("aria2");
