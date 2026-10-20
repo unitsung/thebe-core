@@ -190,7 +190,7 @@ so an import finishes while the phone is asleep. A job restored after a Core
 restart is not auto-resumed — call `pipeline.advance` to continue it — and a
 failed job is never retried automatically.
 
-- `download.pause` and `download.resume` take `hashes` (1 to 20 info-hashes; there is no "pause all"), keep the task and files, and need approval. qBittorrent 5 uses `stop`/`start` and 4.x uses `pause`/`resume`; Core detects the version. Unknown hashes are rejected rather than silently ignored. If the downloader lacks the operation, the tool does not appear.
+- `download.pause` and `download.resume` take `hashes` (1 to 20 download ids: torrent info-hashes, or aria2 ids when aria2 is configured; there is no "pause all"), keep the task and files, and need approval. qBittorrent 5 uses `stop`/`start` and 4.x uses `pause`/`resume`; Core detects the version. Unknown hashes are rejected rather than silently ignored. If the downloader lacks the operation, the tool does not appear.
 - `download.delete` also takes `hashes` (1 to 20), is irreversible, and needs approval. `deleteFiles` must be explicitly `true` or `false`: `false` removes only the task, `true` also deletes files on disk. A missing or non-boolean value is rejected; nothing is deleted by default.
 
 qBittorrent also supplies native download tasks to the Activity feed and, for

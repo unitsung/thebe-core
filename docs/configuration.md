@@ -141,7 +141,7 @@ export THEBE_OPENLIST_TOKEN=your-openlist-token
 # magnets and .torrent links go to qBittorrent, other links to aria2, unless download.add names an engine.
 ```
 
-`download.pause` / `download.resume` 按 `hashes`（1–20 个 info-hash，没有"全部暂停"）暂停或恢复
+`download.pause` / `download.resume` 按 `hashes`（1–20 个下载 id：种子 info-hash，配了 aria2 时也可以是 aria2 的 id；没有"全部暂停"）暂停或恢复
 下载，不删除任务和文件，需要审批。qBittorrent 5 使用 `stop`/`start`，4.x 使用 `pause`/`resume`，
 Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBittorrent 自身会忽略未知 hash）。下载器若不
 支持这两个操作，对应工具不会出现。
