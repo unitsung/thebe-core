@@ -1,5 +1,10 @@
 import { ProviderError } from "../../agent/capabilities/containers.ts";
-import type { DownloadItem, DownloadProvider, DownloadState } from "../../agent/capabilities/pipeline.ts";
+import type {
+  DownloadItem,
+  DownloadProvider,
+  DownloadState,
+} from "../../agent/capabilities/pipeline.ts";
+import { describeTorrent } from "./download-phase.ts";
 
 const HASH = /^[a-f0-9]{40,64}$/i;
 
@@ -10,7 +15,14 @@ export class QBittorrentDownloadProvider implements DownloadProvider {
   private readonly base: string;
   private readonly fetchImpl: typeof fetch;
 
-  constructor(private readonly options: { baseUrl: string; username: string; password: string; fetch?: typeof fetch }) {
+  constructor(
+    private readonly options: {
+      baseUrl: string;
+      username: string;
+      password: string;
+      fetch?: typeof fetch;
+    }
+  ) {
     this.base = options.baseUrl.trim().replace(/\/+$/, "");
     this.fetchImpl = options.fetch ?? fetch;
   }
@@ -18,105 +30,209 @@ export class QBittorrentDownloadProvider implements DownloadProvider {
   private async login(): Promise<void> {
     if (this.cookie) return;
     const response = await this.fetchImpl(`${this.base}/api/v2/auth/login`, {
-      method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
-      headers: { Referer: `${this.base}/`, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ username: this.options.username, password: this.options.password }),
+      method: "POST",
+      redirect: "error",
+      signal: AbortSignal.timeout(15_000),
+      headers: {
+        Referer: `${this.base}/`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        username: this.options.username,
+        password: this.options.password,
+      }),
     });
-    const cookie = response.headers.get("set-cookie")?.match(/(?:^|[,;]\s*)(SID=[^;\s,]+)/)?.[1];
+    const cookie = response.headers
+      .get("set-cookie")
+      ?.match(/(?:^|[,;]\s*)(SID=[^;\s,]+)/)?.[1];
     if (!response.ok || (await response.text()).trim() !== "Ok." || !cookie) {
       throw new ProviderError("UNAUTHORIZED", "qBittorrent login failed");
     }
     this.cookie = cookie;
   }
 
-  private async request(path: string, body?: URLSearchParams, retry = true): Promise<Response> {
+  private async request(
+    path: string,
+    body?: URLSearchParams,
+    retry = true
+  ): Promise<Response> {
     await this.login();
     const response = await this.fetchImpl(`${this.base}/api/v2/${path}`, {
-      method: body ? "POST" : "GET", redirect: "error", signal: AbortSignal.timeout(20_000),
-      headers: { Referer: `${this.base}/`, Cookie: this.cookie!, ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}) },
+      method: body ? "POST" : "GET",
+      redirect: "error",
+      signal: AbortSignal.timeout(20_000),
+      headers: {
+        Referer: `${this.base}/`,
+        Cookie: this.cookie!,
+        ...(body
+          ? { "Content-Type": "application/x-www-form-urlencoded" }
+          : {}),
+      },
       body,
     });
     if ((response.status === 401 || response.status === 403) && retry) {
       this.cookie = undefined;
       return this.request(path, body, false);
     }
-    if (!response.ok) throw new ProviderError("UNKNOWN", `qBittorrent request failed (${response.status})`);
+    if (!response.ok)
+      throw new ProviderError(
+        "UNKNOWN",
+        `qBittorrent request failed (${response.status})`
+      );
     return response;
   }
 
-  async add(input: { urls: string[]; savePath?: string; category?: string; paused?: boolean }): Promise<{ submitted: number }> {
-    const urls = input.urls.map(url => url.trim()).filter(Boolean);
-    if (urls.length === 0) throw new ProviderError("UNKNOWN", "At least one URL is required");
+  async add(input: {
+    urls: string[];
+    savePath?: string;
+    category?: string;
+    paused?: boolean;
+  }): Promise<{ submitted: number; engine: string }> {
+    const urls = input.urls.map((url) => url.trim()).filter(Boolean);
+    if (urls.length === 0)
+      throw new ProviderError("UNKNOWN", "At least one URL is required");
     for (const url of urls) {
-      if (!/^(magnet:\?|https?:\/\/)/i.test(url)) throw new ProviderError("UNKNOWN", `Unsupported download source: ${url.slice(0, 40)}`);
+      if (!/^(magnet:\?|https?:\/\/)/i.test(url))
+        throw new ProviderError(
+          "UNKNOWN",
+          `Unsupported download source: ${url.slice(0, 40)}`
+        );
     }
     const body = new URLSearchParams({ urls: urls.join("\n") });
     if (input.savePath) body.set("savepath", input.savePath);
     if (input.category) body.set("category", input.category);
-    if (input.paused) { body.set("paused", "true"); body.set("stopped", "true"); }
+    if (input.paused) {
+      body.set("paused", "true");
+      body.set("stopped", "true");
+    }
     const response = await this.request("torrents/add", body);
     const text = (await response.text()).trim();
-    if (text && text !== "Ok.") throw new ProviderError("UNKNOWN", "qBittorrent rejected the download");
-    return { submitted: urls.length };
+    if (text && text !== "Ok.")
+      throw new ProviderError("UNKNOWN", "qBittorrent rejected the download");
+    return { submitted: urls.length, engine: this.service };
   }
 
   private major?: number;
 
   /** qBittorrent 5 renamed pause/resume to stop/start. */
   private async verb(kind: "pause" | "resume"): Promise<string> {
-    this.major ??= Number.parseInt((await (await this.request("app/version")).text()).trim().replace(/^v/, ""), 10);
+    this.major ??= Number.parseInt(
+      (await (await this.request("app/version")).text())
+        .trim()
+        .replace(/^v/, ""),
+      10
+    );
     if (this.major >= 5) return kind === "pause" ? "stop" : "start";
     return kind;
   }
 
   /** qBittorrent ignores unknown hashes silently, so check them first rather than report a false success. */
   private async knownHashes(hashes: string[]): Promise<string[]> {
-    const unique = [...new Set(hashes.map(hash => hash.trim().toLowerCase()))];
-    if (unique.length === 0 || unique.length > 20) throw new ProviderError("UNKNOWN", "Provide between 1 and 20 torrent hashes");
-    if (unique.some(hash => !HASH.test(hash))) throw new ProviderError("UNKNOWN", "Invalid torrent hash");
-    const data: unknown = await (await this.request(`torrents/info?hashes=${unique.join("|")}`)).json();
-    const known = new Set(Array.isArray(data) ? data.flatMap(row => toItem(row)?.hash ?? []) : []);
-    const missing = unique.filter(hash => !known.has(hash));
-    if (missing.length > 0) throw new ProviderError("UNKNOWN", `Unknown torrent: ${missing.map(hash => hash.slice(0, 8)).join(", ")}`);
+    const unique = [
+      ...new Set(hashes.map((hash) => hash.trim().toLowerCase())),
+    ];
+    if (unique.length === 0 || unique.length > 20)
+      throw new ProviderError(
+        "UNKNOWN",
+        "Provide between 1 and 20 torrent hashes"
+      );
+    if (unique.some((hash) => !HASH.test(hash)))
+      throw new ProviderError("UNKNOWN", "Invalid torrent hash");
+    const data: unknown = await (
+      await this.request(`torrents/info?hashes=${unique.join("|")}`)
+    ).json();
+    const known = new Set(
+      Array.isArray(data) ? data.flatMap((row) => toItem(row)?.hash ?? []) : []
+    );
+    const missing = unique.filter((hash) => !known.has(hash));
+    if (missing.length > 0)
+      throw new ProviderError(
+        "UNKNOWN",
+        `Unknown torrent: ${missing.map((hash) => hash.slice(0, 8)).join(", ")}`
+      );
     return unique;
   }
 
   private async act(kind: "pause" | "resume", hashes: string[]): Promise<void> {
     const unique = await this.knownHashes(hashes);
-    await this.request(`torrents/${await this.verb(kind)}`, new URLSearchParams({ hashes: unique.join("|") }));
+    await this.request(
+      `torrents/${await this.verb(kind)}`,
+      new URLSearchParams({ hashes: unique.join("|") })
+    );
   }
 
   async remove(hashes: string[], deleteFiles: boolean): Promise<void> {
     const unique = await this.knownHashes(hashes);
-    await this.request("torrents/delete", new URLSearchParams({ hashes: unique.join("|"), deleteFiles: String(deleteFiles) }));
+    await this.request(
+      "torrents/delete",
+      new URLSearchParams({
+        hashes: unique.join("|"),
+        deleteFiles: String(deleteFiles),
+      })
+    );
   }
 
-  pause(hashes: string[]): Promise<void> { return this.act("pause", hashes); }
-  resume(hashes: string[]): Promise<void> { return this.act("resume", hashes); }
+  pause(hashes: string[]): Promise<void> {
+    return this.act("pause", hashes);
+  }
+  resume(hashes: string[]): Promise<void> {
+    return this.act("resume", hashes);
+  }
 
-  async list(input: { filter?: string; category?: string; limit?: number }): Promise<DownloadItem[]> {
-    const query = new URLSearchParams({ sort: "added_on", reverse: "true", limit: String(Math.min(Math.max(input.limit ?? 30, 1), 100)) });
-    const filter = ({ downloading: "downloading", completed: "completed", paused: "paused", errored: "errored" } as Record<string, string>)[input.filter ?? ""];
+  async list(input: {
+    filter?: string;
+    category?: string;
+    limit?: number;
+  }): Promise<DownloadItem[]> {
+    const query = new URLSearchParams({
+      sort: "added_on",
+      reverse: "true",
+      limit: String(Math.min(Math.max(input.limit ?? 30, 1), 100)),
+    });
+    const filter = (
+      {
+        downloading: "downloading",
+        completed: "completed",
+        paused: "paused",
+        errored: "errored",
+      } as Record<string, string>
+    )[input.filter ?? ""];
     if (filter) query.set("filter", filter);
     if (input.category) query.set("category", input.category);
-    const data: unknown = await (await this.request(`torrents/info?${query}`)).json();
-    if (!Array.isArray(data)) throw new ProviderError("UNKNOWN", "qBittorrent returned invalid torrents");
-    return data.flatMap(row => { const item = toItem(row); return item ? [item] : []; });
+    const data: unknown = await (
+      await this.request(`torrents/info?${query}`)
+    ).json();
+    if (!Array.isArray(data))
+      throw new ProviderError(
+        "UNKNOWN",
+        "qBittorrent returned invalid torrents"
+      );
+    return data.flatMap((row) => {
+      const item = toItem(row);
+      return item ? [item] : [];
+    });
   }
 
   async get(hash: string): Promise<DownloadItem | undefined> {
-    if (!HASH.test(hash)) throw new ProviderError("UNKNOWN", "Invalid torrent hash");
-    const data: unknown = await (await this.request(`torrents/info?hashes=${hash.toLowerCase()}`)).json();
+    if (!HASH.test(hash))
+      throw new ProviderError("UNKNOWN", "Invalid torrent hash");
+    const data: unknown = await (
+      await this.request(`torrents/info?hashes=${hash.toLowerCase()}`)
+    ).json();
     return Array.isArray(data) ? toItem(data[0]) : undefined;
   }
 }
 
 function toState(raw: string, progress: number): DownloadState {
   if (raw === "error" || raw === "missingFiles") return "error";
-  if (/^(paused|stopped)/.test(raw)) return progress >= 1 ? "completed" : "paused";
+  if (/^(paused|stopped)/.test(raw))
+    return progress >= 1 ? "completed" : "paused";
   if (/checking/.test(raw)) return "checking";
   if (/^(queued|allocating|metaDL|forcedMetaDL)/.test(raw)) return "queued";
-  if (progress >= 1) return /^(uploading|forcedUP|stalledUP|queuedUP)/.test(raw) ? "seeding" : "completed";
+  if (progress >= 1)
+    return /^(uploading|forcedUP|stalledUP|queuedUP)/.test(raw)
+      ? "seeding"
+      : "completed";
   return "downloading";
 }
 
@@ -124,18 +240,34 @@ function toItem(value: unknown): DownloadItem | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
   if (typeof row.hash !== "string" || !HASH.test(row.hash)) return undefined;
-  const progress = typeof row.progress === "number" ? Math.min(1, Math.max(0, row.progress)) : 0;
-  const date = (v: unknown) => typeof v === "number" && v > 0 && v < 8.64e12 ? new Date(v * 1000).toISOString() : undefined;
-  const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
-  const text = (v: unknown, max = 500) => typeof v === "string" && v ? v.slice(0, max) : undefined;
+  const progress =
+    typeof row.progress === "number"
+      ? Math.min(1, Math.max(0, row.progress))
+      : 0;
+  const date = (v: unknown) =>
+    typeof v === "number" && v > 0 && v < 8.64e12
+      ? new Date(v * 1000).toISOString()
+      : undefined;
+  const num = (v: unknown) =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined;
+  const text = (v: unknown, max = 500) =>
+    typeof v === "string" && v ? v.slice(0, max) : undefined;
+  const rawState = typeof row.state === "string" ? row.state : "";
+  const hash = row.hash.toLowerCase();
   return {
-    hash: row.hash.toLowerCase(),
+    hash,
+    id: hash,
+    engine: "qbittorrent",
+    ...describeTorrent(rawState, progress),
     name: text(row.name) ?? row.hash,
-    state: toState(typeof row.state === "string" ? row.state : "", progress),
+    state: toState(rawState, progress),
     progress,
     sizeBytes: num(row.size),
     downloadSpeedBytes: num(row.dlspeed),
-    etaSeconds: typeof row.eta === "number" && row.eta >= 0 && row.eta < 8_640_000 ? row.eta : undefined,
+    etaSeconds:
+      typeof row.eta === "number" && row.eta >= 0 && row.eta < 8_640_000
+        ? row.eta
+        : undefined,
     category: text(row.category, 100),
     savePath: text(row.save_path, 1000),
     contentPath: text(row.content_path, 1000),
@@ -144,9 +276,13 @@ function toItem(value: unknown): DownloadItem | undefined {
   };
 }
 
-export function createQBittorrentDownloadProviderFromEnv(env: Record<string, string | undefined> = process.env): QBittorrentDownloadProvider | undefined {
+export function createQBittorrentDownloadProviderFromEnv(
+  env: Record<string, string | undefined> = process.env
+): QBittorrentDownloadProvider | undefined {
   const baseUrl = env.THEBE_QBITTORRENT_URL?.trim();
   const username = env.THEBE_QBITTORRENT_USERNAME?.trim();
   const password = env.THEBE_QBITTORRENT_PASSWORD;
-  return baseUrl && username && password ? new QBittorrentDownloadProvider({ baseUrl, username, password }) : undefined;
+  return baseUrl && username && password
+    ? new QBittorrentDownloadProvider({ baseUrl, username, password })
+    : undefined;
 }

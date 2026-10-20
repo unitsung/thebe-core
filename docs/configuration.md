@@ -137,6 +137,8 @@ export THEBE_OPENLIST_TOKEN=your-openlist-token
 # library.scan and library.refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource.search,
 # and pipeline.acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
 # persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
+# With THEBE_ARIA2_URL (and THEBE_ARIA2_SECRET) aria2 is a second download engine behind the same download.* tools:
+# magnets and .torrent links go to qBittorrent, other links to aria2, unless download.add names an engine.
 ```
 
 `download.pause` / `download.resume` 按 `hashes`（1–20 个 info-hash，没有"全部暂停"）暂停或恢复

@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "engines": {
+    "qbittorrent": [
+      {
+        "state": "downloading",
+        "progress": 0.5,
+        "phase": "downloading",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "forcedDL",
+        "progress": 0.5,
+        "phase": "downloading",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "metaDL",
+        "progress": 0,
+        "phase": "downloading",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "checkingDL",
+        "progress": 0.2,
+        "phase": "downloading",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "stalledDL",
+        "progress": 0.4,
+        "phase": "downloading",
+        "badges": [
+          "no_progress"
+        ],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "queuedDL",
+        "progress": 0.1,
+        "phase": "queued",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "pausedDL",
+        "progress": 0.3,
+        "phase": "paused",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files",
+          "resume"
+        ]
+      },
+      {
+        "state": "stoppedDL",
+        "progress": 0.3,
+        "phase": "paused",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files",
+          "resume"
+        ]
+      },
+      {
+        "state": "uploading",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [
+          "seeding"
+        ],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "forcedUP",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [
+          "seeding"
+        ],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "stalledUP",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [
+          "seeding"
+        ],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "queuedUP",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [
+          "seeding"
+        ],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "pausedUP",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files",
+          "resume"
+        ]
+      },
+      {
+        "state": "stoppedUP",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files",
+          "resume"
+        ]
+      },
+      {
+        "state": "error",
+        "progress": 0.3,
+        "phase": "error",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "missingFiles",
+        "progress": 0.3,
+        "phase": "error",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files"
+        ]
+      }
+    ],
+    "aria2": [
+      {
+        "state": "active",
+        "progress": 0.5,
+        "phase": "downloading",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "waiting",
+        "progress": 0,
+        "phase": "queued",
+        "badges": [],
+        "capabilities": [
+          "pause",
+          "remove",
+          "remove_with_files"
+        ]
+      },
+      {
+        "state": "paused",
+        "progress": 0.2,
+        "phase": "paused",
+        "badges": [],
+        "capabilities": [
+          "remove",
+          "remove_with_files",
+          "resume"
+        ]
+      },
+      {
+        "state": "error",
+        "progress": 0.2,
+        "phase": "error",
+        "badges": [],
+        "capabilities": [
+          "remove"
+        ]
+      },
+      {
+        "state": "complete",
+        "progress": 1,
+        "phase": "completed",
+        "badges": [],
+        "capabilities": [
+          "remove"
+        ]
+      },
+      {
+        "state": "removed",
+        "progress": 0.1,
+        "phase": "completed",
+        "badges": [
+          "cancelled"
+        ],
+        "capabilities": [
+          "remove"
+        ]
+      }
+    ]
+  }
+}

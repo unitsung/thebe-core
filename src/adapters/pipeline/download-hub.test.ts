@@ -1,0 +1,193 @@
+import { describe, expect, it, vi } from "vitest";
+import type {
+  DownloadItem,
+  DownloadProvider,
+} from "../../agent/capabilities/pipeline.ts";
+import { downloadItem } from "../../testing/download-item.ts";
+import { createDownloadHub } from "./download-hub.ts";
+
+const hash = "a".repeat(40);
+const gid = "0123456789abcdef";
+
+function engine(
+  service: string,
+  items: DownloadItem[] = [],
+  options: { failing?: boolean } = {}
+) {
+  const calls = {
+    add: vi.fn(async (input: { urls: string[] }) => ({
+      submitted: input.urls.length,
+      engine: service,
+    })),
+    pause: vi.fn(async () => {}),
+    resume: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+  };
+  const provider: DownloadProvider = {
+    service,
+    add: calls.add,
+    list: vi.fn(async () => {
+      if (options.failing) throw new Error(`${service} is down`);
+      return items;
+    }),
+    get: vi.fn(async (id: string) => items.find((item) => item.id === id)),
+    pause: calls.pause,
+    resume: calls.resume,
+    remove: calls.remove,
+  };
+  return { provider, calls };
+}
+
+const torrent = downloadItem({
+  hash,
+  name: "Show",
+  state: "downloading",
+  progress: 0.4,
+});
+const file = downloadItem({
+  hash: gid,
+  name: "file.iso",
+  state: "downloading",
+  progress: 0.1,
+  engine: "aria2",
+});
+
+describe("download hub", () => {
+  it("has nothing to offer without an engine and is the engine itself when there is one", () => {
+    expect(createDownloadHub([])).toBeUndefined();
+    const only = engine("qbittorrent");
+    expect(createDownloadHub([only.provider])).toBeDefined();
+  });
+
+  it("sends magnets and .torrent files to the torrent engine and direct links to aria2", async () => {
+    const qb = engine("qbittorrent");
+    const aria = engine("aria2");
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    const result = await hub.add({
+      urls: [
+        "magnet:?xt=urn:btih:abc",
+        "https://tracker.example/file.torrent?key=1",
+        "https://files.example/movie.mkv",
+        "ftp://files.example/other.iso",
+      ],
+      savePath: "/dl",
+    });
+
+    expect(qb.calls.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: [
+          "magnet:?xt=urn:btih:abc",
+          "https://tracker.example/file.torrent?key=1",
+        ],
+        savePath: "/dl",
+      })
+    );
+    expect(aria.calls.add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: [
+          "https://files.example/movie.mkv",
+          "ftp://files.example/other.iso",
+        ],
+      })
+    );
+    expect(result).toEqual({ submitted: 4, engine: "qbittorrent+aria2" });
+  });
+
+  it("lets a named engine take the links, and refuses one that is not set up", async () => {
+    const qb = engine("qbittorrent");
+    const aria = engine("aria2");
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    await hub.add({ urls: ["magnet:?xt=urn:btih:abc"], engine: "aria2" });
+    expect(aria.calls.add).toHaveBeenCalledOnce();
+    expect(qb.calls.add).not.toHaveBeenCalled();
+
+    const single = createDownloadHub([qb.provider])!;
+    await expect(
+      single.add({ urls: ["https://x.example/a.iso"], engine: "aria2" })
+    ).rejects.toThrow(/aria2 is not configured/);
+  });
+
+  it("falls back to the one engine there is, whatever the link", async () => {
+    const aria = engine("aria2");
+    await createDownloadHub([aria.provider])!.add({
+      urls: ["magnet:?xt=urn:btih:abc"],
+    });
+    expect(aria.calls.add).toHaveBeenCalledOnce();
+
+    const qb = engine("qbittorrent");
+    await createDownloadHub([qb.provider])!.add({
+      urls: ["https://files.example/movie.mkv"],
+    });
+    expect(qb.calls.add).toHaveBeenCalledOnce();
+  });
+
+  it("lists every engine's downloads, and names an engine that did not answer", async () => {
+    const hub = createDownloadHub([
+      engine("qbittorrent", [torrent]).provider,
+      engine("aria2", [], { failing: true }).provider,
+    ])!;
+
+    const all = await hub.listWithProblems!({});
+    expect(all.downloads).toEqual([torrent]);
+    expect(all.unreachable).toEqual(["aria2: aria2 is down"]);
+
+    const both = createDownloadHub([
+      engine("qbittorrent", [torrent]).provider,
+      engine("aria2", [file]).provider,
+    ])!;
+    expect(await both.list({})).toEqual([torrent, file]);
+    expect(await both.list({ engine: "aria2" })).toEqual([file]);
+  });
+
+  it("fails when no engine answers", async () => {
+    const hub = createDownloadHub([
+      engine("qbittorrent", [], { failing: true }).provider,
+      engine("aria2", [], { failing: true }).provider,
+    ])!;
+    await expect(hub.listWithProblems!({})).rejects.toThrow(/is down/);
+  });
+
+  it("reads one download from the engine its id belongs to", async () => {
+    const qb = engine("qbittorrent", [torrent]);
+    const aria = engine("aria2", [file]);
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    expect(await hub.get(gid)).toEqual(file);
+    expect(await hub.get(hash)).toEqual(torrent);
+    expect(qb.provider.get).toHaveBeenCalledTimes(1);
+    expect(aria.provider.get).toHaveBeenCalledTimes(1);
+    await expect(hub.get("nope")).rejects.toThrow(/Invalid download id/);
+  });
+
+  it("pauses, resumes and removes through the engine each id belongs to", async () => {
+    const qb = engine("qbittorrent", [torrent]);
+    const aria = engine("aria2", [file]);
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    await hub.pause!([hash, gid]);
+    expect(qb.calls.pause).toHaveBeenCalledWith([hash]);
+    expect(aria.calls.pause).toHaveBeenCalledWith([gid]);
+
+    await hub.resume!([gid]);
+    expect(aria.calls.resume).toHaveBeenCalledWith([gid]);
+    expect(qb.calls.resume).not.toHaveBeenCalled();
+
+    await hub.remove!([hash], true);
+    expect(qb.calls.remove).toHaveBeenCalledWith([hash], true);
+    await expect(hub.pause!(["zz"])).rejects.toThrow(/Invalid download id/);
+  });
+
+  it("offers a control only when an engine has it", () => {
+    const bare: DownloadProvider = {
+      service: "bare",
+      add: vi.fn(),
+      list: vi.fn(),
+      get: vi.fn(),
+    };
+    const hub = createDownloadHub([bare])!;
+    expect(hub.pause).toBeUndefined();
+    expect(hub.remove).toBeUndefined();
+  });
+});

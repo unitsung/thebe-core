@@ -172,6 +172,15 @@ also exposes `resource.search` and `pipeline.acquire/advance/status`: a
 deterministic job (download, copy, scan, verify) with bounded retries, persisted
 in `<agent store>/pipeline-jobs.json`. Writes need approval.
 
+`THEBE_ARIA2_URL` (and `THEBE_ARIA2_SECRET`, aria2's `rpc-secret`, when it has one) adds aria2 as a second
+download engine behind the same `download.*` tools. `download.add` sends magnets and `.torrent` links to
+qBittorrent and every other link to aria2 unless `engine` names one; `download.list` merges both and names an
+engine that did not answer in `unreachable`. Every download carries `engine`, `id`, `phase` (`queued`,
+`downloading`, `paused`, `error`, `completed`), `badges` and `capabilities`, the same vocabulary the App's
+Downloads page uses (`contracts/download-states.json`). aria2's RPC cannot delete files: an unfinished
+aria2 download offers `remove_with_files` because removing it makes the owner's own `on-download-stop` script
+clean up; a finished one cannot have its files deleted through aria2 and offers only `remove`.
+
 An acquisition job can start from a torrent or from a network-drive transfer:
 `pipeline.acquire` with `kind: "cloud_transfer"` and a `transferSource` fetches
 the share/direct link through OpenList's offline download, then runs the same

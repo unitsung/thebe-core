@@ -8,6 +8,7 @@ import {
   createPipelineTools,
 } from "../../agent/tools/pipeline-tools.ts";
 import { PIPELINE_WRITE_TOOL_NAMES } from "../../agent/capabilities/pipeline.ts";
+import { downloadItem } from "../../testing/download-item.ts";
 
 const hash = "a".repeat(40);
 
@@ -67,7 +68,7 @@ describe("qBittorrent downloads", () => {
         category: "movies",
         paused: true,
       })
-    ).toEqual({ submitted: 1 });
+    ).toEqual({ submitted: 1, engine: "qbittorrent" });
     const add = calls.find((call) => call.url.includes("torrents/add"))!;
     expect(add.body).toContain("savepath=%2Fmedia%2Fin");
     expect(add.body).toContain("category=movies");
@@ -601,6 +602,61 @@ describe("pipeline tools", () => {
       { policy: deny, callerId: "c" }
     )[0]!;
     await expect(blocked.execute("3", {})).rejects.toThrow("blocked");
+  });
+
+  it("passes the named engine to download.add and says which engine took the links", async () => {
+    const add = vi.fn(async () => ({ submitted: 1, engine: "aria2" }));
+    const tool = createPipelineTools(
+      { downloads: { service: "q", add, list: vi.fn(), get: vi.fn() } },
+      { policy: allow, callerId: "c" }
+    ).find((candidate) => candidate.name === "download.add")!;
+    const result = await tool.execute("1", {
+      urls: ["https://f.example/a.iso"],
+      engine: "aria2",
+    });
+    expect(add).toHaveBeenCalledWith(
+      expect.objectContaining({
+        urls: ["https://f.example/a.iso"],
+        engine: "aria2",
+      })
+    );
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      submitted: 1,
+      engine: "aria2",
+    });
+  });
+
+  it("lists every engine's downloads and names an engine that did not answer", async () => {
+    const item = downloadItem({
+      hash,
+      name: "Show",
+      state: "downloading",
+      progress: 0.4,
+    });
+    const listWithProblems = vi.fn(async () => ({
+      downloads: [item],
+      unreachable: ["aria2: aria2 is down"],
+    }));
+    const tool = createPipelineTools(
+      {
+        downloads: {
+          service: "q+aria2",
+          add: vi.fn(),
+          list: vi.fn(),
+          listWithProblems,
+          get: vi.fn(),
+        },
+      },
+      { policy: allow, callerId: "c" }
+    ).find((candidate) => candidate.name === "download.list")!;
+    const result = await tool.execute("1", { engine: "qbittorrent", limit: 5 });
+    expect(listWithProblems).toHaveBeenCalledWith(
+      expect.objectContaining({ engine: "qbittorrent", limit: 5 })
+    );
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      downloads: [item],
+      unreachable: ["aria2: aria2 is down"],
+    });
   });
 
   it("needs a provider choice when several media servers exist", async () => {

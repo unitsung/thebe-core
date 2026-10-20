@@ -15,9 +15,43 @@ export type DownloadState =
   | "checking"
   | "error";
 
+/** Where a download stands, in one vocabulary for every engine (the App uses the same one). */
+export type DownloadPhase =
+  | "queued"
+  | "downloading"
+  | "paused"
+  | "error"
+  | "completed";
+/** How a phase is qualified: a stalled download is still downloading, a seeding one is completed. */
+export type DownloadBadge =
+  | "no_progress"
+  | "seeding"
+  | "retrying"
+  | "cancelling"
+  | "cancelled";
+/** What the engine really supports for this one download; a tool that cannot work is not offered. */
+export type DownloadCapability =
+  | "pause"
+  | "resume"
+  | "remove"
+  | "remove_with_files"
+  | "retry"
+  | "cancel";
+
 export type DownloadItem = {
+  /** The engine's own id: a torrent info-hash, or an aria2 gid. Name it in pause, resume and delete. */
   hash: string;
   name: string;
+  /** The download engine that owns it: "qbittorrent" or "aria2". */
+  engine: string;
+  /** Same as `hash`, under the name the App's Download shape uses. */
+  id: string;
+  phase: DownloadPhase;
+  badges: DownloadBadge[];
+  /** Sorted, so two reads of the same download compare equal. */
+  capabilities: DownloadCapability[];
+  /** The engine's own error text, when it gave one. */
+  message?: string;
   state: DownloadState;
   /** 0..1 */
   progress: number;
@@ -39,12 +73,26 @@ export interface DownloadProvider {
     savePath?: string;
     category?: string;
     paused?: boolean;
-  }): Promise<{ submitted: number }>;
+    /** Which engine takes it, when several are configured. Omitted: magnets and .torrent go to the torrent engine. */
+    engine?: string;
+  }): Promise<{ submitted: number; engine?: string }>;
   list(input: {
     filter?: "all" | "downloading" | "completed" | "paused" | "errored";
     category?: string;
     limit?: number;
+    /** Only this engine's downloads, when several are configured. */
+    engine?: string;
   }): Promise<DownloadItem[]>;
+  /**
+   * Optional. Like `list`, but an engine that did not answer is named instead of failing the whole read
+   * (only when none answered). Providers with a single engine simply do not have it.
+   */
+  listWithProblems?(input: {
+    filter?: "all" | "downloading" | "completed" | "paused" | "errored";
+    category?: string;
+    limit?: number;
+    engine?: string;
+  }): Promise<{ downloads: DownloadItem[]; unreachable: string[] }>;
   get(hash: string): Promise<DownloadItem | undefined>;
   /** Optional. Providers without it simply do not expose download.pause. */
   pause?(hashes: string[]): Promise<void>;
@@ -161,8 +209,14 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     type: "object",
     properties: {
       urls: stringArray(
-        "Magnet links or http(s) .torrent URLs. Verify the release with the user first."
+        "Magnet links or .torrent URLs (torrent engine), or direct http(s) / ftp / sftp links (aria2). Verify the release with the user first."
       ),
+      engine: {
+        type: "string",
+        enum: ["qbittorrent", "aria2"],
+        description:
+          "Which engine takes the links. Omit it: magnets and .torrent URLs go to qBittorrent, every other link to aria2.",
+      },
       savePath: {
         type: "string",
         description:
@@ -183,7 +237,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     type: "object",
     properties: {
       hashes: stringArray(
-        "Torrent info-hashes from download.list or download.status. Always name the downloads; there is no pause-all."
+        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no pause-all."
       ),
     },
     required: ["hashes"],
@@ -192,7 +246,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     type: "object",
     properties: {
       hashes: stringArray(
-        "Torrent info-hashes from download.list or download.status. Always name the downloads; there is no resume-all."
+        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no resume-all."
       ),
     },
     required: ["hashes"],
@@ -201,12 +255,12 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     type: "object",
     properties: {
       hashes: stringArray(
-        "Torrent info-hashes from download.list or download.status. Always name the downloads; there is no delete-all."
+        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no delete-all."
       ),
       deleteFiles: {
         type: "boolean",
         description:
-          "Required. true also deletes the downloaded files from disk and cannot be undone; false removes only the task and keeps the files.",
+          "Required. true also deletes the downloaded files from disk and cannot be undone; false removes only the task and keeps the files. Only an item whose capabilities include remove_with_files accepts true; for aria2 that is an unfinished download, and the owner's own aria2 script does the deleting.",
       },
     },
     required: ["hashes", "deleteFiles"],
@@ -220,6 +274,11 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       },
       category: { type: "string" },
       limit: { type: "integer", minimum: 1, maximum: 100 },
+      engine: {
+        type: "string",
+        enum: ["qbittorrent", "aria2"],
+        description: "Only this engine's downloads. Omit it for all of them.",
+      },
     },
   },
   "download.status": {
@@ -227,7 +286,8 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     properties: {
       hash: {
         type: "string",
-        description: "Torrent info-hash from download.list.",
+        description:
+          "Download id from download.list: a torrent info-hash or an aria2 id.",
       },
     },
     required: ["hash"],
@@ -317,16 +377,17 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
 
 export const PIPELINE_TOOL_DESCRIPTIONS: Record<PipelineToolName, string> = {
   "download.add":
-    "Submit magnet or .torrent URLs to the configured downloader. Requires approval. Afterwards poll download.status until it completes; submission is not completion.",
+    "Submit magnet, .torrent or direct links to the configured download engines (qBittorrent for torrents, aria2 for direct links). Requires approval. Afterwards poll download.status until it completes; submission is not completion.",
   "download.pause":
     "Pause the named downloads without deleting them or their files. Requires approval. Afterwards confirm with download.status that state is paused.",
   "download.delete":
     "Remove the named downloads from the downloader. Irreversible and requires approval. deleteFiles must be stated: false keeps the downloaded files, true deletes them too. Prefer download.pause unless the user asked to delete. Afterwards confirm with download.list.",
   "download.resume":
     "Resume the named paused downloads. Requires approval. A finished download resumes as seeding. Afterwards confirm with download.status.",
-  "download.list": "List downloader tasks with progress and state. Read-only.",
+  "download.list":
+    "List downloads from every configured engine (qBittorrent, aria2). Each has an engine, an id, a phase (queued, downloading, paused, error, completed), badges, progress and the actions its capabilities allow. An engine that did not answer is named in unreachable. Read-only.",
   "download.status":
-    "Get one download by info-hash: progress, state, save path and content path. Read-only.",
+    "Get one download by id (torrent info-hash or aria2 id): phase, progress, save path and content path. Read-only.",
   "files.list":
     "List a directory in the file manager (OpenList). Read-only. Use it to inspect a share or the library folder before copying.",
   "files.mkdir": "Create a directory in the file manager. Requires approval.",

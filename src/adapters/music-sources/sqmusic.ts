@@ -8,6 +8,8 @@ const list = (value: unknown): Row[] =>
   Array.isArray(value)
     ? (value.filter((row) => row && typeof row === "object") as Row[])
     : [];
+/** One approval covers one album; a long box set is for the owner to queue by hand. */
+const MAX_ALBUM_SONGS = 60;
 const str = (value: unknown) =>
   typeof value === "string" || typeof value === "number"
     ? String(value)
@@ -66,8 +68,68 @@ export function createSqMusicProvider(
     }
     throw new Error(`SQMusic: ${str(json.msg) ?? `code ${str(json.code)}`}`);
   }
+  async function downloadAlbum({
+    plugin,
+    id,
+    query,
+    quality,
+  }: SqMusicDownload) {
+    if (quality)
+      throw new Error(
+        "SQMusic: an album is downloaded in SQMusic's default quality; leave quality out"
+      );
+    // The record must come from SQMusic itself: it is what its download endpoint expects back.
+    const page = (await call("/api/music/searchAlbum", {
+      query: {
+        plugName: plugin,
+        keyword: query,
+        pageSize: "30",
+        pageIndex: "1",
+      },
+    })) as Row | undefined;
+    const record = list(page?.records).find((row) => str(row.albumid) === id);
+    if (!record)
+      throw new Error(
+        `SQMusic: album ${id} is not in the first results for "${query}" on ${plugin}; search again with sqmusic_search kind album`
+      );
+    const songCount = Number(
+      record.total ?? (record.dataInfo as Row | undefined)?.musiccnt
+    );
+    if (Number.isFinite(songCount) && songCount > MAX_ALBUM_SONGS)
+      throw new Error(
+        `SQMusic: this album has ${songCount} songs; more than ${MAX_ALBUM_SONGS} are not queued in one approval`
+      );
+    const queued = await call("/api/download/downloadAlbum", { body: record });
+    const name = str(record.albumName);
+    const tasks = (await call("/api/task/list", {
+      body: { pageSize: 30, pageIndex: 1 },
+    })) as Row | undefined;
+    const seen = list(tasks?.records).filter(
+      (row) =>
+        str(row.downloadAlbumname) === name &&
+        str(row.downloadPlugName) === plugin
+    );
+    return {
+      queued: true,
+      album: name,
+      plugin,
+      songs: Array.isArray(queued)
+        ? queued.length
+        : Number.isFinite(songCount)
+          ? songCount
+          : undefined,
+      verified: seen.length > 0,
+      tasksSeen: seen.length,
+      note:
+        seen.length > 0
+          ? undefined
+          : "SQMusic accepted the request but no task of this album is listed yet; check sqmusic_search action tasks.",
+    };
+  }
   return {
-    async download({ plugin, id, query, quality }: SqMusicDownload) {
+    async download(input: SqMusicDownload) {
+      if (input.kind === "album") return downloadAlbum(input);
+      const { plugin, id, query, quality } = input;
       // The record must come from SQMusic itself: it is what its download endpoint expects back.
       const page = (await call("/api/music/searchSong", {
         query: {
@@ -130,6 +192,33 @@ export function createSqMusicProvider(
             })),
           };
         case "search": {
+          if (input.kind === "album") {
+            const page = (await call("/api/music/searchAlbum", {
+              query: {
+                plugName: input.plugin,
+                keyword: input.query,
+                pageSize: String(Math.min(input.limit ?? 10, 30)),
+                pageIndex: "1",
+              },
+            })) as Row | undefined;
+            return {
+              plugin: input.plugin,
+              total: page?.searchTotal ?? page?.total,
+              albums: list(page?.records).map((row) => ({
+                id: str(row.albumid),
+                name: str(row.albumName),
+                artists: Array.isArray(row.artistName)
+                  ? row.artistName.map(String)
+                  : str(row.artistName)
+                    ? [str(row.artistName)!]
+                    : [],
+                songCount:
+                  Number(
+                    row.total ?? (row.dataInfo as Row | undefined)?.musiccnt
+                  ) || undefined,
+              })),
+            };
+          }
           const page = (await call("/api/music/searchSong", {
             query: {
               plugName: input.plugin,

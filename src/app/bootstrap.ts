@@ -11,6 +11,8 @@ import { createMusicSourcesFromEnv } from "../adapters/music-sources/index.ts";
 import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
+import { createAria2DownloadProviderFromEnv } from "../adapters/pipeline/aria2-downloads.ts";
+import { createDownloadHub } from "../adapters/pipeline/download-hub.ts";
 import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
 import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/openlist-transfer.ts";
 import { createFileJobStore } from "../agent/pipeline/job-store.ts";
@@ -229,7 +231,12 @@ export async function bootstrapThebe(
     strmRepairProvider,
     navidrome,
     pipeline: {
-      downloads: createQBittorrentDownloadProviderFromEnv(),
+      downloads: createDownloadHub(
+        [
+          createQBittorrentDownloadProviderFromEnv(),
+          createAria2DownloadProviderFromEnv(),
+        ].filter((engine) => engine !== undefined)
+      ),
       transfer: createOpenListTransferProviderFromEnv(),
       files: createOpenListFilesProviderFromEnv(),
       libraries: createLibraryRefreshProvidersFromEnv(),

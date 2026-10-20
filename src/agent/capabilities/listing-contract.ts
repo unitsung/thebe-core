@@ -31,6 +31,11 @@ export const DOWNLOAD_LIST_EXAMPLE = {
   downloads: [
     {
       hash: "0123456789abcdef0123456789abcdef01234567",
+      id: "0123456789abcdef0123456789abcdef01234567",
+      engine: "qbittorrent",
+      phase: "downloading",
+      badges: [],
+      capabilities: ["pause", "remove", "remove_with_files"],
       name: "Dune.Part.Two.2024.2160p",
       state: "downloading",
       progress: 0.42,
@@ -41,6 +46,11 @@ export const DOWNLOAD_LIST_EXAMPLE = {
     },
     {
       hash: "fedcba9876543210fedcba9876543210fedcba98",
+      id: "fedcba9876543210fedcba9876543210fedcba98",
+      engine: "qbittorrent",
+      phase: "completed",
+      badges: ["seeding"],
+      capabilities: ["pause", "remove", "remove_with_files"],
       name: "Album.FLAC",
       state: "completed",
       progress: 1,

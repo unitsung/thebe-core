@@ -292,6 +292,7 @@ async function run(
         savePath: optionalString(args.savePath),
         category: optionalString(args.category),
         paused: args.paused === true,
+        engine: optionalString(args.engine),
       });
       return {
         ...submitted,
@@ -321,14 +322,21 @@ async function run(
         note: "Requested removal. Confirm with download.list.",
       };
     }
-    case "download.list":
-      return {
-        downloads: await providers.downloads!.list({
-          filter: filter(args.filter),
-          category: optionalString(args.category),
-          limit: integer(args.limit),
-        }),
+    case "download.list": {
+      const input: Parameters<DownloadProvider["list"]>[0] = {
+        filter: filter(args.filter),
+        category: optionalString(args.category),
+        limit: integer(args.limit),
+        engine: optionalString(args.engine),
       };
+      const provider = providers.downloads!;
+      if (!provider.listWithProblems)
+        return { downloads: await provider.list(input) };
+      const { downloads, unreachable } = await provider.listWithProblems(input);
+      return unreachable.length > 0
+        ? { downloads, unreachable }
+        : { downloads };
+    }
     case "download.status":
       return (
         (await providers.downloads!.get(requiredString(args.hash, "hash"))) ??

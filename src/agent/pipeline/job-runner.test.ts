@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { downloadItem } from "../../testing/download-item.ts";
 import {
   advanceJob,
   createJobBook,
@@ -37,12 +38,12 @@ function world() {
     downloads: {
       service: "q",
       add: vi.fn(async () => {
-        state.download ??= {
+        state.download ??= downloadItem({
           hash,
           name: "Dune.2021",
           state: "downloading",
           progress: 0.1,
-        };
+        });
         return { submitted: 1 };
       }),
       list: vi.fn(),
@@ -121,13 +122,13 @@ describe("acquisition job", () => {
     const { deps, state } = world();
     const book = createJobBook(deps);
     const job = await book.acquire(spec);
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "seeding",
       progress: 1,
       contentPath: "/data/Dune.2021",
-    };
+    });
     await book.advance(job.id); // copy 1 requested but "lost"
     expect(job.stage).toBe("place");
     await book.advance(job.id); // inside the grace window: waits
@@ -149,16 +150,21 @@ describe("acquisition job", () => {
     const { deps, state } = world();
     const book = createJobBook(deps);
     const job = await book.acquire(spec);
-    state.download = { hash, name: "Dune.2021", state: "error", progress: 0.3 };
+    state.download = downloadItem({
+      hash,
+      name: "Dune.2021",
+      state: "error",
+      progress: 0.3,
+    });
     await book.advance(job.id);
     expect(job.stage).toBe("failed");
     expect(job.failure?.advice).toContain("disk space");
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "downloading",
       progress: 0.5,
-    };
+    });
     await book.advance(job.id);
     expect(job.stage).toBe("download");
     expect(job.failure).toBeUndefined();
@@ -167,12 +173,12 @@ describe("acquisition job", () => {
   it("gives up with guidance when the media server never identifies the item", async () => {
     const { deps, state } = world();
     state.folders["/media/Movies"] = ["Dune.2021"];
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "completed",
       progress: 1,
-    };
+    });
     const job = createJob(spec, new Date());
     job.stage = "download";
     (deps.libraries![0]!.scan as any).mockImplementation(async () => {

@@ -205,6 +205,163 @@ describe("SQMusic download", () => {
     );
   });
 });
+describe("SQMusic album", () => {
+  const options = { baseUrl: "http://nas:28096", username: "u", password: "p" };
+  const album = {
+    albumid: "A1",
+    albumName: "叶惠美",
+    plugName: "kw",
+    artistName: "周杰伦",
+    total: 11,
+    dataInfo: { musiccnt: 11 },
+  };
+  const route = (
+    calls: { path: string; body?: any }[],
+    options: { records?: unknown[]; tasks?: unknown[]; queued?: unknown } = {}
+  ) =>
+    vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      calls.push({
+        path,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if (path.endsWith("/login"))
+        return json({ code: 200, data: { tokenValue: "t" } });
+      if (path.endsWith("/searchAlbum"))
+        return json({
+          code: 200,
+          data: { records: options.records ?? [album] },
+        });
+      if (path.endsWith("/downloadAlbum"))
+        return json({
+          code: 200,
+          data: options.queued ?? Array.from({ length: 11 }, () => ({})),
+        });
+      if (path.endsWith("/task/list"))
+        return json({ code: 200, data: { records: options.tasks ?? [] } });
+      return json({ code: 200, data: {} });
+    });
+
+  it("searches albums and says how many songs each holds", async () => {
+    const calls: { path: string; body?: any }[] = [];
+    const result = (await createSqMusicProvider(options, route(calls)).read({
+      action: "search",
+      kind: "album",
+      plugin: "kw",
+      query: "叶惠美",
+    })) as any;
+    expect(result.albums).toEqual([
+      { id: "A1", name: "叶惠美", artists: ["周杰伦"], songCount: 11 },
+    ]);
+    expect(calls.some((call) => call.path.endsWith("/searchAlbum"))).toBe(true);
+  });
+
+  it("sends back SQMusic's own album record and reads the album's tasks back", async () => {
+    const calls: { path: string; body?: any }[] = [];
+    const request = route(calls, {
+      tasks: [
+        {
+          id: 1,
+          downloadAlbumname: "叶惠美",
+          downloadPlugName: "kw",
+          downloadStatus: "waiting",
+        },
+        {
+          id: 2,
+          downloadAlbumname: "叶惠美",
+          downloadPlugName: "kw",
+          downloadStatus: "loading",
+        },
+        {
+          id: 3,
+          downloadAlbumname: "别的专辑",
+          downloadPlugName: "kw",
+          downloadStatus: "waiting",
+        },
+      ],
+    });
+    const result = (await createSqMusicProvider(options, request).download({
+      kind: "album",
+      plugin: "kw",
+      id: "A1",
+      query: "叶惠美",
+    })) as any;
+    expect(
+      calls.find((call) => call.path.endsWith("/downloadAlbum"))!.body
+    ).toMatchObject({ albumid: "A1", plugName: "kw" });
+    expect(result).toMatchObject({
+      queued: true,
+      album: "叶惠美",
+      songs: 11,
+      verified: true,
+      tasksSeen: 2,
+    });
+  });
+
+  it("refuses an album that was not searched, one with too many songs, and a quality, without queuing", async () => {
+    const calls: { path: string; body?: any }[] = [];
+    const provider = createSqMusicProvider(options, route(calls));
+    await expect(
+      provider.download({
+        kind: "album",
+        plugin: "kw",
+        id: "nope",
+        query: "叶惠美",
+      })
+    ).rejects.toThrow("not in the first results");
+    await expect(
+      provider.download({
+        kind: "album",
+        plugin: "kw",
+        id: "A1",
+        query: "叶惠美",
+        quality: "KW_FLAC",
+      })
+    ).rejects.toThrow("default quality");
+    const big = createSqMusicProvider(
+      options,
+      route(calls, {
+        records: [{ ...album, total: 120, dataInfo: { musiccnt: 120 } }],
+      })
+    );
+    await expect(
+      big.download({ kind: "album", plugin: "kw", id: "A1", query: "叶惠美" })
+    ).rejects.toThrow("120 songs");
+    expect(calls.some((call) => call.path.endsWith("/downloadAlbum"))).toBe(
+      false
+    );
+  });
+
+  it("reads the kind from the tool arguments and keeps a song the default", () => {
+    expect(
+      parseSqMusicDownload({
+        kind: "album",
+        plugin: "kw",
+        id: "A1",
+        query: "叶惠美",
+      })
+    ).toEqual({ kind: "album", plugin: "kw", id: "A1", query: "叶惠美" });
+    expect(
+      parseSqMusicDownload({ plugin: "kw", id: "9", query: "晴天" })
+    ).not.toHaveProperty("kind");
+    expect(() =>
+      parseSqMusicDownload({
+        kind: "artist",
+        plugin: "kw",
+        id: "9",
+        query: "x",
+      })
+    ).toThrow("kind");
+    expect(
+      parseSqMusicQuery({
+        action: "search",
+        kind: "album",
+        plugin: "kw",
+        query: "x",
+      })
+    ).toMatchObject({ kind: "album" });
+  });
+});
 describe("music source wiring", () => {
   it("is absent without configuration and per-source with it", () => {
     expect(createMusicSourcesFromEnv({})).toBeUndefined();

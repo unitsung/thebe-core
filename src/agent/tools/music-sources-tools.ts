@@ -84,6 +84,9 @@ export function parseSqMusicQuery(input: unknown): SqMusicQuery {
       action,
       plugin: word(args.plugin, "plugin", 40),
       query: word(args.query, "query"),
+      ...(args.kind !== undefined
+        ? { kind: oneOf(args.kind, ["song", "album"] as const, "kind") }
+        : {}),
       limit: limit(args.limit),
     };
   return {
@@ -111,6 +114,9 @@ export function parseSqMusicDownload(input: unknown): SqMusicDownload {
     id: word(args.id, "id", 120),
     query: word(args.query, "query"),
     ...(quality ? { quality } : {}),
+    ...(args.kind !== undefined
+      ? { kind: oneOf(args.kind, ["song", "album"] as const, "kind") }
+      : {}),
   };
 }
 export function createMusicSourcesTools(

@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { downloadItem } from "../../testing/download-item.ts";
 import { createJobBook } from "./job-runner.ts";
-import {
-  createPipelineAdvancer,
-} from "./advancer.ts";
+import { createPipelineAdvancer } from "./advancer.ts";
 import type { DownloadItem } from "../capabilities/pipeline.ts";
 
 const hash = "a".repeat(40);
@@ -60,12 +59,12 @@ describe("pipeline advancer", () => {
     expect(book.status(job.id)[0]!.stage).toBe("download");
 
     const advancer = createPipelineAdvancer({ book, intervalMs: 0 });
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "completed",
       progress: 1,
-    };
+    });
 
     // A job restored from disk was never acquired in this process: no auto-run.
     await advancer.runOnce();
@@ -84,17 +83,22 @@ describe("pipeline advancer", () => {
     const job = await book.acquire(torrentSpec);
     advancer.track(job.id);
 
-    state.download = { hash, name: "Dune.2021", state: "error", progress: 0.2 };
+    state.download = downloadItem({
+      hash,
+      name: "Dune.2021",
+      state: "error",
+      progress: 0.2,
+    });
     await advancer.runOnce();
     expect(book.status(job.id)[0]!.stage).toBe("failed");
     expect(advancer.size()).toBe(0);
 
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "downloading",
       progress: 0.5,
-    };
+    });
     await advancer.runOnce();
     expect(book.status(job.id)[0]!.stage).toBe("failed");
   });
@@ -109,12 +113,12 @@ describe("pipeline advancer", () => {
     });
     const job = await book.acquire(torrentSpec);
     advancer.track(job.id);
-    state.download = {
+    state.download = downloadItem({
       hash,
       name: "Dune.2021",
       state: "completed",
       progress: 1,
-    };
+    });
 
     expect(await advancer.runOnce()).toEqual([]);
     expect(book.status(job.id)[0]!.stage).toBe("download");
