@@ -9,6 +9,7 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Added
 
+- `THEBE_MCP_WRITES=on` lets an agent connected over `/mcp` call write tools (`container.restart`, the Navidrome playlist writes, a provider MCP server's write tools, and a configured service API's preview and confirm). Core does not ask first on this path; the calling agent asks its user, and every write is audited. A restart's receipt records its approval source as `mcp_client`.
 - aria2 is a second download engine: `THEBE_ARIA2_URL` and `THEBE_ARIA2_SECRET`. `download.add` sends magnets and `.torrent` links to qBittorrent and other links to aria2 (or the `engine` you name); `download.list` merges both, names an engine that did not answer in `unreachable`, and takes an `engine` filter. Every download now carries `engine`, `id`, `phase`, `badges` and `capabilities`, the same vocabulary clients use; the state table is `contracts/download-states.json`, checked in both repositories. An address Prowlarr serves (one its search returned, or any under its base URL) is routed as a torrent although it ends in no `.torrent`; an address shaped like one but served elsewhere is not. `download.pause`, `download.resume` and `download.delete` refuse a download that does not offer that control, a merged `download.list` honours `limit` across engines, and a batch that fails on one engine still runs on the others and says what was already done.
 - `sqmusic_search` takes `kind: "album"` and `sqmusic_download` takes `kind: "album"`: one approval queues every song of one album (at most 60) in SQMusic's default quality and reads its tasks back, counting the album's tasks before and after so an earlier queue is not mistaken for this one; an album that does not say how many songs it has is not queued. An artist's catalogue is still never queued.
 - HTTP services accept `excludeOperations` and `excludeTags`: matching operations are hidden from discovery and refused on every route.
@@ -18,6 +19,7 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Fixed
 
+- Over `/mcp`, a provider MCP server's write tool ran with no check, and a service API write could be previewed and confirmed by the calling agent itself. Both are now refused unless `THEBE_MCP_WRITES` is on, so `/mcp` is read-only by default as documented.
 - `/mcp` follows the Streamable HTTP transport more closely: notifications get `202 Accepted` (was `204`), `GET` and `DELETE` answer `405` with `Allow: POST` (was `404`), and `initialize` returns the client's protocol version when it is `2025-06-18` or `2025-03-26`, otherwise `2025-06-18`.
 - The audit log is on by default: it writes `audit.jsonl` in the agent store directory. Before, it was written only when `THEBE_AUDIT_PATH` was set, which no deployment did, so `GET /v1/audit` was always empty.
 - `service_api_discover` matches every word of a query in any order; "list containers" no longer needs the exact phrase.

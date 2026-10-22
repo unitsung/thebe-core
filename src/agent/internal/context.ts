@@ -22,6 +22,7 @@ import { commandGuardPreflight } from "../security/command-risk.ts";
 import { acceptEditsApproves } from "../security/accept-edits.ts";
 import { buildIsolationReport } from "../security/isolation.ts";
 import { remoteBashAllowed as remoteBashHostAllowed } from "../security/remote-bash.ts";
+import { mcpWritesAllowed as mcpWritesHostAllowed } from "../security/mcp-writes.ts";
 import {
   resolveHostSecurity,
   sandboxForcedOff,
@@ -250,6 +251,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   // Host-only gate for running a client-supplied command (THEBE_REMOTE_BASH).
   const remoteBashAllowed =
     options.remoteBashAllowed ?? remoteBashHostAllowed();
+  // Host-only gate for write tools over /mcp (THEBE_MCP_WRITES).
+  const mcpWritesAllowed = options.mcpWritesAllowed ?? mcpWritesHostAllowed();
   // Critical commands (storage destruction, disk writes, container breakouts)
   // never reach approval: policy denies them. Dangerous ones still ask, with the
   // risk raised for the approval UI, and everything else falls through to the
@@ -1190,6 +1193,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     updatePermissionMode,
     getFullAccessSupport,
     remoteBashAllowed,
+    mcpWritesAllowed,
     remoteCommandDecision,
     setSessionFullAccess,
     setSessionPermissionMode,

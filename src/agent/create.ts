@@ -77,7 +77,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...goals,
     ...extensions,
     ...subagents,
-    ...createControlApi(ctx, artifactStore),
+    ...createControlApi(ctx, artifactStore, {
+      executeAction: actions.executeApprovedAction,
+    }),
     listSchedules: schedules.listSchedules,
     getSchedule: schedules.getSchedule,
     createSchedule: schedules.createSchedule,

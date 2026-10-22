@@ -1610,6 +1610,7 @@ describe("Thebe HTTP handler", () => {
       runtime: createFakeRuntime().runtime,
       provider: provider(),
       serviceAPIProviders: [service],
+      mcpWritesAllowed: true,
     });
     const mcp = (body: unknown) =>
       app.handler.handle(

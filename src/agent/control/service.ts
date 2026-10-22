@@ -33,6 +33,11 @@ import type {
 import { DEFAULT_MODEL_TEST_TIMEOUT_MS, httpError } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
 import {
+  MCP_CLIENT_APPROVAL,
+  type ActionReceipt,
+  type ActionRequest,
+} from "../action/types.ts";
+import {
   CORE_EVENT_TOOLS,
   listCoreMcpTools,
   withProductMetadata,
@@ -73,7 +78,11 @@ const RUNTIME_APPROVAL_REQUIRED =
 
 export function createControlApi(
   ctx: AgentContext,
-  artifactStore?: ArtifactStore
+  artifactStore?: ArtifactStore,
+  deps: {
+    /** The approved-action path; a restart over `/mcp` goes through it so it gets a receipt. */
+    executeAction?: (request: ActionRequest) => Promise<ActionReceipt>;
+  } = {}
 ) {
   const {
     options,
@@ -253,6 +262,13 @@ export function createControlApi(
       const result = await tool.execute("mcp", params);
       return ok(result.content.map((block) => block.text).join("\n"));
     }
+    return runBaseTool(name, args);
+  }
+
+  async function runBaseTool(
+    name: string,
+    args: unknown
+  ): Promise<{ text: string; isError: boolean }> {
     // A control-plane invocation is its own run: it has no session key, so without this the shared
     // default budget would count every invocation since the last diagnosis.
     policy.beginRun();
@@ -266,6 +282,98 @@ export function createControlApi(
       text: result.content.map((block) => block.text).join("\n"),
       isError: result.isError === true,
     };
+  }
+
+  /** Whether calling this tool changes something, by what Core knows about it. */
+  async function isMcpWrite(name: string): Promise<boolean> {
+    if (
+      name === CONTAINER_RESTART_ACTION_ID ||
+      (NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) ||
+      name === SERVICE_API_WRITE_TOOL_NAME ||
+      name === SERVICE_API_CONFIRM_TOOL_NAME
+    ) {
+      return true;
+    }
+    if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
+      try {
+        return !(await findServiceOperation(name)).operation.readOnly;
+      } catch {
+        return false; // an unknown operation fails as unknown when it is invoked
+      }
+    }
+    if (name.startsWith("mcp:")) {
+      // A provider tool is a read only when its server says so; one Core cannot find is treated as a write.
+      const tool = (await mcp.listTools()).find((item) => item.name === name);
+      return !tool || tool.permission !== "read";
+    }
+    return false;
+  }
+
+  async function invokeMcpTool(
+    name: string,
+    args: unknown
+  ): Promise<{ text: string; isError: boolean }> {
+    if (!(await isMcpWrite(name))) return invokeToolDetailed(name, args);
+    if (!ctx.mcpWritesAllowed) {
+      throw httpError(
+        403,
+        `${name} changes things, and this Core host has not enabled writes over /mcp (set THEBE_MCP_WRITES=on)`,
+        "mcp_writes_not_enabled"
+      );
+    }
+    const params = (args ?? {}) as Record<string, unknown>;
+    if (name === CONTAINER_RESTART_ACTION_ID) {
+      if (!deps.executeAction) {
+        throw httpError(503, "container actions are not available");
+      }
+      const id = typeof params.id === "string" ? params.id.trim() : "";
+      if (!id) {
+        throw httpError(400, `${name} requires id`, "invalid_body");
+      }
+      // The calling agent is the one that asked its user; Core records that the approval came from /mcp.
+      const receipt = await deps.executeAction({
+        actionId: name,
+        resource: { kind: "container", id, provider: "unknown" },
+        approval: {
+          approved: true,
+          approvedAt: now().toISOString(),
+          client: MCP_CLIENT_APPROVAL,
+        },
+      });
+      return {
+        text: JSON.stringify(receipt),
+        isError: receipt.action.status !== "succeeded",
+      };
+    }
+    if (
+      (NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) ||
+      name === SERVICE_API_WRITE_TOOL_NAME
+    ) {
+      return runBaseTool(name, args);
+    }
+    if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
+    // Core's own tools write their audit record; a provider's tool does not, so Core does.
+    const record = (text: string, result: "ok" | "error") =>
+      audit?.append({
+        method: name,
+        parameterHash: hashParameters(params),
+        responseBytes: Buffer.byteLength(text),
+        budgetConsumed: 0,
+        redactionFired: false,
+        source: "mcp",
+        result,
+      });
+    try {
+      const done = await invokeToolDetailed(name, args);
+      await record(done.text, done.isError ? "error" : "ok");
+      return done;
+    } catch (error) {
+      await record(
+        error instanceof Error ? error.message : String(error),
+        "error"
+      );
+      throw error;
+    }
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
@@ -399,6 +507,7 @@ export function createControlApi(
   }
 
   return {
+    invokeMcpTool,
     permissionMode(): import("../runtime/interface.ts").PermissionMode {
       return ctx.permissionMode();
     },

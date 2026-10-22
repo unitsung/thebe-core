@@ -4,6 +4,9 @@ import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 
 export { CONTAINER_RESTART_ACTION_ID };
 
+/** `approval.client` of a restart that came in over `/mcp`; the receipt records it as `mcp_client`. */
+export const MCP_CLIENT_APPROVAL = "mcp";
+
 export type ActionApprovalInput = {
   approved: boolean;
   approvedAt?: string;
@@ -26,7 +29,7 @@ export type ApprovalRecord = {
   required: true;
   approved: boolean;
   approvedAt?: string;
-  source: "on_device" | "missing";
+  source: "on_device" | "mcp_client" | "missing";
   capability: CapabilityPolicy;
 };
 
@@ -53,7 +56,11 @@ export type VerificationCheck = {
   skipped?: boolean;
 };
 
-export type VerificationStatus = "passed" | "failed" | "skipped" | "unavailable";
+export type VerificationStatus =
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "unavailable";
 
 export type VerificationResult = {
   status: VerificationStatus;

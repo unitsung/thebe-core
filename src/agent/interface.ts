@@ -136,6 +136,11 @@ export type CreateThebeAgentOptions = {
    * `THEBE_REMOTE_BASH`; off unless the host turns it on.
    */
   remoteBashAllowed?: boolean;
+  /**
+   * Host gate for write tools over `/mcp`. Defaults to `THEBE_MCP_WRITES`; off unless the host
+   * turns it on.
+   */
+  mcpWritesAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -391,6 +396,14 @@ export interface ThebeAgent {
   invokeTool(name: string, args: unknown): Promise<string>;
   /** `invokeTool` plus the tool's own failure flag, for the MCP `isError` result. */
   invokeToolDetailed(
+    name: string,
+    args: unknown
+  ): Promise<{ text: string; isError: boolean }>;
+  /**
+   * `invokeToolDetailed` for a caller on `/mcp`: read tools run as before, and a write tool runs
+   * only when the host has enabled writes over `/mcp`. The call is audited.
+   */
+  invokeMcpTool(
     name: string,
     args: unknown
   ): Promise<{ text: string; isError: boolean }>;

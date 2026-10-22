@@ -51,6 +51,7 @@ export function createThebeApp(options: {
   permissionMode?: import("../agent/runtime/interface.ts").PermissionMode;
   fullAccessAllowed?: boolean;
   remoteBashAllowed?: boolean;
+  mcpWritesAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -93,6 +94,7 @@ export function createThebeApp(options: {
     permissionMode: options.permissionMode,
     fullAccessAllowed: options.fullAccessAllowed,
     remoteBashAllowed: options.remoteBashAllowed,
+    mcpWritesAllowed: options.mcpWritesAllowed,
     maxSubagentConcurrency: options.maxSubagentConcurrency,
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,

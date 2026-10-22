@@ -39,6 +39,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
 - `THEBE_SESSION_DIR`: where the Pi runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
+- `THEBE_MCP_WRITES`: `on` (or `allow`/`true`/`1`/`yes`) lets an agent connected over `/mcp` call write tools: `container.restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. Off by default, and a client cannot turn it on for itself. Core does not ask anyone first on this path; the calling agent asks its own user (MCP clients read each tool's `destructiveHint`). A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
 - `THEBE_AUDIT_PATH`: the append-only audit log (JSON lines: method, parameter hash, result, duration; no arguments or output). Defaults to `audit.jsonl` in the agent store directory. `GET /v1/audit` reads it back.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
@@ -214,7 +215,8 @@ lyrics, and the playback queue. `navidrome.queue` returns uniform song entries
 (direct or transcoded stream URL, cover, title, artist, album, optional lyrics);
 Core does not play audio, the client does. Creating, updating, and deleting
 playlists are writes and can only run through an agent session's runtime
-approval; direct MCP or capability invoke returns 403. The password stays inside
+approval; capability invoke returns 403, and `/mcp` allows them only when the
+host sets `THEBE_MCP_WRITES=on`. The password stays inside
 the adapter.
 
 For the model, library, search, and artist tools return compact observations:

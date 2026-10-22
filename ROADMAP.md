@@ -114,14 +114,18 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
-- **Write tools for external agents on `/mcp`.** Today every write is refused over
-  `/mcp`, so another agent can look but not act. Offer the approval-gated writes
-  there with approval over MCP elicitation, or an out-of-band approval a client
-  confirms (the pending-permission queue and `ActionReceipt` already exist), and
-  scope tokens first, because a token has full access today. Add a light way to
-  start Core for this use (`npx` or stdio) so a workstation user need not run the
-  container. Verify against real clients (Claude Code, Codex, Hermes) before
-  claiming compatibility.
+- **Scoped tokens.** A token has full access today, and `thebe token create` already makes
+  named, revocable device tokens. Give each token a set of scopes, with full access as the
+  default so nothing changes for existing tokens. Possible scopes: read-only; `/mcp` only;
+  `/mcp` with writes; no admin routes (token management, provider keys, settings); no shell
+  or file routes; one named tool or capability. The token's name goes into the audit record
+  as the caller. Not scheduled.
+- **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are a host switch
+  (`THEBE_MCP_WRITES`) and the calling agent asks its own user. A stricter option would hold
+  each write until a person approves it in Core (an out-of-band queue, with scoped tokens so
+  the agent cannot approve itself), and run it on approval. Revisit only if someone needs it.
+- **A light start without the container** (`npx` or stdio) so a workstation user can use
+  Core's tools without running the container.
 - **Third-party harnesses behind the same seam (low priority).** Claude Code (Claude Agent SDK, in
   process) and Codex (`codex app-server`, JSON-RPC) as additional `AgentRuntime`
   implementations next to Pi, chosen per session, so any `/v1` client keeps

@@ -9,6 +9,7 @@ import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { DiagnosisResult } from "../diagnosis/types.ts";
 import { verifyRestart, type ProbeHealth } from "./verify.ts";
+import { MCP_CLIENT_APPROVAL } from "./types.ts";
 import type { ActivityStore } from "../activity/store.ts";
 import type { ActivityGroup, ActivityRecord } from "../activity/types.ts";
 import { idempotencyIndexKey } from "../activity/types.ts";
@@ -82,7 +83,9 @@ export function createActionApi(options: {
     async denyActivity(id: string) {
       return options.activityStore?.removePending(id) ?? false;
     },
-    async executeApprovedAction(request: ActionRequest): Promise<ActionReceipt> {
+    async executeApprovedAction(
+      request: ActionRequest
+    ): Promise<ActionReceipt> {
       const finishedAt = options.now().toISOString();
       const resource = request.resource;
       const idempotency =
@@ -110,16 +113,28 @@ export function createActionApi(options: {
         required: true,
         approved: request.approval?.approved === true,
         approvedAt: request.approval?.approvedAt,
-        source: request.approval?.approved === true ? "on_device" : "missing",
+        source:
+          request.approval?.approved !== true
+            ? "missing"
+            : request.approval.client === MCP_CLIENT_APPROVAL
+              ? "mcp_client"
+              : "on_device",
         capability,
       };
 
       const receiptId =
         (request.diagnosisRunId
-          ? (await options.activityStore?.findPendingForDiagnosis(request.diagnosisRunId))?.id
+          ? (
+              await options.activityStore?.findPendingForDiagnosis(
+                request.diagnosisRunId
+              )
+            )?.id
           : undefined) ?? randomUUID();
 
-      if (request.actionId && request.actionId !== CONTAINER_RESTART_ACTION_ID) {
+      if (
+        request.actionId &&
+        request.actionId !== CONTAINER_RESTART_ACTION_ID
+      ) {
         return await remember(
           receipt({
             receiptId,
@@ -133,7 +148,7 @@ export function createActionApi(options: {
               summary: `Unsupported action: ${request.actionId}`,
             },
             error: "unsupported_action",
-          }),
+          })
         );
       }
 
@@ -151,7 +166,7 @@ export function createActionApi(options: {
               summary: "container.restart was not approved on device.",
             },
             error: "approval_required",
-          }),
+          })
         );
       }
 
@@ -169,7 +184,7 @@ export function createActionApi(options: {
               summary: "Container provider does not implement restart.",
             },
             error: "restart_unsupported",
-          }),
+          })
         );
       }
 
@@ -184,7 +199,8 @@ export function createActionApi(options: {
           summary: `Restarted ${resource.name ?? resource.id}.`,
         };
       } catch (error) {
-        const unavailable = error instanceof ProviderError && error.code === "UNREACHABLE";
+        const unavailable =
+          error instanceof ProviderError && error.code === "UNREACHABLE";
         action = {
           status: unavailable ? "provider_unavailable" : "failed",
           startedAt,
@@ -279,7 +295,12 @@ function idempotencyKey(receipt: ActionReceipt): string {
 }
 
 function receiptFromActivity(activity: ActivityRecord): ActionReceipt {
-  if (!activity.receiptId || !activity.approval || !activity.action || !activity.verification) {
+  if (
+    !activity.receiptId ||
+    !activity.approval ||
+    !activity.action ||
+    !activity.verification
+  ) {
     throw new Error("activity is not a restart receipt");
   }
   return {
@@ -298,7 +319,10 @@ function receiptFromActivity(activity: ActivityRecord): ActionReceipt {
 
 type Audit = ReturnType<typeof createAuditLog>;
 
-async function auditWrite(audit: Audit | undefined, receipt: ActionReceipt): Promise<void> {
+async function auditWrite(
+  audit: Audit | undefined,
+  receipt: ActionReceipt
+): Promise<void> {
   await audit
     ?.append({
       method: CONTAINER_RESTART_ACTION_ID,

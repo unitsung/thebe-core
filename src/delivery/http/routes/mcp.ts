@@ -59,12 +59,12 @@ async function callTool(
 ): Promise<{ text: string; isError: boolean }> {
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
     if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
-    return agent.invokeToolDetailed(name, asObject(args) ?? {});
+    return agent.invokeMcpTool(name, asObject(args) ?? {});
   }
   const mapped = ALIASES[name] ?? name;
   if (ALL_TOOL_NAMES.has(name)) {
     if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
-    return agent.invokeToolDetailed(mapped, asObject(args) ?? {});
+    return agent.invokeMcpTool(mapped, asObject(args) ?? {});
   }
   if (agent) {
     const coreCapability = (await agent.listMcpTools()).find((tool) => {
@@ -73,14 +73,11 @@ async function callTool(
       );
     });
     if (coreCapability) {
-      return agent.invokeToolDetailed(
-        coreCapability.name,
-        asObject(args) ?? {}
-      );
+      return agent.invokeMcpTool(coreCapability.name, asObject(args) ?? {});
     }
   }
   if (agent && name.startsWith("mcp:")) {
-    return agent.invokeToolDetailed(name, asObject(args) ?? {});
+    return agent.invokeMcpTool(name, asObject(args) ?? {});
   }
   throw new McpProtocolError(`unknown tool: ${name}`, -32602);
 }
