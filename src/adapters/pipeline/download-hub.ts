@@ -3,11 +3,12 @@ import type {
   DownloadItem,
   DownloadProvider,
 } from "../../agent/capabilities/pipeline.ts";
-
-const TORRENT_ENGINE = "qbittorrent";
-const DIRECT_ENGINE = "aria2";
-const TORRENT_ID = /^[a-f0-9]{40,64}$/i;
-const DIRECT_ID = /^[a-f0-9]{16}$/i;
+import {
+  DIRECT_ENGINE,
+  DIRECT_ID,
+  TORRENT_ENGINE,
+  TORRENT_ID,
+} from "./download-engines.ts";
 
 /** An indexer's own download address (Prowlarr's `/<id>/download?apikey=…&link=…`, Jackett's `/dl/<name>/?jackett_apikey=…`). */
 const INDEXER_DOWNLOAD =
@@ -148,19 +149,18 @@ export function createDownloadHub(
   };
 
   if (engines.length > 1) hub.listWithProblems = listWithProblems;
-  if (engines.some((engine) => engine.pause))
-    hub.pause = (ids) =>
-      perEngine(
-        ids,
-        (engine, group) => engine.pause?.(group) ?? unsupported(engine, "pause")
-      );
-  if (engines.some((engine) => engine.resume))
-    hub.resume = (ids) =>
-      perEngine(
-        ids,
-        (engine, group) =>
-          engine.resume?.(group) ?? unsupported(engine, "resume")
-      );
+  /** Pause and resume differ only in the verb; a verb no engine has is not offered at all. */
+  const control = (verb: "pause" | "resume") =>
+    engines.some((engine) => engine[verb])
+      ? (ids: string[]) =>
+          perEngine(
+            ids,
+            (engine, group) =>
+              engine[verb]?.(group) ?? unsupported(engine, verb)
+          )
+      : undefined;
+  hub.pause = control("pause");
+  hub.resume = control("resume");
   if (engines.some((engine) => engine.remove))
     hub.remove = (ids, deleteFiles) =>
       perEngine(

@@ -4,13 +4,12 @@ import type {
   DownloadProvider,
   DownloadState,
 } from "../../agent/capabilities/pipeline.ts";
+import { TORRENT_ENGINE, TORRENT_ID } from "./download-engines.ts";
 import { describeTorrent } from "./download-phase.ts";
-
-const HASH = /^[a-f0-9]{40,64}$/i;
 
 /** qBittorrent Web API v2 as a DownloadProvider. Credentials never leave this class. */
 export class QBittorrentDownloadProvider implements DownloadProvider {
-  readonly service = "qbittorrent";
+  readonly service = TORRENT_ENGINE;
   private cookie?: string;
   private readonly base: string;
   private readonly fetchImpl: typeof fetch;
@@ -136,7 +135,7 @@ export class QBittorrentDownloadProvider implements DownloadProvider {
         "UNKNOWN",
         "Provide between 1 and 20 torrent hashes"
       );
-    if (unique.some((hash) => !HASH.test(hash)))
+    if (unique.some((hash) => !TORRENT_ID.test(hash)))
       throw new ProviderError("UNKNOWN", "Invalid torrent hash");
     const data: unknown = await (
       await this.request(`torrents/info?hashes=${unique.join("|")}`)
@@ -214,7 +213,7 @@ export class QBittorrentDownloadProvider implements DownloadProvider {
   }
 
   async get(hash: string): Promise<DownloadItem | undefined> {
-    if (!HASH.test(hash))
+    if (!TORRENT_ID.test(hash))
       throw new ProviderError("UNKNOWN", "Invalid torrent hash");
     const data: unknown = await (
       await this.request(`torrents/info?hashes=${hash.toLowerCase()}`)
@@ -239,7 +238,8 @@ function toState(raw: string, progress: number): DownloadState {
 function toItem(value: unknown): DownloadItem | undefined {
   if (!value || typeof value !== "object") return undefined;
   const row = value as Record<string, unknown>;
-  if (typeof row.hash !== "string" || !HASH.test(row.hash)) return undefined;
+  if (typeof row.hash !== "string" || !TORRENT_ID.test(row.hash))
+    return undefined;
   const progress =
     typeof row.progress === "number"
       ? Math.min(1, Math.max(0, row.progress))
@@ -257,7 +257,7 @@ function toItem(value: unknown): DownloadItem | undefined {
   return {
     hash,
     id: hash,
-    engine: "qbittorrent",
+    engine: TORRENT_ENGINE,
     ...describeTorrent(rawState, progress),
     name: text(row.name) ?? row.hash,
     state: toState(rawState, progress),

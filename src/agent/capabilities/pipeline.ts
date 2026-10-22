@@ -15,6 +15,10 @@ export type DownloadState =
   | "checking"
   | "error";
 
+/** The download engines Core can drive. */
+export const DOWNLOAD_ENGINES = ["qbittorrent", "aria2"] as const;
+export type DownloadEngine = (typeof DOWNLOAD_ENGINES)[number];
+
 /** Where a download stands, in one vocabulary for every engine (the App uses the same one). */
 export type DownloadPhase =
   | "queued"
@@ -22,14 +26,20 @@ export type DownloadPhase =
   | "paused"
   | "error"
   | "completed";
-/** How a phase is qualified: a stalled download is still downloading, a seeding one is completed. */
+/**
+ * How a phase is qualified: a stalled download is still downloading, a seeding one is completed.
+ * `retrying` and `cancelling` are part of the App's shared vocabulary; no engine here reports them yet.
+ */
 export type DownloadBadge =
   | "no_progress"
   | "seeding"
   | "retrying"
   | "cancelling"
   | "cancelled";
-/** What the engine really supports for this one download; a tool that cannot work is not offered. */
+/**
+ * What the engine really supports for this one download; a tool that cannot work is not offered.
+ * `retry` and `cancel` are part of the App's shared vocabulary; no engine here offers them yet.
+ */
 export type DownloadCapability =
   | "pause"
   | "resume"
@@ -42,8 +52,8 @@ export type DownloadItem = {
   /** The engine's own id: a torrent info-hash, or an aria2 gid. Name it in pause, resume and delete. */
   hash: string;
   name: string;
-  /** The download engine that owns it: "qbittorrent" or "aria2". */
-  engine: string;
+  /** The download engine that owns it. */
+  engine: DownloadEngine;
   /** Same as `hash`, under the name the App's Download shape uses. */
   id: string;
   phase: DownloadPhase;
@@ -213,7 +223,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       ),
       engine: {
         type: "string",
-        enum: ["qbittorrent", "aria2"],
+        enum: [...DOWNLOAD_ENGINES],
         description:
           "Which engine takes the links. Omit it: magnets, .torrent URLs and an indexer's download address (a release's downloadUrl from resource.search) go to qBittorrent, every other link to aria2.",
       },
@@ -276,7 +286,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       limit: { type: "integer", minimum: 1, maximum: 100 },
       engine: {
         type: "string",
-        enum: ["qbittorrent", "aria2"],
+        enum: [...DOWNLOAD_ENGINES],
         description: "Only this engine's downloads. Omit it for all of them.",
       },
     },

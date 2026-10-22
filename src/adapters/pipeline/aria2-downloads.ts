@@ -2,11 +2,10 @@ import { ProviderError } from "../../agent/capabilities/containers.ts";
 import type {
   DownloadItem,
   DownloadProvider,
-  DownloadState,
 } from "../../agent/capabilities/pipeline.ts";
+import { DIRECT_ENGINE, DIRECT_ID } from "./download-engines.ts";
 import { describeDirect } from "./download-phase.ts";
 
-const GID = /^[a-f0-9]{16}$/i;
 const LINK = /^(magnet:\?|https?:\/\/|ftps?:\/\/|sftp:\/\/)/i;
 const KEYS = [
   "gid",
@@ -25,7 +24,7 @@ type Row = Record<string, unknown>;
 
 /** aria2 over JSON-RPC as a DownloadProvider. The RPC secret never leaves this class. */
 export class Aria2DownloadProvider implements DownloadProvider {
-  readonly service = "aria2";
+  readonly service = DIRECT_ENGINE;
   private readonly endpoint: string;
   private readonly fetchImpl: typeof fetch;
 
@@ -112,7 +111,7 @@ export class Aria2DownloadProvider implements DownloadProvider {
     const unique = [...new Set(ids.map((id) => id.trim().toLowerCase()))];
     if (unique.length === 0 || unique.length > 20)
       throw new ProviderError("UNKNOWN", "Provide between 1 and 20 aria2 ids");
-    if (unique.some((id) => !GID.test(id)))
+    if (unique.some((id) => !DIRECT_ID.test(id)))
       throw new ProviderError("UNKNOWN", "Invalid aria2 id");
     const statuses = new Map<string, string>();
     for (const gid of unique) {
@@ -199,7 +198,7 @@ export class Aria2DownloadProvider implements DownloadProvider {
   }
 
   async get(id: string): Promise<DownloadItem | undefined> {
-    if (!GID.test(id.trim()))
+    if (!DIRECT_ID.test(id.trim()))
       throw new ProviderError("UNKNOWN", "Invalid aria2 id");
     const row = await this.status(id.trim().toLowerCase(), KEYS);
     return row ? toItem(row) : undefined;
@@ -213,25 +212,10 @@ const number = (value: unknown) => {
 const text = (value: unknown, max = 500) =>
   typeof value === "string" && value ? value.slice(0, max) : undefined;
 
-function legacyState(status: string): DownloadState {
-  switch (status) {
-    case "active":
-      return "downloading";
-    case "paused":
-      return "paused";
-    case "error":
-      return "error";
-    case "complete":
-    case "removed":
-      return "completed";
-    default:
-      return "queued";
-  }
-}
-
 function toItem(row: Row): DownloadItem | undefined {
-  if (typeof row.gid !== "string" || !GID.test(row.gid)) return undefined;
+  if (typeof row.gid !== "string" || !DIRECT_ID.test(row.gid)) return undefined;
   const status = typeof row.status === "string" ? row.status : "";
+  const described = describeDirect(status);
   const total = number(row.totalLength) ?? 0;
   const done = number(row.completedLength) ?? 0;
   const speed = number(row.downloadSpeed);
@@ -247,10 +231,11 @@ function toItem(row: Row): DownloadItem | undefined {
   return {
     hash: row.gid.toLowerCase(),
     id: row.gid.toLowerCase(),
-    engine: "aria2",
-    ...describeDirect(status),
+    engine: DIRECT_ENGINE,
+    ...described,
     name: torrentName ?? firstPath?.split("/").filter(Boolean).pop() ?? row.gid,
-    state: legacyState(status),
+    // Every aria2 phase is also a DownloadState, so the older field cannot drift from the phase.
+    state: described.phase,
     progress,
     sizeBytes: total > 0 ? total : undefined,
     downloadSpeedBytes: speed,

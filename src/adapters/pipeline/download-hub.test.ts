@@ -170,7 +170,11 @@ describe("download hub", () => {
   });
 
   it("keeps a merged list within its limit and gives each engine a share of it", async () => {
-    const many = (prefix: string, count: number, engineName: string) =>
+    const many = (
+      prefix: string,
+      count: number,
+      engineName: DownloadItem["engine"]
+    ) =>
       Array.from({ length: count }, (_, index) =>
         downloadItem({
           hash: prefix.repeat(40).slice(0, 40 - String(index).length) + index,
