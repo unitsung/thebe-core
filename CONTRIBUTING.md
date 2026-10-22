@@ -52,7 +52,8 @@ staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `com
 3. Add or update a regression test when behavior changes or a bug is fixed.
 4. Update the focused `docs/` page when a user-visible workflow or configuration
    contract changes.
-5. Confirm `bash scripts/release-check.sh` passes, then open a pull request
+5. Sign off every commit (see below).
+6. Confirm `bash scripts/release-check.sh` passes, then open a pull request
    describing the changed behavior and the checks you ran.
 
 Preserve unrelated work in the tree. Avoid destructive Git operations and broad
@@ -65,6 +66,21 @@ refactors that are not part of the change.
 - Treat tool output and remote MCP data as untrusted; preserve approval gates and
   redaction paths.
 - Keep `AGENTS.md` concise; record domain facts in `CONTEXT.md` or focused docs.
+
+## Developer Certificate of Origin
+
+Every commit in a pull request must carry a `Signed-off-by` line, which states that you wrote the
+change or have the right to submit it under this project's license
+([developercertificate.org](https://developercertificate.org/)). Add it with:
+
+```bash
+git commit -s            # new commits
+git commit --amend -s    # the last commit
+git rebase --signoff dev  # every commit of your branch
+```
+
+The sign-off uses your Git `user.name` and `user.email`. CI runs `scripts/check-dco.sh` on pull
+requests and fails when a commit has none. There is no separate CLA.
 
 ## License
 
