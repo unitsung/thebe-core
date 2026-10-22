@@ -180,6 +180,7 @@ export async function bootstrapThebe(
       : (dockerEngineProvider ?? stubProvider());
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
   const navidrome = createNavidromeProviderFromEnv();
+  const releaseSearch = createProwlarrSearchProviderFromEnv();
   const emby = createEmbyProviderFromEnv();
   const jellyfin = createJellyfinProviderFromEnv();
   const immich = createImmichProviderFromEnv();
@@ -235,12 +236,15 @@ export async function bootstrapThebe(
         [
           createQBittorrentDownloadProviderFromEnv(),
           createAria2DownloadProviderFromEnv(),
-        ].filter((engine) => engine !== undefined)
+        ].filter((engine) => engine !== undefined),
+        {
+          isIndexerAddress: (url) => releaseSearch?.ownsAddress(url) === true,
+        }
       ),
       transfer: createOpenListTransferProviderFromEnv(),
       files: createOpenListFilesProviderFromEnv(),
       libraries: createLibraryRefreshProvidersFromEnv(),
-      search: createProwlarrSearchProviderFromEnv(),
+      search: releaseSearch,
       media: { ...(emby ? { emby } : {}), ...(jellyfin ? { jellyfin } : {}) },
       jobStore: createFileJobStore(join(agentStoreDir, "pipeline-jobs.json")),
     },

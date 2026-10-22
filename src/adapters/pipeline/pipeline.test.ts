@@ -762,4 +762,28 @@ describe("Prowlarr search", () => {
     expect(parseQuality("Album FLAC")).toBe("FLAC");
     await expect(provider.search({ query: "  " })).rejects.toThrow("query");
   });
+
+  it("tells its own addresses by where they come from", async () => {
+    const issued = "https://elsewhere.example/dl/9?token=x";
+    const provider = new ProwlarrSearchProvider({
+      baseUrl: "https://p.example/prowlarr/",
+      apiKey: "k",
+      fetch: vi.fn<typeof fetch>(async () =>
+        Response.json([{ title: "Dune", seeders: 3, downloadUrl: issued }])
+      ),
+    });
+    // Anything under its own base URL is its own, whatever the address looks like.
+    expect(
+      provider.ownsAddress("https://p.example/prowlarr/7/anything?k=1")
+    ).toBe(true);
+    expect(
+      provider.ownsAddress("https://p.example/other/7/download?link=a")
+    ).toBe(false);
+    expect(provider.ownsAddress("https://q.example/prowlarr/7")).toBe(false);
+    expect(provider.ownsAddress("not a url")).toBe(false);
+    // A host it was never reached by is its own only once it has been returned by a search.
+    expect(provider.ownsAddress(issued)).toBe(false);
+    await provider.search({ query: "Dune" });
+    expect(provider.ownsAddress(issued)).toBe(true);
+  });
 });

@@ -10,15 +10,13 @@ import {
   TORRENT_ID,
 } from "./download-engines.ts";
 
-/** An indexer's own download address (Prowlarr's `/<id>/download?apikey=…&link=…`, Jackett's `/dl/<name>/?jackett_apikey=…`). */
-const INDEXER_DOWNLOAD =
-  /^https?:\/\/[^?#]*(?:\/(?:\d+\/)?download\/?\?[^#]*\b(?:apikey|link)=|\/dl\/[^/?#]+\/?\?[^#]*\bjackett_apikey=)/i;
-
-/** A magnet, a .torrent file, or an indexer's download address: every one of them is a torrent. */
-const isTorrentLink = (url: string) =>
-  /^magnet:\?/i.test(url) ||
-  /\.torrent(?:[?#].*)?$/i.test(url) ||
-  INDEXER_DOWNLOAD.test(url);
+export type DownloadHubOptions = {
+  /**
+   * Whether an address is served by the indexer manager that searched for it. Such an address ends in no
+   * `.torrent` but fetches one, so it belongs to the torrent engine like a magnet link.
+   */
+  isIndexerAddress?: (url: string) => boolean;
+};
 
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
@@ -29,7 +27,8 @@ const messageOf = (error: unknown) =>
  * to aria2) unless one is named; an id belongs to the engine its shape says (an info-hash or an aria2 gid).
  */
 export function createDownloadHub(
-  engines: DownloadProvider[]
+  engines: DownloadProvider[],
+  options: DownloadHubOptions = {}
 ): DownloadProvider | undefined {
   if (engines.length === 0) return undefined;
   const byName = new Map(engines.map((engine) => [engine.service, engine]));
@@ -40,6 +39,12 @@ export function createDownloadHub(
       throw new ProviderError("UNKNOWN", `${name} is not configured`);
     return engine;
   };
+
+  /** A magnet, a .torrent file, or an address the indexer manager serves: every one of them is a torrent. */
+  const isTorrentLink = (url: string) =>
+    /^magnet:\?/i.test(url) ||
+    /\.torrent(?:[?#].*)?$/i.test(url) ||
+    options.isIndexerAddress?.(url) === true;
 
   const forLink = (url: string): DownloadProvider =>
     byName.get(isTorrentLink(url) ? TORRENT_ENGINE : DIRECT_ENGINE) ??

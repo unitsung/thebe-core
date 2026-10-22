@@ -94,32 +94,41 @@ describe("download hub", () => {
     expect(result).toEqual({ submitted: 4, engine: "qbittorrent+aria2" });
   });
 
-  it("treats an indexer's download address as a torrent although it ends in no .torrent", async () => {
+  it("sends an address the indexer manager serves to the torrent engine, whatever it looks like", async () => {
     const qb = engine("qbittorrent");
     const aria = engine("aria2");
-    const hub = createDownloadHub([qb.provider, aria.provider])!;
+    const served = "http://prowlarr.lan:9696/anything/at/all?x=1";
+    const hub = createDownloadHub([qb.provider, aria.provider], {
+      isIndexerAddress: (url) => url.startsWith("http://prowlarr.lan:9696/"),
+    })!;
 
     await hub.add({
       urls: [
-        "http://prowlarr.lan:9696/3/download?apikey=KEY&link=abc&file=Dune",
-        "http://jackett.lan:9117/dl/tracker/?jackett_apikey=KEY&path=abc&file=Dune",
-        "https://files.example/download?file=movie.mkv",
+        served,
+        // Shaped like an indexer address, but not served by it: an ordinary download.
+        "https://files.example/download?link=movie.mkv&apikey=1",
       ],
     });
 
     expect(qb.calls.add).toHaveBeenCalledWith(
-      expect.objectContaining({
-        urls: [
-          "http://prowlarr.lan:9696/3/download?apikey=KEY&link=abc&file=Dune",
-          "http://jackett.lan:9117/dl/tracker/?jackett_apikey=KEY&path=abc&file=Dune",
-        ],
-      })
+      expect.objectContaining({ urls: [served] })
     );
     expect(aria.calls.add).toHaveBeenCalledWith(
       expect.objectContaining({
-        urls: ["https://files.example/download?file=movie.mkv"],
+        urls: ["https://files.example/download?link=movie.mkv&apikey=1"],
       })
     );
+  });
+
+  it("sends every link that is not a magnet or .torrent to aria2 when no indexer is known", async () => {
+    const qb = engine("qbittorrent");
+    const aria = engine("aria2");
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+    await hub.add({
+      urls: ["http://prowlarr.lan:9696/3/download?apikey=K&link=a"],
+    });
+    expect(qb.calls.add).not.toHaveBeenCalled();
+    expect(aria.calls.add).toHaveBeenCalledOnce();
   });
 
   it("lets a named engine take the links, and refuses one that is not set up", async () => {

@@ -10,9 +10,13 @@ const CATEGORY: Record<string, string> = {
   music: "3000",
 };
 
+/** How many returned addresses are remembered; the oldest are forgotten first. */
+const ISSUED_LIMIT = 500;
+
 export class ProwlarrSearchProvider implements ReleaseSearchProvider {
   readonly service = "prowlarr";
   private readonly base: string;
+  private readonly issued = new Set<string>();
   private readonly fetchImpl: typeof fetch;
 
   constructor(
@@ -24,6 +28,31 @@ export class ProwlarrSearchProvider implements ReleaseSearchProvider {
   ) {
     this.base = options.baseUrl.trim().replace(/\/+$/, "");
     this.fetchImpl = options.fetch ?? fetch;
+  }
+
+  /**
+   * Prowlarr's download addresses carry no mark of their own, so they are told by where they come from: a
+   * `downloadUrl` this provider returned, or any address under Prowlarr's own base URL. The second covers a
+   * restart and a Prowlarr that writes a different host into its addresses than the one Core reaches it by.
+   */
+  ownsAddress(url: string): boolean {
+    if (this.issued.has(url)) return true;
+    try {
+      const address = new URL(url);
+      const base = new URL(`${this.base}/`);
+      return (
+        address.origin === base.origin &&
+        address.pathname.startsWith(base.pathname)
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  private remember(url: string) {
+    this.issued.add(url);
+    if (this.issued.size > ISSUED_LIMIT)
+      this.issued.delete(this.issued.values().next().value!);
   }
 
   async search(input: {
@@ -58,12 +87,14 @@ export class ProwlarrSearchProvider implements ReleaseSearchProvider {
     const rows: unknown = await response.json();
     if (!Array.isArray(rows))
       throw new ProviderError("UNKNOWN", "Prowlarr returned an invalid result");
-    return rank(
+    const releases = rank(
       rows.flatMap((row) => {
         const item = toCandidate(row);
         return item ? [item] : [];
       })
     ).slice(0, Math.min(Math.max(input.limit ?? 10, 1), 30));
+    for (const release of releases) this.remember(release.downloadUrl);
+    return releases;
   }
 }
 

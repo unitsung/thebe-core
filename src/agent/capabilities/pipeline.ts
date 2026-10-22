@@ -435,6 +435,11 @@ export interface ReleaseSearchProvider {
     type?: "movie" | "tv" | "music" | "any";
     limit?: number;
   }): Promise<ReleaseCandidate[]>;
+  /**
+   * Optional. Whether this address is one the indexer manager serves: a `downloadUrl` it returned, or any
+   * address on its own host. Such an address fetches a torrent although it ends in no `.torrent`.
+   */
+  ownsAddress?(url: string): boolean;
 }
 
 export const RESOURCE_SEARCH_TOOL_NAME = "resource.search" as const;
