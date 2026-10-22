@@ -38,7 +38,7 @@ Thebe Core is designed to run on your own hardware:
   the audit log, change settings, approve pending permissions, and run any tool
   the permission mode allows. Treat it like a password.
 - **Opting out of safety.** `bypassPermissions` lifts the command guard, the
-  sandbox and approval for one session. The App and the TUI ask before turning it
+  sandbox and approval for one session. Graphical clients and the TUI ask before turning it
   on; the HTTP API accepts it from any token holder.
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full operational security

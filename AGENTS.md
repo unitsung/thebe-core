@@ -6,7 +6,7 @@ Build and maintain Thebe Core: a terminal-first coding and homelab agent whose c
 
 `CONTEXT.md` is the authoritative vocabulary and architecture reference. Read it before changing an unfamiliar subsystem. Read the relevant document in `docs/` before changing configuration, sessions, summaries, security, MCP, skills, or subagents.
 
-For App-facing runtime/API work, read **`docs/CORE-PRODUCT-HTTP.md`** for shipped routes and non-goals before starting a new product capability.
+For client-facing runtime/API work, read **`docs/CORE-PRODUCT-HTTP.md`** for shipped routes and non-goals before starting a new product capability.
 
 For deployment, release, or operations work, read **`docs/DEPLOYMENT.md`** (supported container shape, production configuration, upgrade/rollback, backup/restore, release gate).
 

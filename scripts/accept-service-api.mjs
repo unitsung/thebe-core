@@ -4,7 +4,7 @@
  * Acceptance check for one or more `service_api` (OpenAPI) services.
  *
  * Spawns `dist/serve.js` with a throwaway data dir, then walks the product API
- * the way the App or an MCP client would:
+ * the way a client or an MCP client would:
  *   - the per-operation tools appear under GET /v1/capabilities
  *   - service_api_discover lists the service's operations
  *   - a configured read operation is invoked and returns real data

@@ -212,8 +212,8 @@ export NAVIDROME_FALLBACK_URL=https://music.example.com
 专辑、歌手、歌单、歌曲、搜索、歌手详情、歌词和播放队列。
 
 `navidrome.queue` 返回统一的歌曲条目，包括直接播放或转码后的流地址、封面、
-标题、艺术家、专辑和可选歌词。Core 不启动 iOS 播放器；App 消费队列后继续使用
-自己的 MPV、Now Playing 和远程控制实现。歌单创建、更新和删除属于写能力，
+标题、艺术家、专辑和可选歌词。Core 不负责播放；客户端消费队列后用
+自己的播放器、Now Playing 和远程控制实现。歌单创建、更新和删除属于写能力，
 只能通过 Agent 会话的运行时审批执行，直接调用 MCP 或 capability invoke 返回
 403。Navidrome 密码只保留在 Core adapter 内，不会进入工具参数或 capability
 metadata。
@@ -222,7 +222,7 @@ metadata。
 
 仓库提供 `.thebe/skills/navidrome-recommend/SKILL.md`，用于个性化推荐、场景选歌
 和推荐后的播放/歌单追问。将该目录放到配置工作区的 `.thebe/skills/`，或运行
-Core 用户的 `~/.thebe/skills/` 下，再通过 App 的 Skills 设置启用
+Core 用户的 `~/.thebe/skills/` 下，再通过客户端的 Skills 设置启用
 `navidrome-recommend`（HTTP：`PATCH /v1/skills/navidrome-recommend`，正文
 `{"enabled":true}`）。容器部署需把 skill 放在挂载的工作区或持久化 HOME 中；
 仅将它放在开发仓库里不会使任意工作区或现有部署自动启用。
@@ -267,9 +267,8 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 
 仓库提供 `.thebe/skills/library-lookup/SKILL.md` 和
 `.thebe/skills/photo-find/SKILL.md`。放到工作区 `.thebe/skills/` 或
-`~/.thebe/skills/` 后，在 App 的 Skills 设置里启用 `library-lookup` 与
-`photo-find`。只放在开发仓库里不会让任意工作区自动启用。App 直连路由内置同一份
-说明，并把 Core 工具名改写成本机工具名。
+`~/.thebe/skills/` 后，在客户端的 Skills 设置里启用 `library-lookup` 与
+`photo-find`。只放在开发仓库里不会让任意工作区自动启用。
 
 ### 运维类 skill
 
@@ -337,7 +336,7 @@ export ARCANE_ENVIRONMENT_ID=0   # 可选；0 是 Arcane 的本地环境
 
 `THEBE_ARCANE_BASE_URL` / `THEBE_ARCANE_API_KEY` / `THEBE_ARCANE_ENVIRONMENT_ID`
 是等价别名。活动来源读取 `/api/environments/{id}/activities`（最近 25 条，倒序），
-映射 `id` / `type` / `name` / 状态与起止时间，错误文本先脱敏再截断；App 上的“停止”
+映射 `id` / `type` / `name` / 状态与起止时间，错误文本先脱敏再截断；客户端里的“停止”
 调用 `/api/environments/{id}/activities/{activityId}/cancel`，activity 已结束时
 Core 返回 409 与 “already finished” 说明（取消需要 Arcane 版本带活动取消能力，
 旧版本返回 404）。缺少凭据时既不暴露容器能力，也不注册该活动来源。
@@ -385,7 +384,7 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 | `plan`              | 工作区内的读取                                                      | 一切会改动东西的操作都拒绝                                                    |
 | `default`           | 工作区内的读取                                                      | `bash`、`write`、`edit`、记忆写入和各服务的写工具，每次都问                   |
 | `acceptEdits`       | 工作区内的 `write`/`edit`（不含 `.git`），以及有沙箱隔离时的 `bash` | 命令守卫标出的、工作区外的路径、没有沙箱时的 `bash`、`memory`、MCP 与服务写入 |
-| `bypassPermissions` | 一切；命令守卫和沙箱都关闭                                          | 无。在 TUI 或 App 里打开，并先确认                                            |
+| `bypassPermissions` | 一切；命令守卫和沙箱都关闭                                          | 无。在 TUI 或图形客户端里打开，并先确认                                       |
 
 `acceptEdits` 照 Codex 的“按需询问 + 受限沙箱”：能让命令不问就执行的是沙箱，而不是一张“安全命令”清单，
 所以没有沙箱时命令照常询问。有沙箱时，`tree-sitter-bash` 读不懂的脚本、或含有强制 `rm`（照 Codex 的检查，穿过 `sudo`、`env`、`trap`、`bash -c` 也能找到）的脚本，同样会询问。`.git` 与 Codex 的工作区可写沙箱一样保持只读。
@@ -399,7 +398,7 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 
 按会话生效，也可以写成宿主默认。为一个会话同时关闭命令守卫、操作系统沙箱和工具审批，脱敏与审计照旧。
 
-不需要环境变量。`THEBE_FULL_ACCESS` 忽略，等同未设置：它不会让进程以 bypass 启动。在 TUI 的 `/permissions` 或设置菜单里选它，或在 App 的 Agent 设置里选它，都会先确认。确认后的宿主默认会保存到 `config.json`，定时任务、子代理、后台目标和 `/mcp` 用的是宿主默认，不继承某个会话自己开的 bypass。
+不需要环境变量。`THEBE_FULL_ACCESS` 忽略，等同未设置：它不会让进程以 bypass 启动。在 TUI 的 `/permissions` 或设置菜单里选它，或在图形客户端的 Agent 设置里选它，都会先确认。确认后的宿主默认会保存到 `config.json`，定时任务、子代理、后台目标和 `/mcp` 用的是宿主默认，不继承某个会话自己开的 bypass。
 
 模型会读到不可信内容（网页、工具输出、外部 MCP），该模式下一条误判的命令可能损坏宿主数据，只在需要时开启。完全访问在下一条命令生效，不必新开会话。
 
@@ -408,7 +407,7 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 模型跑的 `bash` 和 Core 进程不是同一层边界。没有后端菜单。
 
 - **容器部署**（发布形态）：检测到 `/.dockerenv` 或 `/run/.containerenv` 就不启动沙箱。不要设置 `THEBE_SANDBOX`。不要在容器里再套 bubblewrap 或虚拟机。
-- **装在宿主上**：默认用钉死的 `@anthropic-ai/sandbox-runtime`（和 Claude Code 同一套 Seatbelt / bubblewrap）。TUI 设置和 App 的 Agent 设置里可以关掉，关掉前会确认；命令守卫仍然开着。这不是 bypass，也没有自动跳过权限。`THEBE_SANDBOX=off` 和容器部署会强制关闭，界面改不了。会话或宿主默认里的完全访问（`bypassPermissions`，TUI 和 App 会先确认）同样会拿掉沙箱。
+- **装在宿主上**：默认用钉死的 `@anthropic-ai/sandbox-runtime`（和 Claude Code 同一套 Seatbelt / bubblewrap）。TUI 设置和图形客户端的 Agent 设置里可以关掉，关掉前会确认；命令守卫仍然开着。这不是 bypass，也没有自动跳过权限。`THEBE_SANDBOX=off` 和容器部署会强制关闭，界面改不了。会话或宿主默认里的完全访问（`bypassPermissions`，TUI 和图形客户端会先确认）同样会拿掉沙箱。
 
 `os`、`auto`、`vm`、`gondolin`、`bwrap`、`docker`、`seatbelt` 以及任何其它值都当作没设置：宿主仍用 OS 沙箱，容器里仍关闭。不再映射，也不再因此启动失败。
 

@@ -178,8 +178,8 @@ in `<agent store>/pipeline-jobs.json`. Writes need approval.
 download engine behind the same `download.*` tools. `download.add` sends magnets and `.torrent` links to
 qBittorrent and every other link to aria2 unless `engine` names one; `download.list` merges both and names an
 engine that did not answer in `unreachable`. Every download carries `engine`, `id`, `phase` (`queued`,
-`downloading`, `paused`, `error`, `completed`), `badges` and `capabilities`, the same vocabulary the App's
-Downloads page uses (`contracts/download-states.json`). aria2's RPC cannot delete files: an unfinished
+`downloading`, `paused`, `error`, `completed`), `badges` and `capabilities`, the same vocabulary clients
+use (`contracts/download-states.json`). aria2's RPC cannot delete files: an unfinished
 aria2 download offers `remove_with_files` because removing it makes the owner's own `on-download-stop` script
 clean up; a finished one cannot have its files deleted through aria2 and offers only `remove`.
 
@@ -308,7 +308,7 @@ sent to the model.
   `preview` (`method`, `path`, `body`) and a single-use `confirmToken` that
   expires in five minutes. `service_api.confirm` with that token executes exactly
   the previewed request. Both the preview and the execution are audited, and the
-  App/MCP client is expected to show the preview before confirming. The model's
+  client is expected to show the preview before confirming. The model's
   own write path stays `service_api_write` with runtime approval.
 - Run `node scripts/accept-service-api.mjs` to check a configured service end to
   end (it spawns Core, lists the per-operation tools, discovers operations, and
@@ -392,7 +392,7 @@ One setting decides how much a session may do without asking. The names are Clau
 | `plan`              | Reads inside the workspace                                                                                     | Everything that changes something is refused                                                                            |
 | `manual`            | Reads inside the workspace                                                                                     | `bash`, `write`, `edit`, memory and write tools of services are asked each time                                         |
 | `acceptEdits`       | `write` and `edit` inside the workspace (never `.git`), and `bash` when a sandbox that confines it is in place | Anything the command guard flags, paths outside the workspace, `bash` with no sandbox, `memory`, MCP and service writes |
-| `bypassPermissions` | Everything; the command guard and the sandbox are lifted                                                       | Nothing. Turn it on in the TUI or the App; both ask first                                                               |
+| `bypassPermissions` | Everything; the command guard and the sandbox are lifted                                                       | Nothing. Turn it on in the TUI or a graphical client; both ask first                                                    |
 
 `acceptEdits` follows Codex's on-request policy with a restricted sandbox: the sandbox, not a list of
 "safe" commands, is what makes running a command without asking acceptable, so with no sandbox
@@ -409,7 +409,7 @@ workspace-write sandbox.
 
 Session-scoped, and it can also be the host default. It lifts the command guard, the OS sandbox and tool approval, and leaves redaction and audit in place.
 
-No environment variable is required. `THEBE_FULL_ACCESS` is ignored, the same as leaving it unset: it does not start the process in bypass. Choosing it with `/permissions` or the settings menu in the TUI, or in the App's Agent settings, asks first. A confirmed host default is saved in `config.json`. Schedules, subagents, background goals and `/mcp` use the host default; they do not inherit bypass that one session turned on for itself.
+No environment variable is required. `THEBE_FULL_ACCESS` is ignored, the same as leaving it unset: it does not start the process in bypass. Choosing it with `/permissions` or the settings menu in the TUI, or in a graphical client's Agent settings, asks first. A confirmed host default is saved in `config.json`. Schedules, subagents, background goals and `/mcp` use the host default; they do not inherit bypass that one session turned on for itself.
 
 The model reads untrusted content (web pages, tool output, remote MCP), so in this mode a mistaken command can damage the host: use it only when needed. Full access applies on the next command; a new session is not required.
 
@@ -418,7 +418,7 @@ The model reads untrusted content (web pages, tool output, remote MCP), so in th
 Model `bash` and the Core process are different boundaries. There is no backend menu.
 
 - **Container deployment** (the release shape): `/.dockerenv` or `/run/.containerenv` means no sandbox is started. Leave `THEBE_SANDBOX` unset. Do not nest bubblewrap or a VM inside the container.
-- **Host install**: the default is pinned `@anthropic-ai/sandbox-runtime` (the same Seatbelt / bubblewrap Claude Code uses). The TUI settings menu and the App's Agent settings can turn it off, and both ask first; the command guard stays on. That is not bypass, and there is no automatic bypass. `THEBE_SANDBOX=off` and a container force it off, and the switch cannot override that. Full access (`bypassPermissions`, confirmed in the TUI or the App) also lifts the sandbox.
+- **Host install**: the default is pinned `@anthropic-ai/sandbox-runtime` (the same Seatbelt / bubblewrap Claude Code uses). The TUI settings menu and a graphical client's Agent settings can turn it off, and both ask first; the command guard stays on. That is not bypass, and there is no automatic bypass. `THEBE_SANDBOX=off` and a container force it off, and the switch cannot override that. Full access (`bypassPermissions`, confirmed in the TUI or a graphical client) also lifts the sandbox.
 
 `os`, `auto`, `vm`, `gondolin`, `bwrap`, `docker`, `seatbelt` and any other value are ignored, the same as leaving the variable unset: a host still uses the OS sandbox, and a container still stays off. They are not mapped, and they do not fail startup.
 

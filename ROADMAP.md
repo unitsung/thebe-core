@@ -170,5 +170,5 @@ they are not re-raised as omissions:
 - A chat-tool `/v1/approvals` collection (diagnose-restart uses `/v1/activity`;
   tool confirmations use `/v1/permissions`).
 - A second agent loop, or a Thebe-owned transcript store.
-- iOS DTOs, SwiftUI screens, or native provider clients inside Core.
+- Client UI code (screens, DTOs) or native provider clients inside Core.
 - Self-hosted inference; Octop / Hermes / ACP as dependencies.

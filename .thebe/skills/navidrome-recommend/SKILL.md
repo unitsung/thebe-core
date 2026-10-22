@@ -5,7 +5,7 @@ description: Recommend music from the user's Navidrome library, curate mood-base
 
 # Navidrome recommendations
 
-Use Core's `navidrome.*` tools. The App owns playback; `navidrome.queue` supplies playable items.
+Use Core's `navidrome.*` tools. The client owns playback; `navidrome.queue` supplies playable items.
 
 ## Match the request
 

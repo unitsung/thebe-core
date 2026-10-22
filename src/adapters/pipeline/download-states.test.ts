@@ -66,7 +66,7 @@ function aria2Reading(status: string, progress: number) {
 }
 
 describe("Download states contract", () => {
-  it("matches the checked-in file the App syncs (THEBE_UPDATE_CONTRACT=1 rewrites it)", async () => {
+  it("matches the checked-in contract file (THEBE_UPDATE_CONTRACT=1 rewrites it)", async () => {
     if (process.env.THEBE_UPDATE_CONTRACT === "1")
       await writeFile(contractFile, render());
     expect(await readFile(contractFile, "utf8")).toBe(render());

@@ -141,12 +141,12 @@ enable it by default. This never pushes.
 | `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
 | `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                           |
 | `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                          |
-| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`, or the App's provider settings                                                                                                                                    |
+| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`                                                                                                                                                                    |
 
 Request contract (verified by `scripts/smoke.mjs`):
 
 ```text
-/docs, /openapi.json, /swagger   readable without the token (the App links here)
+/docs, /openapi.json, /swagger   readable without the token
 every other route                401 without X-Thebe-Token
 mutating routes                  403 when the Host header is not allowlisted
 ```
@@ -162,15 +162,15 @@ Secret handling:
 
 ### 3.1 Push notifications: registration here, delivery elsewhere
 
-Core stores iOS device registrations (`GET/POST /v1/devices`, `DELETE
-/v1/devices/{registrationId}`) with a redacted token, and the App registers
-notification categories. Core does **not** deliver APNs notifications and this
-release ships no relay: remote notifications are not delivered. When delivery is added it arrives as a
-separately deployed Push Relay that Core signs events for, so a self-hosted Core
-never embeds Thebe's APNs credentials. Until then, do not run or document a relay
-as part of this deployment.
+Core stores push device registrations (`GET/POST /v1/devices`, `DELETE
+/v1/devices/{registrationId}`) with a redacted token, and clients register
+notification categories. Core does **not** deliver push notifications and this
+release ships no relay: remote notifications are not delivered. When delivery is
+added it arrives as a separately deployed Push Relay that Core signs events for,
+so a self-hosted Core never embeds Thebe's APNs credentials. Until then, do not
+run or document a relay as part of this deployment.
 
-## 4. Network exposure and the iOS connection
+## 4. Network exposure and client connections
 
 Pick one TLS path; all three keep Core on loopback and never expose the token in
 plaintext off-host:
@@ -225,16 +225,16 @@ Rules:
   an unlisted public Host get `403`.
 - Do not publish `8787` on `0.0.0.0`, and do not put Core behind a proxy that
   strips the `Host` header.
-- iOS: in the App, set the Core URL to the TLS endpoint and paste
-  `THEBE_TOKEN`. Confirm `GET /v1/health` succeeds and the API docs open, then
-  open Activity — the App's first product call is `GET /v1/activity`.
+- Clients: point them at the TLS endpoint and give them `THEBE_TOKEN` in an
+  `X-Thebe-Token` header. Confirm `GET /v1/health` succeeds and `/docs` opens,
+  then `GET /v1/activity` with the token.
 
 ### 4.1 Home network mode (no TLS)
 
-The App accepts plain `http://` addresses, and private-network hosts are trusted automatically, so a
+Private-network hosts are trusted automatically and a client can use a plain `http://` address, so a
 Core used only inside the home needs no certificate. Publish the port on the host's LAN address
-only: set `THEBE_BIND=<LAN address>` in `deploy/.env` and `docker compose up -d`. Then enter
-`http://<LAN address>:8787` and the token in the App.
+only: set `THEBE_BIND=<LAN address>` in `deploy/.env` and `docker compose up -d`. Then point
+clients at `http://<LAN address>:8787` with the token.
 
 What this costs: the token crosses your network in plaintext, so anyone on it who captures a request
 holds full access. Keep `THEBE_REMOTE_BASH` off unless you trust the network, never bind `0.0.0.0`,
@@ -280,7 +280,7 @@ container is the release boundary:
   uses the OS sandbox by default; `THEBE_SANDBOX=off` is the only escape
   hatch. See `docs/configuration.en.md`.
 - `THEBE_FULL_ACCESS` is ignored. It does not start Core in bypass. Turn
-  bypass on in the TUI or the App; both ask first. That choice is the host
+  bypass on in the TUI or a graphical client; both ask first. That choice is the host
   default when saved from settings, so schedules and subagents follow it.
 - Choosing the host-service path instead means you provide the dedicated user
   (no login shell, no sudo) and the filesystem permissions yourself.

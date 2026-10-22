@@ -268,7 +268,7 @@ describe("Thebe HTTP handler", () => {
     expect(Array.isArray(body.events)).toBe(true);
   });
 
-  it("POST /v1/devices accepts an iOS token", async () => {
+  it("POST /v1/devices accepts a device token", async () => {
     const res = await handler().handle(
       new Request("http://127.0.0.1:8787/v1/devices", {
         method: "POST",
