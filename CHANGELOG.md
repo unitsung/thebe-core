@@ -18,6 +18,7 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Fixed
 
+- The audit log is on by default: it writes `audit.jsonl` in the agent store directory. Before, it was written only when `THEBE_AUDIT_PATH` was set, which no deployment did, so `GET /v1/audit` was always empty.
 - `service_api_discover` matches every word of a query in any order; "list containers" no longer needs the exact phrase.
 - Creating a session with no configured model answers `409 no_model_configured`, and asking for a model that is not available answers `404 model_not_found`; both were an unexplained `500`.
 

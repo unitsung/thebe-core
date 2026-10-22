@@ -214,7 +214,8 @@ export async function bootstrapThebe(
     // `thebe token` commands apply without a restart.
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
-    auditPath: process.env.THEBE_AUDIT_PATH,
+    auditPath:
+      process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
     model: defaultModel,
     autoCompact: userConfig.autoCompact,
     autoSummary: userConfig.autoSummary,
