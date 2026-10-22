@@ -39,10 +39,11 @@ operate on that one directory.
 A multi-arch image (`linux/amd64` and `linux/arm64`) is built and pushed to
 GitHub Container Registry by `.github/workflows/publish-image.yml`, which runs
 on version tags (`v*`) and manual dispatch — not on every push. The package is
-private while this repository is private, so authenticate first:
+private until the first public release; once it is public no login is needed.
+While it is private, authenticate first with a GitHub account that has access:
 
 ```bash
-echo "$GHCR_TOKEN" | docker login ghcr.io -u unitsung --password-stdin   # token needs read:packages
+echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin   # token needs read:packages
 ```
 
 Point the compose file at it in `deploy/.env`:

@@ -1,14 +1,10 @@
 # Thebe App ↔ Core Runtime Contract
 
-> Baseline: `unitsung/thebe@dev` + `unitsung/thebe-core@dev`
+> Baseline: `thebe-core@dev` and the Thebe App (an Apple client whose source is not published)
 >
-> Status: implementation contract
->
-> Companion docs:
->
-> - `unitsung/thebe/docs/PRODUCT-THESIS.md`
-> - `unitsung/thebe/docs/AGENT-NAS-DESIGN-PRINCIPLES.md`
-> - `unitsung/thebe/ui/docs/archive/AGENT-NATIVE-REFACTOR.md`
+> Status: implementation contract. It records what Core promises any graphical client, and which
+> parts the App relies on. Other clients can use it as a compatibility reference; the HTTP routes
+> themselves are in [CORE-PRODUCT-HTTP.md](CORE-PRODUCT-HTTP.md).
 
 ## Shipped product contracts (dev implementation)
 

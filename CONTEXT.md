@@ -29,7 +29,7 @@ First `AgentRuntime` implementation. Embeds `@earendil-works/pi-coding-agent` vi
 _Avoid_: depending on Pi types outside `src/adapters/pi`, wrapping the Pi CLI
 
 **Pi version pin**:
-`@earendil-works/pi-coding-agent`, `pi-server`, `pi-tui` (dependencies) and `pi-ai` (dev) are pinned together (currently `1.0.4`) and listed in `pnpm-workspace.yaml#minimumReleaseAgeExclude`. Pi's dist is loaded by URL from its own `node_modules` (`src/adapters/pi/sdk/load-pi.ts`), including `pi-ai` for providers that need its helpers, so Core never depends on pi-ai directly and never bundles a second copy. Provider streams receive a normalized transcript (`getCurrentSystemPrompt` / `getCurrentTools`), not `context.systemPrompt`/`context.tools`.
+`@earendil-works/pi-coding-agent`, `pi-mcp`, `pi-tui` (dependencies) and `pi-ai` (dev) move together (currently `^1.2.0`, locked in `package-lock.json`); bump all four in one change and run `node scripts/check-pi-resolution.mjs`. Pi's dist is loaded by URL from its own `node_modules` (`src/adapters/pi/sdk/load-pi.ts`), including `pi-ai` for providers that need its helpers, so Core never depends on pi-ai directly and never bundles a second copy. Provider streams receive a normalized transcript (`getCurrentSystemPrompt` / `getCurrentTools`), not `context.systemPrompt`/`context.tools`.
 _Avoid_: bumping one Pi package alone, importing pi-ai outside `src/adapters/pi`, reading `context.systemPrompt` in a provider
 
 **MCP Integration**:
