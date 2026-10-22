@@ -46,7 +46,7 @@ staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `com
 
 ## Pull requests
 
-1. Fork the repository and branch from `main`.
+1. Fork the repository and branch from `dev`.
 2. Make the smallest coherent change, keeping the Agent interface thin and
    variable behavior behind a clear seam.
 3. Add or update a regression test when behavior changes or a bug is fixed.
@@ -76,7 +76,7 @@ change or have the right to submit it under this project's license
 ```bash
 git commit -s            # new commits
 git commit --amend -s    # the last commit
-git rebase --signoff main  # every commit of your branch
+git rebase --signoff dev  # every commit of your branch
 ```
 
 The sign-off uses your Git `user.name` and `user.email`. CI runs `scripts/check-dco.sh` on pull

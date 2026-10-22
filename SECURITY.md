@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-Development happens on `main`. 0.1.0 is the first release; only the latest
-release and `main` receive security fixes. Keep the `/data` directory when you
+Development happens on `dev` and releases are cut from `main`. 0.1.0 is the
+first release; only the latest release and `dev` receive security fixes. Keep the `/data` directory when you
 move to a newer version.
 
 ## Reporting a vulnerability

@@ -5,7 +5,7 @@
 > 明确不做见 **Not planned**。Core 目前是 API-first：用终端、HTTP API 或 MCP 使用；除了 `/docs`
 > 的 API 参考页（Swagger UI），没有任何 web 界面。
 
-Status: living document. It reflects what `main` contains (release 0.1.0) and the remaining work named in
+Status: living document. It reflects what `dev` contains (release 0.1.0 and after) and the remaining work named in
 `docs/CORE-PRODUCT-HTTP.md`. It is a plan, not a commitment, and nothing here is scheduled to a
 date.
 

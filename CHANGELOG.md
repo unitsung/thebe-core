@@ -7,7 +7,7 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ## [0.1.0] - 2026-10-22
 
-The first release, built from the history on `main`.
+The first release, built from `main`.
 
 ### Added
 

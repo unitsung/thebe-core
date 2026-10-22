@@ -55,7 +55,7 @@ kind and open its content from task details. Existing Artifact retention
 limits still apply. Authorization/Proxy-Authorization Bearer and Basic tokens
 are redacted in logs and Artifact content.
 
-This page records the product HTTP surfaces shipped on `main`. Delivery still only calls `ThebeAgent`; raw `/mcp` stays the integration surface (see "Raw `/mcp` contract" below).
+This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` stays the integration surface (see "Raw `/mcp` contract" below).
 
 ## Permission modes (2026-10-14)
 
