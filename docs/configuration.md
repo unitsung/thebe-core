@@ -122,6 +122,8 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_TOOL_RESULT_COMPACTION` 可选，默认关闭。设为 `on` 时，每次调用模型前把模型已经据以回答过的工具结果缩短（本轮约 3000 字符，更早的轮次约 1200 字符，更早轮次的图片会被去掉）；模型最后一条消息之后新到的结果保持完整，会话记录不变。它减小输入，但会改写服务商已经见过的文本，从改写处起丢失提示缓存命中，所以只在输入体积比缓存复用更重要时开启。
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
+- `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
+- `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
 ## OpenList STRM 修复 provider
 
@@ -282,6 +284,45 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 
 对应工具未配置时，skill 会照实报告而不是编造结果。
 
+## 网页搜索与音乐来源
+
+都是可选项，配置前默认关闭。
+
+```bash
+# 网页搜索：开启 JSON 输出的 SearXNG 实例
+export THEBE_WEB_SEARCH_URL=http://127.0.0.1:8080
+
+# 音乐来源（只读查询；SQMusic 下载需审批）
+export THEBE_NETEASE_API_URL=http://127.0.0.1:3000      # NeteaseCloudMusicApi 服务，无需登录
+export THEBE_SQMUSIC_URL=http://127.0.0.1:8081
+export THEBE_SQMUSIC_USERNAME=thebe
+export THEBE_SQMUSIC_PASSWORD=your-password
+```
+
+- `THEBE_WEB_SEARCH_URL` 注册 `web_search`（最多 5 条结果，每条 500 字符，附来源链接）。没有公共默认端点：不设置该变量时 Core 不提供 `web_search`。会话可以通过标签 `thebe.webSearch=false` 单独关闭。搜索结果是不可信文本。不想自己跑 SearXNG 时，可以改接搜索类 MCP 服务器（见上文“MCP 服务器”）。
+- `THEBE_NETEASE_API_URL` 注册 `netease_music`（搜索、歌词、评论、歌单、榜单）。
+- `THEBE_SQMUSIC_URL`、`_USERNAME`、`_PASSWORD` 三项都配置才注册 `sqmusic_search` 和 `sqmusic_download`。下载一次排队一首歌，传 `kind: "album"` 时排队整张专辑（最多 60 首），需要审批；经 `/mcp` 或直接调用 capability 会被 403 拒绝。完整契约见 [Core 产品 HTTP](CORE-PRODUCT-HTTP.md)。
+- 内置的 `music_research`（MusicBrainz 和 Wikipedia 查询）无需配置。
+
+## 其他 HTTP 服务（OpenAPI）
+
+按你提供的 OpenAPI 3 或 Swagger 2 文档接入一个 HTTP 服务：
+
+```bash
+export THEBE_SERVICE_APIS='[{"id":"my-service","baseURL":"http://192.168.1.10:8080","openapiPath":"/openapi.json","headersEnv":{"X-API-Key":"MY_SERVICE_API_KEY"}}]'
+export MY_SERVICE_API_KEY=...
+```
+
+发现和读取操作从 OpenAPI 文档加载，写操作需要审批。请求头的值是环境变量名，不会发给模型。
+
+- `openapiPath` 相对 `baseURL` 获取。服务不在那里提供文档时，用 `openapiURL` 给出绝对的 `http(s)` 地址（获取文档时不带 API 的认证头，认证头只发给 API 主机）。
+- `readOperations` 是运维人员指定的只读白名单（operationId 或 `METHOD /path`）。白名单内的每个读操作会成为独立工具 `service_api.<id>.<operationId>`，有真实的入参 schema，出现在 `/mcp` 和 `/v1/capabilities` 里。其余操作仍走 `service_api_discover` / `service_api_write`，写需要运行时审批。需要请求头参数的操作不会这样暴露（请求头由运维人员持有）。
+- `readMethods`（如 `["GET","HEAD"]`）把这些方法的操作都当作只读；`trustReadOnlyAnnotations: true` 额外信任文档自带的只读标注。两者默认都**关闭**——远端文档不能自己声明自己只读。
+- `excludeOperations`（operationId 或 `METHOD /path`）和 `excludeTags` 把操作从发现和命名工具里隐藏，匹配的请求一律拒绝，读、写、已批准的调用都不例外。用于管理类或破坏性接口。
+- `writeOperations` 把选定的写操作暴露为两阶段工具：调用本身**不做任何改动**，只返回 `preview`（`method`、`path`、`body`）和一次性 `confirmToken`（5 分钟过期）；`service_api.confirm` 携带该 token 才会执行刚才预览的那个请求。预览和执行都会审计。模型自己的写路径仍是 `service_api_write` 加运行时审批。
+- `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` 和 `THEBE_CLOUDSAVER_BASE_URL` / `THEBE_CLOUDSAVER_TOKEN` 是这两个服务的快捷配置，无需写 `THEBE_SERVICE_APIS`。CloudSaver 的 token 以 Bearer 形式发送。
+- `node scripts/accept-service-api.mjs` 可以端到端检查已配置的服务（启动 Core、列出逐操作工具、发现操作、调用一个读操作；`--preview` 检查两阶段写）。
+
 ## Arcane 容器 provider 与活动来源
 
 Arcane 提供容器能力（`container.list` / `container.inspect` / `container.logs` /
@@ -320,8 +361,7 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 
 ## 命令风险守卫（homelab / NAS 启发式）
 
-`bash`、`write`、`edit` 的审批前会先过一遍命令风险守卫（`src/agent/security/command-risk.ts`，
-规则表来自重构前的 `src/policy/safety-evaluator.ts`），分四档：
+`bash`、`write`、`edit` 的审批前会先过一遍命令风险守卫（`src/agent/security/command-risk.ts`），分四档：
 
 | 风险        | 行为                                                          | 例子                                                                                                                                                                                                                                                                                     |
 | ----------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

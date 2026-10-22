@@ -38,6 +38,8 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_AGENT_STORE_DIR`: session, goal, and subagent metadata. Pi transcripts are not stored here.
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
+- `THEBE_SESSION_DIR`: where the Pi runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
+- `THEBE_AUDIT_PATH`: the append-only audit log (JSON lines: method, parameter hash, result, duration; no arguments or output). Defaults to `audit.jsonl` in the agent store directory. `GET /v1/audit` reads it back.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
 ## Managing settings
@@ -247,7 +249,29 @@ content; filename, date, and city filters still use the metadata listings. If
 machine learning is unavailable the error is surfaced, not treated as an empty
 library.
 
+### Web search and music sources
+
+Both are optional and off until configured.
+
+```bash
+# Web search: a SearXNG instance with the JSON format enabled
+export THEBE_WEB_SEARCH_URL=http://127.0.0.1:8080
+
+# Music sources (read-only lookups, plus approval-gated SQMusic downloads)
+export THEBE_NETEASE_API_URL=http://127.0.0.1:3000      # a NeteaseCloudMusicApi service, no login
+export THEBE_SQMUSIC_URL=http://127.0.0.1:8081
+export THEBE_SQMUSIC_USERNAME=thebe
+export THEBE_SQMUSIC_PASSWORD=your-password
+```
+
+- `THEBE_WEB_SEARCH_URL` registers `web_search` (up to 5 results of 500 characters, with source links). There is no public default endpoint: without this variable Core offers no `web_search`. A session also keeps its own on/off switch. Results are untrusted text. To search without running SearXNG, point Core at a search MCP server instead (see [MCP servers](#mcp-servers)).
+- `THEBE_NETEASE_API_URL` registers `netease_music` (search, lyrics, comments, playlist, toplist).
+- `THEBE_SQMUSIC_URL` with `_USERNAME` and `_PASSWORD` (all three) registers `sqmusic_search` and `sqmusic_download`. A download queues one song, or with `kind: "album"` one album (at most 60 songs), and needs approval; it is refused over `/mcp` and direct capability invoke. See [Core product HTTP](CORE-PRODUCT-HTTP.md) for the full contract.
+- Built-in `music_research` (MusicBrainz and Wikipedia lookups) needs no configuration.
+
 ### Other services (OpenAPI)
+
+`THEBE_CLOUDSAVER_BASE_URL` and `THEBE_CLOUDSAVER_TOKEN` (and the same pair for OpenList) are shortcuts that register those two services as OpenAPI connections without a `THEBE_SERVICE_APIS` entry. The CloudSaver token is sent as a bearer token.
 
 Add one HTTP service by setting its base URL and an OpenAPI 3 or Swagger 2 document:
 
