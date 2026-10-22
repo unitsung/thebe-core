@@ -46,7 +46,7 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
+describe("Thebe HTTP handler", () => {
   it("rejects a model output limit larger than its context window before saving", async () => {
     const { createFakeRuntime } =
       await import("../../testing/runtime/index.ts");
@@ -100,7 +100,13 @@ describe("Thebe HTTP handler (iOS ThebeCoreClient)", () => {
       (saved[0] as { models: Array<{ thinkingLevelMap: unknown }> }).models[0]
         ?.thinkingLevelMap
     ).toEqual({ low: null, xhigh: "xhigh" });
-    for (const bad of [{ ultra: "x" }, { low: 3 }, { low: "" }, ["low"], "low"]) {
+    for (const bad of [
+      { ultra: "x" },
+      { low: 3 },
+      { low: "" },
+      ["low"],
+      "low",
+    ]) {
       const response = await put(bad);
       expect(response.status).toBe(400);
     }

@@ -127,7 +127,7 @@ export type CreateThebeAgentOptions = {
   autoSummaryDelayMs?: number;
   permissionMode?: PermissionMode;
   /**
-   * Ignored. `bypassPermissions` is always selectable. The TUI and the App
+   * Ignored. `bypassPermissions` is always selectable. The TUI and graphical clients
    * confirm before turning it on. `THEBE_FULL_ACCESS` does not start bypass.
    */
   fullAccessAllowed?: boolean;

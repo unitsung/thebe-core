@@ -8,13 +8,12 @@ import {
 } from "./navidrome.ts";
 
 /**
- * The part of the Navidrome capabilities the iOS App depends on, exported as data. Core owns it;
- * the App keeps a copy under `ui/Tests/Fixtures` (`scripts/sync-core-contract.sh --check` fails on
- * drift) and its tests check the App's requests and decoders against it.
+ * The part of the Navidrome capabilities a client depends on, exported as data. Core owns it; a
+ * client can check its requests and decoders against it.
  */
 export const NAVIDROME_CONTRACT_PATH = "contracts/navidrome-capabilities.json";
 
-/** A queue as the App receives it from `navidrome.queue`, with a real two-item shape. */
+/** A queue as a client receives it from `navidrome.queue`, with a real two-item shape. */
 export const NAVIDROME_QUEUE_EXAMPLE = {
   items: [
     {
@@ -24,7 +23,8 @@ export const NAVIDROME_QUEUE_EXAMPLE = {
       title: "First",
       artist: "Artist",
       album: "Album",
-      artworkUrl: "https://music.example/rest/getCoverArt.view?id=al-1&size=600",
+      artworkUrl:
+        "https://music.example/rest/getCoverArt.view?id=al-1&size=600",
       artworkHeaders: {},
       lyrics: {
         synced: true,
@@ -61,8 +61,11 @@ export function buildNavidromeContract() {
     capabilities: Object.fromEntries(
       NAVIDROME_TOOL_NAMES.map((name) => [
         name,
-        { ...NAVIDROME_CAPABILITY_METADATA[name], inputSchema: NAVIDROME_TOOL_SCHEMAS[name] },
-      ]),
+        {
+          ...NAVIDROME_CAPABILITY_METADATA[name],
+          inputSchema: NAVIDROME_TOOL_SCHEMAS[name],
+        },
+      ])
     ),
     examples: {
       "navidrome.queue": NAVIDROME_QUEUE_EXAMPLE,

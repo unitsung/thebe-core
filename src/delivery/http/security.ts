@@ -5,7 +5,7 @@
  * handler.ts is the primary guard for read routes. This file only does
  * browser cross-site / DNS-rebinding protection for writes.
  *
- * Non-browser clients (curl, iOS, Tauri) do not send Origin — origin
+ * Non-browser clients (curl, native apps, Tauri) do not send Origin — origin
  * validation is skipped when Origin is absent. Browser cross-site
  * requests are blocked via sec-fetch-site first, then Origin vs Host.
  *
@@ -17,7 +17,7 @@
  */
 export function validateRequestSecurity(
   request: Request,
-  allowedHosts?: Set<string>,
+  allowedHosts?: Set<string>
 ): { ok: boolean; reason?: string } {
   const method = request.method.toUpperCase();
   const isMutating = ["POST", "PUT", "PATCH", "DELETE"].includes(method);
@@ -51,7 +51,10 @@ export function validateRequestSecurity(
       const originUrl = new URL(origin);
       if (originUrl.host !== host) {
         if (!allowedHosts || !hostAllowed(originUrl.host, allowedHosts)) {
-          return { ok: false, reason: "cross-origin browser requests rejected" };
+          return {
+            ok: false,
+            reason: "cross-origin browser requests rejected",
+          };
         }
       }
     } catch {
@@ -80,7 +83,10 @@ function hostAllowed(hostHeader: string, allowed: Set<string>): boolean {
   if (allowed.has("*")) {
     return true;
   }
-  return hostInAllowlist(hostHeader, allowed) || isTrustedLocalHost(hostnameOf(hostHeader));
+  return (
+    hostInAllowlist(hostHeader, allowed) ||
+    isTrustedLocalHost(hostnameOf(hostHeader))
+  );
 }
 
 function isTrustedLocalHost(hostname: string): boolean {

@@ -52,7 +52,7 @@ export function coreRunsInContainer(
 }
 
 /**
- * Why the OS sandbox cannot be turned on from the TUI or the App.
+ * Why the OS sandbox cannot be turned on from the TUI or a client.
  * `THEBE_SANDBOX=off` wins over the saved preference. A container never nests one.
  */
 export function sandboxForcedOff(
@@ -63,7 +63,7 @@ export function sandboxForcedOff(
     return {
       source: "environment",
       message:
-        "THEBE_SANDBOX=off keeps the OS sandbox off. Unset it to change this in the TUI or the App.",
+        "THEBE_SANDBOX=off keeps the OS sandbox off. Unset it to change this in the TUI or a client.",
     };
   }
   if (options.inContainer ?? coreRunsInContainer()) {

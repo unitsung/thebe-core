@@ -6,9 +6,9 @@ import type {
 
 /**
  * How each engine's own state becomes the one phase, badges and capabilities every Download carries,
- * exported as data. Core owns the table; the App keeps a copy under `ui/Tests/Fixtures/contracts`
- * (`scripts/sync-core-contract.sh --check` fails on drift) and runs the same cases through its own
- * readers, so the two routes cannot disagree about what a stalled or a seeding torrent is.
+ * exported as data. Core owns the table; a client that reads the engines itself can run the same
+ * cases through its own readers, so the two routes cannot disagree about what a stalled or a
+ * seeding torrent is.
  */
 export const DOWNLOAD_STATES_CONTRACT_PATH = "contracts/download-states.json";
 

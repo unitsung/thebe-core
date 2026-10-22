@@ -19,7 +19,7 @@ export type DownloadState =
 export const DOWNLOAD_ENGINES = ["qbittorrent", "aria2"] as const;
 export type DownloadEngine = (typeof DOWNLOAD_ENGINES)[number];
 
-/** Where a download stands, in one vocabulary for every engine (the App uses the same one). */
+/** Where a download stands, in one vocabulary for every engine (clients use the same one). */
 export type DownloadPhase =
   | "queued"
   | "downloading"
@@ -28,7 +28,7 @@ export type DownloadPhase =
   | "completed";
 /**
  * How a phase is qualified: a stalled download is still downloading, a seeding one is completed.
- * `retrying` and `cancelling` are part of the App's shared vocabulary; no engine here reports them yet.
+ * `retrying` and `cancelling` are part of the shared vocabulary; no engine here reports them yet.
  */
 export type DownloadBadge =
   | "no_progress"
@@ -38,7 +38,7 @@ export type DownloadBadge =
   | "cancelled";
 /**
  * What the engine really supports for this one download; a tool that cannot work is not offered.
- * `retry` and `cancel` are part of the App's shared vocabulary; no engine here offers them yet.
+ * `retry` and `cancel` are part of the shared vocabulary; no engine here offers them yet.
  */
 export type DownloadCapability =
   | "pause"
@@ -54,7 +54,7 @@ export type DownloadItem = {
   name: string;
   /** The download engine that owns it. */
   engine: DownloadEngine;
-  /** Same as `hash`, under the name the App's Download shape uses. */
+  /** Same as `hash`, under the name clients' Download shape uses. */
   id: string;
   phase: DownloadPhase;
   badges: DownloadBadge[];

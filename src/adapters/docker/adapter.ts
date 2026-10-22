@@ -10,7 +10,7 @@ import {
 /**
  * Docker Engine API container provider, reached through a restricted
  * `docker-socket-proxy` URL. This is the Arcane-free second implementation
- * decided for Core: the App can list/inspect/read logs and restart containers
+ * decided for Core: a client can list/inspect/read logs and restart containers
  * on a host that runs no container panel.
  *
  * Core never opens `docker.sock` directly and only ever talks to the configured

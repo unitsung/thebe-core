@@ -32,9 +32,7 @@ export type ArcaneBackgroundTaskProviderOptions = {
  * one (409 when it already finished). Cancelling needs an Arcane build with
  * activity cancellation (PR #2756); older builds answer 404.
  */
-export class ArcaneBackgroundTaskProvider
-  implements ProductBackgroundTaskProvider
-{
+export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvider {
   readonly service = "arcane";
 
   private readonly baseUrl: string;
@@ -61,7 +59,7 @@ export class ArcaneBackgroundTaskProvider
       order: "desc",
     });
     const body = await this.requestJSON(
-      `${this.environmentPath()}/activities?${query.toString()}`,
+      `${this.environmentPath()}/activities?${query.toString()}`
     );
     const rows = Array.isArray(body.data) ? body.data : [];
     const tasks: ProviderBackgroundTask[] = [];
@@ -80,13 +78,13 @@ export class ArcaneBackgroundTaskProvider
     try {
       await this.requestJSON(
         `${this.environmentPath()}/activities/${encodeURIComponent(id)}/cancel`,
-        { method: "POST" },
+        { method: "POST" }
       );
     } catch (cause) {
       if (cause instanceof ProviderError && providerStatus(cause) === 409) {
         const finished = new ProviderError(
           "UNKNOWN",
-          `Arcane activity ${id} has already finished`,
+          `Arcane activity ${id} has already finished`
         );
         (finished as ProviderError & { status?: number }).status = 409;
         throw finished;
@@ -100,7 +98,7 @@ export class ArcaneBackgroundTaskProvider
     await Promise.all(
       tasks
         .filter((task) => task.status === "running")
-        .map((task) => this.stop(task.id)),
+        .map((task) => this.stop(task.id))
     );
   }
 
@@ -110,7 +108,7 @@ export class ArcaneBackgroundTaskProvider
 
   private async requestJSON(
     path: string,
-    init: { method?: "GET" | "POST" } = {},
+    init: { method?: "GET" | "POST" } = {}
   ): Promise<JsonObject> {
     let response: Response;
     try {
@@ -122,13 +120,17 @@ export class ArcaneBackgroundTaskProvider
         },
       });
     } catch (cause) {
-      throw new ProviderError("UNREACHABLE", "Arcane API is unreachable", cause);
+      throw new ProviderError(
+        "UNREACHABLE",
+        "Arcane API is unreachable",
+        cause
+      );
     }
 
     if (!response.ok) {
       const error = new ProviderError(
         statusToCode(response.status),
-        `Arcane HTTP ${response.status}`,
+        `Arcane HTTP ${response.status}`
       );
       // Keep the provider status so the product HTTP layer can answer with it.
       (error as ProviderError & { status?: number }).status = response.status;
@@ -150,7 +152,7 @@ export class ArcaneBackgroundTaskProvider
 }
 
 export function createArcaneBackgroundTaskProviderFromEnv(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = process.env
 ): ArcaneBackgroundTaskProvider | undefined {
   const baseUrl = firstEnv(env, ["THEBE_ARCANE_BASE_URL", "ARCANE_BASE_URL"]);
   const apiKey = firstEnv(env, ["THEBE_ARCANE_API_KEY", "ARCANE_API_KEY"]);
@@ -165,7 +167,7 @@ export function createArcaneBackgroundTaskProviderFromEnv(
 
 /** Arcane environment the agent talks to; `0` is Arcane's local environment. */
 export function arcaneEnvironmentIdFromEnv(
-  env: Record<string, string | undefined> = process.env,
+  env: Record<string, string | undefined> = process.env
 ): string | undefined {
   return firstEnv(env, [
     "THEBE_ARCANE_ENVIRONMENT_ID",
@@ -175,7 +177,7 @@ export function arcaneEnvironmentIdFromEnv(
 
 function firstEnv(
   env: Record<string, string | undefined>,
-  names: readonly string[],
+  names: readonly string[]
 ): string | undefined {
   for (const name of names) {
     const value = env[name]?.trim();
@@ -196,7 +198,7 @@ function toProviderTask(value: unknown): ProviderBackgroundTask | undefined {
   const name =
     stringField(dto, "resourceName") || stringField(dto, "step") || kind;
   const error = stringField(dto, "error");
-  // Arcane names the object an activity belongs to, so the App can deep link to
+  // Arcane names the object an activity belongs to, so a client can deep link to
   // it (`thebe://resource/<kind>/<provider>/<id>`).
   const resourceKind = stringField(dto, "resourceType").toLowerCase();
   const resourceId = stringField(dto, "resourceId");
@@ -219,7 +221,7 @@ function toProviderTask(value: unknown): ProviderBackgroundTask | undefined {
 
 function statusForActivity(
   value: unknown,
-  endedAt: string | undefined,
+  endedAt: string | undefined
 ): ProviderBackgroundTask["status"] {
   const status = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (status === "failed") return "failed";
@@ -251,4 +253,3 @@ function stringField(object: JsonObject, key: string): string {
   const value = object[key];
   return typeof value === "string" ? value.trim() : "";
 }
-

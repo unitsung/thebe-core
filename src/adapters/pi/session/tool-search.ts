@@ -203,7 +203,7 @@ export function createRelevantToolSearchExtension() {
               type: "text",
               text:
                 loaded.length === 0
-                  ? "No App tool fits this search. If the user did not ask to act on a connected service, answer without tools."
+                  ? "No connected tool fits this search. If the user did not ask to act on a connected service, answer without tools."
                   : `Loaded ${loaded.length} tool${loaded.length === 1 ? "" : "s"}. They are available from your next call:\n${loaded
                       .map(
                         (t) =>

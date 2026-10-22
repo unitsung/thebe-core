@@ -1,7 +1,7 @@
 /**
  * Whether a session may use `bypassPermissions`.
  *
- * It is always selectable. The TUI and the App ask before turning it on.
+ * It is always selectable. The TUI and graphical clients ask before turning it on.
  * `THEBE_FULL_ACCESS` is ignored, the same as leaving it unset: it does not
  * start the process in bypass, and it is not required.
  */

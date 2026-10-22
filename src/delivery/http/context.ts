@@ -10,14 +10,14 @@ export type ThebeHttpContext = {
   parts: string[];
   version: string;
   agent?: ThebeAgent;
-  /** Durable device registration state used by the iOS push endpoint. */
+  /** Durable device registration state used by the device push endpoint. */
   deviceRegistry?: DeviceRegistry;
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
 
 export type ThebeHttpRoute = (
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ) => Response | undefined | Promise<Response | undefined>;
 
 export function createThebeHttpContext(
@@ -28,7 +28,7 @@ export function createThebeHttpContext(
     path?: string;
     deviceRegistry?: DeviceRegistry;
     workspacePath?: string;
-  },
+  }
 ): ThebeHttpContext {
   const url = new URL(request.url);
   const path = options.path ?? (url.pathname.replace(/\/$/, "") || "/");
@@ -58,6 +58,6 @@ export function quiescedWrite(context: ThebeHttpContext): Response | undefined {
       error:
         "System is quiesced for maintenance; write operations are temporarily disabled",
     },
-    503,
+    503
   );
 }

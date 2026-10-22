@@ -2,9 +2,8 @@ import type { ContainerSummary } from "./containers.ts";
 import type { DownloadItem, FileEntry } from "./pipeline.ts";
 
 /**
- * Results the App turns into tables and file lists, exported as data. Core owns the shapes; the App
- * keeps a copy under `ui/Tests/Fixtures/contracts` (`scripts/sync-core-contract.sh --check` fails on
- * drift) and checks that its card specs read these fields.
+ * Results a client turns into tables and file lists, exported as data. Core owns the shapes; a
+ * client can check that its card specs read these fields.
  */
 export const LISTING_CONTRACT_PATH = "contracts/listing-results.json";
 

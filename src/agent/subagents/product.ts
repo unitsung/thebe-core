@@ -1,7 +1,7 @@
 import type { SubagentProfile } from "./catalog.ts";
 import type { SubagentRun } from "../types.ts";
 
-/** App-facing Worker. Core internals remain SubagentRun. */
+/** Client-facing Worker. Core internals remain SubagentRun. */
 export type ProductWorker = {
   runId: string;
   parentSessionId: string;
@@ -49,7 +49,7 @@ export function toProductWorker(run: SubagentRun): ProductWorker {
 }
 
 export function toProductSubagentProfile(
-  profile: SubagentProfile,
+  profile: SubagentProfile
 ): ProductSubagentProfile {
   return {
     name: profile.name,

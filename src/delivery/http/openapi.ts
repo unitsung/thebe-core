@@ -136,14 +136,14 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/devices",
-    summary: "List registered iOS devices",
+    summary: "List registered push devices",
     tag: "compatibility",
     responseSchema: "DeviceRegistrationList",
   },
   {
     method: "post",
     path: "/v1/devices",
-    summary: "Register an iOS device",
+    summary: "Register a push device",
     tag: "compatibility",
     requestBody: { required: true },
     requestSchema: "DeviceRegistrationRequest",
@@ -152,7 +152,7 @@ const operations: Operation[] = [
   {
     method: "delete",
     path: "/v1/devices/{registrationId}",
-    summary: "Remove a registered iOS device",
+    summary: "Remove a registered push device",
     tag: "compatibility",
     parameters: [idParameter("registrationId")],
     responseSchema: "Ok",
@@ -160,7 +160,7 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/messages",
-    summary: "Send a prompt (iOS compatibility endpoint)",
+    summary: "Send a prompt (compatibility endpoint)",
     tag: "compatibility",
     requestBody: { required: true },
   },
@@ -1256,12 +1256,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       },
       {
         name: "settings",
-        description: "Runtime behavior settings consumed by the App",
+        description: "Runtime behavior settings consumed by clients",
       },
       {
         name: "diagnosis",
         description:
-          "Product-facing read-only diagnosis; App does not call raw MCP tools",
+          "Product-facing read-only diagnosis; clients do not call raw MCP tools",
       },
       {
         name: "action",
@@ -1280,7 +1280,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       },
       {
         name: "compatibility",
-        description: "Legacy iOS compatibility endpoints",
+        description: "Legacy compatibility endpoints",
       },
       { name: "mcp", description: "MCP JSON-RPC" },
     ],
@@ -2179,7 +2179,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             allowed: {
               type: "boolean",
               description:
-                "Always true. bypassPermissions is selectable; the TUI and the App confirm before turning it on. THEBE_FULL_ACCESS is ignored.",
+                "Always true. bypassPermissions is selectable; the TUI and graphical clients confirm before turning it on. THEBE_FULL_ACCESS is ignored.",
             },
           },
         },

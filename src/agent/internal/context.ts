@@ -1271,7 +1271,7 @@ function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
   ].join("\n");
 }
 
-/** When not to reach for a tool. Mirrors the App's direct-path prompt (ThebeSystemPrompt.toolUse). */
+/** When not to reach for a tool. Keeps a small model from calling tools for chat. */
 export const TOOL_USE =
   "Answer directly, with no tool, unless the message needs live data, an action, or the user's own media, files or services: conversation, feelings, advice, general knowledge, writing, translation, and recommendations from what you already know need none. Never play music or search a library or the web because of a mood or a topic; do it only when asked. An attached image is already visible to you: describe or discuss it yourself, and search only if the user asks you to find it in their photos or library.";
 

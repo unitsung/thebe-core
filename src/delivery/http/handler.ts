@@ -22,7 +22,8 @@ export type ThebeHttpHandlerOptions = {
 export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
   const verify: ((received: string) => boolean) | undefined =
     typeof options.token === "object" && options.token !== null
-      ? (received) => (options.token as TokenVerifier).verify(received) !== undefined
+      ? (received) =>
+          (options.token as TokenVerifier).verify(received) !== undefined
       : typeof options.token === "function"
         ? (received) => {
             // A source with no token (revoked, unreadable) refuses everything rather than opening up.
@@ -30,7 +31,8 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
             return !!expected && tokensEqual(received, expected);
           }
         : options.token?.trim()
-          ? (received) => tokensEqual(received, (options.token as string).trim())
+          ? (received) =>
+              tokensEqual(received, (options.token as string).trim())
           : undefined;
   const allowedHostsSet = options.allowedHosts
     ? new Set(options.allowedHosts)
@@ -49,7 +51,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
         return json({ ok: false, error: security.reason }, 403);
       }
       // Documentation is intentionally readable without the shared token so
-      // the iOS "Open API docs" link can launch Safari. Swagger UI still asks
+      // a client's "Open API docs" link can launch Safari. Swagger UI still asks
       // for X-Thebe-Token through its Authorize control when trying requests.
       if (verify && !isDocumentationRequest(request)) {
         if (!verify(request.headers.get("X-Thebe-Token") ?? "")) {
@@ -90,5 +92,10 @@ function tokensEqual(received: string, expected: string): boolean {
 
 function hasHttpStatus(error: unknown): boolean {
   const status = (error as { status?: unknown } | null)?.status;
-  return typeof status === "number" && Number.isInteger(status) && status >= 400 && status < 600;
+  return (
+    typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= 400 &&
+    status < 600
+  );
 }
