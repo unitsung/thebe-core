@@ -7,11 +7,11 @@ export type ProviderFailure = {
   message: string;
 };
 
-/** Runtimes surface a provider failure as `<status> <body>`; anything else is not a provider failure. */
+/** Runtimes surface a provider failure as `<status> <body>` or `<status>: <body>`; anything else is not a provider failure. */
 export function describeProviderFailure(
   raw: string
 ): ProviderFailure | undefined {
-  const match = /^(\d{3})(?:\s+([\s\S]*))?$/.exec(raw.trim());
+  const match = /^(\d{3})(?::?\s+([\s\S]*))?$/.exec(raw.trim());
   if (!match) return undefined;
   const upstream = Number(match[1]);
   if (upstream < 400 || upstream > 599) return undefined;

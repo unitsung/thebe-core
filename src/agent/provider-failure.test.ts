@@ -26,6 +26,19 @@ describe("describeProviderFailure", () => {
     });
   });
 
+  it("reads the colon form some providers use", () => {
+    expect(
+      describeProviderFailure(
+        '503: {"message":"No available accounts: no available accounts","type":"api_error"}'
+      )
+    ).toEqual({
+      status: 502,
+      code: "provider_error",
+      message:
+        "The model provider failed (503): No available accounts: no available accounts",
+    });
+  });
+
   it("leaves everything that is not a provider reply alone", () => {
     expect(describeProviderFailure("session not found")).toBeUndefined();
     expect(describeProviderFailure("200 ok")).toBeUndefined();
