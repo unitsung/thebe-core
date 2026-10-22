@@ -4,7 +4,7 @@ name: publish-image
 # supported architectures and pushes it to GitHub Container Registry. The
 # package is private while this repository is private; it becomes public with
 # the open-source release. It runs on version tags and manual dispatch, not on
-# every commit: a push to `main` is verified by the `verify` workflow.
+# every commit: a push to `dev`/`main` is verified by the `verify` workflow.
 
 on:
   push:
