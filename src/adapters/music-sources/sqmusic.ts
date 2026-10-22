@@ -14,6 +14,9 @@ const str = (value: unknown) =>
   typeof value === "string" || typeof value === "number"
     ? String(value)
     : undefined;
+/** How many songs an album holds, as SQMusic reports it (NaN when it does not say). */
+const songCountOf = (album: Row) =>
+  Number(album.total ?? (album.dataInfo as Row | undefined)?.musiccnt);
 export type SqMusicOptions = {
   baseUrl: string;
   username: string;
@@ -68,6 +71,25 @@ export function createSqMusicProvider(
     }
     throw new Error(`SQMusic: ${str(json.msg) ?? `code ${str(json.code)}`}`);
   }
+  /** One page of SQMusic's own search results: the records its download endpoints expect back. */
+  async function searchPage(
+    kind: "song" | "album",
+    plugin: string,
+    keyword: string,
+    pageSize: number
+  ) {
+    return (await call(
+      kind === "album" ? "/api/music/searchAlbum" : "/api/music/searchSong",
+      {
+        query: {
+          plugName: plugin,
+          keyword,
+          pageSize: String(pageSize),
+          pageIndex: "1",
+        },
+      }
+    )) as Row | undefined;
+  }
   async function downloadAlbum({
     plugin,
     id,
@@ -79,22 +101,13 @@ export function createSqMusicProvider(
         "SQMusic: an album is downloaded in SQMusic's default quality; leave quality out"
       );
     // The record must come from SQMusic itself: it is what its download endpoint expects back.
-    const page = (await call("/api/music/searchAlbum", {
-      query: {
-        plugName: plugin,
-        keyword: query,
-        pageSize: "30",
-        pageIndex: "1",
-      },
-    })) as Row | undefined;
+    const page = await searchPage("album", plugin, query, 30);
     const record = list(page?.records).find((row) => str(row.albumid) === id);
     if (!record)
       throw new Error(
         `SQMusic: album ${id} is not in the first results for "${query}" on ${plugin}; search again with sqmusic_search kind album`
       );
-    const songCount = Number(
-      record.total ?? (record.dataInfo as Row | undefined)?.musiccnt
-    );
+    const songCount = songCountOf(record);
     // An album whose size SQMusic does not report cannot be held to the cap, so it is not queued.
     if (!Number.isFinite(songCount) || songCount <= 0)
       throw new Error(
@@ -140,14 +153,7 @@ export function createSqMusicProvider(
       if (input.kind === "album") return downloadAlbum(input);
       const { plugin, id, query, quality } = input;
       // The record must come from SQMusic itself: it is what its download endpoint expects back.
-      const page = (await call("/api/music/searchSong", {
-        query: {
-          plugName: plugin,
-          keyword: query,
-          pageSize: "30",
-          pageIndex: "1",
-        },
-      })) as Row | undefined;
+      const page = await searchPage("song", plugin, query, 30);
       const record = list(page?.records).find((row) => str(row.id) === id);
       if (!record)
         throw new Error(
@@ -202,14 +208,12 @@ export function createSqMusicProvider(
           };
         case "search": {
           if (input.kind === "album") {
-            const page = (await call("/api/music/searchAlbum", {
-              query: {
-                plugName: input.plugin,
-                keyword: input.query,
-                pageSize: String(Math.min(input.limit ?? 10, 30)),
-                pageIndex: "1",
-              },
-            })) as Row | undefined;
+            const page = await searchPage(
+              "album",
+              input.plugin,
+              input.query,
+              Math.min(input.limit ?? 10, 30)
+            );
             return {
               plugin: input.plugin,
               total: page?.searchTotal ?? page?.total,
@@ -221,21 +225,16 @@ export function createSqMusicProvider(
                   : str(row.artistName)
                     ? [str(row.artistName)!]
                     : [],
-                songCount:
-                  Number(
-                    row.total ?? (row.dataInfo as Row | undefined)?.musiccnt
-                  ) || undefined,
+                songCount: songCountOf(row) || undefined,
               })),
             };
           }
-          const page = (await call("/api/music/searchSong", {
-            query: {
-              plugName: input.plugin,
-              keyword: input.query,
-              pageSize: String(Math.min(input.limit ?? 10, 30)),
-              pageIndex: "1",
-            },
-          })) as Row | undefined;
+          const page = await searchPage(
+            "song",
+            input.plugin,
+            input.query,
+            Math.min(input.limit ?? 10, 30)
+          );
           return {
             plugin: input.plugin,
             total: page?.searchTotal ?? page?.total,

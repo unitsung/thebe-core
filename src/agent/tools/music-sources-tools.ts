@@ -71,6 +71,11 @@ export function parseNeteaseQuery(input: unknown): NeteaseQuery {
   if (!/^[0-9]+$/.test(id)) throw new Error("id must be numeric");
   return { action, id, limit: limit(args.limit) };
 }
+/** The optional `kind` of a SQMusic search or download: a song unless the argument says album. */
+const songOrAlbum = (kind: unknown) =>
+  kind === undefined
+    ? {}
+    : { kind: oneOf(kind, ["song", "album"] as const, "kind") };
 export function parseSqMusicQuery(input: unknown): SqMusicQuery {
   const args = object(input),
     action = oneOf(
@@ -84,9 +89,7 @@ export function parseSqMusicQuery(input: unknown): SqMusicQuery {
       action,
       plugin: word(args.plugin, "plugin", 40),
       query: word(args.query, "query"),
-      ...(args.kind !== undefined
-        ? { kind: oneOf(args.kind, ["song", "album"] as const, "kind") }
-        : {}),
+      ...songOrAlbum(args.kind),
       limit: limit(args.limit),
     };
   return {
@@ -114,9 +117,7 @@ export function parseSqMusicDownload(input: unknown): SqMusicDownload {
     id: word(args.id, "id", 120),
     query: word(args.query, "query"),
     ...(quality ? { quality } : {}),
-    ...(args.kind !== undefined
-      ? { kind: oneOf(args.kind, ["song", "album"] as const, "kind") }
-      : {}),
+    ...songOrAlbum(args.kind),
   };
 }
 export function createMusicSourcesTools(
