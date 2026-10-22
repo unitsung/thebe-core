@@ -380,6 +380,60 @@ describe("Thebe HTTP handler", () => {
     expect(JSON.parse(text)).toEqual([]);
   });
 
+  it("POST /mcp negotiates the protocol version and accepts notifications with 202", async () => {
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      version: "0.1.0",
+    });
+    const post = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/mcp", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+    const older = await json(
+      await post({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-03-26" },
+      })
+    );
+    expect(older).toMatchObject({ result: { protocolVersion: "2025-03-26" } });
+    const newer = await json(
+      await post({
+        jsonrpc: "2.0",
+        id: 2,
+        method: "initialize",
+        params: { protocolVersion: "2099-01-01" },
+      })
+    );
+    expect(newer).toMatchObject({ result: { protocolVersion: "2025-06-18" } });
+    const notification = await post({
+      jsonrpc: "2.0",
+      method: "notifications/initialized",
+    });
+    expect(notification.status).toBe(202);
+    const reply = await post({ jsonrpc: "2.0", id: 9, result: {} });
+    expect(reply.status).toBe(202);
+  });
+
+  it("/mcp answers GET and DELETE with 405 because it is stateless", async () => {
+    for (const method of ["GET", "DELETE"]) {
+      const res = await handler().handle(
+        new Request("http://127.0.0.1:8787/mcp", { method })
+      );
+      expect(res.status).toBe(405);
+      expect(res.headers.get("allow")).toBe("POST");
+    }
+  });
+
   it("POST /mcp tools/call rejects names outside the MCP allow-list", async () => {
     const { createFakeRuntime } =
       await import("../../testing/runtime/index.ts");

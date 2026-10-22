@@ -39,6 +39,17 @@ class McpProtocolError extends Error {
   }
 }
 
+const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
+
+/** The client's version when this server speaks it; otherwise the newest one it does. */
+function negotiateProtocolVersion(params: Record<string, unknown>): string {
+  const requested = params.protocolVersion;
+  return (
+    SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ??
+    SUPPORTED_PROTOCOL_VERSIONS[0]
+  );
+}
+
 const AGENT_REQUIRED = "MCP tools require the Thebe agent service";
 
 async function callTool(
@@ -107,8 +118,12 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
   const { agent } = context;
   const id = body.id ?? null;
   const method = typeof body.method === "string" ? body.method : "";
-  if (method.startsWith("notifications/")) {
-    return new Response(null, { status: 204 });
+  // A notification, or a client's reply to a server request, gets no JSON-RPC response: 202 Accepted.
+  if (
+    method.startsWith("notifications/") ||
+    (!method && ("result" in body || "error" in body))
+  ) {
+    return new Response(null, { status: 202 });
   }
   if (method === "ping") {
     return json({ jsonrpc: "2.0", id, result: {} });
@@ -118,7 +133,7 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
       jsonrpc: "2.0",
       id,
       result: {
-        protocolVersion: "2025-06-18",
+        protocolVersion: negotiateProtocolVersion(asObject(body.params)),
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "thebe-core", version: context.version },
       },

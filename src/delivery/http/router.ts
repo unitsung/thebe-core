@@ -1,9 +1,6 @@
 import { json } from "./json.ts";
 import { createDeviceRegistry, type DeviceRegistry } from "./devices.ts";
-import {
-  createThebeHttpContext,
-  type ThebeHttpContext,
-} from "./context.ts";
+import { createThebeHttpContext, type ThebeHttpContext } from "./context.ts";
 import { handleHealthEventsCompatibility } from "./routes/health.ts";
 import { handleMcp } from "./routes/mcp.ts";
 import { handleAgentRoutes } from "./routes/agent-api.ts";
@@ -23,7 +20,11 @@ import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
-import { createOpenApiDocument, swaggerUiAsset, swaggerUiHtml } from "./openapi.ts";
+import {
+  createOpenApiDocument,
+  swaggerUiAsset,
+  swaggerUiHtml,
+} from "./openapi.ts";
 import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
 
 export type ThebeHttpRouterOptions = {
@@ -35,10 +36,15 @@ export type ThebeHttpRouterOptions = {
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
-  const deviceRegistry = options.deviceRegistry ?? createDeviceRegistry({ dir: options.deviceStoreDir });
+  const deviceRegistry =
+    options.deviceRegistry ??
+    createDeviceRegistry({ dir: options.deviceStoreDir });
   return {
     async handle(request: Request): Promise<Response> {
-      const context = createThebeHttpContext(request, { ...options, deviceRegistry });
+      const context = createThebeHttpContext(request, {
+        ...options,
+        deviceRegistry,
+      });
 
       if (request.method === "GET" && context.path === "/openapi.json") {
         return json(createOpenApiDocument(options.version), 200, {
@@ -49,11 +55,15 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
         const assetResponse = swaggerUiAsset(context.path);
         if (assetResponse) return assetResponse;
       }
-      if (request.method === "GET" && (context.path === "/docs" || context.path === "/swagger")) {
+      if (
+        request.method === "GET" &&
+        (context.path === "/docs" || context.path === "/swagger")
+      ) {
         return new Response(swaggerUiHtml(options.version), {
           headers: {
             "content-type": "text/html; charset=utf-8",
-            "content-security-policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+            "content-security-policy":
+              "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
             "x-content-type-options": "nosniff",
           },
         });
@@ -129,7 +139,11 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (isAgentRoute(context.path)) {
         return (await handleAgentRoutes(context)) ?? json({ ok: false }, 404);
       }
-      if (request.method === "POST" && context.path === "/mcp") {
+      if (context.path === "/mcp") {
+        // Stateless: no server-initiated SSE stream (GET) and no session to end (DELETE).
+        if (request.method !== "POST") {
+          return json({ ok: false }, 405, { allow: "POST" });
+        }
         return handleMcp(context);
       }
       return json({ ok: false }, 404);
