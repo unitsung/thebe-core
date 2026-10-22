@@ -2,11 +2,9 @@
 
 ## Supported versions
 
-Development happens on `dev`. There is no tagged release yet, so no image has
-been published to the container registry. Security fixes land on `dev`. Build
-the image from the commit you run, and keep the `/data` directory when you move
-to a newer checkout. Once releases are tagged, this section will name the
-versions that receive fixes.
+Development happens on `main`. 0.1.0 is the first release; only the latest
+release and `main` receive security fixes. Keep the `/data` directory when you
+move to a newer version.
 
 ## Reporting a vulnerability
 

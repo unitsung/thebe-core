@@ -5,9 +5,9 @@
 > 明确不做见 **Not planned**。Core 目前是 API-first：用终端、HTTP API 或 MCP 使用；除了 `/docs`
 > 的 API 参考页（Swagger UI），没有任何 web 界面。
 
-Status: living document. It reflects what `dev` contains and the remaining work named in
+Status: living document. It reflects what `main` contains (release 0.1.0) and the remaining work named in
 `docs/CORE-PRODUCT-HTTP.md`. It is a plan, not a commitment, and nothing here is scheduled to a
-date. There is no tagged release yet.
+date.
 
 Core is used from the terminal, over the HTTP API, or through MCP. The only page it serves is
 the API reference at `/docs` (Swagger UI); it is not a client. Graphical clients are separate
@@ -24,7 +24,7 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   agent. Do not grow it into a second Claude Code or Codex.
 - Keep `/v1` and `/mcp` stable; clients built on them should not need Core-specific changes.
 
-## Shipped (on `dev`)
+## Shipped (in 0.1.0)
 
 **Runtime and delivery**
 

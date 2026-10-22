@@ -34,7 +34,7 @@ Thebe Core 是一个带审批和审计日志的 homelab agent 服务端。它连
 
 ## 快速开始
 
-容器是受支持的运行方式，见[部署文档](docs/DEPLOYMENT.md)。支持 x86_64 和 arm64。推送 `v*` 标签时，工作流会构建多架构镜像并推送到 GitHub Container Registry（`ghcr.io/unitsung/thebe-core`）。目前还没有打过标签，所以现在请从本仓库构建镜像。
+容器是受支持的运行方式，见[部署文档](docs/DEPLOYMENT.md)。支持 x86_64 和 arm64。推送 `v*` 标签时，工作流会构建多架构镜像并推送到 GitHub Container Registry（`ghcr.io/unitsung/thebe-core`）。`v0.1.0` 标签会发布第一个镜像；你也可以随时从本仓库自行构建镜像。
 
 ```bash
 cd deploy

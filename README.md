@@ -12,7 +12,7 @@ Run it on a NAS, a mini PC, a Raspberry Pi or a cloud server. Use it three ways:
 
 The name comes from Thebe, a moon of Jupiter (Jupiter XIV), pronounced /ˈθiːbi/.
 
-> **Status: pre-release.** There is no tagged version yet. The test suite and the container smoke test pass, but the service integrations (Emby, Jellyfin, Immich, Navidrome, OpenList, qBittorrent, aria2, Prowlarr, Arcane) are tested against recorded responses and mocks, not yet against every live release of each product. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
+> **Status: first release (0.1.0).** The test suite and the container smoke test pass, but the service integrations (Emby, Jellyfin, Immich, Navidrome, OpenList, qBittorrent, aria2, Prowlarr, Arcane) are tested against recorded responses and mocks, not yet against every live release of each product. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
 
 ## What it can do
 
@@ -34,7 +34,7 @@ Models, service URLs and credentials are in the [configuration guide](docs/confi
 
 ## Quick start
 
-The container is the supported way to run Core; see the [deployment guide](docs/DEPLOYMENT.md). It is built for x86_64 and arm64. A workflow publishes a multi-arch image to GitHub Container Registry (`ghcr.io/unitsung/thebe-core`) when a `v*` tag is pushed. No release has been tagged yet, so build the image from this repository for now.
+The container is the supported way to run Core; see the [deployment guide](docs/DEPLOYMENT.md). It is built for x86_64 and arm64. A workflow publishes a multi-arch image to GitHub Container Registry (`ghcr.io/unitsung/thebe-core`) when a `v*` tag is pushed. The `v0.1.0` tag publishes the first image; you can always build the image from this repository instead.
 
 ```bash
 cd deploy
