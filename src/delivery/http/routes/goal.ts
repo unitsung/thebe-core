@@ -1,5 +1,9 @@
 import { toProductGoal, toProductGoalEvent } from "../../../agent/index.ts";
-import { agentUnavailable, quiescedWrite, type ThebeHttpContext } from "../context.ts";
+import {
+  agentUnavailable,
+  quiescedWrite,
+  type ThebeHttpContext,
+} from "../context.ts";
 import { json, readJson } from "../json.ts";
 import { agentError } from "../parsing/errors.ts";
 import { parseLogCursor } from "../parsing/query.ts";
@@ -12,7 +16,7 @@ type Agent = NonNullable<ThebeHttpContext["agent"]>;
  * Canonical session-scoped routes and `/v1/goals` aliases share the same mapper.
  */
 export async function handleGoalRoutes(
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ): Promise<Response | undefined> {
   const parsed = parseGoalPath(context.path, context.parts);
   if (!parsed) return undefined;
@@ -48,7 +52,11 @@ export async function handleGoalRoutes(
       if (request.method !== "GET") return undefined;
       return goalLog(context, agent, parsed.sessionId);
     }
-    if (parsed.kind === "pause" || parsed.kind === "resume" || parsed.kind === "stop") {
+    if (
+      parsed.kind === "pause" ||
+      parsed.kind === "resume" ||
+      parsed.kind === "stop"
+    ) {
       if (request.method !== "POST") return undefined;
       if (parsed.kind === "resume") {
         const blocked = quiescedWrite(context);
@@ -65,7 +73,7 @@ export async function handleGoalRoutes(
 async function createGoal(
   request: Request,
   agent: Agent,
-  existingSessionId?: string,
+  existingSessionId?: string
 ): Promise<Response> {
   const body = await readJson(request);
   const goalText =
@@ -73,28 +81,60 @@ async function createGoal(
     (typeof body.title === "string" && body.title.trim()) ||
     "";
   if (!goalText) {
-    return json({ ok: false, error: "goal cannot be empty", code: "invalid_body" }, 400);
+    return json(
+      { ok: false, error: "goal cannot be empty", code: "invalid_body" },
+      400
+    );
   }
   const criteria = asStringList(body.criteria);
   const maxIterations =
     typeof body.maxIterations === "number" ? body.maxIterations : undefined;
+  const model =
+    body.model && typeof body.model === "object"
+      ? (body.model as Record<string, unknown>)
+      : undefined;
+  const providerId =
+    typeof model?.providerId === "string" ? model.providerId : "";
+  const modelId = typeof model?.modelId === "string" ? model.modelId : "";
+  if (body.model !== undefined && (!providerId || !modelId)) {
+    return json(
+      {
+        ok: false,
+        error: "model.providerId and model.modelId required",
+        code: "invalid_body",
+      },
+      400
+    );
+  }
+  // The workers and reviewer inherit the parent session's model, so choosing it here chooses it for the Goal.
   const thebeSessionId =
     existingSessionId ??
-    (await agent.createSession({
-      title: goalText.slice(0, 80),
-      labels: { kind: "goal" },
-    })).thebeSessionId;
+    (
+      await agent.createSession({
+        title: goalText.slice(0, 80),
+        labels: { kind: "goal" },
+        model: providerId && modelId ? { providerId, modelId } : undefined,
+      })
+    ).thebeSessionId;
   const current = agent.getGoal(thebeSessionId);
   if (current?.status === "running" || current?.status === "pausing") {
     return json(
-      { ok: false, error: "a goal is already running for this session", code: "invalid_transition" },
-      409,
+      {
+        ok: false,
+        error: "a goal is already running for this session",
+        code: "invalid_transition",
+      },
+      409
     );
   }
   if (current?.status === "paused") {
     return json(
-      { ok: false, error: "goal is paused; resume it instead of starting a new one", code: "invalid_transition" },
-      409,
+      {
+        ok: false,
+        error: "goal is paused; resume it instead of starting a new one",
+        code: "invalid_transition",
+      },
+      409
     );
   }
   const run = await agent.startGoal({
@@ -122,7 +162,7 @@ async function getGoal(agent: Agent, sessionId: string): Promise<Response> {
 async function goalLog(
   context: ThebeHttpContext,
   agent: Agent,
-  sessionId: string,
+  sessionId: string
 ): Promise<Response> {
   if (!(await loadGoal(agent, sessionId))) {
     return json({ ok: false, error: "goal not found" }, 404);
@@ -135,12 +175,22 @@ async function goalLog(
     context.url.searchParams.get("follow") === "true" ||
     (context.request.headers.get("accept") ?? "").includes("text/event-stream");
   if (follow) {
-    return goalEventStream(agent, sessionId, context.request, afterResult.after);
+    return goalEventStream(
+      agent,
+      sessionId,
+      context.request,
+      afterResult.after
+    );
   }
   const events = agent.goalEvents(sessionId).slice(afterResult.after);
   return json({
     events: events.map((row, index) =>
-      toProductGoalEvent(sessionId, row.event, afterResult.after + index, row.at),
+      toProductGoalEvent(
+        sessionId,
+        row.event,
+        afterResult.after + index,
+        row.at
+      )
     ),
     next: agent.goalEvents(sessionId).length,
   });
@@ -149,7 +199,7 @@ async function goalLog(
 async function controlGoal(
   agent: Agent,
   sessionId: string,
-  action: "pause" | "resume" | "stop",
+  action: "pause" | "resume" | "stop"
 ): Promise<Response> {
   const current = await loadGoal(agent, sessionId);
   if (!current) {
@@ -157,14 +207,22 @@ async function controlGoal(
   }
   if (action === "pause" && current.status !== "running") {
     return json(
-      { ok: false, error: "goal can only be paused while running", code: "invalid_transition" },
-      409,
+      {
+        ok: false,
+        error: "goal can only be paused while running",
+        code: "invalid_transition",
+      },
+      409
     );
   }
   if (action === "resume" && current.status !== "paused") {
     return json(
-      { ok: false, error: "goal can only be resumed while paused", code: "invalid_transition" },
-      409,
+      {
+        ok: false,
+        error: "goal can only be resumed while paused",
+        code: "invalid_transition",
+      },
+      409
     );
   }
   if (
@@ -174,8 +232,12 @@ async function controlGoal(
     current.status !== "paused"
   ) {
     return json(
-      { ok: false, error: "goal is already finished", code: "invalid_transition" },
-      409,
+      {
+        ok: false,
+        error: "goal is already finished",
+        code: "invalid_transition",
+      },
+      409
     );
   }
   const run =
@@ -189,7 +251,7 @@ async function controlGoal(
 
 function parseGoalPath(
   path: string,
-  parts: string[],
+  parts: string[]
 ):
   | { kind: "collection"; sessionId?: undefined }
   | { kind: "item" | "log" | "pause" | "resume" | "stop"; sessionId: string }
@@ -202,8 +264,12 @@ function parseGoalPath(
     const id = parts[2] ?? "";
     if (!id) return undefined;
     if (parts.length === 3) return { kind: "item", sessionId: id };
-    if (parts.length === 4 && parts[3] === "log") return { kind: "log", sessionId: id };
-    if (parts.length === 4 && (parts[3] === "pause" || parts[3] === "resume" || parts[3] === "stop")) {
+    if (parts.length === 4 && parts[3] === "log")
+      return { kind: "log", sessionId: id };
+    if (
+      parts.length === 4 &&
+      (parts[3] === "pause" || parts[3] === "resume" || parts[3] === "stop")
+    ) {
       return { kind: parts[3], sessionId: id };
     }
     return undefined;
@@ -212,8 +278,12 @@ function parseGoalPath(
     const id = parts[2] ?? "";
     if (!id) return undefined;
     if (parts.length === 4) return { kind: "item", sessionId: id };
-    if (parts.length === 5 && parts[4] === "log") return { kind: "log", sessionId: id };
-    if (parts.length === 5 && (parts[4] === "pause" || parts[4] === "resume" || parts[4] === "stop")) {
+    if (parts.length === 5 && parts[4] === "log")
+      return { kind: "log", sessionId: id };
+    if (
+      parts.length === 5 &&
+      (parts[4] === "pause" || parts[4] === "resume" || parts[4] === "stop")
+    ) {
       return { kind: parts[4], sessionId: id };
     }
     return undefined;
@@ -223,7 +293,9 @@ function parseGoalPath(
 
 function asStringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const items = value.filter((item): item is string => typeof item === "string" && Boolean(item.trim()));
+  const items = value.filter(
+    (item): item is string => typeof item === "string" && Boolean(item.trim())
+  );
   return items.length > 0 ? items : undefined;
 }
 

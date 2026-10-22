@@ -130,6 +130,7 @@ export function createScheduleApi(options: {
       const session = await options.goals.createSession({
         title: row.title,
         labels: { kind: "goal", scheduleId: row.id },
+        model: row.model,
       });
       reserved.lastSessionId = session.thebeSessionId;
       await save({ ...reserved });
@@ -260,6 +261,7 @@ export function createScheduleApi(options: {
           cron: normalized.cron,
           timeZone: normalized.timeZone,
           maxIterations: normalized.maxIterations,
+          model: normalized.model,
           nextRunAt: row.enabled ? firstRun(normalized) : undefined,
           updatedAt: options.now().toISOString(),
         };
@@ -403,6 +405,21 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
       "criteria must contain up to 32 nonempty strings",
       "invalid_body"
     );
+  const model = input.model;
+  if (
+    model !== undefined &&
+    (!model ||
+      typeof model !== "object" ||
+      typeof model.providerId !== "string" ||
+      !model.providerId.trim() ||
+      typeof model.modelId !== "string" ||
+      !model.modelId.trim())
+  )
+    throw httpError(
+      400,
+      "model must contain providerId and modelId",
+      "invalid_body"
+    );
   return {
     title,
     goal,
@@ -416,6 +433,14 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
         }
       : {}),
     maxIterations: input.maxIterations,
+    ...(model
+      ? {
+          model: {
+            providerId: model.providerId.trim(),
+            modelId: model.modelId.trim(),
+          },
+        }
+      : {}),
   };
 }
 

@@ -26,11 +26,15 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-const PI_LEAK = /assistantMessageEvent|@earendil|tools\/call|internalState|AgentSession/;
+const PI_LEAK =
+  /assistantMessageEvent|@earendil|tools\/call|internalState|AgentSession/;
 
 function completingTurns() {
   return [
-    { kind: "text" as const, text: "I inspected the workspace and completed the checkpoint." },
+    {
+      kind: "text" as const,
+      text: "I inspected the workspace and completed the checkpoint.",
+    },
     {
       kind: "text" as const,
       text: "VERDICT: pass\nEVIDENCE: pnpm test — all tests pass\nREMAINING: none",
@@ -51,8 +55,12 @@ describe("Goal HTTP", () => {
       new Request("http://127.0.0.1:8787/v1/goals", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ goal: "Finish the refactor", criteria: ["tests pass"], maxIterations: 3 }),
-      }),
+        body: JSON.stringify({
+          goal: "Finish the refactor",
+          criteria: ["tests pass"],
+          maxIterations: 3,
+        }),
+      })
     );
     expect(res.status).toBe(201);
     const body = await json(res);
@@ -61,12 +69,72 @@ describe("Goal HTTP", () => {
     expect(body.title).toBe("Finish the refactor");
     expect(body.status).toMatch(/queued|running|succeeded/);
     expect(body.controls).toEqual(
-      expect.objectContaining({ pause: expect.any(Boolean), resume: expect.any(Boolean), stop: expect.any(Boolean) }),
+      expect.objectContaining({
+        pause: expect.any(Boolean),
+        resume: expect.any(Boolean),
+        stop: expect.any(Boolean),
+      })
     );
     expect(JSON.stringify(body)).not.toMatch(PI_LEAK);
     expect(body).not.toHaveProperty("thebeSessionId");
     expect(body).not.toHaveProperty("finalReport");
     await app.agent.waitGoal(String(body.id));
+  });
+
+  it("stops at the first failed worker and reports why instead of burning every checkpoint", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "error",
+        message:
+          '401 {"type":"error","error":{"code":"api_key_expired","message":"This API key has expired."}}',
+      },
+    ]);
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const created = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ goal: "Check the library", maxIterations: 4 }),
+        })
+      )
+    );
+    await app.agent.waitGoal(String(created.id));
+    const goal = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${created.id}`)
+      )
+    );
+    expect(goal.status).toBe("failed");
+    expect(goal.iteration).toBe(1);
+    expect(goal.summary).toContain("worker run failed");
+    expect((goal.error as { message: string }).message).toBe(
+      "The model provider rejected Core's credentials (401): This API key has expired."
+    );
+  });
+
+  it("rejects a half-specified model and accepts a full one when creating a Goal", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns(completingTurns());
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const post = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+    expect(
+      (await post({ goal: "x", model: { providerId: "fake" } })).status
+    ).toBe(400);
+    const ok = await post({
+      goal: "x",
+      model: { providerId: "fake", modelId: "fake-2" },
+    });
+    expect(ok.status).toBe(201);
+    await app.agent.waitGoal(String((await json(ok)).id));
   });
 
   it("publishes a completed Goal report as a linked Artifact", async () => {
@@ -79,22 +147,26 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Publish the verified result" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
 
     await app.agent.waitGoal(id);
 
     const goal = await json(
-      await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${id}`)),
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}`)
+      )
     );
     expect(goal.artifactId).toEqual(expect.any(String));
 
     const listed = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts?kind=report&sessionId=${id}`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts?kind=report&sessionId=${id}`
+        )
+      )
     );
     const artifacts = listed.artifacts as Array<Record<string, unknown>>;
     expect(artifacts).toEqual(
@@ -105,66 +177,111 @@ describe("Goal HTTP", () => {
           sessionId: id,
           contentType: "text/plain; charset=utf-8",
         }),
-      ]),
+      ])
     );
-    expect(artifacts.filter((item) => item.artifactId === goal.artifactId)).toHaveLength(1);
+    expect(
+      artifacts.filter((item) => item.artifactId === goal.artifactId)
+    ).toHaveLength(1);
 
     const content = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${goal.artifactId}/content`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts/${goal.artifactId}/content`
+        )
+      )
     );
     expect(content.content).toContain("VERDICT: pass");
     expect(JSON.stringify(content)).not.toMatch(PI_LEAK);
   });
 
   it("documents Goal run and report links in OpenAPI", async () => {
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
     const document = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/openapi.json"),
-      ),
+        new Request("http://127.0.0.1:8787/openapi.json")
+      )
     );
-    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const schemas = (document.components as Record<string, unknown>)
+      .schemas as Record<string, unknown>;
     const productGoal = schemas.ProductGoal as Record<string, unknown>;
     const properties = productGoal.properties as Record<string, unknown>;
 
     expect(properties.artifactId).toEqual({ type: "string" });
-    expect(properties.currentRun).toEqual({ $ref: "#/components/schemas/ProductGoalRun" });
+    expect(properties.currentRun).toEqual({
+      $ref: "#/components/schemas/ProductGoalRun",
+    });
     expect(schemas.ProductGoalRun).toEqual(
       expect.objectContaining({
         type: "object",
-        required: ["id", "goalId", "sessionId", "status", "createdAt", "updatedAt"],
-      }),
+        required: [
+          "id",
+          "goalId",
+          "sessionId",
+          "status",
+          "createdAt",
+          "updatedAt",
+        ],
+      })
     );
   });
 
   it("documents named Goal request and response schemas in OpenAPI", async () => {
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
     const document = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/openapi.json"),
-      ),
+        new Request("http://127.0.0.1:8787/openapi.json")
+      )
     );
-    const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
-    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const paths = document.paths as Record<
+      string,
+      Record<string, Record<string, unknown>>
+    >;
+    const schemas = (document.components as Record<string, unknown>)
+      .schemas as Record<string, unknown>;
     const responseRef = (method: string, path: string, status: string) =>
-      (paths[path]?.[method]?.responses as Record<string, Record<string, unknown>>)?.[status]
-        ?.content as Record<string, Record<string, unknown>>;
+      (
+        paths[path]?.[method]?.responses as Record<
+          string,
+          Record<string, unknown>
+        >
+      )?.[status]?.content as Record<string, Record<string, unknown>>;
 
     expect(paths["/v1/goals"]?.post?.requestBody).toEqual(
       expect.objectContaining({
-        content: { "application/json": { schema: { $ref: "#/components/schemas/GoalCreateRequest" } } },
-      }),
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/GoalCreateRequest" },
+          },
+        },
+      })
     );
-    expect(responseRef("post", "/v1/goals", "201")["application/json"]?.schema).toEqual({
+    expect(
+      responseRef("post", "/v1/goals", "201")["application/json"]?.schema
+    ).toEqual({
       $ref: "#/components/schemas/ProductGoal",
     });
-    expect(responseRef("get", "/v1/goals", "200")["application/json"]?.schema).toEqual({
+    expect(
+      responseRef("get", "/v1/goals", "200")["application/json"]?.schema
+    ).toEqual({
       $ref: "#/components/schemas/ProductGoalList",
     });
-    for (const path of ["/v1/goals/{id}", "/v1/goals/{id}/pause", "/v1/goals/{id}/resume", "/v1/goals/{id}/stop"]) {
-      expect(responseRef(path === "/v1/goals/{id}" ? "get" : "post", path, "200")["application/json"]?.schema).toEqual({
+    for (const path of [
+      "/v1/goals/{id}",
+      "/v1/goals/{id}/pause",
+      "/v1/goals/{id}/resume",
+      "/v1/goals/{id}/stop",
+    ]) {
+      expect(
+        responseRef(path === "/v1/goals/{id}" ? "get" : "post", path, "200")[
+          "application/json"
+        ]?.schema
+      ).toEqual({
         $ref: "#/components/schemas/ProductGoal",
       });
     }
@@ -172,13 +289,13 @@ describe("Goal HTTP", () => {
       expect.objectContaining({
         type: "object",
         required: ["goal"],
-      }),
+      })
     );
     expect(schemas.ProductGoalList).toEqual(
       expect.objectContaining({
         type: "object",
         required: ["goals"],
-      }),
+      })
     );
   });
 
@@ -187,15 +304,19 @@ describe("Goal HTTP", () => {
     const now = () => new Date(Date.UTC(2026, 8, 22, 0, 0, tick++));
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);
-    const app = createThebeApp({ runtime: fake.runtime, provider: provider(), now });
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      now,
+    });
     const created = await json(
       await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/goals", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Track live progress" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
 
@@ -204,7 +325,9 @@ describe("Goal HTTP", () => {
         expect(app.agent.getGoal(id)?.activeSubagent?.status).toBe("running");
       });
       const current = await json(
-        await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${id}`)),
+        await app.handler.handle(
+          new Request(`http://127.0.0.1:8787/v1/goals/${id}`)
+        )
       );
 
       expect(current.updatedAt).not.toBe(created.updatedAt);
@@ -228,8 +351,8 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Persist this objective" }),
-        }),
-      ),
+        })
+      )
     );
     await first.agent.waitGoal(String(created.id));
 
@@ -239,7 +362,9 @@ describe("Goal HTTP", () => {
       agentStoreDir: dir,
     });
     const listed = await json(
-      await restarted.handler.handle(new Request("http://127.0.0.1:8787/v1/goals")),
+      await restarted.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals")
+      )
     );
     const goals = listed.goals as Array<Record<string, unknown>>;
     expect(goals).toHaveLength(1);
@@ -250,15 +375,19 @@ describe("Goal HTTP", () => {
     expect(JSON.stringify(listed)).not.toMatch(PI_LEAK);
 
     const fetched = await json(
-      await restarted.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${created.id}`)),
+      await restarted.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/goals/${created.id}`)
+      )
     );
     expect(fetched.id).toBe(created.id);
     expect(fetched.artifactId).toBe(goals[0]?.artifactId);
 
     const artifacts = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts?sessionId=${created.id}`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts?sessionId=${created.id}`
+        )
+      )
     );
     expect(artifacts.artifacts).toEqual(
       expect.arrayContaining([
@@ -267,7 +396,7 @@ describe("Goal HTTP", () => {
           kind: "report",
           sessionId: created.id,
         }),
-      ]),
+      ])
     );
   });
 
@@ -286,8 +415,8 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Keep the progress history" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
     await first.agent.waitGoal(id);
@@ -299,8 +428,8 @@ describe("Goal HTTP", () => {
     });
     const log = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`)
+      )
     );
     const events = log.events as Array<Record<string, unknown>>;
     expect(events.some((event) => event.type === "goal_started")).toBe(true);
@@ -309,8 +438,8 @@ describe("Goal HTTP", () => {
     expect(JSON.stringify(log)).not.toMatch(PI_LEAK);
     expect(
       events.every(
-        (event) => !Object.prototype.hasOwnProperty.call(event, "run"),
-      ),
+        (event) => !Object.prototype.hasOwnProperty.call(event, "run")
+      )
     ).toBe(true);
   });
 
@@ -329,8 +458,8 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Recover this active objective" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
     await vi.waitFor(() => {
@@ -344,16 +473,16 @@ describe("Goal HTTP", () => {
     });
     const recovered = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/goals/${id}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}`)
+      )
     );
     expect(recovered.status).toBe("paused");
     expect(recovered.phase).toBe("paused");
 
     const log = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`)
+      )
     );
     const events = log.events as Array<Record<string, unknown>>;
     expect(events).toEqual(
@@ -364,7 +493,7 @@ describe("Goal HTTP", () => {
           phase: "paused",
           message: expect.stringContaining("Core restart"),
         }),
-      ]),
+      ])
     );
 
     await first.agent.stopGoal(id);
@@ -380,13 +509,21 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ title: "Same object" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
     const [canonical, alias] = await Promise.all([
-      json(await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/goals/${id}`))),
-      json(await app.handler.handle(new Request(`http://127.0.0.1:8787/v1/session/${id}/goal`))),
+      json(
+        await app.handler.handle(
+          new Request(`http://127.0.0.1:8787/v1/goals/${id}`)
+        )
+      ),
+      json(
+        await app.handler.handle(
+          new Request(`http://127.0.0.1:8787/v1/session/${id}/goal`)
+        )
+      ),
     ]);
     expect(alias).toEqual(canonical);
     expect(canonical.id).toBe(id);
@@ -403,7 +540,7 @@ describe("Goal HTTP", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ goal: "   " }),
-      }),
+      })
     );
     expect(res.status).toBe(400);
     const body = await json(res);
@@ -420,12 +557,14 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Already done" }),
-        }),
-      ),
+        })
+      )
     );
     await app.agent.waitGoal(String(created.id));
     const res = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/goals/${created.id}/pause`, { method: "POST" }),
+      new Request(`http://127.0.0.1:8787/v1/goals/${created.id}/pause`, {
+        method: "POST",
+      })
     );
     expect(res.status).toBe(409);
     expect((await json(res)).code).toBe("invalid_transition");
@@ -437,7 +576,7 @@ describe("Goal HTTP", () => {
       provider: provider(),
     });
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/goals/missing-goal"),
+      new Request("http://127.0.0.1:8787/v1/goals/missing-goal")
     );
     expect(res.status).toBe(404);
   });
@@ -452,12 +591,12 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Log product events" }),
-        }),
-      ),
+        })
+      )
     );
     await app.agent.waitGoal(String(created.id));
     const res = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/goals/${created.id}/log`),
+      new Request(`http://127.0.0.1:8787/v1/goals/${created.id}/log`)
     );
     expect(res.status).toBe(200);
     const body = await json(res);
@@ -483,8 +622,8 @@ describe("Goal HTTP", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ goal: "Stream progress" }),
-        }),
-      ),
+        })
+      )
     );
     const id = String(created.id);
     const firstAc = new AbortController();
@@ -492,7 +631,7 @@ describe("Goal HTTP", () => {
       new Request(`http://127.0.0.1:8787/v1/goals/${id}/log`, {
         headers: { accept: "text/event-stream" },
         signal: firstAc.signal,
-      }),
+      })
     );
     expect(first.status).toBe(200);
     expect(first.headers.get("content-type")).toContain("text/event-stream");
@@ -502,7 +641,7 @@ describe("Goal HTTP", () => {
     expect(chunk).not.toMatch(PI_LEAK);
 
     const crowded = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${id}/goal/log?follow=true`),
+      new Request(`http://127.0.0.1:8787/v1/session/${id}/goal/log?follow=true`)
     );
     expect(crowded.status).toBe(429);
 
@@ -513,7 +652,7 @@ describe("Goal HTTP", () => {
     const second = await app.handler.handle(
       new Request(`http://127.0.0.1:8787/v1/goals/${id}/log?follow=true`, {
         signal: secondAc.signal,
-      }),
+      })
     );
     expect(second.status).toBe(200);
     expect(second.headers.get("content-type")).toContain("text/event-stream");

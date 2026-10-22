@@ -115,4 +115,75 @@ describe("schedule product HTTP", () => {
     expect(document.paths["/v1/schedules"]?.post).toBeDefined();
     expect(document.components.schemas.GoalSchedule).toBeDefined();
   });
+
+  it("keeps the chosen model and runs the Goal session on it", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "Completed" },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: Checked\nREMAINING: none",
+      },
+    ]);
+    const unused = async () => {
+      throw new Error("unused");
+    };
+    const createdWith: unknown[] = [];
+    const createSession = fake.runtime.createSession.bind(fake.runtime);
+    fake.runtime.createSession = async (create) => {
+      createdWith.push(create.model);
+      return createSession(create);
+    };
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: {
+        listContainers: async () => [],
+        inspectContainer: unused,
+        getContainerLogs: unused,
+        getStatusSummary: unused,
+      },
+    });
+    const router = createThebeHttpRouter({ agent, version: "test" });
+    const send = (path: string, method: string, body?: unknown) =>
+      router.handle(
+        new Request(`http://127.0.0.1:8787/v1/schedules${path}`, {
+          method,
+          headers: { "content-type": "application/json" },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        })
+      );
+    const input = {
+      title: "Check",
+      goal: "Check health",
+      startAt: "2099-01-01T00:00:00Z",
+      intervalMinutes: 60,
+    };
+    expect(
+      (await send("", "POST", { ...input, model: { providerId: "fake" } }))
+        .status
+    ).toBe(400);
+    const created = (await (
+      await send("", "POST", {
+        ...input,
+        model: { providerId: "fake", modelId: "fake-2" },
+      })
+    ).json()) as { id: string; model: unknown };
+    expect(created.model).toEqual({ providerId: "fake", modelId: "fake-2" });
+    const cleared = (await (
+      await send(`/${created.id}`, "PUT", input)
+    ).json()) as { model?: unknown };
+    expect(cleared.model).toBeUndefined();
+    await send(`/${created.id}`, "PUT", {
+      ...input,
+      model: { providerId: "fake", modelId: "fake-2" },
+    });
+    const run = (await (await send(`/${created.id}/run`, "POST")).json()) as {
+      lastSessionId: string;
+    };
+    expect(createdWith.at(-1)).toEqual({
+      providerId: "fake",
+      modelId: "fake-2",
+    });
+    await agent.waitGoal(run.lastSessionId);
+  });
 });
