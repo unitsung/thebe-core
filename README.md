@@ -12,7 +12,7 @@ Run it on a NAS, a mini PC, a Raspberry Pi or a cloud server. Use it three ways:
 
 The name comes from Thebe, a moon of Jupiter (Jupiter XIV), pronounced /ˈθiːbi/.
 
-> **Status: pre-release.** There is no tagged version yet. The test suite and the container smoke test pass, but the service integrations (Emby, Jellyfin, Immich, Navidrome, OpenList, qBittorrent, aria2, Prowlarr, Arcane) are tested against recorded responses and mocks, not yet against every live release of each product. Claude Code has listed and called `/mcp` tools in a real session, and the official MCP TypeScript SDK passes initialize, list and call; Codex and OpenCode have not been tried yet. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
+> **Status: pre-release.** There is no tagged version yet. The test suite and the container smoke test pass, but the service integrations (Emby, Jellyfin, Immich, Navidrome, OpenList, qBittorrent, aria2, Prowlarr, Arcane) are tested against recorded responses and mocks, not yet against every live release of each product. Claude Code and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call; Codex has not been tried yet. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
 
 ## What it can do
 
