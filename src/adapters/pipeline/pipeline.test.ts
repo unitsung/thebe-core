@@ -195,7 +195,16 @@ describe("qBittorrent pause and resume", () => {
     );
     const pause = vi.fn(async () => {});
     const resume = vi.fn(async () => {});
-    const downloads = { ...base, pause, resume };
+    const get = vi.fn(async () =>
+      downloadItem({
+        hash,
+        name: "Show",
+        state: "downloading",
+        progress: 0.4,
+        capabilities: ["pause", "resume", "remove", "remove_with_files"],
+      })
+    );
+    const downloads = { ...base, get, pause, resume };
     const names = availablePipelineTools({ downloads });
     expect(names).toEqual(
       expect.arrayContaining(["download.pause", "download.resume"])
@@ -227,6 +236,30 @@ describe("qBittorrent pause and resume", () => {
         .execute("3", { hashes: [] })
     ).rejects.toThrow("must not be empty");
     expect(pause).toHaveBeenCalledTimes(1);
+
+    // A control the download does not offer is refused before anything is sent to the engine.
+    get.mockResolvedValueOnce(
+      downloadItem({
+        hash,
+        name: "Show",
+        state: "paused",
+        progress: 0.4,
+        capabilities: ["resume", "remove"],
+      })
+    );
+    await expect(
+      tools
+        .find((tool) => tool.name === "download.pause")!
+        .execute("3b", { hashes: [hash] })
+    ).rejects.toThrow("does not offer pause while paused");
+    get.mockResolvedValueOnce(undefined as never);
+    await expect(
+      tools
+        .find((tool) => tool.name === "download.resume")!
+        .execute("3c", { hashes: [hash] })
+    ).rejects.toThrow("Unknown download");
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(resume).toHaveBeenCalledTimes(1);
 
     const deny = { allow: () => ({ ok: false, reason: "blocked" }) } as any;
     const blocked = createPipelineTools(
@@ -304,7 +337,16 @@ describe("qBittorrent delete", () => {
       "download.delete"
     );
     const remove = vi.fn(async () => {});
-    const downloads = { ...base, remove };
+    const get = vi.fn(async () =>
+      downloadItem({
+        hash,
+        name: "Show",
+        state: "completed",
+        progress: 1,
+        capabilities: ["remove"],
+      })
+    );
+    const downloads = { ...base, get, remove };
     expect(availablePipelineTools({ downloads })).toContain("download.delete");
     expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download.delete");
 
@@ -329,6 +371,12 @@ describe("qBittorrent delete", () => {
       requested: 1,
       deleteFiles: false,
     });
+
+    // This download can be removed but not together with its files.
+    await expect(
+      tool.execute("3b", { hashes: [hash], deleteFiles: true })
+    ).rejects.toThrow("does not offer remove_with_files");
+    expect(remove).toHaveBeenCalledTimes(1);
 
     const deny = { allow: () => ({ ok: false, reason: "blocked" }) } as any;
     const blocked = createPipelineTools(

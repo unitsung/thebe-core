@@ -2,6 +2,7 @@ import {
   PIPELINE_TOOL_DESCRIPTIONS,
   PIPELINE_TOOL_SCHEMAS,
   type CloudTransferProvider,
+  type DownloadCapability,
   type DownloadProvider,
   type FilesProvider,
   type LibraryRefreshProvider,
@@ -280,6 +281,22 @@ function view(job: import("../pipeline/job-runner.ts").Job) {
   };
 }
 
+/** Every named download must offer the control, so a batch is refused whole rather than half done. */
+async function requireCapability(
+  downloads: DownloadProvider,
+  ids: string[],
+  capability: DownloadCapability
+): Promise<void> {
+  for (const id of ids) {
+    const item = await downloads.get(id);
+    if (!item) throw new Error(`Unknown download: ${id.slice(0, 8)}`);
+    if (!item.capabilities.includes(capability))
+      throw new Error(
+        `${item.name} (${item.engine}) does not offer ${capability} while ${item.phase}`
+      );
+  }
+}
+
 async function run(
   name: PipelineToolName,
   args: Record<string, unknown>,
@@ -303,6 +320,7 @@ async function run(
     case "download.resume": {
       const hashes = stringArray(args.hashes, "hashes");
       const verb = name === "download.pause" ? "pause" : "resume";
+      await requireCapability(providers.downloads!, hashes, verb);
       await providers.downloads![verb]!(hashes);
       return {
         requested: hashes.length,
@@ -314,6 +332,11 @@ async function run(
       const hashes = stringArray(args.hashes, "hashes");
       if (typeof args.deleteFiles !== "boolean")
         throw new Error("deleteFiles must be stated as true or false");
+      await requireCapability(
+        providers.downloads!,
+        hashes,
+        args.deleteFiles ? "remove_with_files" : "remove"
+      );
       await providers.downloads!.remove!(hashes, args.deleteFiles);
       return {
         requested: hashes.length,

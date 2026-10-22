@@ -169,6 +169,30 @@ describe("download hub", () => {
     expect(await both.list({ engine: "aria2" })).toEqual([file]);
   });
 
+  it("keeps a merged list within its limit and gives each engine a share of it", async () => {
+    const many = (prefix: string, count: number, engineName: string) =>
+      Array.from({ length: count }, (_, index) =>
+        downloadItem({
+          hash: prefix.repeat(40).slice(0, 40 - String(index).length) + index,
+          name: `${engineName} ${index}`,
+          state: "downloading",
+          progress: 0.1,
+          engine: engineName,
+        })
+      );
+    const hub = createDownloadHub([
+      engine("qbittorrent", many("a", 5, "qbittorrent")).provider,
+      engine("aria2", many("b", 5, "aria2")).provider,
+    ])!;
+    const names = (await hub.list({ limit: 4 })).map((item) => item.name);
+    expect(names).toEqual([
+      "qbittorrent 0",
+      "aria2 0",
+      "qbittorrent 1",
+      "aria2 1",
+    ]);
+  });
+
   it("fails when no engine answers", async () => {
     const hub = createDownloadHub([
       engine("qbittorrent", [], { failing: true }).provider,
@@ -205,6 +229,24 @@ describe("download hub", () => {
     await hub.remove!([hash], true);
     expect(qb.calls.remove).toHaveBeenCalledWith([hash], true);
     await expect(hub.pause!(["zz"])).rejects.toThrow(/Invalid download id/);
+  });
+
+  it("carries on with the other engine when one fails, and says what was already done", async () => {
+    const qb = engine("qbittorrent", [torrent]);
+    const aria = engine("aria2", [file]);
+    aria.calls.remove.mockRejectedValueOnce(new Error("aria2 is down"));
+    const hub = createDownloadHub([qb.provider, aria.provider])!;
+
+    await expect(hub.remove!([hash, gid], false)).rejects.toThrow(
+      "aria2: aria2 is down (already done on qbittorrent)"
+    );
+    expect(qb.calls.remove).toHaveBeenCalledWith([hash], false);
+
+    qb.calls.pause.mockRejectedValueOnce(new Error("qbittorrent is down"));
+    aria.calls.pause.mockRejectedValueOnce(new Error("aria2 is down"));
+    await expect(hub.pause!([hash, gid])).rejects.toThrow(
+      "qbittorrent: qbittorrent is down; aria2: aria2 is down"
+    );
   });
 
   it("offers a control only when an engine has it", () => {

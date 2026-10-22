@@ -51,17 +51,45 @@ export function createDownloadHub(
     throw new ProviderError("UNKNOWN", "Invalid download id");
   };
 
-  /** Runs `act` once per engine on the ids that belong to it. */
+  /** Items grouped by the engine that owns them, in the order the engines first appear. */
+  const byEngine = (
+    items: string[],
+    engineOf: (item: string) => DownloadProvider
+  ) => {
+    const groups = new Map<DownloadProvider, string[]>();
+    for (const item of items) {
+      const engine = engineOf(item);
+      groups.set(engine, [...(groups.get(engine) ?? []), item]);
+    }
+    return groups;
+  };
+
+  /**
+   * Runs `act` once per engine on the ids that belong to it. An engine that fails does not stop the others,
+   * and the error says which engines did the work, so a half-done batch is never reported as plain failure.
+   */
   const perEngine = async (
     ids: string[],
     act: (engine: DownloadProvider, ids: string[]) => Promise<void> | undefined
   ) => {
-    const groups = new Map<DownloadProvider, string[]>();
-    for (const id of ids) {
-      const engine = forId(id);
-      groups.set(engine, [...(groups.get(engine) ?? []), id]);
+    const groups = byEngine(ids, forId);
+    const failed: string[] = [];
+    const done: string[] = [];
+    for (const [engine, group] of groups) {
+      try {
+        await act(engine, group);
+        done.push(engine.service);
+      } catch (error) {
+        failed.push(`${engine.service}: ${messageOf(error)}`);
+      }
     }
-    for (const [engine, group] of groups) await act(engine, group);
+    if (failed.length === 0) return;
+    throw new ProviderError(
+      "UNKNOWN",
+      done.length > 0
+        ? `${failed.join("; ")} (already done on ${done.join(", ")})`
+        : failed.join("; ")
+    );
   };
 
   const listWithProblems: NonNullable<
@@ -71,10 +99,10 @@ export function createDownloadHub(
     const settled = await Promise.allSettled(
       chosen.map((engine) => engine.list(input))
     );
-    const downloads: DownloadItem[] = [];
+    const answers: DownloadItem[][] = [];
     const unreachable: string[] = [];
     settled.forEach((result, index) => {
-      if (result.status === "fulfilled") downloads.push(...result.value);
+      if (result.status === "fulfilled") answers.push(result.value);
       else
         unreachable.push(
           `${chosen[index]!.service}: ${messageOf(result.reason)}`
@@ -87,18 +115,19 @@ export function createDownloadHub(
       );
       throw first!.reason;
     }
-    return { downloads, unreachable };
+    return {
+      downloads: interleave(answers).slice(0, listLimit(input.limit)),
+      unreachable,
+    };
   };
 
   const hub: DownloadProvider = {
     service: engines.map((engine) => engine.service).join("+"),
 
     async add(input) {
-      const groups = new Map<DownloadProvider, string[]>();
-      for (const url of input.urls) {
-        const engine = input.engine ? named(input.engine) : forLink(url.trim());
-        groups.set(engine, [...(groups.get(engine) ?? []), url]);
-      }
+      const groups = byEngine(input.urls, (url) =>
+        input.engine ? named(input.engine) : forLink(url.trim())
+      );
       let submitted = 0;
       for (const [engine, urls] of groups) {
         submitted += (await engine.add({ ...input, urls })).submitted;
@@ -140,6 +169,17 @@ export function createDownloadHub(
           engine.remove?.(group, deleteFiles) ?? unsupported(engine, "remove")
       );
   return hub;
+}
+
+const listLimit = (limit?: number) => Math.min(Math.max(limit ?? 30, 1), 100);
+
+/** One row from each engine in turn, so a busy engine cannot push the others out of a limited list. */
+function interleave<T>(lists: T[][]): T[] {
+  const merged: T[] = [];
+  for (let index = 0; lists.some((list) => index < list.length); index++)
+    for (const list of lists)
+      if (index < list.length) merged.push(list[index]!);
+  return merged;
 }
 
 function unsupported(engine: DownloadProvider, action: string): never {
