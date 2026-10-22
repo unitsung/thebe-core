@@ -94,6 +94,12 @@ Writes are refused over `/mcp`; they only run inside an agent session, where you
 
 The token grants full access: there are no scopes. The container listens on loopback by default; put anything wider behind TLS (Tailscale or a reverse proxy) and list the host names in `THEBE_ALLOWED_HOSTS`. The default permission mode asks before editing files or running commands. Tool output and MCP data are treated as untrusted. [SECURITY.md](SECURITY.md) has the full model and how to report a vulnerability.
 
+## Responsible use
+
+Core drives services you run and accounts you hold; it does not provide, host, index or recommend any content. Some optional integrations connect to downloaders, indexers (Prowlarr), cloud drives and third-party music services (SQMusic, and an unofficial NetEase API service you run yourself). Those integrations are conveniences for tools you already use.
+
+You are responsible for what you ask Core to do with them: make sure you have the right to download, copy or store the material, and follow the laws where you live and the terms of the services you connect. The maintainers do not endorse or take responsibility for infringing use, and the software is provided as is, without warranty, under the [Apache-2.0 license](LICENSE). Downloads and other writes need your approval by default, and every call is recorded in the audit log, so you can see what ran.
+
 ## Documentation
 
 | Topic                                     | Where                                                          |
