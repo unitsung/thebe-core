@@ -2,20 +2,21 @@
 
 [English](README.md)
 
-Thebe Core 是跑在你自己机器上的服务端，用来操作已经在跑的影视库、照片、音乐、文件、下载和容器。名字来自木星的卫星 Thebe（木卫十四），读作 /ˈθiːbi/。
+Thebe Core 是一个带审批和审计日志的 homelab agent 服务端。它连接你已经在跑的服务（影视库、照片、音乐、文件、下载、容器），让 agent 能安全地操作它们：读操作直接执行，有风险的操作等你批准，每次调用都有记录。
 
-这个仓库只有服务端，而且它是可选的。Apple 上的 Thebe App 是另一个闭源产品，直接连接你的各个服务，不依赖 Core；Core 补上手机 App 单独做不到的部分：AI agent、后台和定时任务、危险操作的审批，以及可供其他 agent 使用的 MCP 端点。App 的源码不在这里。仓库里可以直接使用的是终端、HTTP API 和 MCP。
+可以跑在 NAS、迷你主机、树莓派或云服务器上。有三种用法：
 
-> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、
-> Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的
-> 响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。可能有毛边；在把它暴露到本机以外之前，
-> 请先读 [SECURITY.md](SECURITY.md)。
+- **作为 MCP 服务器**，给你已经在用的 agent 使用。任何能发送 HTTP 请求头的 MCP 客户端都可以列出并调用 Core 的工具。
+- **作为终端 agent。** Core 内嵌 [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 运行时，`thebe` 提供 TUI 和一次性 CLI，可以在你指定的工作区里读文件、改文件、执行命令。
+- **通过 HTTP API。** 会话、目标、定时任务、活动流、审批和审计日志，OpenAPI 文档在 `/docs`。
 
-服务端是一个 Docker 容器，支持 x86_64 和 arm64。NAS、迷你主机、树莓派或云服务器都可以。推送 `v*` 标签时，工作流会构建多架构镜像并推送到 GitHub Container Registry（`ghcr.io/unitsung/thebe-core`）。目前还没有打过标签，所以现在请从本仓库构建镜像。
+名字来自木星的卫星 Thebe（木卫十四），读作 /ˈθiːbi/。
+
+> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。`/mcp` 只用普通 JSON-RPC 请求试过，针对具体 MCP 客户端的兼容性还没有验证。在把 Core 暴露到本机以外之前，请先读 [SECURITY.md](SECURITY.md)。
 
 ## 能做什么
 
-Agent 运行时使用 pi-coding-agent。在指定的工作区里，它可以读文件、改文件、执行命令，一次任务里可以连做几步。改文件和执行命令默认会先征求确认。较长的工作可以作为目标（goal）、后台 worker 或定时任务运行。
+配置好模型和工作区后，agent 可以读文件、改文件、执行命令，一次任务里可以连做几步。改文件和执行命令默认会先征求确认。较长的工作可以作为目标（goal）、后台 worker 或定时任务运行。
 
 接上服务后还可以：
 
@@ -25,29 +26,15 @@ Agent 运行时使用 pi-coding-agent。在指定的工作区里，它可以读�
 - 用 OpenList 浏览和整理文件、发起离线下载；用 qBittorrent 和 aria2 查看和控制下载任务
 - 在 OpenList、下载引擎，以及 Emby 或 Jellyfin 都已配置时，把下载、拷贝、扫描和校验串成入库流程。配上 Prowlarr 后可以先搜索资源
 - 通过 Arcane，或通过受限的 `docker-socket-proxy` 后面的 Docker Engine API，查看容器状态和日志。启动和重启会先征求确认
-- 加载 Skills，或在 `.thebe/mcp.json` 里接入 MCP 服务器
-- 按你提供的 OpenAPI 3 或 Swagger 2 文档调用一个 HTTP 服务。开放哪些读接口写在配置里，写操作会先征求确认
+- 按你提供的 OpenAPI 3 或 Swagger 2 文档调用任意 HTTP 服务。开放哪些读接口写在配置里，写操作会先征求确认
+- 加载 Skills，或在 `.thebe/mcp.json` 里接入其他 MCP 服务器
 - 通过你指定的 SearXNG 实例搜索网页（设置 `THEBE_WEB_SEARCH_URL` 之前默认关闭），结果附来源链接
 
 模型、服务地址和密钥见[配置指南](docs/configuration.md)。
 
-## Core 适合什么时候用
-
-只想查看和控制服务、播放媒体、和 App 自带的 agent 对话，单用 App 就够。需要手机自己做不到的事时再加 Core：
-
-| 你想要                                                                        | 是否需要 Core     |
-| ----------------------------------------------------------------------------- | ----------------- |
-| 手机休眠后仍在跑的下载、媒体库扫描和定时任务                                  | 需要              |
-| 在服务器上执行命令、改文件的 agent                                            | 需要              |
-| 危险操作的推送与审批                                                          | 需要              |
-| 让你自己的 agent（OpenClaw、Hermes、Claude Code、Codex）使用你的 homelab 服务 | 需要，通过 `/mcp` |
-| 浏览服务、播放媒体、在 App 里交互式对话                                       | 不需要            |
-
-Core 不打算做通用 agent 平台，也不做聊天网关。如果你已经在用这类工具，请把它指向 Core 的 `/mcp` 端点，不必替换它。目前 `/mcp` 只提供读工具；写操作经 `/mcp` 会被拒绝，只能在 Core 自己的会话里经你审批后执行。
-
 ## 快速开始
 
-容器请从本仓库构建，见[部署文档](docs/DEPLOYMENT.md)。不使用 Docker 时，从源码运行需要 Node.js 24 LTS（自带 npm）。
+容器是受支持的运行方式，见[部署文档](docs/DEPLOYMENT.md)。支持 x86_64 和 arm64。推送 `v*` 标签时，工作流会构建多架构镜像并推送到 GitHub Container Registry（`ghcr.io/unitsung/thebe-core`）。目前还没有打过标签，所以现在请从本仓库构建镜像。
 
 ```bash
 cd deploy
@@ -57,7 +44,7 @@ TOKEN=$(sed -n 's/^THEBE_TOKEN=//p' .env)
 curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/health
 ```
 
-从源码运行（必须指定工作区目录）：
+不使用 Docker 时，从源码运行（需要 Node.js 24 LTS，自带 npm；必须指定工作区目录）：
 
 ```bash
 npm install
@@ -65,32 +52,30 @@ cp .env.example .env
 THEBE_WORKSPACE_DIR=/srv/thebe-workspace npm run start:build
 ```
 
-接着按[配置指南](docs/configuration.md)连接模型和你的服务。Core 不自带模型：在终端界面里用 `/settings`，或通过 `GET /v1/provider` 登录一个模型服务商。
+Core 不自带模型：在终端界面里用 `/settings`，或通过 `GET /v1/provider` 登录一个模型服务商，然后按[配置指南](docs/configuration.md)连接你的服务。
 
-## 不用 App 怎么用
+## 怎么用
 
-有三个入口，都走同一套权限和审批规则。
-
-**终端。** `npm run tui` 会构建并启动交互界面。构建之后，`node dist/cli.js`（或包的 `bin`：`thebe`）效果相同；`thebe -p "列出我的容器"` 执行一条提示后退出。`thebe --help` 列出 session 和 MCP 子命令，`thebe doctor` 报告隔离状态。
-
-**HTTP API。** 所有 `/v1` 路由都需要在 `X-Thebe-Token` 请求头里带 token。API 参考在 `/docs`（Swagger UI），原始规范在 `/openapi.json`，这两个不需要 token。想看 Core 能做什么、想试一下，这里最快：
-
-```bash
-curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
-```
-
-**MCP。** `POST /mcp` 是无状态的 JSON-RPC 端点（只有 tools），能带 token 请求头的 MCP 客户端都可以用它调用 Core 的能力：
+**接入你自己的 agent（MCP）。** `POST /mcp` 是无状态的 JSON-RPC 端点（只有 tools），暴露 Core 的能力。在 `X-Thebe-Token` 请求头里带 token：
 
 ```bash
 curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-写操作经 `/mcp` 会被拒绝，只能在 agent 会话里、经你审批后执行。
+在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。目前 `/mcp` 只提供读工具：写操作经 `/mcp` 会被拒绝，只能在 Core 自己的会话里经你批准后执行。让其他 agent 也能请求经审批的写操作，在[路线图](ROADMAP.md)里。
+
+**在终端里。** `npm run tui` 会构建并启动交互界面。构建之后，`node dist/cli.js`（或包的 `bin`：`thebe`）效果相同；`thebe -p "列出我的容器"` 执行一条提示后退出。`thebe --help` 列出 session 和 MCP 子命令，`thebe doctor` 报告隔离状态。
+
+**通过 HTTP。** 所有 `/v1` 路由都需要 token。API 参考在 `/docs`（Swagger UI），原始规范在 `/openapi.json`，这两个不需要 token。
+
+```bash
+curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
+```
 
 ## 安全要点
 
-token 拥有全部权限，没有作用域。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认。工具输出和 MCP 数据都当作不可信数据。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+token 拥有全部权限，没有作用域。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认；shell 命令会先做风险分级，在宿主机上运行于系统沙箱里；工具输出和 MCP 数据都当作不可信数据；密钥会被脱敏；每次调用都写入只追加的审计日志（agent store 目录下的 `audit.jsonl`）。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 ## 使用须知
 
@@ -106,7 +91,6 @@ Core 操作的是你自己运行的服务和你自己的账号，它不提供、
 | 容器、升级、备份、发布检查 | [部署文档](docs/DEPLOYMENT.md)                                 |
 | HTTP 路由                  | [Core 产品 HTTP](docs/CORE-PRODUCT-HTTP.md)                    |
 | 使用服务自带的 MCP 服务器  | [Provider MCP](docs/PROVIDER-MCP.md)                           |
-| 设计决策                   | [docs/adr](docs/adr)                                           |
 | 变更记录                   | [CHANGELOG.md](CHANGELOG.md)                                   |
 | 路线图                     | [ROADMAP.md](ROADMAP.md)                                       |
 | 术语与架构                 | [CONTEXT.md](CONTEXT.md)                                       |
@@ -116,6 +100,6 @@ Core 操作的是你自己运行的服务和你自己的账号，它不提供、
 
 ## 许可证
 
-Apache-2.0。代码按 Apache-2.0 授权；Thebe 名称以及 Thebe App 的图标等美术素材不在该许可范围内，也不意味着你可以用同样的名字发布产品。
+Apache-2.0。代码按 Apache-2.0 授权；Thebe 名称和标志不在该许可范围内，也不意味着你可以用同样的名字发布产品。
 
 贡献需要在提交里带 `Signed-off-by`，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
