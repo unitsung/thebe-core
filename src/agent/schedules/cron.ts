@@ -2,7 +2,7 @@
  * Five-field cron for Goal schedules: `minute hour day-of-month month day-of-week`, evaluated in an
  * IANA time zone (so "0 9 * * *" is nine o'clock where the owner is, across daylight saving).
  *
- * Supported per field: `*`, a number, `a-b`, a list `a,b,c`, and a step `*​/n` or `a-b/n`. Day of week
+ * Supported per field: `*`, a number, `a-b`, a list `a,b,c`, and a step written as a slash and a number after `*` or a range. Day of week
  * is 0-6 with 7 also meaning Sunday. As in Vixie cron, when both day-of-month and day-of-week are
  * restricted a day matches if either does. Names (JAN, MON) and `@daily`-style macros are not supported.
  */
