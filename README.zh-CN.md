@@ -63,7 +63,7 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。默认 `/mcp` 只提供读工具。设置 `THEBE_MCP_WRITES=on` 后，调用方 agent 也能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人：由调用方 agent 去问它的用户，Claude Code、Codex 这类 MCP 客户端会按每个工具的 `destructiveHint` 提示用户。每次写操作都记入审计日志。
+在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。默认 `/mcp` 只提供读工具。设置 `THEBE_MCP_WRITES=on` 后，调用方 agent 也能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。每次写操作都记入审计日志。
 
 **在终端里。** `npm run tui` 会构建并启动交互界面。构建之后，`node dist/cli.js`（或包的 `bin`：`thebe`）效果相同；`thebe -p "列出我的容器"` 执行一条提示后退出。`thebe --help` 列出 session 和 MCP 子命令，`thebe doctor` 报告隔离状态。
 

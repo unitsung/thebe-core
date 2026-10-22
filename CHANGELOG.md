@@ -27,6 +27,7 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 
 ### Changed
 
+- Over `/mcp`, a provider MCP server's tool counts as a write unless its permission is `read`. Core takes that from the tool's `readOnlyHint`, or from `permission: "read"` on the server in `.thebe/mcp.json`, so a provider tool that was callable over `/mcp` before can now need that setting or `THEBE_MCP_WRITES`.
 - Host bash isolation is pinned `@anthropic-ai/sandbox-runtime` 0.0.80 (Seatbelt / bubblewrap). Unset `THEBE_SANDBOX` means on for a host and off inside a container. The TUI and graphical clients can turn that host sandbox off; the command guard stays on. There is no automatic bypass. `THEBE_SANDBOX=off` still forces it off. `os`, `auto`, `vm`, `gondolin`, `bwrap`, `docker`, `seatbelt` and any other value are ignored, the same as leaving the variable unset.
 - Sandboxed bash asks before reaching a host that is not allowed yet, the same shape as Claude Code. Allowing once covers that command. Remembering the host stores it on the Core. Two sandboxed commands at once are not asked, because the connection cannot be attributed. Bypass does not enter the sandbox, so its network stays open.
 - `GET /v1/system/isolation` `sandbox.mode` is `off` or `os`. `sandbox.backends` is gone, and `fallback` is always false. A missing dependency refuses commands; `thebe doctor` exits 1.

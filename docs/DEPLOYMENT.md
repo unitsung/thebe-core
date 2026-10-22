@@ -237,7 +237,7 @@ only: set `THEBE_BIND=<LAN address>` in `deploy/.env` and `docker compose up -d`
 clients at `http://<LAN address>:8787` with the token.
 
 What this costs: the token crosses your network in plaintext, so anyone on it who captures a request
-holds full access. Keep `THEBE_REMOTE_BASH` off unless you trust the network, never bind `0.0.0.0`,
+holds full access. Keep `THEBE_REMOTE_BASH` and `THEBE_MCP_WRITES` off unless you trust the network, never bind `0.0.0.0`,
 and do not forward the port from your router. Use a TLS path above for anything beyond the home.
 
 ### 4.2 Managing tokens

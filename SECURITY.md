@@ -37,6 +37,12 @@ Thebe Core is designed to run on your own hardware:
   full access to the API: there are no scopes. Anyone holding a token can read
   the audit log, change settings, approve pending permissions, and run any tool
   the permission mode allows. Treat it like a password.
+- **Writes over `/mcp` are off.** An agent connected over `/mcp` can read. With
+  `THEBE_MCP_WRITES=on` it can also restart containers, edit playlists and use a
+  provider's write tools, and Core does not hold those calls for approval: the
+  calling agent and its client decide whether to ask. Anyone with a token can
+  then change things through `/mcp`, so leave it off unless you want that. Every
+  write is audited.
 - **Opting out of safety.** `bypassPermissions` lifts the command guard, the
   sandbox and approval for one session. Graphical clients and the TUI ask before turning it
   on; the HTTP API accepts it from any token holder.

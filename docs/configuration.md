@@ -123,7 +123,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 - `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
-- `THEBE_MCP_WRITES` 设为 `on`（或 `allow`/`true`/`1`/`yes`）后，经 `/mcp` 连接的 agent 可以调用写工具：`container.restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。默认关闭，客户端无法自己打开。这条路径上 Core 不会先问任何人，由调用方 agent 去问它的用户（MCP 客户端会读每个工具的 `destructiveHint`）。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
+- `THEBE_MCP_WRITES` 设为 `on`（或 `allow`/`true`/`1`/`yes`）后，经 `/mcp` 连接的 agent 可以调用写工具：`container.restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。默认关闭，客户端无法自己打开。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
 ## OpenList STRM 修复 provider

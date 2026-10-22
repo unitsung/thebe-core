@@ -4,6 +4,7 @@ import type {
   ContainerInfoProvider,
 } from "../../agent/capabilities/containers.ts";
 import type { ServiceAPIProvider } from "../../agent/capabilities/service-api.ts";
+import type { NavidromeProvider } from "../../agent/capabilities/navidrome.ts";
 import type { McpRegistry } from "../../agent/extensions/mcp.ts";
 import { createThebeAgent } from "../../agent/index.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
@@ -88,7 +89,38 @@ function petstore(requests: string[]): ServiceAPIProvider {
   };
 }
 
-function setup(mcpWritesAllowed: boolean, requests: string[] = []) {
+function navidrome(created: string[]): NavidromeProvider {
+  return {
+    service: "navidrome",
+    async listLibrary() {
+      return { mode: "recent", albums: [] };
+    },
+    async search() {
+      return { artists: [], albums: [], songs: [] };
+    },
+    async getArtist() {
+      return undefined;
+    },
+    async getLyrics() {
+      return undefined;
+    },
+    async getPlaybackQueue() {
+      return { items: [], startIndex: 0, mode: "direct" };
+    },
+    async createPlaylist(input) {
+      created.push(input.name);
+      return undefined;
+    },
+    async updatePlaylist() {},
+    async deletePlaylist() {},
+  };
+}
+
+function setup(
+  mcpWritesAllowed: boolean,
+  requests: string[] = [],
+  playlists: string[] = []
+) {
   const calls: string[] = [];
   const provider = containers();
   const agent = createThebeAgent({
@@ -96,6 +128,7 @@ function setup(mcpWritesAllowed: boolean, requests: string[] = []) {
     provider,
     mcp: providerRegistry(calls),
     serviceAPIProviders: [petstore(requests)],
+    navidrome: navidrome(playlists),
     mcpWritesAllowed,
   });
   const handler = createThebeHttpHandler({ version: "0.1.0", agent });
@@ -171,6 +204,32 @@ describe("/mcp write tools", () => {
     const deleted = await call("mcp:radarr/delete_movie", { id: 1 });
     expect(deleted.result?.isError).toBeUndefined();
     expect(calls).toEqual(["mcp:radarr/delete_movie"]);
+  });
+
+  it("restart the same container again each time they are called", async () => {
+    const { call, provider } = setup(true);
+    await call("container.restart", { id: "ctr-1" });
+    await call("container.restart", { id: "ctr-1" });
+    expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
+  });
+
+  it("let a Navidrome playlist be created only when the host enables writes", async () => {
+    const off = setup(false, [], []);
+    const refused = await off.call("navidrome.playlist.create", {
+      name: "Mix",
+      songIds: ["s1"],
+    });
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("THEBE_MCP_WRITES");
+
+    const created: string[] = [];
+    const on = setup(true, [], created);
+    const done = await on.call("navidrome.playlist.create", {
+      name: "Mix",
+      songIds: ["s1"],
+    });
+    expect(done.result?.isError).toBeUndefined();
+    expect(created).toEqual(["Mix"]);
   });
 
   it("need an id to restart a container", async () => {

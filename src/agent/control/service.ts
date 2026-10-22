@@ -334,6 +334,9 @@ export function createControlApi(
       const receipt = await deps.executeAction({
         actionId: name,
         resource: { kind: "container", id, provider: "unknown" },
+        // Each call is its own request: the default key is one per container, so a second restart
+        // would get the first receipt back and restart nothing.
+        idempotencyKey: `mcp:${randomUUID()}`,
         approval: {
           approved: true,
           approvedAt: now().toISOString(),
