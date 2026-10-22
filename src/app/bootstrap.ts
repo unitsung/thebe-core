@@ -35,13 +35,11 @@ import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts"
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
-import { createJevAdapter } from "../adapters/jev/adapter.ts";
 import {
   createOpenListBackgroundTaskProviderFromEnv,
   createOpenListStrmRepairProviderFromEnv,
 } from "../adapters/openlist/index.ts";
 import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbittorrent/tasks.ts";
-import { readJudgmentGate } from "../agent/judgment/gate.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
 import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
@@ -194,18 +192,6 @@ export async function bootstrapThebe(
     process.env.THEBE_AGENT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
 
-  const judgmentGate = readJudgmentGate();
-  const judgment =
-    judgmentGate.adapter === "jev"
-      ? createJevAdapter({
-          apiKey: judgmentGate.apiKey,
-          baseUrl: judgmentGate.baseUrl,
-          model: judgmentGate.model,
-        })
-      : undefined;
-  const judgmentSites =
-    judgmentGate.adapter === "jev" ? judgmentGate.sites : undefined;
-
   const app = createThebeApp({
     runtime,
     provider,
@@ -226,8 +212,6 @@ export async function bootstrapThebe(
     workspacePath,
     outputDirectory,
     allowedHosts: options?.allowedHosts,
-    judgment,
-    judgmentSites,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     memoryStore: createJsonMemoryStore(join(configDir, "memory.json")),
     strmRepairProvider,

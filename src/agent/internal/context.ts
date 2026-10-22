@@ -87,7 +87,6 @@ import { createResearchBudget } from "../../agent/tools/research-budget.ts";
 import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
-import { createJudgmentApi } from "../judgment/service.ts";
 import { createAutoSummary } from "./auto-summary.ts";
 export { DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./auto-summary.ts";
 import { createEventLog } from "./event-log.ts";
@@ -332,10 +331,6 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     : undefined;
   const store = createAgentStore(options.agentStoreDir);
   const mcp = options.mcp ?? createEmptyMcpRegistry();
-  const judgment = createJudgmentApi({
-    model: options.judgment,
-    sites: options.judgmentSites ?? "all",
-  });
   const enabledResources: EnabledResource[] = [
     ...(options.enabledResources ?? []),
   ];
@@ -1165,7 +1160,6 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     audit,
     store,
     mcp,
-    judgment,
     enabledResources,
     workspacePath,
     outputDirectory,

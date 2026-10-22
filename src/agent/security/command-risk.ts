@@ -1,8 +1,6 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { parsedCommandRisk } from "./parsed-command-risk.ts";
-import {
-  inspectDockerCommandSafety,
-} from "./docker-command-guard.ts";
+import { inspectDockerCommandSafety } from "./docker-command-guard.ts";
 import {
   validateDockerApiRequest,
   type DockerProxyPolicy,
@@ -15,13 +13,18 @@ import {
  * the 2026-09 audit branches): the pattern tables carry the storage-system
  * knowledge — ZFS, Btrfs, EXT4, NTFS, NFS — plus NAS volume deletion, host
  * RAID/block-device writes, container breakouts, and the workspace-escape
- * check. The small-model review that used to live beside it is dev's
- * `src/agent/judgment/`; this module stays pure and heuristic.
+ * check. This module stays pure and heuristic.
  */
 
 export type CommandRiskLevel = "safe" | "caution" | "dangerous" | "critical";
 
-export type StorageSystem = "zfs" | "btrfs" | "ext4" | "ntfs" | "nfs" | "general";
+export type StorageSystem =
+  | "zfs"
+  | "btrfs"
+  | "ext4"
+  | "ntfs"
+  | "nfs"
+  | "general";
 
 export type CommandRiskCategory =
   | "filesystem"
@@ -60,14 +63,16 @@ export type AssessToolCallOptions = {
   dockerGuard?: DockerProxyPolicy;
 };
 
-
 export interface CommandRiskCacheOptions {
   maxEntries?: number;
   ttlMs?: number;
 }
 
 export class CommandRiskCache {
-  private cache = new Map<string, { assessment: CommandRiskAssessment; expiresAt: number }>();
+  private cache = new Map<
+    string,
+    { assessment: CommandRiskAssessment; expiresAt: number }
+  >();
   private maxEntries: number;
   private ttlMs: number;
 
@@ -112,20 +117,26 @@ export const defaultCommandRiskCache = new CommandRiskCache();
 
 const CRITICAL_PATTERNS: RiskRule[] = [
   {
-    pattern: /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)*(\/|\/\*|\/etc|\/var|\/usr|\/boot|\/dev|\/sys|\/proc|\/bin|\/sbin|\/home|\/root|~)(\s|$|\/)/,
-    reason: "Catastrophic file deletion targeting root, system, or home directory",
+    pattern:
+      /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)*(\/|\/\*|\/etc|\/var|\/usr|\/boot|\/dev|\/sys|\/proc|\/bin|\/sbin|\/home|\/root|~)(\s|$|\/)/,
+    reason:
+      "Catastrophic file deletion targeting root, system, or home directory",
     category: "filesystem",
   },
   {
-    pattern: /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)*(\/volume\d+|\/mnt\/[a-zA-Z0-9_-]+|\/shares?|\/data)(\s|$|\/|\/\*)/,
-    reason: "Catastrophic mass deletion of NAS storage dataset, pool, or shared volume",
+    pattern:
+      /\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)*(\/volume\d+|\/mnt\/[a-zA-Z0-9_-]+|\/shares?|\/data)(\s|$|\/|\/\*)/,
+    reason:
+      "Catastrophic mass deletion of NAS storage dataset, pool, or shared volume",
     category: "storage",
     storageSystem: "general",
   },
   // --- ZFS Critical ---
   {
-    pattern: /\b(zfs\s+(destroy|rollback\s+-r)|zpool\s+(destroy|split|labelclear))\b/,
-    reason: "Destruction of ZFS filesystem dataset, storage pool, or vdev on-disk label",
+    pattern:
+      /\b(zfs\s+(destroy|rollback\s+-r)|zpool\s+(destroy|split|labelclear))\b/,
+    reason:
+      "Destruction of ZFS filesystem dataset, storage pool, or vdev on-disk label",
     category: "storage",
     storageSystem: "zfs",
   },
@@ -137,14 +148,17 @@ const CRITICAL_PATTERNS: RiskRule[] = [
   },
   // --- Btrfs Critical ---
   {
-    pattern: /\b(btrfs\s+(subvolume\s+delete|device\s+(delete|remove))|mkfs\.btrfs)\b/,
-    reason: "Destruction of Btrfs storage subvolume, device removal, or filesystem creation",
+    pattern:
+      /\b(btrfs\s+(subvolume\s+delete|device\s+(delete|remove))|mkfs\.btrfs)\b/,
+    reason:
+      "Destruction of Btrfs storage subvolume, device removal, or filesystem creation",
     category: "storage",
     storageSystem: "btrfs",
   },
   {
     pattern: /\bbtrfs\s+check\s+.*--repair\b/,
-    reason: "Running 'btrfs check --repair' is extremely dangerous and prone to catastrophic Btrfs metadata corruption",
+    reason:
+      "Running 'btrfs check --repair' is extremely dangerous and prone to catastrophic Btrfs metadata corruption",
     category: "storage",
     storageSystem: "btrfs",
   },
@@ -189,12 +203,14 @@ const CRITICAL_PATTERNS: RiskRule[] = [
   // --- NFS Critical ---
   {
     pattern: /\bexportfs\s+.*(-u\s+-a|-ua|-au)\b/,
-    reason: "Abrupt unexport of ALL NFS shares disconnects all network clients and causes client hangs",
+    reason:
+      "Abrupt unexport of ALL NFS shares disconnects all network clients and causes client hangs",
     category: "storage",
     storageSystem: "nfs",
   },
   {
-    pattern: /(^|[;&|\s])(rm\s+.*|truncate\s+.*|>\s*)\/etc\/exports(\.d(\/.*)?)?\b/,
+    pattern:
+      /(^|[;&|\s])(rm\s+.*|truncate\s+.*|>\s*)\/etc\/exports(\.d(\/.*)?)?\b/,
     reason: "Destructive removal or truncation of NFS exports configuration",
     category: "storage",
     storageSystem: "nfs",
@@ -213,7 +229,8 @@ const CRITICAL_PATTERNS: RiskRule[] = [
     storageSystem: "general",
   },
   {
-    pattern: /\bdd\s+.*of=\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|hd[a-z]|loop\d+)\b/,
+    pattern:
+      /\bdd\s+.*of=\/dev\/(sd[a-z]|nvme\d+n\d+|vd[a-z]|hd[a-z]|loop\d+)\b/,
     reason: "Raw write to disk block device",
     category: "storage",
     storageSystem: "general",
@@ -237,20 +254,24 @@ const CRITICAL_PATTERNS: RiskRule[] = [
   },
   {
     pattern: /\bdocker\s+run\s+.*(-v|--volume)\s+\/:.*--privileged\b/,
-    reason: "Docker container escape attempting to mount host root in privileged mode",
+    reason:
+      "Docker container escape attempting to mount host root in privileged mode",
     category: "container",
   },
 ];
 
 const DANGEROUS_PATTERNS: RiskRule[] = [
   {
-    pattern: /\b(shutdown|reboot|poweroff|init\s+[06]|systemctl\s+(poweroff|reboot|halt))\b/,
+    pattern:
+      /\b(shutdown|reboot|poweroff|init\s+[06]|systemctl\s+(poweroff|reboot|halt))\b/,
     reason: "Host reboot, shutdown, or poweroff",
     category: "system",
   },
   {
-    pattern: /\b(iptables\s+(-[FXZ]|--flush)|nft\s+flush|ufw\s+(disable|reset))\b/,
-    reason: "Host firewall flush or disable could expose homelab or disconnect network",
+    pattern:
+      /\b(iptables\s+(-[FXZ]|--flush)|nft\s+flush|ufw\s+(disable|reset))\b/,
+    reason:
+      "Host firewall flush or disable could expose homelab or disconnect network",
     category: "network",
   },
   {
@@ -259,7 +280,8 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
     category: "network",
   },
   {
-    pattern: /\b(docker|podman)\s+rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?(\$\((docker|podman)\s+ps|`\s*(docker|podman)\s+ps|.*-a\b)/,
+    pattern:
+      /\b(docker|podman)\s+rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+)?(\$\((docker|podman)\s+ps|`\s*(docker|podman)\s+ps|.*-a\b)/,
     reason: "Mass destructive deletion of all containers",
     category: "container",
   },
@@ -281,7 +303,8 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
   // --- ZFS Dangerous ---
   {
     pattern: /\bzpool\s+(offline|detach|remove|replace|clear)\b/,
-    reason: "Offlining, detaching, removing, or replacing ZFS storage pool device",
+    reason:
+      "Offlining, detaching, removing, or replacing ZFS storage pool device",
     category: "storage",
     storageSystem: "zfs",
   },
@@ -293,8 +316,10 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
   },
   // --- Btrfs Dangerous ---
   {
-    pattern: /\bbtrfs\s+(balance\s+(start|cancel)|subvolume\s+set-default|filesystem\s+defrag|rescue)\b/,
-    reason: "Btrfs balance rechunking, default subvolume alteration, defragmentation, or rescue operation",
+    pattern:
+      /\bbtrfs\s+(balance\s+(start|cancel)|subvolume\s+set-default|filesystem\s+defrag|rescue)\b/,
+    reason:
+      "Btrfs balance rechunking, default subvolume alteration, defragmentation, or rescue operation",
     category: "storage",
     storageSystem: "btrfs",
   },
@@ -307,7 +332,8 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
   // --- EXT4 Dangerous ---
   {
     pattern: /\btune2fs\s+.*(-[OojE]|--feature)\b/,
-    reason: "Altering EXT4 superblock flags, features, or journal on active filesystem",
+    reason:
+      "Altering EXT4 superblock flags, features, or journal on active filesystem",
     category: "storage",
     storageSystem: "ext4",
   },
@@ -319,7 +345,8 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
   },
   {
     pattern: /\b(e2fsck|fsck\.ext[234])\s+.*(-y|-p)\b/,
-    reason: "Unattended forced repair of EXT4 filesystem may drop corrupted inodes",
+    reason:
+      "Unattended forced repair of EXT4 filesystem may drop corrupted inodes",
     category: "storage",
     storageSystem: "ext4",
   },
@@ -331,15 +358,18 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
     storageSystem: "ntfs",
   },
   {
-    pattern: /\bmount\s+.*(-t\s+ntfs(-3g)?\s+.*-o\s+.*force|-o\s+.*force.*-t\s+ntfs(-3g)?)\b/,
-    reason: "Forced mounting of NTFS volume with corrupted journal or dirty bit",
+    pattern:
+      /\bmount\s+.*(-t\s+ntfs(-3g)?\s+.*-o\s+.*force|-o\s+.*force.*-t\s+ntfs(-3g)?)\b/,
+    reason:
+      "Forced mounting of NTFS volume with corrupted journal or dirty bit",
     category: "storage",
     storageSystem: "ntfs",
   },
   // --- NFS Dangerous ---
   {
     pattern: /\bexportfs\s+.*(-u\s+[^\s]+|-r|-ra)\b/,
-    reason: "Unexporting specific NFS share or re-exporting active network shares",
+    reason:
+      "Unexporting specific NFS share or re-exporting active network shares",
     category: "storage",
     storageSystem: "nfs",
   },
@@ -350,8 +380,10 @@ const DANGEROUS_PATTERNS: RiskRule[] = [
     storageSystem: "nfs",
   },
   {
-    pattern: /\b(systemctl\s+(stop|disable)|service\s+.*\s+stop)\s+(smbd|nfs-kernel-server|nfs-server|rpcbind|nfs-idmapd|sshd|docker|containerd)\b/,
-    reason: "Stopping essential host/NAS network, storage, or virtualization service",
+    pattern:
+      /\b(systemctl\s+(stop|disable)|service\s+.*\s+stop)\s+(smbd|nfs-kernel-server|nfs-server|rpcbind|nfs-idmapd|sshd|docker|containerd)\b/,
+    reason:
+      "Stopping essential host/NAS network, storage, or virtualization service",
     category: "system",
   },
 ];
@@ -391,9 +423,8 @@ const DOCKER_API_PATH =
 const DOCKER_API_MARKER = /\bdocker\.sock\b|DOCKER_HOST=|\/v1\.[0-9]+\//;
 
 function extractDockerApiBody(command: string): unknown | undefined {
-  const match = /(?:-d|--data|--data-binary|--data-raw)\s+(['"])([\s\S]*?)\1/.exec(
-    command,
-  );
+  const match =
+    /(?:-d|--data|--data-binary|--data-raw)\s+(['"])([\s\S]*?)\1/.exec(command);
   if (!match?.[2]) return undefined;
   try {
     return JSON.parse(match[2]);
@@ -409,7 +440,7 @@ function extractDockerApiBody(command: string): unknown | undefined {
  */
 function assessDockerApiCall(
   command: string,
-  policy?: DockerProxyPolicy,
+  policy?: DockerProxyPolicy
 ): CommandRiskAssessment | undefined {
   if (!DOCKER_API_MARKER.test(command)) return undefined;
   const pathMatch = DOCKER_API_PATH.exec(command);
@@ -424,7 +455,11 @@ function assessDockerApiCall(
       : "GET";
   const body = extractDockerApiBody(command);
 
-  if (pathname === "/containers/create" && method === "POST" && body === undefined) {
+  if (
+    pathname === "/containers/create" &&
+    method === "POST" &&
+    body === undefined
+  ) {
     return {
       allowed: false,
       risk: "dangerous",
@@ -457,8 +492,12 @@ function assessDockerApiCall(
 /** Whether a target path escapes the workspace root (ported `checkWorkspaceEscape`). */
 export function detectWorkspaceEscape(
   targetPath: string,
-  workspacePath: string,
-): { isEscape: boolean; normalizedTarget: string; normalizedWorkspace: string } {
+  workspacePath: string
+): {
+  isEscape: boolean;
+  normalizedTarget: string;
+  normalizedWorkspace: string;
+} {
   const normWorkspace = resolve(workspacePath);
   const normTarget = isAbsolute(targetPath)
     ? resolve(targetPath)
@@ -480,7 +519,7 @@ function isProtectedPath(path: string): boolean {
 
 export function assessCommand(
   command: string,
-  options: { dockerGuard?: DockerProxyPolicy } = {},
+  options: { dockerGuard?: DockerProxyPolicy } = {}
 ): CommandRiskAssessment {
   const trimmed = command.trim();
   if (!trimmed) {
@@ -526,7 +565,10 @@ export function assessCommand(
   // 2. Check dedicated Docker container safety
   if (/\b(docker|podman)\b/.test(trimmed)) {
     const dockerAssessment = inspectDockerCommandSafety(trimmed);
-    if (dockerAssessment.risk === "critical" || dockerAssessment.risk === "dangerous") {
+    if (
+      dockerAssessment.risk === "critical" ||
+      dockerAssessment.risk === "dangerous"
+    ) {
       return {
         allowed: dockerAssessment.allowed,
         risk: dockerAssessment.risk,
@@ -588,9 +630,14 @@ export function assessCommand(
   let detectedStorage: StorageSystem | undefined;
   if (/\b(zfs|zpool)\b/.test(trimmed)) detectedStorage = "zfs";
   else if (/\bbtrfs\b/.test(trimmed)) detectedStorage = "btrfs";
-  else if (/\b(ext[234]|tune2fs|dumpe2fs|resize2fs|e2fsck|e2label)\b/.test(trimmed)) detectedStorage = "ext4";
-  else if (/\b(ntfs|ntfs-3g|ntfsinfo|ntfsls|ntfscluster)\b/.test(trimmed)) detectedStorage = "ntfs";
-  else if (/\b(nfs|exportfs|showmount|nfsstat)\b/.test(trimmed)) detectedStorage = "nfs";
+  else if (
+    /\b(ext[234]|tune2fs|dumpe2fs|resize2fs|e2fsck|e2label)\b/.test(trimmed)
+  )
+    detectedStorage = "ext4";
+  else if (/\b(ntfs|ntfs-3g|ntfsinfo|ntfsls|ntfscluster)\b/.test(trimmed))
+    detectedStorage = "ntfs";
+  else if (/\b(nfs|exportfs|showmount|nfsstat)\b/.test(trimmed))
+    detectedStorage = "nfs";
 
   return {
     allowed: true,
@@ -607,7 +654,7 @@ export function assessCommand(
 export function assessCommandCached(
   command: string,
   cache: CommandRiskCache | null = defaultCommandRiskCache,
-  options: { dockerGuard?: DockerProxyPolicy } = {},
+  options: { dockerGuard?: DockerProxyPolicy } = {}
 ): CommandRiskAssessment {
   // The Docker API policy changes verdicts, so it bypasses the shared cache.
   if (!cache || options.dockerGuard) return assessCommand(command, options);
@@ -626,7 +673,7 @@ export function assessCommandCached(
 export function assessToolCall(
   toolName: string,
   input: unknown,
-  options: AssessToolCallOptions = {},
+  options: AssessToolCallOptions = {}
 ): CommandRiskAssessment {
   if (toolName === "bash" || toolName === "sh") {
     const command =
@@ -644,7 +691,7 @@ export function assessToolCall(
     ) {
       assessment.workspaceEscape = commandTouchesOutsideWorkspace(
         command,
-        options.workspacePath,
+        options.workspacePath
       );
     }
     if (
@@ -685,8 +732,8 @@ export function assessToolCall(
       input && typeof input === "object"
         ? String((input as Record<string, unknown>).path ?? "")
         : "";
-    const systemPath = SENSITIVE_WRITE_PREFIXES.find(
-      (prefix) => target.startsWith(prefix),
+    const systemPath = SENSITIVE_WRITE_PREFIXES.find((prefix) =>
+      target.startsWith(prefix)
     );
     if (systemPath) {
       return {
@@ -724,24 +771,34 @@ export function assessToolCall(
   };
 }
 
-const SENSITIVE_WRITE_PREFIXES = ["/etc/", "/boot/", "/sys/", "/dev/", "/proc/"];
+const SENSITIVE_WRITE_PREFIXES = [
+  "/etc/",
+  "/boot/",
+  "/sys/",
+  "/dev/",
+  "/proc/",
+];
 
 function commandTouchesOutsideWorkspace(
   command: string,
-  workspacePath: string,
+  workspacePath: string
 ): boolean | undefined {
   const paths = command
     .split(/\s+/)
     .filter((part) => part.startsWith("/") || part.startsWith("../"));
-  const escape = paths.some((path) => detectWorkspaceEscape(path, workspacePath).isEscape);
+  const escape = paths.some(
+    (path) => detectWorkspaceEscape(path, workspacePath).isEscape
+  );
   return escape ? true : undefined;
 }
 
 function mutatingCommandEscape(
   command: string,
-  workspacePath: string,
+  workspacePath: string
 ): CommandRiskAssessment | undefined {
-  const match = /\b(rm|mv|cp|touch|truncate|chmod|chown)\s+([^\n;|&]+)/.exec(command);
+  const match = /\b(rm|mv|cp|touch|truncate|chmod|chown)\s+([^\n;|&]+)/.exec(
+    command
+  );
   if (!match) return undefined;
   const paths = (match[2] ?? "")
     .split(/\s+/)
@@ -769,9 +826,14 @@ function mutatingCommandEscape(
 export function commandGuardPreflight(
   toolName: string,
   input: unknown,
-  options: AssessToolCallOptions = {},
+  options: AssessToolCallOptions = {}
 ): "deny" | "ask" | undefined {
-  if (toolName !== "bash" && toolName !== "sh" && toolName !== "write" && toolName !== "edit") {
+  if (
+    toolName !== "bash" &&
+    toolName !== "sh" &&
+    toolName !== "write" &&
+    toolName !== "edit"
+  ) {
     return undefined;
   }
   const assessment = assessToolCall(toolName, input, options);

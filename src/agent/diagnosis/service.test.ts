@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ProviderError, type ContainerInfoProvider } from "../capabilities/containers.ts";
+import {
+  ProviderError,
+  type ContainerInfoProvider,
+} from "../capabilities/containers.ts";
 import { createThebeAgent } from "../create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
@@ -51,8 +54,12 @@ describe("container diagnosis service", () => {
     expect(result.actionId).toBe("container.diagnose");
     expect(result.status).toBe("completed");
     expect(result.resource.id).toBe("ctr-emby");
-    expect(result.observations.some((item) => item.source === "container.inspect")).toBe(true);
-    expect(result.observations.every((item) => item.observedAt.length > 0)).toBe(true);
+    expect(
+      result.observations.some((item) => item.source === "container.inspect")
+    ).toBe(true);
+    expect(
+      result.observations.every((item) => item.observedAt.length > 0)
+    ).toBe(true);
     expect(result.diagnosis.code).toBe("container_exited");
     expect(result.diagnosis.tokenUsed).toBe(false);
     const raw = JSON.stringify(result);
@@ -89,7 +96,9 @@ describe("container diagnosis service", () => {
 
   it("does not let the model invent a cause when tools only return errors", async () => {
     const fake = createFakeRuntime();
-    fake.queueTurns([{ kind: "text", text: '{"code":"invented","title":"nope"}' }]);
+    fake.queueTurns([
+      { kind: "text", text: '{"code":"invented","title":"nope"}' },
+    ]);
     const agent = createThebeAgent({
       runtime: fake.runtime,
       provider: {
@@ -110,20 +119,28 @@ describe("container diagnosis service", () => {
     });
     expect(result.diagnosis.tokenUsed).toBe(false);
     expect(result.diagnosis.code).not.toBe("invented");
-    expect(result.observations.every((item) => item.source.startsWith("container."))).toBe(true);
+    expect(
+      result.observations.every((item) => item.source.startsWith("container."))
+    ).toBe(true);
   });
 
-  it("keeps the traditional restart recommendation when no Judgment Model is configured", async () => {
+  it("recommends a restart, pending approval, for an exited container", async () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({
       runtime: fake.runtime,
       provider: embyProvider(),
     });
     const result = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+      resource: {
+        kind: "container",
+        id: "ctr-emby",
+        name: "emby",
+        provider: "arcane",
+      },
     });
-    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
-    expect(result.technicalDetails.judgment).toBeUndefined();
+    expect(
+      result.recommendations.some((item) => item.id === "rec-restart")
+    ).toBe(true);
   });
 
   it("updates the linked Artifact when explaining a diagnosis", async () => {
@@ -135,134 +152,39 @@ describe("container diagnosis service", () => {
       now: () => new Date(`2026-09-21T00:00:0${tick++}.000Z`),
     });
     const initial = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+      resource: {
+        kind: "container",
+        id: "ctr-emby",
+        name: "emby",
+        provider: "arcane",
+      },
     });
     const initialArtifact = await agent.getArtifactContent(initial.artifactId!);
     expect(initialArtifact?.content).not.toContain("why-reasoning");
 
-    fake.queueTurns([{
-      kind: "text",
-      text: JSON.stringify({
-        code: "container_exited",
-        title: "Container is not running",
-        summary: "The container exited after a database lock.",
-        confidence: "high",
-        reasoning: "why-reasoning",
-        recommendations: [],
-      }),
-    }]);
-    const explained = await agent.explainDiagnosis(initial.runId, "Why did this happen?");
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          code: "container_exited",
+          title: "Container is not running",
+          summary: "The container exited after a database lock.",
+          confidence: "high",
+          reasoning: "why-reasoning",
+          recommendations: [],
+        }),
+      },
+    ]);
+    const explained = await agent.explainDiagnosis(
+      initial.runId,
+      "Why did this happen?"
+    );
 
     expect(explained.artifactId).toBe(initial.artifactId);
     const updatedArtifact = await agent.getArtifactContent(initial.artifactId!);
     expect(updatedArtifact?.content).toContain("why-reasoning");
-    expect(updatedArtifact?.artifact.updatedAt).not.toBe(initialArtifact?.artifact.updatedAt);
-  });
-
-  it("does not let a low Noul veto a high-confidence deterministic restart", async () => {
-    const fake = createFakeRuntime();
-    const agent = createThebeAgent({
-      runtime: fake.runtime,
-      provider: embyProvider(),
-      judgment: {
-        adapterId: "jev",
-        judge: async () => ({
-          adapter: "jev",
-          model: "jev-test",
-          answers: { restart_supported: { type: "noul", noul: 0.05 } },
-        }),
-      },
-    });
-    const result = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
-    });
-    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
-    expect(result.technicalDetails.judgment).toEqual(
-      expect.objectContaining({
-        siteId: "diagnosis.write_recommendation",
-        used: true,
-        path: "judgment",
-      }),
-    );
-  });
-
-  it("adds a restart recommendation when Judgment Noul is high and rules did not", async () => {
-    const fake = createFakeRuntime();
-    fake.queueTurns([{ kind: "text", text: "not-json" }]);
-    const agent = createThebeAgent({
-      runtime: fake.runtime,
-      provider: {
-        listContainers: async () => [],
-        inspectContainer: async (id: string) => ({
-          id,
-          name: "misc",
-          image: "example/app:1",
-          state: "created",
-          config: { env: [], cmd: [], labels: {} },
-        }),
-        getContainerLogs: async () => "waiting",
-        getStatusSummary: async () => {
-          throw new Error("summary skipped");
-        },
-      },
-      judgment: {
-        adapterId: "jev",
-        judge: async () => ({
-          adapter: "jev",
-          model: "jev-test",
-          answers: { restart_supported: { type: "noul", noul: 0.93 } },
-        }),
-      },
-    });
-    const result = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-misc", name: "misc", provider: "arcane" },
-    });
-    expect(result.diagnosis.code).toBe("unknown_degraded");
-    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
-  });
-
-  it("skips diagnosis when that Site is not enabled", async () => {
-    const fake = createFakeRuntime();
-    const agent = createThebeAgent({
-      runtime: fake.runtime,
-      provider: embyProvider(),
-      judgment: {
-        adapterId: "jev",
-        judge: async () => {
-          throw new Error("should not be called");
-        },
-      },
-      judgmentSites: ["home.attention"],
-    });
-    const result = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
-    });
-    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
-    expect(result.technicalDetails.judgment).toBeUndefined();
-  });
-
-  it("falls back to the traditional path when Judgment fails", async () => {
-    const fake = createFakeRuntime();
-    const agent = createThebeAgent({
-      runtime: fake.runtime,
-      provider: embyProvider(),
-      judgment: {
-        adapterId: "jev",
-        judge: async () => {
-          throw new Error("Jev HTTP 503");
-        },
-      },
-    });
-    const result = await agent.diagnose({
-      resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
-    });
-    expect(result.recommendations.some((item) => item.id === "rec-restart")).toBe(true);
-    expect(result.technicalDetails.judgment).toEqual(
-      expect.objectContaining({
-        used: false,
-        path: "traditional",
-        error: "Jev HTTP 503",
-      }),
+    expect(updatedArtifact?.artifact.updatedAt).not.toBe(
+      initialArtifact?.artifact.updatedAt
     );
   });
 });

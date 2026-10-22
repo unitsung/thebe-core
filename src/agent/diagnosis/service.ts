@@ -19,12 +19,6 @@ import {
   extractObservations,
   parseToolPayload,
 } from "./observations.ts";
-import type { JudgmentApi } from "../judgment/service.ts";
-import { DIAGNOSIS_WRITE_RECOMMENDATION_SITE } from "../judgment/sites.ts";
-import {
-  applyWriteRecommendationJudgment,
-  judgeWriteRecommendation,
-} from "./write-judgment.ts";
 import {
   DIAGNOSIS_ACTION_ID,
   type DiagnosisRequest,
@@ -62,7 +56,6 @@ export function createDiagnosisApi(options: {
   ) => Promise<ThebePromptResult>;
   activityStore?: ActivityStore;
   artifactStore?: ArtifactStore;
-  judgment?: JudgmentApi;
 }): DiagnosisApi {
   const runs = new Map<string, DiagnosisResult>();
 
@@ -176,13 +169,6 @@ export function createDiagnosisApi(options: {
     let recommendations = baseline.recommendations;
     let sessionId: string | undefined;
 
-    const judgment = await judgeWriteRecommendation({
-      judgment: options.judgment,
-      resource,
-      observations: collected.observations,
-      diagnosis: baseline.diagnosis,
-    });
-
     const hasProviderFacts = collected.observations.some(
       (item) => item.kind !== "error"
     );
@@ -212,12 +198,6 @@ export function createDiagnosisApi(options: {
       }
     }
 
-    recommendations = applyWriteRecommendationJudgment({
-      code: baseline.diagnosis.code,
-      recommendations,
-      trace: judgment,
-    });
-
     const result: DiagnosisResult = {
       runId,
       actionId: DIAGNOSIS_ACTION_ID,
@@ -230,9 +210,6 @@ export function createDiagnosisApi(options: {
       technicalDetails: {
         evidence: collected.evidence,
         toolTranscript: collected.toolTranscript,
-        ...(options.judgment?.enabled(DIAGNOSIS_WRITE_RECOMMENDATION_SITE)
-          ? { judgment }
-          : {}),
       },
       sessionId,
     };

@@ -60,7 +60,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     prompt: prompts.prompt,
     activityStore,
     artifactStore,
-    judgment: ctx.judgment,
   });
   const actions = createActionApi({
     now: ctx.now,

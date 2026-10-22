@@ -71,8 +71,6 @@ import type {
   ProductBackgroundTask,
   ProductBackgroundTaskProvider,
 } from "./background-tasks/product.ts";
-import type { JudgmentModel } from "./judgment/interface.ts";
-import type { JudgmentEnabledSites } from "./judgment/types.ts";
 import type {
   AgentSettings,
   AgentSettingsPatch,
@@ -163,10 +161,6 @@ export type CreateThebeAgentOptions = {
   /** Optional provider-native background task sources. */
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
   serviceAPIProviders?: readonly ServiceAPIProvider[];
-  /** Optional Judgment Model. Absent means the Judgment Gate is off. */
-  judgment?: JudgmentModel;
-  /** Which catalog Sites may call the model. Default all when a model is present. */
-  judgmentSites?: JudgmentEnabledSites;
   /** Optional persistence boundary for product-facing Agent settings. */
   settingsStore?: AgentSettingsStore;
   /** Where Thebe Memory is kept. Without one the agent has no memory tool and no memory section. */

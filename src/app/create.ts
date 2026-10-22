@@ -16,8 +16,6 @@ import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
 import type { McpRegistry } from "../agent/extensions/mcp.ts";
-import type { JudgmentModel } from "../agent/judgment/interface.ts";
-import type { JudgmentEnabledSites } from "../agent/judgment/types.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
 import type { AgentMemoryStore } from "../agent/memory/store.ts";
 import type { ArtifactStore } from "../agent/artifacts/store.ts";
@@ -57,8 +55,6 @@ export function createThebeApp(options: {
   maxSubagentsPerParent?: number;
   workspacePath?: string;
   outputDirectory?: string;
-  judgment?: JudgmentModel;
-  judgmentSites?: JudgmentEnabledSites;
   settingsStore?: AgentSettingsStore;
   memoryStore?: AgentMemoryStore;
   mcp?: McpRegistry;
@@ -107,8 +103,6 @@ export function createThebeApp(options: {
         cwd: options.workspacePath,
         serverStates: storedSettings?.mcpServerStates,
       }),
-    judgment: options.judgment,
-    judgmentSites: options.judgmentSites,
     settingsStore: options.settingsStore,
     memoryStore: options.memoryStore,
     artifactStore: options.artifactStore,

@@ -16,8 +16,8 @@
  *   node scripts/smoke.mjs --base-url https://thebe.example.ts.net --token "$THEBE_TOKEN"
  *
  * In that mode the settings write is skipped unless `--write` is passed, because
- * a smoke test should not mutate a running deployment by default. The iOS check
- * is manual: open the App against the same URL and confirm it connects.
+ * a smoke test should not mutate a running deployment by default. Checking a
+ * client against the deployment is manual: point it at the same URL and confirm it connects.
  *
  * The checks speak HTTP on purpose: they never import `src/`, so they verify the
  * deployed process the way a client sees it.
@@ -92,7 +92,10 @@ export function parseListenLine(text) {
   return match ? match[1] : undefined;
 }
 
-export function requestOptions(baseUrl, { method = "GET", path = "/", token, hostHeader, body } = {}) {
+export function requestOptions(
+  baseUrl,
+  { method = "GET", path = "/", token, hostHeader, body } = {}
+) {
   const url = new URL(path, baseUrl);
   const protocol = url.protocol === "https:" ? "https:" : "http:";
   const headers = {};
@@ -123,7 +126,11 @@ export function requestOptions(baseUrl, { method = "GET", path = "/", token, hos
 }
 
 export function request(baseUrl, options = {}) {
-  const { transport, options: requestInit, payload } = requestOptions(baseUrl, options);
+  const {
+    transport,
+    options: requestInit,
+    payload,
+  } = requestOptions(baseUrl, options);
   return new Promise((resolvePromise, reject) => {
     const req = transport.request(requestInit, (res) => {
       let text = "";
@@ -138,7 +145,12 @@ export function request(baseUrl, options = {}) {
         } catch {
           json = undefined;
         }
-        resolvePromise({ status: res.statusCode ?? 0, headers: res.headers, text, json });
+        resolvePromise({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          text,
+          json,
+        });
       });
     });
     req.on("error", reject);
@@ -149,7 +161,13 @@ export function request(baseUrl, options = {}) {
   });
 }
 
-export function coreEnv({ dirs, token, port, allowedHosts = "127.0.0.1", extra = {} }) {
+export function coreEnv({
+  dirs,
+  token,
+  port,
+  allowedHosts = "127.0.0.1",
+  extra = {},
+}) {
   return {
     ...process.env,
     NODE_ENV: "production",
@@ -191,7 +209,8 @@ export function findFreePort() {
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
-      const port = address && typeof address === "object" ? address.port : undefined;
+      const port =
+        address && typeof address === "object" ? address.port : undefined;
       server.close(() => {
         if (port) {
           resolvePromise(port);
@@ -212,16 +231,21 @@ function assert(condition, message) {
 async function startCore({ dist, env, timeoutMs }) {
   const entry = join(dist, "serve.js");
   if (!existsSync(entry)) {
-    throw new Error(`missing ${entry}; run the release check first (bash scripts/release-check.sh)`);
+    throw new Error(
+      `missing ${entry}; run the release check first (bash scripts/release-check.sh)`
+    );
   }
-  const child = spawn(process.execPath, [entry], { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, [entry], {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const output = { stdout: "", stderr: "" };
   const baseUrl = await new Promise((resolvePromise, reject) => {
     const timer = setTimeout(() => {
       reject(
         new Error(
-          `Core did not print THEBE_LISTEN within ${timeoutMs}ms\n${output.stdout}\n${output.stderr}`,
-        ),
+          `Core did not print THEBE_LISTEN within ${timeoutMs}ms\n${output.stdout}\n${output.stderr}`
+        )
       );
     }, timeoutMs);
     child.stdout.setEncoding("utf8");
@@ -239,7 +263,11 @@ async function startCore({ dist, env, timeoutMs }) {
     });
     child.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`Core exited early (code ${code})\n${output.stdout}\n${output.stderr}`));
+      reject(
+        new Error(
+          `Core exited early (code ${code})\n${output.stdout}\n${output.stderr}`
+        )
+      );
     });
   });
   return { child, baseUrl, output };
@@ -252,13 +280,18 @@ async function stopCore(core, { timeoutMs = 10_000 } = {}) {
   core.child.kill("SIGTERM");
   const result = await Promise.race([
     exit,
-    new Promise((resolvePromise) => setTimeout(() => resolvePromise({ timeout: true }), timeoutMs)),
+    new Promise((resolvePromise) =>
+      setTimeout(() => resolvePromise({ timeout: true }), timeoutMs)
+    ),
   ]);
   if (result.timeout) {
     core.child.kill("SIGKILL");
     throw new Error(`Core did not exit within ${timeoutMs}ms after SIGTERM`);
   }
-  assert(result.code === 0, `Core exited with code ${result.code} after SIGTERM`);
+  assert(
+    result.code === 0,
+    `Core exited with code ${result.code} after SIGTERM`
+  );
   return result;
 }
 
@@ -287,7 +320,10 @@ async function readChecks(run, { baseUrl, token }) {
       hostHeader: "rebind.evil.example",
       body: { autoCompact: true },
     });
-    assert(res.status === 403, `status ${res.status} ${res.text.slice(0, 120)}`);
+    assert(
+      res.status === 403,
+      `status ${res.status} ${res.text.slice(0, 120)}`
+    );
     return "403";
   });
 }
@@ -300,8 +336,14 @@ async function writeChecks(run, { baseUrl, token }) {
       token,
       body: { autoCompact: false },
     });
-    assert(res.status === 200, `status ${res.status} ${res.text.slice(0, 160)}`);
-    assert(res.json?.autoCompact === false, `autoCompact=${res.json?.autoCompact}`);
+    assert(
+      res.status === 200,
+      `status ${res.status} ${res.text.slice(0, 160)}`
+    );
+    assert(
+      res.json?.autoCompact === false,
+      `autoCompact=${res.json?.autoCompact}`
+    );
     return "autoCompact=false";
   });
 }
@@ -322,7 +364,8 @@ export async function main(argv = process.argv.slice(2)) {
     printHelp();
     return 0;
   }
-  const token = options.token || `thebe-smoke-${randomBytes(6).toString("hex")}`;
+  const token =
+    options.token || `thebe-smoke-${randomBytes(6).toString("hex")}`;
   const results = [];
   const run = async (name, fn) => {
     try {
@@ -331,7 +374,9 @@ export async function main(argv = process.argv.slice(2)) {
       console.log(`ok   ${name}${detail ? ` — ${detail}` : ""}`);
     } catch (error) {
       results.push({ ok: false, name });
-      console.log(`FAIL ${name} — ${error instanceof Error ? error.message : String(error)}`);
+      console.log(
+        `FAIL ${name} — ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   };
 
@@ -341,15 +386,23 @@ export async function main(argv = process.argv.slice(2)) {
     if (options.write) {
       await writeChecks(run, { baseUrl: options.baseUrl, token });
     } else {
-      console.log("skip settings write check (pass --write to allow one mutating request)");
+      console.log(
+        "skip settings write check (pass --write to allow one mutating request)"
+      );
     }
   } else {
     const dirs = makeTempDirs();
     const port = options.port ?? (await findFreePort());
     const env = coreEnv({ dirs, token, port });
     try {
-      const first = await startCore({ dist: options.dist, env, timeoutMs: options.timeoutMs });
-      console.log(`smoke: spawned Core at ${first.baseUrl} (data ${dirs.root})`);
+      const first = await startCore({
+        dist: options.dist,
+        env,
+        timeoutMs: options.timeoutMs,
+      });
+      console.log(
+        `smoke: spawned Core at ${first.baseUrl} (data ${dirs.root})`
+      );
       await readChecks(run, { baseUrl: first.baseUrl, token });
       await writeChecks(run, { baseUrl: first.baseUrl, token });
       await run("SIGTERM drains and exits 0", async () => {
@@ -357,14 +410,24 @@ export async function main(argv = process.argv.slice(2)) {
         return `exit=${code}`;
       });
 
-      const second = await startCore({ dist: options.dist, env, timeoutMs: options.timeoutMs });
+      const second = await startCore({
+        dist: options.dist,
+        env,
+        timeoutMs: options.timeoutMs,
+      });
       await run("durable setting survives Core recreation", async () => {
-        const res = await request(second.baseUrl, { path: "/v1/settings/agent", token });
+        const res = await request(second.baseUrl, {
+          path: "/v1/settings/agent",
+          token,
+        });
         assert(res.status === 200, `status ${res.status}`);
-        assert(res.json?.autoCompact === false, `autoCompact=${res.json?.autoCompact}`);
+        assert(
+          res.json?.autoCompact === false,
+          `autoCompact=${res.json?.autoCompact}`
+        );
         assert(
           res.json?.sources?.autoCompact === "configured",
-          `source=${res.json?.sources?.autoCompact}`,
+          `source=${res.json?.sources?.autoCompact}`
         );
         return "autoCompact=false, source=configured";
       });
@@ -387,23 +450,28 @@ export async function main(argv = process.argv.slice(2)) {
   console.log(
     failed.length === 0
       ? `\nSMOKE OK (${results.length} checks)`
-      : `\nSMOKE FAILED (${failed.length}/${results.length} checks)`,
+      : `\nSMOKE FAILED (${failed.length}/${results.length} checks)`
   );
   if (!options.baseUrl) {
     console.log(
-      "iOS: point the App at the same deployment URL with THEBE_TOKEN; open /docs to confirm the API surface.",
+      "Manual check: point a client at the same deployment URL with THEBE_TOKEN; open /docs to confirm the API surface."
     );
   }
   return failed.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   main()
     .then((code) => {
       process.exitCode = code;
     })
     .catch((error) => {
-      console.error(`smoke: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(
+        `smoke: ${error instanceof Error ? error.message : String(error)}`
+      );
       process.exitCode = 2;
     });
 }
