@@ -12,7 +12,7 @@ Thebe Core 是一个带审批和审计日志的 homelab agent 服务端。它连
 
 名字来自木星的卫星 Thebe（木卫十四），读作 /ˈθiːbi/。
 
-> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。Claude Code 和 OpenCode 已在真实会话里列出并调用过 `/mcp` 的工具，官方 MCP TypeScript SDK 也通过了 initialize、列工具、调用工具；Codex 还没有试过。在把 Core 暴露到本机以外之前，请先读 [SECURITY.md](SECURITY.md)。
+> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。Claude Code、Codex 和 OpenCode 都已在真实会话里列出并调用过 `/mcp` 的工具，官方 MCP TypeScript SDK 也通过了 initialize、列工具、调用工具。在把 Core 暴露到本机以外之前，请先读 [SECURITY.md](SECURITY.md)。
 
 ## 能做什么
 
