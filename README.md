@@ -112,4 +112,8 @@ Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm 
 
 ## License
 
-Apache-2.0
+Apache-2.0. The code is licensed under Apache-2.0; the Thebe name and the Thebe app's icon and
+other artwork are not part of that license, and do not give you the right to publish a product
+under the same name.
+
+Contributions need a `Signed-off-by` line; see [CONTRIBUTING.md](CONTRIBUTING.md).

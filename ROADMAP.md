@@ -158,11 +158,11 @@ Named after the first beta.
   Push Relay that Core signs minimal events for; a self-hosted Core never embeds
   Thebe's APNs credentials.
 - **Open-source release prep.** Done in the tree: README set, security policy,
-  contributing guide, internal audit and research notes moved out, and a scan of
-  tracked files and history for credentials (none found). Still open: decide
-  whether to publish the existing history or a fresh one (commit author e-mail
-  and early commits), tag `v0.1.0`, make the GHCR package public, and run a
-  live acceptance against real providers.
+  contributing guide with a DCO sign-off check, a trademark note, internal audit and
+  research notes moved out, and a scan of tracked files and history for credentials
+  (none found). Decided: the existing history is published as it is. Still open: create the
+  public default branch, turn on private vulnerability reporting, tag `v0.1.0`, make the GHCR
+  package public, and run a live acceptance against real providers.
 - **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
   `@anthropic-ai/sandbox-runtime` (ADR 0005). The release container does not nest it.
 

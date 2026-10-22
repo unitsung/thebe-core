@@ -110,4 +110,6 @@ token 拥有全部权限，没有作用域。容器默认只监听回环地址�
 
 ## 许可证
 
-Apache-2.0
+Apache-2.0。代码按 Apache-2.0 授权；Thebe 名称以及 Thebe App 的图标等美术素材不在该许可范围内，也不意味着你可以用同样的名字发布产品。
+
+贡献需要在提交里带 `Signed-off-by`，见 [CONTRIBUTING.md](CONTRIBUTING.md)。
