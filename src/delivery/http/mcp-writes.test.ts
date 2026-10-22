@@ -157,7 +157,7 @@ const text = (reply: Awaited<ReturnType<ReturnType<typeof setup>["call"]>>) =>
   reply.result?.content?.[0]?.text ?? "";
 
 describe("/mcp write tools", () => {
-  it("are refused by default, whoever lists them", async () => {
+  it("are refused when the host turns writes off, whoever lists them", async () => {
     const { call, calls, provider } = setup(false);
     for (const [name, args] of [
       ["container.restart", { id: "ctr-1" }],
@@ -171,7 +171,7 @@ describe("/mcp write tools", () => {
     expect(provider.restarts).toEqual([]);
   });
 
-  it("cannot be previewed and confirmed by the calling agent either", async () => {
+  it("cannot be previewed and confirmed by the calling agent when writes are off", async () => {
     const requests: string[] = [];
     const { call } = setup(false, requests);
     for (const [name, args] of [
@@ -213,7 +213,7 @@ describe("/mcp write tools", () => {
     expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
   });
 
-  it("let a Navidrome playlist be created only when the host enables writes", async () => {
+  it("let a Navidrome playlist be created unless the host turns writes off", async () => {
     const off = setup(false, [], []);
     const refused = await off.call("navidrome.playlist.create", {
       name: "Mix",

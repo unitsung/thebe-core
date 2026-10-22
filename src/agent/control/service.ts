@@ -317,7 +317,7 @@ export function createControlApi(
     if (!ctx.mcpWritesAllowed) {
       throw httpError(
         403,
-        `${name} changes things, and this Core host has not enabled writes over /mcp (set THEBE_MCP_WRITES=on)`,
+        `${name} changes things, and this Core host has turned off writes over /mcp (THEBE_MCP_WRITES=off)`,
         "mcp_writes_not_enabled"
       );
     }

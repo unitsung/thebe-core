@@ -137,8 +137,8 @@ export type CreateThebeAgentOptions = {
    */
   remoteBashAllowed?: boolean;
   /**
-   * Host gate for write tools over `/mcp`. Defaults to `THEBE_MCP_WRITES`; off unless the host
-   * turns it on.
+   * Host gate for write tools over `/mcp`. Defaults to `THEBE_MCP_WRITES`; on unless the host
+   * sets it to `off`.
    */
   mcpWritesAllowed?: boolean;
   maxSubagentConcurrency?: number;

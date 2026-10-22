@@ -120,8 +120,8 @@ Named after the first beta.
   `/mcp` with writes; no admin routes (token management, provider keys, settings); no shell
   or file routes; one named tool or capability. The token's name goes into the audit record
   as the caller. Not scheduled.
-- **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are a host switch
-  (`THEBE_MCP_WRITES`) and the calling agent asks its own user. A stricter option would hold
+- **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are on by default, with a host
+  switch (`THEBE_MCP_WRITES=off`), and the calling agent asks its own user. A stricter option would hold
   each write until a person approves it in Core (an out-of-band queue, with scoped tokens so
   the agent cannot approve itself), and run it on approval. Revisit only if someone needs it.
 - **A light start without the container** (`npx` or stdio) so a workstation user can use

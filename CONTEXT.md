@@ -116,7 +116,7 @@ The default container capability provider. Thebe Core does not talk to docker.so
 _Avoid_: ADMIN_STATIC_API_KEY, a homegrown Docker manager, or expanding Core into a vendor-by-vendor service implementation
 
 **NavidromeProvider**:
-Agent-owned music capability in `src/agent/capabilities/navidrome.ts`. `NavidromeAdapter` implements the Subsonic API boundary, including salt+MD5 authentication, library/search/artist/lyrics reads, playlist writes, and provider-neutral playback queues with stream/artwork URLs. Core exposes these as `navidrome.*` capabilities; playback, Now Playing and remote commands belong to the client. Playlist writes require the runtime permission flow and are rejected by capability invocation; over `/mcp` they run only when the host sets `THEBE_MCP_WRITES`.
+Agent-owned music capability in `src/agent/capabilities/navidrome.ts`. `NavidromeAdapter` implements the Subsonic API boundary, including salt+MD5 authentication, library/search/artist/lyrics reads, playlist writes, and provider-neutral playback queues with stream/artwork URLs. Core exposes these as `navidrome.*` capabilities; playback, Now Playing and remote commands belong to the client. Playlist writes require the runtime permission flow and are rejected by capability invocation; over `/mcp` they run unless the host sets `THEBE_MCP_WRITES=off`.
 _Avoid_: exposing Subsonic credentials to the model, making Core start a mobile playback session, or creating a second player engine
 
 **MediaLibraryProvider**:

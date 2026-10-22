@@ -63,7 +63,7 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-Point your agent's MCP configuration at that URL with the same header. By default `/mcp` offers read tools only. Set `THEBE_MCP_WRITES=on` to let the calling agent use the write tools too (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log.
+Point your agent's MCP configuration at that URL with the same header. An agent connected over `/mcp` can use the write tools too (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log. Set `THEBE_MCP_WRITES=off` to make `/mcp` read-only.
 
 **In the terminal.** `npm run tui` builds and starts the interactive UI. After a build, `node dist/cli.js` (or `thebe`, the package's `bin`) does the same, and `thebe -p "list my containers"` runs one prompt and exits. `thebe --help` lists the session and MCP subcommands, and `thebe doctor` reports the isolation posture.
 

@@ -1,19 +1,19 @@
 /**
  * Host gate for write tools over `/mcp`.
  *
- * Off by default: an external agent can read but not change anything. `THEBE_MCP_WRITES=on` (or
- * `allow`/`true`/`1`/`yes`) lets it call the write tools too. Core does not ask anyone first:
- * the client that calls the tool is responsible for asking its user, and the call is audited.
- * A client cannot turn this on for itself.
+ * On by default: an agent connected over `/mcp` may call the write tools. Core does not ask anyone
+ * first; the calling agent and its client are responsible for asking their user, and every write is
+ * audited. `THEBE_MCP_WRITES=off` (or `deny`/`false`/`0`/`no`) makes `/mcp` read-only. A client
+ * cannot change this for itself.
  */
 
 export const MCP_WRITES_ENV = "THEBE_MCP_WRITES";
 
-const ENABLING_VALUES = new Set(["on", "allow", "true", "1", "yes"]);
+const DISABLING_VALUES = new Set(["off", "deny", "false", "0", "no"]);
 
 export function mcpWritesAllowed(
   env: NodeJS.ProcessEnv = process.env
 ): boolean {
   const value = env[MCP_WRITES_ENV]?.trim().toLowerCase();
-  return value !== undefined && ENABLING_VALUES.has(value);
+  return value === undefined || !DISABLING_VALUES.has(value);
 }
