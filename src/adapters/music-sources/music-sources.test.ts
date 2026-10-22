@@ -217,9 +217,16 @@ describe("SQMusic album", () => {
   };
   const route = (
     calls: { path: string; body?: any }[],
-    options: { records?: unknown[]; tasks?: unknown[]; queued?: unknown } = {}
-  ) =>
-    vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
+    options: {
+      records?: unknown[];
+      tasks?: unknown[];
+      /** What the task list held before the album was queued; defaults to empty. */
+      tasksBefore?: unknown[];
+      queued?: unknown;
+    } = {}
+  ) => {
+    let requested = false;
+    return vi.fn<typeof fetch>().mockImplementation(async (url, init) => {
       const path = new URL(String(url)).pathname;
       calls.push({
         path,
@@ -232,15 +239,25 @@ describe("SQMusic album", () => {
           code: 200,
           data: { records: options.records ?? [album] },
         });
-      if (path.endsWith("/downloadAlbum"))
+      if (path.endsWith("/downloadAlbum")) {
+        requested = true;
         return json({
           code: 200,
           data: options.queued ?? Array.from({ length: 11 }, () => ({})),
         });
+      }
       if (path.endsWith("/task/list"))
-        return json({ code: 200, data: { records: options.tasks ?? [] } });
+        return json({
+          code: 200,
+          data: {
+            records: requested
+              ? (options.tasks ?? [])
+              : (options.tasksBefore ?? []),
+          },
+        });
       return json({ code: 200, data: {} });
     });
+  };
 
   it("searches albums and says how many songs each holds", async () => {
     const calls: { path: string; body?: any }[] = [];
@@ -295,7 +312,37 @@ describe("SQMusic album", () => {
       songs: 11,
       verified: true,
       tasksSeen: 2,
+      tasksAdded: 2,
     });
+  });
+
+  it("does not call an album verified when its tasks were already there before the request", async () => {
+    const task = (id: number) => ({
+      id,
+      downloadAlbumname: "叶惠美",
+      downloadPlugName: "kw",
+      downloadStatus: "success",
+    });
+    const calls: { path: string; body?: any }[] = [];
+    const result = (await createSqMusicProvider(
+      options,
+      route(calls, {
+        tasksBefore: [task(1), task(2)],
+        tasks: [task(1), task(2)],
+      })
+    ).download({
+      kind: "album",
+      plugin: "kw",
+      id: "A1",
+      query: "叶惠美",
+    })) as any;
+    expect(result).toMatchObject({
+      queued: true,
+      verified: false,
+      tasksSeen: 2,
+      tasksAdded: 0,
+    });
+    expect(result.note).toContain("no new task");
   });
 
   it("refuses an album that was not searched, one with too many songs, and a quality, without queuing", async () => {
@@ -327,6 +374,29 @@ describe("SQMusic album", () => {
     await expect(
       big.download({ kind: "album", plugin: "kw", id: "A1", query: "叶惠美" })
     ).rejects.toThrow("120 songs");
+    expect(calls.some((call) => call.path.endsWith("/downloadAlbum"))).toBe(
+      false
+    );
+  });
+
+  it.each([
+    ["no size at all", { total: undefined, dataInfo: undefined }],
+    ["an empty size", { total: 0, dataInfo: { musiccnt: 0 } }],
+    ["a size that is not a number", { total: "many", dataInfo: undefined }],
+  ])("does not queue an album with %s", async (_label, size) => {
+    const calls: { path: string; body?: any }[] = [];
+    const provider = createSqMusicProvider(
+      options,
+      route(calls, { records: [{ ...album, ...size }] })
+    );
+    await expect(
+      provider.download({
+        kind: "album",
+        plugin: "kw",
+        id: "A1",
+        query: "叶惠美",
+      })
+    ).rejects.toThrow("does not say how many songs");
     expect(calls.some((call) => call.path.endsWith("/downloadAlbum"))).toBe(
       false
     );

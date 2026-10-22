@@ -95,35 +95,44 @@ export function createSqMusicProvider(
     const songCount = Number(
       record.total ?? (record.dataInfo as Row | undefined)?.musiccnt
     );
-    if (Number.isFinite(songCount) && songCount > MAX_ALBUM_SONGS)
+    // An album whose size SQMusic does not report cannot be held to the cap, so it is not queued.
+    if (!Number.isFinite(songCount) || songCount <= 0)
+      throw new Error(
+        `SQMusic: album ${id} does not say how many songs it has; it is not queued without a known size`
+      );
+    if (songCount > MAX_ALBUM_SONGS)
       throw new Error(
         `SQMusic: this album has ${songCount} songs; more than ${MAX_ALBUM_SONGS} are not queued in one approval`
       );
-    const queued = await call("/api/download/downloadAlbum", { body: record });
     const name = str(record.albumName);
-    const tasks = (await call("/api/task/list", {
-      body: { pageSize: 30, pageIndex: 1 },
-    })) as Row | undefined;
-    const seen = list(tasks?.records).filter(
-      (row) =>
-        str(row.downloadAlbumname) === name &&
-        str(row.downloadPlugName) === plugin
-    );
+    // SQMusic's task list is the only proof of a queue, and an earlier queue of the same album would still be
+    // in it, so the album's tasks are counted before the request as well as after it.
+    const albumTasks = async () => {
+      const tasks = (await call("/api/task/list", {
+        body: { pageSize: 100, pageIndex: 1 },
+      })) as Row | undefined;
+      return list(tasks?.records).filter(
+        (row) =>
+          str(row.downloadAlbumname) === name &&
+          str(row.downloadPlugName) === plugin
+      ).length;
+    };
+    const before = await albumTasks();
+    const queued = await call("/api/download/downloadAlbum", { body: record });
+    const after = await albumTasks();
+    const added = Math.max(after - before, 0);
     return {
       queued: true,
       album: name,
       plugin,
-      songs: Array.isArray(queued)
-        ? queued.length
-        : Number.isFinite(songCount)
-          ? songCount
-          : undefined,
-      verified: seen.length > 0,
-      tasksSeen: seen.length,
+      songs: Array.isArray(queued) ? queued.length : songCount,
+      verified: added > 0,
+      tasksSeen: after,
+      tasksAdded: added,
       note:
-        seen.length > 0
+        added > 0
           ? undefined
-          : "SQMusic accepted the request but no task of this album is listed yet; check sqmusic_search action tasks.",
+          : "SQMusic accepted the request but no new task of this album appeared; it may already be queued or finished. Check sqmusic_search action tasks.",
     };
   }
   return {
