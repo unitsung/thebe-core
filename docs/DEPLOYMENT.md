@@ -49,7 +49,7 @@ echo "$GHCR_TOKEN" | docker login ghcr.io -u <github-user> --password-stdin   # 
 Point the compose file at it in `deploy/.env`:
 
 ```bash
-THEBE_IMAGE=ghcr.io/unitsung/thebe-core:latest   # or :v1.2.3, :1.2, or a sha-* tag
+THEBE_IMAGE=ghcr.io/unitsung/thebe-core:latest   # or :1.2.3, :1.2, or a sha-* tag (git tag v1.2.3 gives :1.2.3)
 ```
 
 ```bash
