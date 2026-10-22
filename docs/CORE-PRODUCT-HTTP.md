@@ -56,12 +56,11 @@ kind and opening its content from task details. Existing Artifact retention
 limits still apply. Authorization/Proxy-Authorization Bearer and Basic tokens
 are redacted in logs and Artifact content.
 
-This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` stays the integration surface (see "Raw `/mcp` contract" below). The durable product contract is described in `docs/CORE-NEXT-PRODUCT-SPEC.md`.
+This page records the product HTTP surfaces shipped on `dev`. Delivery still only calls `ThebeAgent`; raw `/mcp` stays the integration surface (see "Raw `/mcp` contract" below).
 
 ## Permission modes (2026-10-14)
 
-One setting decides how much a session may do without asking
-(`docs/adr/0004-permission-model.md`): `plan`, `manual`, `acceptEdits`,
+One setting decides how much a session may do without asking: `plan`, `manual`, `acceptEdits`,
 `bypassPermissions`. Only these names are accepted; anything else is `400`.
 
 - `GET/PATCH /v1/settings/permissions` — the host default, `{ "mode": … }`.
@@ -198,7 +197,7 @@ These are **not** deferred accidentally. They are out of this slice:
 - **Goal identity rewrite** and `GET /v1/goals/{id}/runs`.
 - **Replacing raw `/mcp`**. The product server enable/disable seam is now available; raw JSON-RPC remains an integration compatibility surface.
 - **Skill file editing**.
-- **Chat-tool `/v1/approvals` collection.** Diagnose-restart Approval/Receipt stays on `GET /v1/activity`. Runtime tool confirmations are `/v1/permissions`. `CORE-ITERATION-PLAN.md` P0.4 suggested `/v1/approvals`; that name was rejected so it does not compete with Activity (ADR 0011 / 0013).
+- **Chat-tool `/v1/approvals` collection.** Diagnose-restart Approval/Receipt stays on `GET /v1/activity`. Runtime tool confirmations are `/v1/permissions`. A separate `/v1/approvals` collection was rejected so it does not compete with Activity.
 - Workers HTTP uses plural `/v1/subagents` (plan examples also allowed `/v1/subagent`).
 - Session-scoped background-task HTTP is unchanged and is not a Worker product.
 - Media/Emby/Immich **App** connections. Core already has media read capabilities and adapters.

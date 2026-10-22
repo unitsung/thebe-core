@@ -1,4 +1,4 @@
-# Supported Core deployment shape (docs/DEPLOYMENT.md, ADR 0002).
+# Supported Core deployment shape (docs/DEPLOYMENT.md).
 #
 #   cd deploy
 #   cp .env.example .env       # set THEBE_TOKEN, THEBE_ALLOWED_HOSTS, THEBE_WORKSPACE

@@ -2,7 +2,7 @@
 
 Status: supported path for a self-hosted Thebe Core.
 Shape: **one container** that runs `node dist/serve.js` against a mounted data
-directory (see `docs/adr/0002-core-ships-as-a-container.md`). A host service is
+directory. A host service is
 possible for development, but the container is the supported release shape.
 
 > 中文速览：Core 以单个容器交付；所有持久状态在 `deploy/data`（配置、Pi agent、
@@ -72,7 +72,7 @@ pulled image and does not rebuild; add `--build` only to build the local source
   chowned: use a Docker named volume for `/workspace`, or run the container as
   your host uid. `/data` is created and owned by the container on first start.
 - **Mounts.** Keep both mounts on the same host. `deploy/data` is the only
-  durable state — back it up (§8). Never mount the Docker socket (ADR 0002).
+  durable state — back it up (§8). Never mount the Docker socket.
 - **Exposure.** Publish the port on loopback only; reach Core over Tailscale or a
   reverse proxy (§4), never directly over the LAN or internet.
 - **Skills.** The image intentionally ships no built-in skills. Put them in the
@@ -165,8 +165,7 @@ Secret handling:
 Core stores iOS device registrations (`GET/POST /v1/devices`, `DELETE
 /v1/devices/{registrationId}`) with a redacted token, and the App registers
 notification categories. Core does **not** deliver APNs notifications and this
-release ships no relay: the first App release states that remote notifications
-are not delivered (thebe ADR 0015). When delivery is added it arrives as a
+release ships no relay: remote notifications are not delivered. When delivery is added it arrives as a
 separately deployed Push Relay that Core signs events for, so a self-hosted Core
 never embeds Thebe's APNs credentials. Until then, do not run or document a relay
 as part of this deployment.
@@ -279,7 +278,7 @@ container is the release boundary:
 - Leave `THEBE_SANDBOX` unset in the container. Core sees `/.dockerenv` or
   `/run/.containerenv` and does not start a second sandbox. A host install
   uses the OS sandbox by default; `THEBE_SANDBOX=off` is the only escape
-  hatch. See `docs/configuration.md` and ADR 0005.
+  hatch. See `docs/configuration.en.md`.
 - `THEBE_FULL_ACCESS` is ignored. It does not start Core in bypass. Turn
   bypass on in the TUI or the App; both ask first. That choice is the host
   default when saved from settings, so schedules and subagents follow it.
@@ -431,5 +430,5 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
   `scripts/check-pi-resolution.mjs` and `scripts/smoke.mjs` (8/8) inside the
   running container.
 - The handwritten Seatbelt, bubblewrap, disposable-Docker and Gondolin checks
-  are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime` (ADR 0005).
+  are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime`.
   The container still does not nest that sandbox.

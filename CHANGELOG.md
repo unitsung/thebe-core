@@ -56,8 +56,7 @@ There is no tagged release yet. The entries below are what `dev` currently conta
   contains run unasked, after Codex's on-request policy. `bypassPermissions`
   lifts the command guard, the OS sandbox, and tool approval for one session. It
   does not need `THEBE_FULL_ACCESS` and is not inherited by subagents,
-  schedules, background goals, `/mcp` callers, or non-interactive turns. See
-  `docs/adr/0004-permission-model.md`.
+  schedules, background goals, `/mcp` callers, or non-interactive turns.
 - A `cloud_transfer` acquisition-job kind. The durable pipeline state machine
   (`agent/pipeline/job-runner.ts`) now runs either a torrent download or a
   network-drive transfer through a `CloudTransferProvider` seam, wired to
@@ -88,6 +87,6 @@ There is no tagged release yet. The entries below are what `dev` currently conta
 - Containers without a container panel: `DockerEngineAdapter`
   (`src/adapters/docker/adapter.ts`) implements the same `ContainerInfoProvider`
   over the Docker Engine API through a restricted `docker-socket-proxy`
-  (`THEBE_DOCKER_PROXY_URL`, ADR 0003). Arcane wins when configured; the approved
+  (`THEBE_DOCKER_PROXY_URL`). Arcane wins when configured; the approved
   `container.restart` path is unchanged; `ResourceRef.provider` gains `docker`.
 - A single-container deployment. Build the image from this repository. Durable state stays in `/data`.

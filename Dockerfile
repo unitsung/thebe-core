@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# The supported Core deployment shape (docs/DEPLOYMENT.md, ADR 0002): one
+# The supported Core deployment shape (docs/DEPLOYMENT.md): one
 # container that runs `node dist/serve.js` against a mounted data directory.
 #
 #   docker build -t thebe-core:0.1.0 .

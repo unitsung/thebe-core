@@ -136,7 +136,7 @@ activity source is registered.
 ### Containers without Arcane (Docker Engine API via docker-socket-proxy)
 
 With no Arcane, Core can reach the Docker Engine API through a **restricted**
-`docker-socket-proxy` (ADR 0003). Arcane wins when it is configured:
+`docker-socket-proxy`. Arcane wins when it is configured:
 
 ```bash
 export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # proxy root, must be an http(s) URL
@@ -432,30 +432,3 @@ A missing dependency refuses the command instead of running it bare. Linux needs
 
 The command guard, the workspace confinement and the Docker API guard (privileged containers, host-root and
 `docker.sock` mounts, volume prune) are always on and have no switches.
-
-## Judgment Model (off by default)
-
-The Judgment Model is not a chat provider. By default every site takes its
-traditional path.
-
-```bash
-export THEBE_JUDGMENT_MODEL=off
-```
-
-To enable the first adapter (Jev):
-
-```bash
-export THEBE_JUDGMENT_MODEL=jev
-export THEBE_TYPESAFE_API_KEY=...
-# optional: which sites may call it (default: all catalog sites)
-# export THEBE_JUDGMENT_SITES=all
-# export THEBE_JUDGMENT_SITES=home.attention,intent.capability
-# export THEBE_JUDGMENT_SITES=none
-export THEBE_TYPESAFE_BASE_URL=https://api.typesafe.ai/v1/systemone
-export THEBE_JEV_MODEL=jev-latest
-```
-
-If it is unset, set to anything other than `jev`, missing the API key, not
-enabled for the site, or the call fails, the site falls back to its traditional
-path. When on, that site's `state` is sent to TypeSafe. There is no app setting
-for it.

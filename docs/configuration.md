@@ -345,7 +345,7 @@ Core 返回 409 与 “already finished” 说明（取消需要 Arcane 版本�
 ### 不依赖 Arcane 的容器（Docker Engine API 经 docker-socket-proxy）
 
 没有 Arcane 时，Core 可以直接经一个**限权的** `docker-socket-proxy` 访问 Docker
-Engine API（ADR 0003）。已配置 Arcane 时 Arcane 优先：
+Engine API。已配置 Arcane 时 Arcane 优先：
 
 ```bash
 export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须是 http(s) URL
@@ -375,7 +375,6 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 - 工作区越界：写工作区外路径、或 `rm/mv/cp/chmod/chown` 等改动工作区外路径，都会升级为 `dangerous`。
 - 直接打 Docker Engine API 的调用（`curl --unix-socket /var/run/docker.sock ... /containers/create`、podman remote）走 `docker-api-guard.ts`：`HostConfig.Privileged=true`、`Binds` 里的宿主根 / `docker.sock`、`CapAdd: SYS_ADMIN|ALL`、`/volumes/prune` 与 `/system/prune` 一律 `critical`（策略拒绝）；`/containers/create` 的 body 解析不出来时降级为 `dangerous`（转人工）而不是放行。
 - 这层守卫始终开启；只有 `bypassPermissions`（见下）能为单个会话关掉它。
-- 小模型安全复核不复用这里的启发式：它是 `Judgment Model`（见下节，默认关闭）。
 
 ## 权限模式
 
@@ -422,28 +421,3 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 依赖没装齐时命令会被拒绝，不会退回去直接执行。Linux 需要 bubblewrap、socat 和 ripgrep；macOS 用系统的 `sandbox-exec`，不需要 ripgrep。`thebe doctor` 在这种情况下退出码为 1。`GET /v1/system/isolation` 的 `sandbox.mode` 只有 `off` 和 `os`，不再返回 `backends`。
 
 命令守卫、工作区约束和 Docker API 守卫（特权容器、宿主根与 `docker.sock` 挂载、volume prune）始终开启，没有开关。
-
-## Judgment Model（默认关闭）
-
-Judgment Model 不是聊天模型服务商，也不绑死在诊断上。默认所有 Site 走各自的传统路径。
-
-```bash
-export THEBE_JUDGMENT_MODEL=off
-```
-
-要启用第一款 Adapter（Jev）时：
-
-```bash
-export THEBE_JUDGMENT_MODEL=jev
-export THEBE_TYPESAFE_API_KEY=...
-# optional: which Sites may call it. Default all catalog Sites.
-# export THEBE_JUDGMENT_SITES=all
-# export THEBE_JUDGMENT_SITES=home.attention,intent.capability
-# export THEBE_JUDGMENT_SITES=none
-export THEBE_TYPESAFE_BASE_URL=https://api.typesafe.ai/v1/systemone
-export THEBE_JEV_MODEL=jev-latest
-```
-
-未设置、值不是 `jev`、缺少 API key、Site 未启用、或调用失败时，该 Site 回退传统路径。打开后会把该 Site 的 `state` 发到 TypeSafe。这一刀没有 App Settings 开关。
-
-配置文件可能包含 provider 地址等运行信息；Pi agent 目录还可能包含认证数据。不要将这些文件提交到 Git 或公开分享。

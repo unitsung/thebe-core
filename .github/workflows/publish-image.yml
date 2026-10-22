@@ -1,6 +1,6 @@
 name: publish-image
 
-# Builds the supported Core container (docs/DEPLOYMENT.md, ADR 0002) for both
+# Builds the supported Core container (docs/DEPLOYMENT.md) for both
 # supported architectures and pushes it to GitHub Container Registry. The
 # package is private while this repository is private; it becomes public with
 # the open-source release. It runs on version tags and manual dispatch, not on

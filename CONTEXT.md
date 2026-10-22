@@ -14,14 +14,14 @@ _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`,
 
 **CommandRisk**:
 Homelab/NAS command heuristics in `src/agent/security/command-risk.ts`: `assessCommand`/`assessToolCall` grade a tool call `safe`/`caution`/`dangerous`/`critical` (storage systems, NAS volumes, disk writes, container breakouts, workspace escape) and the agent's permission preflight denies `critical`, asks for `dangerous`. Container commands get their own guard (`docker-command-guard.ts`), and Docker Engine API calls issued straight at `docker.sock` (curl/podman) go through `docker-api-guard.ts`. The layer is always on; only `bypassPermissions` lifts it, for one session.
-_Avoid_: putting model-based review here (that is `JudgmentModel`), blocking inside the adapter instead of the preflight
+_Avoid_: blocking inside the adapter instead of the preflight
 
 **PermissionMode**:
-The one setting that decides how much a session may do without asking: `plan` (read-only), `manual` (ask each time), `acceptEdits` (workspace edits and sandboxed commands run unasked), `bypassPermissions` (nothing asked, command guard and sandbox lifted). Names are Claude Code's; the rules for `acceptEdits` follow Codex's on-request policy with a restricted sandbox (`src/agent/security/accept-edits.ts`, ADR 0004). Stored per session as `AgentSessionMeta.permissionMode`, the host default in `config.json`; `bypassPermissions` is always selectable; the TUI and the App ask before turning it on, and `THEBE_FULL_ACCESS` is ignored. A session's own mode is never inherited by subagents, schedules, background goals, `/mcp` callers, or non-interactive turns. Only the four names are read.
+The one setting that decides how much a session may do without asking: `plan` (read-only), `manual` (ask each time), `acceptEdits` (workspace edits and sandboxed commands run unasked), `bypassPermissions` (nothing asked, command guard and sandbox lifted). Names are Claude Code's; the rules for `acceptEdits` follow Codex's on-request policy with a restricted sandbox (`src/agent/security/accept-edits.ts`). Stored per session as `AgentSessionMeta.permissionMode`, the host default in `config.json`; `bypassPermissions` is always selectable; the TUI and the App ask before turning it on, and `THEBE_FULL_ACCESS` is ignored. A session's own mode is never inherited by subagents, schedules, background goals, `/mcp` callers, or non-interactive turns. Only the four names are read.
 _Avoid_: a second permission-mode name, a remote-controlled switch for `bypassPermissions`, command-safety lists (the sandbox is what makes running unasked acceptable)
 
 **OsSandbox**:
-Host bash isolation in `src/agent/security/os-sandbox.ts`, pinned to `@anthropic-ai/sandbox-runtime` (Seatbelt on macOS, bubblewrap on Linux). A container (`/.dockerenv` or `/run/.containerenv`) does not start it. On a host it is on unless Agent settings set `sandboxEnabled` false, `THEBE_SANDBOX=off`, or that session is in `bypassPermissions`. `SandboxManager.initialize` runs once per process; `wrapWithSandbox` runs inside the async bash `exec`. Pi's `spawnHook` only sanitizes the environment. Writes are the workspace and the temp directory; reads are open except `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.thebe`. The network allowlist starts empty; a host that matches nothing asks through the session permission prompt, and remembering it saves the host. Missing dependencies refuse the command. Any `THEBE_SANDBOX` value other than `off` is ignored, the same as leaving it unset. `bootstrapThebe().disposeSandboxVms` resets the proxies (ADR 0005).
+Host bash isolation in `src/agent/security/os-sandbox.ts`, pinned to `@anthropic-ai/sandbox-runtime` (Seatbelt on macOS, bubblewrap on Linux). A container (`/.dockerenv` or `/run/.containerenv`) does not start it. On a host it is on unless Agent settings set `sandboxEnabled` false, `THEBE_SANDBOX=off`, or that session is in `bypassPermissions`. `SandboxManager.initialize` runs once per process; `wrapWithSandbox` runs inside the async bash `exec`. Pi's `spawnHook` only sanitizes the environment. Writes are the workspace and the temp directory; reads are open except `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.thebe`. The network allowlist starts empty; a host that matches nothing asks through the session permission prompt, and remembering it saves the host. Missing dependencies refuse the command. Any `THEBE_SANDBOX` value other than `off` is ignored, the same as leaving it unset. `bootstrapThebe().disposeSandboxVms` resets the proxies.
 _Avoid_: a backend menu, nesting this sandbox inside the release container, wrapping the command in the synchronous spawn hook, a Pi sandbox extension
 
 **PiCodingAgentRuntime**:
@@ -77,11 +77,11 @@ Thebe custom capability surface. Built-in v0 capabilities include `container.lis
 _Avoid_: a second allow-list in config or flags, treating redaction as its own module, or making the built-in container set the product boundary
 
 **DiagnosisRun**:
-Product-facing read-only diagnosis (`POST /v1/diagnosis`). The App sends a typed `ResourceRef`; Core gathers bounded observations from container capabilities, optionally reasons, and returns `resource`, `observations`, `diagnosis`, `recommendations`, `runId`, and `actionId`. Observed facts come from tools/providers only. Write recommendations carry `actionId` but are not executed here. One optional Judgment Site may confirm a write recommendation; diagnosis does not own the Judgment Model.
+Product-facing read-only diagnosis (`POST /v1/diagnosis`). The App sends a typed `ResourceRef`; Core gathers bounded observations from container capabilities, optionally reasons, and returns `resource`, `observations`, `diagnosis`, `recommendations`, `runId`, and `actionId`. Observed facts come from tools/providers only. Write recommendations carry `actionId` but are not executed here.
 _Avoid_: exposing raw MCP `tools/call` as the App contract, dumping inspect/logs/agent state to the client, or concatenating display names into prompts
 
 **ActionReceipt**:
-Product object for an approved write. Slice 02 is only `container.restart`: on-device approval → deterministic provider restart → programmatic verification (`state==running`, Emby health when applicable) → receipt. Metadata `effect=write`, `risk=disruptive`, `approval=required` lives in `CONTAINER_CAPABILITY_METADATA`. Neither the chat model nor a Judgment Model can approve, execute, or grade verification.
+Product object for an approved write. Slice 02 is only `container.restart`: on-device approval → deterministic provider restart → programmatic verification (`state==running`, Emby health when applicable) → receipt. Metadata `effect=write`, `risk=disruptive`, `approval=required` lives in `CONTAINER_CAPABILITY_METADATA`. The chat model cannot approve, execute, or grade verification.
 _Avoid_: attaching `container.restart` to the chat tool loop, auto-executing from diagnosis, or letting the App call raw MCP for writes
 
 **AgentArtifact**:
@@ -108,7 +108,7 @@ Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on t
 _Avoid_: reimplementing filesystem/bash tools in Thebe
 
 **ContainerInfoProvider**:
-The Agent-owned capability declaration in `src/agent/capabilities/containers.ts` for read-only container observation plus the approved `restartContainer` write. Tool Layer and PolicyEngine speak only this Interface; Arcane implements it as an Adapter, and `DockerEngineAdapter` (`src/adapters/docker/adapter.ts`) implements it against the Docker Engine API through a restricted `docker-socket-proxy` (`THEBE_DOCKER_PROXY_URL`) when Arcane is not configured (ADR 0003).
+The Agent-owned capability declaration in `src/agent/capabilities/containers.ts` for read-only container observation plus the approved `restartContainer` write. Tool Layer and PolicyEngine speak only this Interface; Arcane implements it as an Adapter, and `DockerEngineAdapter` (`src/adapters/docker/adapter.ts`) implements it against the Docker Engine API through a restricted `docker-socket-proxy` (`THEBE_DOCKER_PROXY_URL`) when Arcane is not configured.
 _Avoid_: tool code importing a panel SDK, a Docker client, or an HTTP client directly
 
 **Arcane**:
@@ -141,23 +141,7 @@ _Avoid_: a second scheduler, auto-retrying a failed job, or replaying a restored
 
 **PolicyEngine**:
 Interception and budgets for Thebe custom tools. `decide` is a pure function; `beforeToolCall` is fail-closed. Pi built-ins are not PolicyEngine's concern.
-_Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field, replacing PolicyEngine with a Judgment Model
-
-**Judgment Model**:
-Agent-owned Interface for typed, calibrated judgments over a supplied state. Any Core caller may `ask` a named Site. It answers Noul, Choice, and Score questions; it does not write prose, code, or explanations. Deterministic observation and PolicyEngine stay first. The chat model may still write narrative.
-_Avoid_: Decision Model, Decision Engine, System One, classifier as the Core noun, mixing this with 服务商 / Ask Thebe, using PolicyEngine.decide for these questions, treating this as a diagnosis-only feature
-
-**Judgment Site**:
-A named place that may call `judgment.ask`. Every Site has a traditional path. The catalog is inventory; a caller opts in by asking. Diagnosis is one Site among others, not the owner.
-_Avoid_: hook, 口子, feature flag as the domain noun, treating PolicyEngine, Approval, execute, or verification as Sites
-
-**Judgment Gate**:
-Core opt-in for a Judgment Model and, separately, which Sites may call it. Default off. Off, missing credentials, a Site that is not enabled, or a failed call uses that Site's traditional path. On does not move Approval, execute, or verification onto the model.
-_Avoid_: a per-服务商 toggle, forcing every Site on when the adapter is on, silently swapping results without a Site id
-
-**Jev**:
-First Judgment Model Adapter (TypeSafe hosted API). Vendor name only.
-_Avoid_: Jev as a product object, a chat provider, or a Core glossary synonym for Judgment Model
+_Avoid_: Gate, Harness, Session, Pi-hook-specific policy wiring, stopping a Run with a terminate field
 
 **StreamGuard**:
 Per-Run application timeouts over normalized events: TTFB + idle timers plus an abort watchdog.
