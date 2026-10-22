@@ -5,8 +5,8 @@ The homelab Agent and capability plane. The Pi runtime owns the reasoning loop b
 ## Language
 
 **Thebe Core**:
-This repository and the Agent it is. Package and repo name are `thebe-core`.
-_Avoid_: thebe-agent-core, Thebe Agent Core, core_v0, a dashboard proxy with no Agent
+This repository and the Agent it is. Package and repo name are `thebe-core`. It replaces `core_v0`, an earlier repository that has been deleted; nothing here depends on it, and it is not a version of this one.
+_Avoid_: thebe-agent-core, Thebe Agent Core, core_v0 (the deleted predecessor, not a release line), a dashboard proxy with no Agent
 
 **AgentRuntime**:
 Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. It is a structural seam, not a claim that a second runtime is integrated.
@@ -157,4 +157,4 @@ _Avoid_: MCP elicitation as an approval gate (Core cannot tell whether a person 
 
 **Release line**:
 Day-to-day work is on `dev`; `main` is the default branch and holds the tagged releases. A `v*` tag on `main` runs `publish-image`, which builds amd64 and arm64 and pushes `ghcr.io/unitsung/thebe-core`. `docker/metadata-action` drops the `v`: tag `v0.1.0` gives `0.1.0`, `0.1`, `0`, `latest` and `sha-<short>`. While the major version is 0, `:0` and `:0.1` float over releases that may break, so pin the full version (`:0.1.0`) in a deployment. A published package version is one index plus its platform images and attestations, so removing old builds means deleting all of that build's versions, never only the tagged one. Pre-1.0, minor versions may change the API.
-_Avoid_: pulling `:latest` or `:0` in production, a `v` prefix on image tags, `core_v0` or other version words in names, tagging a commit that is not on `main`
+_Avoid_: pulling `:latest` or `:0` in production, a `v` prefix on image tags, tagging a commit that is not on `main`
