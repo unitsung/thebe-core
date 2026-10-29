@@ -80,6 +80,12 @@ default, not the session's own mode.
 
 ## Session command route (2026-10-14)
 
+`GET /v1/session`, `GET /v1/session/{id}` and `GET /v1/session/{id}/children`
+carry the same run state: `status` is `idle`, `running`, or
+`awaiting_permission`, and `streaming` is true while the turn is held. A client
+that loses the prompt response can poll the single session instead of treating
+an empty-looking transcript as finished.
+
 `POST /v1/session/{id}/bash` with `{ "command": string }` runs one command in that session's
 workspace and returns `{ exitCode, cancelled, output, truncated }`. It exists for a client whose own
 agent has no shell: the client puts the command in front of the user, and only after approval sends it
