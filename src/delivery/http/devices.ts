@@ -90,7 +90,10 @@ export function createDeviceRegistry(options: {
       store = {
         devices: entries.filter(isStoredDeviceRegistration),
       };
-    } catch {
+    } catch (error) {
+      // A missing file is an empty registry. A corrupt one is an error:
+      // registering a device would otherwise replace every other device.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       store = { devices: [] };
     }
     return store;

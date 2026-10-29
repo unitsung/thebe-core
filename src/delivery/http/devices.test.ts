@@ -1,6 +1,7 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createDeviceRegistry } from "./devices.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 
 const tempDirs: string[] = [];
@@ -147,5 +148,21 @@ describe("device registration product HTTP", () => {
       await app.handle(new Request("http://127.0.0.1:8787/v1/devices")),
     );
     expect(listed.devices).toEqual([]);
+  });
+
+  it("does not replace a devices.json it cannot parse", async () => {
+    const dir = await makeStoreDir();
+    const path = join(dir, "devices.json");
+    await writeFile(path, '{"devices":');
+    const registry = createDeviceRegistry({ dir });
+
+    await expect(
+      registry.register({
+        token: "token",
+        platform: "ios",
+        categories: [],
+      })
+    ).rejects.toThrow();
+    expect(await readFile(path, "utf8")).toBe('{"devices":');
   });
 });
