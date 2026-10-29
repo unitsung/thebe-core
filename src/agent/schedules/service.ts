@@ -253,6 +253,22 @@ export function createScheduleApi(options: {
         options.checkWritable();
         const row = find(id);
         const normalized = validate(input);
+        // Editing a title or goal must not move the next run. Recompute only
+        // when the recurrence itself changed, and skip occurrences already
+        // missed instead of firing one as soon as the edit is saved.
+        const recurrenceChanged =
+          normalized.startAt !== row.startAt ||
+          normalized.intervalMinutes !== row.intervalMinutes ||
+          (normalized.cron ?? undefined) !== (row.cron ?? undefined) ||
+          (normalized.cron ? normalized.timeZone : undefined) !==
+            (row.cron ? row.timeZone : undefined);
+        const scheduled = recurrenceChanged
+          ? advance({
+              ...row,
+              ...normalized,
+              nextRunAt: firstRun(normalized),
+            })
+          : row;
         const updated = {
           ...row,
           ...normalized,
@@ -262,7 +278,8 @@ export function createScheduleApi(options: {
           timeZone: normalized.timeZone,
           maxIterations: normalized.maxIterations,
           model: normalized.model,
-          nextRunAt: row.enabled ? firstRun(normalized) : undefined,
+          enabled: row.enabled ? scheduled.enabled : false,
+          nextRunAt: row.enabled ? scheduled.nextRunAt : undefined,
           updatedAt: options.now().toISOString(),
         };
         await save(updated);
