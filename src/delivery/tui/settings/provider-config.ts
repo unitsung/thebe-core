@@ -85,12 +85,15 @@ export async function saveCustomProvider(
   const current = await loadThebeConfig();
   const providers = current.providers ?? {};
   providers[options.providerId] = { baseUrl: options.baseUrl };
-  await saveThebeConfig({ providers });
   const agentDir = getThebeAgentDir();
   await mkdir(agentDir, { recursive: true });
 
   const modelsJsonPath = join(agentDir, "models.json");
   const modelsData = await readJsonObject(modelsJsonPath);
+  const authJsonPath = join(agentDir, "auth.json");
+  const authData = await readJsonObject(authJsonPath);
+  // Only touch config.json once both files that will be merged are readable.
+  await saveThebeConfig({ providers });
   const existingProviders = (modelsData.providers ?? {}) as Record<
     string,
     Record<string, unknown>
@@ -153,8 +156,6 @@ export async function saveCustomProvider(
     "utf8"
   );
 
-  const authJsonPath = join(agentDir, "auth.json");
-  const authData = await readJsonObject(authJsonPath);
   authData[options.providerId] = {
     type: "api_key",
     key: options.apiKey || "none",
@@ -172,11 +173,11 @@ export async function saveProviderEndpoint(
   const current = await loadThebeConfig();
   const providers = current.providers ?? {};
   providers[providerId] = { baseUrl };
-  await saveThebeConfig({ providers });
   const agentDir = getThebeAgentDir();
   await mkdir(agentDir, { recursive: true });
   const modelsJsonPath = join(agentDir, "models.json");
   const existingJson = await readJsonObject(modelsJsonPath);
+  await saveThebeConfig({ providers });
   const existingProviders = (existingJson.providers ?? {}) as Record<
     string,
     Record<string, unknown>
