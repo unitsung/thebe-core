@@ -45,10 +45,32 @@ export function createJsonMemoryStore(path: string): AgentMemoryStore {
       }
     },
     save(snapshot) {
+      // Memory is written whole; replacing a file we cannot parse would drop
+      // every entry the owner had.
+      assertMemoryFileIsReplaceable(path);
       mkdirSync(dirname(path), { recursive: true });
       const temporaryPath = join(dirname(path), `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`);
       writeFileSync(temporaryPath, `${JSON.stringify({ user: snapshot.user, notes: snapshot.notes }, null, 2)}\n`, "utf8");
       renameSync(temporaryPath, path);
     },
   };
+}
+
+function assertMemoryFileIsReplaceable(path: string): void {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new Error(
+      `Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  try {
+    JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file is not valid JSON`
+    );
+  }
 }
