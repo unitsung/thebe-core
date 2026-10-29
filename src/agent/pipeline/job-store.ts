@@ -21,6 +21,12 @@ export function createFileJobStore(path: string): JobStore {
       }
     },
     save(jobs) {
+      // Jobs are rewritten whole. If the old file cannot be parsed, writing
+      // here would silently drop every durable job it held.
+      if (!isReplaceable(path)) {
+        console.warn(`[thebe] leaving unreadable job store ${path} in place`);
+        return;
+      }
       try {
         mkdirSync(dirname(path), { recursive: true });
         const temporary = `${path}.${process.pid}.tmp`;
@@ -31,4 +37,13 @@ export function createFileJobStore(path: string): JobStore {
       }
     },
   };
+}
+
+function isReplaceable(path: string): boolean {
+  try {
+    JSON.parse(readFileSync(path, "utf8"));
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT";
+  }
 }
