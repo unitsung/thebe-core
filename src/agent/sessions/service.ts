@@ -108,8 +108,14 @@ export function createSessionApi(
       }
       return mapped;
     },
-    async getSession(thebeSessionId: string): Promise<AgentSessionMeta> {
-      return lookup(thebeSessionId);
+    async getSession(
+      thebeSessionId: string,
+    ): Promise<
+      AgentSessionMeta & { status: SessionRunStatus; streaming: boolean }
+    > {
+      // The app checks this after a dropped prompt to wait for Core to
+      // finish; the same run state as the list must be on the single item.
+      return withRunState(await lookup(thebeSessionId));
     },
     async patchSession(
       thebeSessionId: string,

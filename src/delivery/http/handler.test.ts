@@ -1394,6 +1394,31 @@ describe("Thebe HTTP handler", () => {
     ).toBe("idle");
   });
 
+  it("GET /v1/session/{id} carries the run state a dropped prompt recovers from", async () => {
+    const { app, session } = await sessionApp([{ kind: "hang" }]);
+    const pending = app.agent.prompt("long", { thebeSessionId: session });
+    pending.catch(() => {});
+    await vi.waitFor(() => {
+      expect(app.agent.isStreaming(session)).toBe(true);
+    });
+
+    const response = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${session}`)
+    );
+    expect(await response.json()).toMatchObject({
+      thebeSessionId: session,
+      streaming: true,
+      status: "running",
+    });
+
+    await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/interrupt`, {
+        method: "POST",
+      })
+    );
+    await expect(pending).rejects.toThrow();
+  });
+
   it("failed runs log an error event, aborts log interrupted only", async () => {
     const failed = await sessionApp([{ kind: "error", message: "boom" }]);
     await expect(
