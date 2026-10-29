@@ -12,7 +12,17 @@ export function syncAgentModelsFile(agentDir: string): void {
       string,
       unknown
     >;
-  } catch {}
+  } catch (error) {
+    // A corrupt models.json holds every provider definition; writing the
+    // merged result over it would erase them. Leave the file for the owner.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error(
+        `Refusing to overwrite ${modelsPath}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
   const providers = (data.providers ?? {}) as Record<
     string,
     Record<string, unknown>
@@ -40,7 +50,5 @@ export function syncAgentModelsFile(agentDir: string): void {
     };
   }
   data.providers = providers;
-  try {
-    writeFileAtomicSync(modelsPath, JSON.stringify(data, null, 2), "utf8");
-  } catch {}
+  writeFileAtomicSync(modelsPath, JSON.stringify(data, null, 2), "utf8");
 }

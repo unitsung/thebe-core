@@ -48,7 +48,17 @@ export async function createPiCodingAgentRuntime(
     mkdirSync(options.sessionDir, { recursive: true });
   }
   if (options.agentDir) {
-    syncAgentModelsFile(options.agentDir);
+    try {
+      syncAgentModelsFile(options.agentDir);
+    } catch (error) {
+      // A corrupt models.json is left in place rather than replaced. Core can
+      // still start, and the message says which file needs attention.
+      console.error(
+        `[thebe] could not sync provider settings: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   const modelRuntime =
