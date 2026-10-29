@@ -995,6 +995,7 @@ describe("Thebe agent service (fake runtime)", () => {
     expect(kids.map((row) => row.thebeSessionId)).toEqual([
       child.thebeSessionId,
     ]);
+    expect(kids[0]).toMatchObject({ status: "idle", streaming: false });
   });
 
   it("reverts and unreverts the last user turn", async () => {

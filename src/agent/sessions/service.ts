@@ -259,9 +259,17 @@ export function createSessionApi(
       ctx.active = { meta, session: child };
       return meta;
     },
-    async children(thebeSessionId: string): Promise<AgentSessionMeta[]> {
+    async children(
+      thebeSessionId: string,
+    ): Promise<
+      Array<
+        AgentSessionMeta & { status: SessionRunStatus; streaming: boolean }
+      >
+    > {
       const rows = await listMetas();
-      return rows.filter((row) => row.parentThebeSessionId === thebeSessionId);
+      return rows
+        .filter((row) => row.parentThebeSessionId === thebeSessionId)
+        .map((row) => withRunState(row));
     },
     async getForkMessages(thebeSessionId?: string): Promise<Array<{ entryId: string; text: string }>> {
       const opened = await openSession(thebeSessionId);
