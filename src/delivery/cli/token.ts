@@ -61,6 +61,8 @@ export function runTokenCommand(
             ? "A device token with that name already exists."
             : result.reason === "reserved-name"
               ? "That name is reserved; pick another."
+              : result.reason === "store-unreadable"
+                ? "tokens.json could not be read; it was left untouched. Fix or move it, then try again."
               : "Name the device in 1-40 letters, digits, spaces, dots, dashes or underscores."
         );
         return 1;

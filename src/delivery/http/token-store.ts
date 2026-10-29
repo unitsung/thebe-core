@@ -115,6 +115,26 @@ export function readDeviceTokens(configDir: string): DeviceToken[] {
   }
 }
 
+/** Reads for a mutation. A corrupt file must not be replaced, or every other device loses its token. */
+function readDeviceTokensForUpdate(configDir: string): DeviceToken[] {
+  const path = deviceTokensPath(configDir);
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  const parsed = JSON.parse(text) as { tokens?: unknown };
+  if (!Array.isArray(parsed.tokens)) {
+    throw new Error(`${path} does not hold a tokens array`);
+  }
+  return parsed.tokens.filter(
+    (t): t is DeviceToken =>
+      !!t && typeof (t as DeviceToken).name === "string" && typeof (t as DeviceToken).hash === "string"
+  );
+}
+
 function writeDeviceTokens(configDir: string, tokens: DeviceToken[]): void {
   writeFileAtomicSync(deviceTokensPath(configDir), `${JSON.stringify({ version: 1, tokens }, null, 2)}\n`, {
     mode: 0o600,
@@ -131,7 +151,7 @@ export function readTokenUsage(configDir: string): Record<string, string> {
 
 export type DeviceTokenResult =
   | { ok: true; name: string; token: string }
-  | { ok: false; reason: "invalid-name" | "reserved-name" | "exists" };
+  | { ok: false; reason: "invalid-name" | "reserved-name" | "exists" | "store-unreadable" };
 
 /** Makes a token for one device. It is shown once; only its hash is kept. */
 export function createDeviceToken(options: {
@@ -143,7 +163,12 @@ export function createDeviceToken(options: {
   const name = options.name.trim();
   if (!NAME_PATTERN.test(name)) return { ok: false, reason: "invalid-name" };
   if (RESERVED_NAMES.has(name.toLowerCase())) return { ok: false, reason: "reserved-name" };
-  const existing = readDeviceTokens(options.configDir);
+  let existing: DeviceToken[];
+  try {
+    existing = readDeviceTokensForUpdate(options.configDir);
+  } catch {
+    return { ok: false, reason: "store-unreadable" };
+  }
   if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase())) return { ok: false, reason: "exists" };
   const token = (options.generate ?? (() => randomBytes(32).toString("hex")))();
   existing.push({ name, hash: hex(token), createdAt: (options.now?.() ?? new Date()).toISOString() });
