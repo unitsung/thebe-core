@@ -70,6 +70,21 @@ export async function handleSystemCommand(
   name: string,
   arg: string
 ): Promise<boolean> {
+  const persistSetting = async (
+    patch: Parameters<typeof saveThebeConfig>[0]
+  ): Promise<boolean> => {
+    try {
+      await saveThebeConfig(patch);
+      return true;
+    } catch (error) {
+      host.notice(
+        `setting was not saved: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+      return false;
+    }
+  };
   switch (name) {
     case "permissions": {
       const applyPermissionMode = async (
@@ -84,7 +99,7 @@ export async function handleSystemCommand(
           return;
         }
         agent.setPermissionMode(mode);
-        await saveThebeConfig({ permissionMode: mode });
+        if (!(await persistSetting({ permissionMode: mode }))) return;
         host.notice(
           `permission mode: ${mode} — ${PERMISSION_MODE_SUMMARY[mode]}`
         );
@@ -176,7 +191,7 @@ export async function handleSystemCommand(
     }
     case "tui": {
       const applyMode = async (chosen: TuiMode): Promise<void> => {
-        await saveThebeConfig({ tuiMode: chosen });
+        if (!(await persistSetting({ tuiMode: chosen }))) return;
         if (host.tui.mode === chosen) {
           host.notice(`TUI mode already "${chosen}"`);
           return;
@@ -240,16 +255,24 @@ export async function handleSystemCommand(
         fullscreenScrollbar: cfg.fullscreenScrollbar ?? "auto",
         onSettingChange: async (id, value) => {
           if (id === "theme") {
-            await host.applyTheme(value as ThemeName);
+            try {
+              await host.applyTheme(value as ThemeName);
+            } catch (error) {
+              host.notice(
+                `theme applied, but it was not saved: ${
+                  error instanceof Error ? error.message : String(error)
+                }`
+              );
+            }
           } else if (id === "thinking") {
             if (agent) {
               await host.setThinkingLevel(value as ThinkingLevel);
               host.updateFooter();
               host.updateEditorBorderColor();
             }
-            await saveThebeConfig({ defaultThinkingLevel: value });
+            if (!(await persistSetting({ defaultThinkingLevel: value }))) return;
           } else if (id === "tui") {
-            await saveThebeConfig({ tuiMode: value as TuiMode });
+            if (!(await persistSetting({ tuiMode: value as TuiMode }))) return;
             if (host.tui.mode !== value && host.options.onTuiModeChange) {
               await host.options.onTuiModeChange(value as TuiMode);
             }
@@ -263,7 +286,7 @@ export async function handleSystemCommand(
               host.notice("bypassPermissions left off");
             } else {
               agent.setPermissionMode(mode);
-              await saveThebeConfig({ permissionMode: mode });
+              if (!(await persistSetting({ permissionMode: mode }))) return;
               host.notice(
                 `permission mode: ${mode} — ${PERMISSION_MODE_SUMMARY[mode]}`
               );
@@ -293,11 +316,18 @@ export async function handleSystemCommand(
             }
           } else if (id === "autoCompact") {
             const enabled = value === "true";
-            await saveThebeConfig({ autoCompact: enabled });
+            if (!(await persistSetting({ autoCompact: enabled }))) return;
             if (agent && host.sessionId) {
               try {
                 await agent.setAutoCompactionEnabled(host.sessionId, enabled);
-              } catch {}
+              } catch (error) {
+                host.notice(
+                  `auto-compact was saved, but this session did not accept it: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`
+                );
+                return;
+              }
             }
             host.notice(
               enabled
@@ -306,7 +336,7 @@ export async function handleSystemCommand(
             );
           } else if (id === "autoSummary") {
             const enabled = value === "true";
-            await saveThebeConfig({ autoSummary: enabled });
+            if (!(await persistSetting({ autoSummary: enabled }))) return;
             await agent.setAutoSummaryEnabled(enabled);
             host.notice(
               enabled ? "auto-summary enabled" : "auto-summary disabled"
@@ -314,27 +344,27 @@ export async function handleSystemCommand(
           } else if (id === "autoSummaryDelay") {
             const seconds = Number(value.replace(/s$/, ""));
             const delayMs = seconds * 1000;
-            await saveThebeConfig({ autoSummaryDelayMs: delayMs });
+            if (!(await persistSetting({ autoSummaryDelayMs: delayMs }))) return;
             await agent.setAutoSummaryDelayMs(delayMs);
             host.notice(`auto-summary delay set to ${seconds}s`);
           } else if (id === "steeringMode") {
-            await saveThebeConfig({
+            await persistSetting({
               steeringMode: value as "one-at-a-time" | "all",
             });
           } else if (id === "followUpMode") {
-            await saveThebeConfig({
+            await persistSetting({
               followUpMode: value as "one-at-a-time" | "all",
             });
           } else if (id === "hideThinking") {
             host.setHideThinking(value === "true");
           } else if (id === "quietStartup") {
-            await saveThebeConfig({ quietStartup: value === "true" });
+            await persistSetting({ quietStartup: value === "true" });
           } else if (id === "fullscreenExitOutput") {
-            await saveThebeConfig({
+            await persistSetting({
               fullscreenExitOutput: value as "transcript" | "resume-hint",
             });
           } else if (id === "fullscreenScrollbar") {
-            await saveThebeConfig({
+            await persistSetting({
               fullscreenScrollbar: value as "auto" | "always" | "hidden",
             });
           }
@@ -345,8 +375,16 @@ export async function handleSystemCommand(
     case "theme": {
       if (arg) {
         if (arg === "dark" || arg === "light") {
-          await host.applyTheme(arg);
-          host.notice(`theme set to ${arg}`);
+          try {
+            await host.applyTheme(arg);
+            host.notice(`theme set to ${arg}`);
+          } catch (error) {
+            host.notice(
+              `theme applied, but it was not saved: ${
+                error instanceof Error ? error.message : String(error)
+              }`
+            );
+          }
         } else {
           host.notice("usage: /theme dark|light");
         }
@@ -374,8 +412,16 @@ export async function handleSystemCommand(
       );
       if (selected) {
         const chosen = selected.value as ThemeName;
-        await host.applyTheme(chosen);
-        host.notice(`theme set to ${chosen}`);
+        try {
+          await host.applyTheme(chosen);
+          host.notice(`theme set to ${chosen}`);
+        } catch (error) {
+          host.notice(
+            `theme applied, but it was not saved: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
       } else {
         await host.applyTheme(previous, false);
       }

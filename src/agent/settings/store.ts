@@ -36,7 +36,9 @@ export function createJsonAgentSettingsStore(path: string): AgentSettingsStore {
       return pickSettings(readConfig(path));
     },
     save(patch: AgentSettingsValues): void {
-      const current = readConfig(path);
+      // Never replace a file that exists but cannot be read: that would drop
+      // providers and delivery settings stored beside these keys.
+      const current = readConfigForUpdate(path);
       const next: Record<string, unknown> = { ...current };
       for (const key of SETTING_KEYS) {
         if (patch[key] !== undefined) next[key] = patch[key];
@@ -63,6 +65,32 @@ function readConfig(path: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function readConfigForUpdate(path: string): Record<string, unknown> {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(
+      `Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file is not valid JSON`
+    );
+  }
+  if (!isRecord(parsed)) {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file does not hold a JSON object`
+    );
+  }
+  return parsed;
 }
 
 function pickSettings(config: Record<string, unknown>): AgentSettingsValues {

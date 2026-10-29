@@ -52,141 +52,145 @@ export type CustomProviderOptions = {
   compat?: Record<string, unknown>;
 };
 
+/** Reads a JSON object this module merges into. A missing file is empty; anything else is an error. */
+async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(
+      `Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file is not valid JSON`
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file does not hold a JSON object`
+    );
+  }
+  return parsed as Record<string, unknown>;
+}
+
 export async function saveCustomProvider(
   options: CustomProviderOptions
 ): Promise<void> {
-  try {
-    const current = await loadThebeConfig();
-    const providers = current.providers ?? {};
-    providers[options.providerId] = { baseUrl: options.baseUrl };
-    await saveThebeConfig({ providers });
-    const agentDir = getThebeAgentDir();
-    await mkdir(agentDir, { recursive: true });
+  const current = await loadThebeConfig();
+  const providers = current.providers ?? {};
+  providers[options.providerId] = { baseUrl: options.baseUrl };
+  await saveThebeConfig({ providers });
+  const agentDir = getThebeAgentDir();
+  await mkdir(agentDir, { recursive: true });
 
-    const modelsJsonPath = join(agentDir, "models.json");
-    let modelsData: Record<string, unknown> = {};
-    try {
-      modelsData = JSON.parse(await readFile(modelsJsonPath, "utf8")) as Record<
-        string,
-        unknown
-      >;
-    } catch {}
-    const existingProviders = (modelsData.providers ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    const currentProvider = existingProviders[options.providerId] ?? {};
-    const existingModels = Array.isArray(currentProvider.models)
-      ? [...(currentProvider.models as Array<Record<string, unknown>>)]
-      : [];
-    for (const newModel of options.models) {
-      const index = existingModels.findIndex(
-        (model) => model.id === newModel.id
-      );
-      const reasoning =
-        newModel.reasoning !== undefined
-          ? Boolean(newModel.reasoning)
-          : isReasoningModel(newModel.id, newModel.name);
-      const modelEntry: Record<string, unknown> = {
-        id: newModel.id,
-        name: newModel.name ?? newModel.id,
-        contextWindow: newModel.contextWindow ?? 128000,
-        maxTokens: newModel.maxTokens ?? 4096,
-        reasoning,
+  const modelsJsonPath = join(agentDir, "models.json");
+  const modelsData = await readJsonObject(modelsJsonPath);
+  const existingProviders = (modelsData.providers ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  const currentProvider = existingProviders[options.providerId] ?? {};
+  const existingModels = Array.isArray(currentProvider.models)
+    ? [...(currentProvider.models as Array<Record<string, unknown>>)]
+    : [];
+  for (const newModel of options.models) {
+    const index = existingModels.findIndex((model) => model.id === newModel.id);
+    const reasoning =
+      newModel.reasoning !== undefined
+        ? Boolean(newModel.reasoning)
+        : isReasoningModel(newModel.id, newModel.name);
+    const modelEntry: Record<string, unknown> = {
+      id: newModel.id,
+      name: newModel.name ?? newModel.id,
+      contextWindow: newModel.contextWindow ?? 128000,
+      maxTokens: newModel.maxTokens ?? 4096,
+      reasoning,
+    };
+    if (reasoning)
+      modelEntry.thinkingLevelMap = newModel.thinkingLevelMap ?? {
+        ...DEFAULT_THINKING_LEVEL_MAP,
       };
-      if (reasoning)
-        modelEntry.thinkingLevelMap = newModel.thinkingLevelMap ?? {
-          ...DEFAULT_THINKING_LEVEL_MAP,
-        };
-      if (index >= 0)
-        existingModels[index] = { ...existingModels[index], ...modelEntry };
-      else existingModels.push(modelEntry);
-    }
-    const defaultCompat: Record<string, unknown> = {};
-    if (options.api === "openai-completions") {
-      defaultCompat.supportsDeveloperRole = false;
-      defaultCompat.supportsReasoningEffort = true;
-      defaultCompat.thinkingFormat =
-        options.providerId.includes("deepseek") ||
-        options.baseUrl.includes("deepseek")
-          ? "deepseek"
-          : options.providerId.includes("qwen") ||
-              options.baseUrl.includes("qwen")
-            ? "qwen"
-            : "openai";
-    }
-    existingProviders[options.providerId] = {
-      ...currentProvider,
-      name: options.name ?? currentProvider.name ?? options.providerId,
-      baseUrl: options.baseUrl,
-      api: options.api,
-      models: existingModels,
-      ...(options.apiKey ? { apiKey: options.apiKey } : {}),
-      compat: {
-        ...defaultCompat,
-        ...(currentProvider.compat as Record<string, unknown>),
-        ...options.compat,
-      },
-    };
-    modelsData.providers = existingProviders;
-    await writeFileAtomic(
-      modelsJsonPath,
-      JSON.stringify(modelsData, null, 2),
-      "utf8"
-    );
+    if (index >= 0)
+      existingModels[index] = { ...existingModels[index], ...modelEntry };
+    else existingModels.push(modelEntry);
+  }
+  const defaultCompat: Record<string, unknown> = {};
+  if (options.api === "openai-completions") {
+    defaultCompat.supportsDeveloperRole = false;
+    defaultCompat.supportsReasoningEffort = true;
+    defaultCompat.thinkingFormat =
+      options.providerId.includes("deepseek") ||
+      options.baseUrl.includes("deepseek")
+        ? "deepseek"
+        : options.providerId.includes("qwen") ||
+            options.baseUrl.includes("qwen")
+          ? "qwen"
+          : "openai";
+  }
+  existingProviders[options.providerId] = {
+    ...currentProvider,
+    name: options.name ?? currentProvider.name ?? options.providerId,
+    baseUrl: options.baseUrl,
+    api: options.api,
+    models: existingModels,
+    ...(options.apiKey ? { apiKey: options.apiKey } : {}),
+    compat: {
+      ...defaultCompat,
+      ...(currentProvider.compat as Record<string, unknown>),
+      ...options.compat,
+    },
+  };
+  modelsData.providers = existingProviders;
+  await writeFileAtomic(
+    modelsJsonPath,
+    JSON.stringify(modelsData, null, 2),
+    "utf8"
+  );
 
-    const authJsonPath = join(agentDir, "auth.json");
-    let authData: Record<string, unknown> = {};
-    try {
-      authData = JSON.parse(await readFile(authJsonPath, "utf8")) as Record<
-        string,
-        unknown
-      >;
-    } catch {}
-    authData[options.providerId] = {
-      type: "api_key",
-      key: options.apiKey || "none",
-    };
-    await writeFileAtomic(authJsonPath, JSON.stringify(authData, null, 2), {
-      encoding: "utf8",
-      mode: 0o600,
-    });
-  } catch {}
+  const authJsonPath = join(agentDir, "auth.json");
+  const authData = await readJsonObject(authJsonPath);
+  authData[options.providerId] = {
+    type: "api_key",
+    key: options.apiKey || "none",
+  };
+  await writeFileAtomic(authJsonPath, JSON.stringify(authData, null, 2), {
+    encoding: "utf8",
+    mode: 0o600,
+  });
 }
 
 export async function saveProviderEndpoint(
   providerId: string,
   baseUrl: string
 ): Promise<void> {
-  try {
-    const current = await loadThebeConfig();
-    const providers = current.providers ?? {};
-    providers[providerId] = { baseUrl };
-    await saveThebeConfig({ providers });
-    const agentDir = getThebeAgentDir();
-    await mkdir(agentDir, { recursive: true });
-    const modelsJsonPath = join(agentDir, "models.json");
-    let existingJson: Record<string, unknown> = {};
-    try {
-      existingJson = JSON.parse(
-        await readFile(modelsJsonPath, "utf8")
-      ) as Record<string, unknown>;
-    } catch {}
-    const existingProviders = (existingJson.providers ?? {}) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    existingProviders[providerId] = {
-      ...existingProviders[providerId],
-      baseUrl,
-    };
-    existingJson.providers = existingProviders;
-    await writeFileAtomic(
-      modelsJsonPath,
-      JSON.stringify(existingJson, null, 2),
-      "utf8"
-    );
-  } catch {}
+  const current = await loadThebeConfig();
+  const providers = current.providers ?? {};
+  providers[providerId] = { baseUrl };
+  await saveThebeConfig({ providers });
+  const agentDir = getThebeAgentDir();
+  await mkdir(agentDir, { recursive: true });
+  const modelsJsonPath = join(agentDir, "models.json");
+  const existingJson = await readJsonObject(modelsJsonPath);
+  const existingProviders = (existingJson.providers ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+  existingProviders[providerId] = {
+    ...existingProviders[providerId],
+    baseUrl,
+  };
+  existingJson.providers = existingProviders;
+  await writeFileAtomic(
+    modelsJsonPath,
+    JSON.stringify(existingJson, null, 2),
+    "utf8"
+  );
 }
 
 export async function fetchRemoteModels(

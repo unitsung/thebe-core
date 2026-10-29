@@ -8,8 +8,13 @@ import {
   getExternalEditorCommand,
   getThebeAgentDir,
   getThebeConfigPath,
+  saveThebeConfig,
 } from "./config.ts";
-import { fetchRemoteModels, isReasoningModel, saveCustomProvider } from "./provider-config.ts";
+import {
+  fetchRemoteModels,
+  isReasoningModel,
+  saveCustomProvider,
+} from "./provider-config.ts";
 
 describe("Thebe user config", () => {
   it("uses the configured directory, creates once, and follows Pi editor precedence", async () => {
@@ -42,6 +47,25 @@ describe("Thebe user config", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("refuses to overwrite a config file it cannot parse", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-corrupt-config-"));
+    const previousConfigDir = process.env.THEBE_CONFIG_DIR;
+    process.env.THEBE_CONFIG_DIR = dir;
+
+    try {
+      const path = join(dir, "config.json");
+      await writeFile(path, '{"providers":', "utf8");
+      await expect(saveThebeConfig({ theme: "dark" })).rejects.toThrow(
+        /Refusing to overwrite/
+      );
+      expect(await readFile(path, "utf8")).toBe('{"providers":');
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
+      else process.env.THEBE_CONFIG_DIR = previousConfigDir;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("fetchRemoteModels", () => {
@@ -59,7 +83,7 @@ describe("fetchRemoteModels", () => {
               { id: "gpt-4o", name: "GPT-4o" },
               { id: "deepseek-coder", display_name: "DeepSeek Coder" },
             ],
-          }),
+          })
         );
         return;
       }
@@ -71,7 +95,7 @@ describe("fetchRemoteModels", () => {
               { name: "llama3.1:latest", model: "llama3.1:latest" },
               { name: "qwen2.5:7b", model: "qwen2.5:7b" },
             ],
-          }),
+          })
         );
         return;
       }
@@ -95,7 +119,10 @@ describe("fetchRemoteModels", () => {
   });
 
   it("discovers OpenAI format models from /v1/models", async () => {
-    const models = await fetchRemoteModels(`http://127.0.0.1:${port}/v1`, "test-key");
+    const models = await fetchRemoteModels(
+      `http://127.0.0.1:${port}/v1`,
+      "test-key"
+    );
     expect(models).not.toBeNull();
     expect(models?.length).toBe(2);
     expect(models?.[0]?.id).toBe("gpt-4o");
@@ -114,7 +141,7 @@ describe("fetchRemoteModels", () => {
               { name: "llama3.2:1b", model: "llama3.2:1b" },
               { name: "mistral:latest", model: "mistral:latest" },
             ],
-          }),
+          })
         );
         return;
       }
@@ -132,14 +159,22 @@ describe("fetchRemoteModels", () => {
     try {
       const models = await fetchRemoteModels(`http://127.0.0.1:${oPort}`);
       expect(models).not.toBeNull();
-      expect(models?.map((m) => m.id)).toEqual(["llama3.2:1b", "mistral:latest"]);
+      expect(models?.map((m) => m.id)).toEqual([
+        "llama3.2:1b",
+        "mistral:latest",
+      ]);
     } finally {
       await new Promise<void>((resolve) => ollamaServer.close(() => resolve()));
     }
   });
 
   it("gracefully returns null when endpoint is unreachable or 404", async () => {
-    const models = await fetchRemoteModels("http://127.0.0.1:59999", "dummy", "openai-completions", 500);
+    const models = await fetchRemoteModels(
+      "http://127.0.0.1:59999",
+      "dummy",
+      "openai-completions",
+      500
+    );
     expect(models).toBeNull();
   });
 });
@@ -162,7 +197,10 @@ describe("isReasoningModel and saveCustomProvider reasoning support", () => {
     const { join } = await import("node:path");
 
     const tmpAgent = "/tmp/thebe-config-test-" + Date.now();
+    const tmpConfig = "/tmp/thebe-config-test-config-" + Date.now();
     process.env.THEBE_AGENT_DIR = tmpAgent;
+    const previousConfigDir = process.env.THEBE_CONFIG_DIR;
+    process.env.THEBE_CONFIG_DIR = tmpConfig;
 
     try {
       await saveCustomProvider({
@@ -170,13 +208,12 @@ describe("isReasoningModel and saveCustomProvider reasoning support", () => {
         baseUrl: "https://api.deepseek.com/v1",
         api: "openai-completions",
         apiKey: "sk-test",
-        models: [
-          { id: "deepseek-r1:14b" },
-          { id: "deepseek-chat" },
-        ],
+        models: [{ id: "deepseek-r1:14b" }, { id: "deepseek-chat" }],
       });
 
-      const modelsJson = JSON.parse(await readFile(join(tmpAgent, "models.json"), "utf8"));
+      const modelsJson = JSON.parse(
+        await readFile(join(tmpAgent, "models.json"), "utf8")
+      );
       const p = modelsJson.providers["test-deepseek-endpoint"];
       expect(p).toBeDefined();
       expect(p.compat?.supportsReasoningEffort).toBe(true);
@@ -195,7 +232,43 @@ describe("isReasoningModel and saveCustomProvider reasoning support", () => {
       expect(chat.reasoning).toBe(false);
     } finally {
       await rm(tmpAgent, { recursive: true, force: true }).catch(() => {});
+      await rm(tmpConfig, { recursive: true, force: true }).catch(() => {});
       delete process.env.THEBE_AGENT_DIR;
+      if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
+      else process.env.THEBE_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
+  it("refuses to overwrite a models.json it cannot parse", async () => {
+    const { mkdir } = await import("node:fs/promises");
+
+    const root = await mkdtemp(join(tmpdir(), "thebe-corrupt-agent-"));
+    const previousAgentDir = process.env.THEBE_AGENT_DIR;
+    const previousConfigDir = process.env.THEBE_CONFIG_DIR;
+    process.env.THEBE_AGENT_DIR = join(root, "agent");
+    process.env.THEBE_CONFIG_DIR = join(root, "config");
+
+    try {
+      await mkdir(process.env.THEBE_AGENT_DIR, { recursive: true });
+      const modelsPath = join(process.env.THEBE_AGENT_DIR, "models.json");
+      await writeFile(modelsPath, '{"providers":', "utf8");
+
+      await expect(
+        saveCustomProvider({
+          providerId: "corrupt-test",
+          baseUrl: "https://example.test/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [{ id: "test-model" }],
+        })
+      ).rejects.toThrow(/Refusing to overwrite/);
+      expect(await readFile(modelsPath, "utf8")).toBe('{"providers":');
+    } finally {
+      await rm(root, { recursive: true, force: true }).catch(() => {});
+      if (previousAgentDir === undefined) delete process.env.THEBE_AGENT_DIR;
+      else process.env.THEBE_AGENT_DIR = previousAgentDir;
+      if (previousConfigDir === undefined) delete process.env.THEBE_CONFIG_DIR;
+      else process.env.THEBE_CONFIG_DIR = previousConfigDir;
     }
   });
 });
