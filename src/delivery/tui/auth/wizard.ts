@@ -254,19 +254,34 @@ export async function runCustomProviderWizard(
     });
   }
 
-  await saveCustomProvider({
-    providerId,
-    name: providerId.charAt(0).toUpperCase() + providerId.slice(1),
-    baseUrl,
-    api,
-    apiKey,
-    models: modelsToSave,
-  });
+  try {
+    await saveCustomProvider({
+      providerId,
+      name: providerId.charAt(0).toUpperCase() + providerId.slice(1),
+      baseUrl,
+      api,
+      apiKey,
+      models: modelsToSave,
+    });
+  } catch (error) {
+    notice(
+      `could not save ${providerId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return null;
+  }
 
   // 7. Update runtime auth credentials
   try {
     await agent.auth().setApiKey(providerId, apiKey);
-  } catch {}
+  } catch (error) {
+    notice(
+      `${providerId} was saved, but the running agent did not accept the API key: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
 
   return { providerId, modelId: selectedModelId };
 }

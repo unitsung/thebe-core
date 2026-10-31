@@ -1,3 +1,4 @@
+import { describeProviderFailure } from "../provider-failure.ts";
 import {
   buildGoalVerifierPrompt,
   reviewGoalEvidence,
@@ -21,7 +22,7 @@ export type GoalSubagentApi = {
   waitSubagent(runId: string): Promise<SubagentRun>;
   subscribeSubagent(
     runId: string,
-    listener: (update: SubagentUpdate) => void,
+    listener: (update: SubagentUpdate) => void
   ): () => void;
   cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun>;
 };
@@ -47,6 +48,16 @@ export class GoalControlError extends Error {
   }
 }
 
+/** A worker or reviewer run itself failed (provider, auth, runtime), as opposed to not finishing the work. */
+export class GoalChildFailure extends Error {
+  constructor(
+    public readonly role: "worker" | "reviewer",
+    detail: string
+  ) {
+    super(detail);
+  }
+}
+
 type GoalTerminalStatus = Exclude<
   GoalRunStatus,
   "running" | "pausing" | "paused" | "failed"
@@ -58,14 +69,14 @@ type GoalExecutionDeps = {
     run: ManagedGoal,
     iteration: number,
     role: "worker" | "reviewer",
-    update: SubagentUpdate,
+    update: SubagentUpdate
   ) => void;
   onEvent: (run: ManagedGoal, event: GoalEvent) => void;
   setTerminal: (
     run: ManagedGoal,
     status: Exclude<GoalRunStatus, "running" | "pausing">,
     summary?: string,
-    error?: string,
+    error?: string
   ) => Promise<GoalRun>;
 };
 
@@ -73,7 +84,7 @@ export async function executeGoal(
   run: ManagedGoal,
   deps: GoalExecutionDeps,
   initialIteration = 0,
-  initialReview?: GoalReviewResult,
+  initialReview?: GoalReviewResult
 ): Promise<void> {
   try {
     const result = await runGoalLoop({
@@ -97,7 +108,7 @@ export async function executeGoal(
         deps.emitChild(run, iteration, "worker", { run: worker });
         const workerUnsubscribe = deps.subagents.subscribeSubagent(
           worker.runId,
-          (update) => deps.emitChild(run, iteration, "worker", update),
+          (update) => deps.emitChild(run, iteration, "worker", update)
         );
         let workerResult: SubagentRun;
         try {
@@ -108,6 +119,13 @@ export async function executeGoal(
         deps.emitChild(run, iteration, "worker", { run: workerResult });
         if (run.stopRequested) throw new GoalControlError("cancel");
         if (run.pauseRequested) throw new GoalControlError("pause");
+        // A failed run is an infrastructure error; retrying burns every checkpoint on the same cause.
+        if (workerResult.status === "failed") {
+          throw new GoalChildFailure(
+            "worker",
+            failureDetail(workerResult.error, "worker")
+          );
+        }
         if (workerResult.status !== "completed") {
           run.finalReport = childReport(workerResult);
           return `VERDICT: blocked\nEVIDENCE: worker ${workerResult.status}: ${workerResult.error ?? "no result"}\nREMAINING: resume the goal after resolving the worker failure`;
@@ -122,7 +140,7 @@ export async function executeGoal(
               criteria: run.criteria,
               maxIterations: run.maxIterations,
             },
-            workerResult.result ?? "",
+            workerResult.result ?? ""
           ),
           parentSessionId: run.thebeSessionId,
         });
@@ -130,12 +148,20 @@ export async function executeGoal(
         deps.emitChild(run, iteration, "reviewer", { run: reviewer });
         const reviewerUnsubscribe = deps.subagents.subscribeSubagent(
           reviewer.runId,
-          (update) => deps.emitChild(run, iteration, "reviewer", update),
+          (update) => deps.emitChild(run, iteration, "reviewer", update)
         );
         try {
-          const reviewerResult = await deps.subagents.waitSubagent(reviewer.runId);
+          const reviewerResult = await deps.subagents.waitSubagent(
+            reviewer.runId
+          );
           run.finalReport = childReport(reviewerResult);
           deps.emitChild(run, iteration, "reviewer", { run: reviewerResult });
+          if (reviewerResult.status === "failed") {
+            throw new GoalChildFailure(
+              "reviewer",
+              failureDetail(reviewerResult.error, "reviewer")
+            );
+          }
           if (run.stopRequested) throw new GoalControlError("cancel");
           if (run.pauseRequested) throw new GoalControlError("pause");
           return reviewerResult.result ?? "";
@@ -158,7 +184,7 @@ export async function executeGoal(
       await deps.setTerminal(
         run,
         "cancelled",
-        `Goal cancelled after ${run.iteration} checkpoint(s).`,
+        `Goal cancelled after ${run.iteration} checkpoint(s).`
       );
       return;
     }
@@ -170,17 +196,24 @@ export async function executeGoal(
       await deps.setTerminal(
         run,
         "paused",
-        `Goal paused after ${run.iteration} checkpoint(s).`,
+        `Goal paused after ${run.iteration} checkpoint(s).`
       );
       return;
     }
     await deps.setTerminal(
       run,
       "failed",
-      "Goal failed before reaching an independently verified stopping condition.",
-      error instanceof Error ? error.message : String(error),
+      error instanceof GoalChildFailure
+        ? `Goal stopped: the ${error.role} run failed at checkpoint ${run.iteration}.`
+        : "Goal failed before reaching an independently verified stopping condition.",
+      error instanceof Error ? error.message : String(error)
     );
   }
+}
+
+function failureDetail(error: string | undefined, role: string): string {
+  if (!error) return `${role} failed without a message`;
+  return describeProviderFailure(error)?.message ?? error;
 }
 
 function childReport(run: SubagentRun): string | undefined {

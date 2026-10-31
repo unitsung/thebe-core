@@ -175,7 +175,16 @@ export async function handleProviderCommand(
               });
               if (endpoint && endpoint.trim()) {
                 customBaseUrl = endpoint.trim();
-                await saveProviderEndpoint(targetProvider, customBaseUrl);
+                try {
+                  await saveProviderEndpoint(targetProvider, customBaseUrl);
+                } catch (error) {
+                  host.notice(
+                    `could not save the endpoint for ${targetProvider}: ${
+                      error instanceof Error ? error.message : String(error)
+                    }`
+                  );
+                  break;
+                }
               }
             }
 

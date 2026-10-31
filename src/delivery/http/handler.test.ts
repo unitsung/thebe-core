@@ -692,6 +692,54 @@ describe("Thebe HTTP handler", () => {
     expect(res.status).toBe(200);
   });
 
+  it("answers a failed provider call with 502 and a readable error, and unknown routes with a reason", async () => {
+    const { createFakeRuntime } =
+      await import("../../testing/runtime/index.ts");
+    const { createThebeApp } = await import("../../app/create.ts");
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "error",
+        message:
+          '401 {"type":"error","error":{"code":"api_key_expired","message":"This API key has expired."}}',
+      },
+    ]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: provider(),
+      version: "0.1.0",
+    });
+    const created = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
+    );
+    const session = (await created.json()) as { thebeSessionId: string };
+    const prompted = await app.handler.handle(
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/prompt`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: "hello" }),
+        }
+      )
+    );
+    expect(prompted.status).toBe(502);
+    await expect(prompted.json()).resolves.toEqual({
+      ok: false,
+      error:
+        "The model provider rejected Core's credentials (401): This API key has expired.",
+      code: "provider_auth_failed",
+    });
+    const missing = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/nope")
+    );
+    expect(missing.status).toBe(404);
+    await expect(missing.json()).resolves.toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+  });
+
   it("POST /v1/session then prompt/message/log/model", async () => {
     const { createFakeRuntime } =
       await import("../../testing/runtime/index.ts");
@@ -1344,6 +1392,31 @@ describe("Thebe HTTP handler", () => {
     expect(
       idleBody.sessions.find((row) => row.thebeSessionId === session)?.status
     ).toBe("idle");
+  });
+
+  it("GET /v1/session/{id} carries the run state a dropped prompt recovers from", async () => {
+    const { app, session } = await sessionApp([{ kind: "hang" }]);
+    const pending = app.agent.prompt("long", { thebeSessionId: session });
+    pending.catch(() => {});
+    await vi.waitFor(() => {
+      expect(app.agent.isStreaming(session)).toBe(true);
+    });
+
+    const response = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${session}`)
+    );
+    expect(await response.json()).toMatchObject({
+      thebeSessionId: session,
+      streaming: true,
+      status: "running",
+    });
+
+    await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/session/${session}/interrupt`, {
+        method: "POST",
+      })
+    );
+    await expect(pending).rejects.toThrow();
   });
 
   it("failed runs log an error event, aborts log interrupted only", async () => {

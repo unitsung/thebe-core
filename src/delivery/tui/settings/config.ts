@@ -69,20 +69,49 @@ export async function loadThebeConfig(): Promise<ThebeUserConfig> {
   }
 }
 
+/** Reads the config for a write. A missing file is empty; an unreadable or invalid one is an error. */
+async function readThebeConfigForUpdate(): Promise<ThebeUserConfig> {
+  const path = getThebeConfigPath();
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {};
+    throw new Error(
+      `Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file is not valid JSON`
+    );
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(
+      `Refusing to overwrite ${path}: the file does not hold a JSON object`
+    );
+  }
+  return parsed as ThebeUserConfig;
+}
+
 export async function saveThebeConfig(
   patch: Partial<ThebeUserConfig>
 ): Promise<ThebeUserConfig> {
-  try {
-    const dir = getThebeConfigDir();
-    await mkdir(dir, { recursive: true });
-    const updated: ThebeUserConfig = { ...(await loadThebeConfig()), ...patch };
-    await writeFileAtomic(
-      getThebeConfigPath(),
-      JSON.stringify(updated, null, 2),
-      "utf8"
-    );
-    return updated;
-  } catch {
-    return {};
-  }
+  const dir = getThebeConfigDir();
+  await mkdir(dir, { recursive: true });
+  // Merge into what is on disk. A corrupt file is never replaced with only
+  // this patch, because that would erase providers and the rest of the config.
+  const updated: ThebeUserConfig = {
+    ...(await readThebeConfigForUpdate()),
+    ...patch,
+  };
+  await writeFileAtomic(
+    getThebeConfigPath(),
+    JSON.stringify(updated, null, 2),
+    "utf8"
+  );
+  return updated;
 }

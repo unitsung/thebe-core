@@ -2433,6 +2433,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            model: {
+              type: "object",
+              required: ["providerId", "modelId"],
+              description:
+                "Model for a new Goal session; its workers and reviewer use it. Ignored when the Goal is started on an existing session.",
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
           },
         },
         GoalScheduleInput: {
@@ -2466,6 +2476,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            model: {
+              type: "object",
+              required: ["providerId", "modelId"],
+              description:
+                "Model for each occurrence's Goal session; its workers and reviewer use it. Omitted means the host default.",
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
           },
         },
         GoalSchedule: {

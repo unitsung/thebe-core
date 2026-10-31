@@ -55,7 +55,14 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // for X-Thebe-Token through its Authorize control when trying requests.
       if (verify && !isDocumentationRequest(request)) {
         if (!verify(request.headers.get("X-Thebe-Token") ?? "")) {
-          return json({ ok: false }, 401);
+          return json(
+            {
+              ok: false,
+              error: "Missing or invalid X-Thebe-Token",
+              code: "unauthorized",
+            },
+            401
+          );
         }
       }
       try {

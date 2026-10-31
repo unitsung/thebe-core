@@ -58,6 +58,25 @@ describe("file job store", () => {
     expect(await readFile(path, "utf8")).toBe("{ not json");
   });
 
+  it("does not replace a jobs file it cannot parse", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-job-store-corrupt-"));
+    const path = join(dir, "jobs.json");
+    await writeFile(path, "{ not json");
+    const store = createFileJobStore(path);
+    const job = createJob(
+      {
+        title: "Dune",
+        magnet: `magnet:?xt=urn:btih:${"b".repeat(40)}`,
+        filesSourceDir: "/dl",
+        libraryDir: "/media",
+      },
+      new Date("2026-10-13T00:00:00Z")
+    );
+
+    store.save([job]);
+    expect(await readFile(path, "utf8")).toBe("{ not json");
+  });
+
   it("does not throw when the directory cannot be written", () => {
     const store = createFileJobStore(
       join(tmpdir(), "thebe-missing-dir", "..", "\u0000bad", "jobs.json")

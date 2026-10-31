@@ -158,7 +158,17 @@ export function createAgentStore(dir?: string) {
     }
     const rows: AgentSessionMeta[] = [];
     for (const name of names.sort()) {
-      rows.push(await load(name.replace(/\.json$/, "")));
+      try {
+        rows.push(await load(name.replace(/\.json$/, "")));
+      } catch (error) {
+        // One damaged mapping file must not hide every other session. Leave
+        // the file in place and name it in the server log.
+        console.warn(
+          `[thebe] skipping unreadable session metadata ${name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
     }
     return rows;
   }

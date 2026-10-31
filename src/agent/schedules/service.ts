@@ -130,6 +130,7 @@ export function createScheduleApi(options: {
       const session = await options.goals.createSession({
         title: row.title,
         labels: { kind: "goal", scheduleId: row.id },
+        model: row.model,
       });
       reserved.lastSessionId = session.thebeSessionId;
       await save({ ...reserved });
@@ -252,6 +253,22 @@ export function createScheduleApi(options: {
         options.checkWritable();
         const row = find(id);
         const normalized = validate(input);
+        // Editing a title or goal must not move the next run. Recompute only
+        // when the recurrence itself changed, and skip occurrences already
+        // missed instead of firing one as soon as the edit is saved.
+        const recurrenceChanged =
+          normalized.startAt !== row.startAt ||
+          normalized.intervalMinutes !== row.intervalMinutes ||
+          (normalized.cron ?? undefined) !== (row.cron ?? undefined) ||
+          (normalized.cron ? normalized.timeZone : undefined) !==
+            (row.cron ? row.timeZone : undefined);
+        const scheduled = recurrenceChanged
+          ? advance({
+              ...row,
+              ...normalized,
+              nextRunAt: firstRun(normalized),
+            })
+          : row;
         const updated = {
           ...row,
           ...normalized,
@@ -260,7 +277,9 @@ export function createScheduleApi(options: {
           cron: normalized.cron,
           timeZone: normalized.timeZone,
           maxIterations: normalized.maxIterations,
-          nextRunAt: row.enabled ? firstRun(normalized) : undefined,
+          model: normalized.model,
+          enabled: row.enabled ? scheduled.enabled : false,
+          nextRunAt: row.enabled ? scheduled.nextRunAt : undefined,
           updatedAt: options.now().toISOString(),
         };
         await save(updated);
@@ -403,6 +422,21 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
       "criteria must contain up to 32 nonempty strings",
       "invalid_body"
     );
+  const model = input.model;
+  if (
+    model !== undefined &&
+    (!model ||
+      typeof model !== "object" ||
+      typeof model.providerId !== "string" ||
+      !model.providerId.trim() ||
+      typeof model.modelId !== "string" ||
+      !model.modelId.trim())
+  )
+    throw httpError(
+      400,
+      "model must contain providerId and modelId",
+      "invalid_body"
+    );
   return {
     title,
     goal,
@@ -416,6 +450,14 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
         }
       : {}),
     maxIterations: input.maxIterations,
+    ...(model
+      ? {
+          model: {
+            providerId: model.providerId.trim(),
+            modelId: model.modelId.trim(),
+          },
+        }
+      : {}),
   };
 }
 

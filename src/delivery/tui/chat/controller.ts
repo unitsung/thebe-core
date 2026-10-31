@@ -150,7 +150,15 @@ export function attachThebeChat(tui: TUI, options: ThebeTuiOptions): ChatHandle 
     getActiveSelectListTheme,
     getSessionId: () => state.sessionId,
     makeMarkdown,
-    persistHideThinking: (hidden) => void saveThebeConfig({ hideThinking: hidden }),
+    persistHideThinking: (hidden) => {
+      void saveThebeConfig({ hideThinking: hidden }).catch((error) => {
+        notice(
+          `hide-thinking setting was not saved: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+    },
   });
   sessions = new SessionDriver({
     tui,

@@ -1,3 +1,4 @@
+import { describeProviderFailure } from "../../../agent/provider-failure.ts";
 import { redactToolOutput } from "../../../agent/security/redaction.ts";
 import { json } from "../json.ts";
 
@@ -15,11 +16,16 @@ export function notFound(error: string): Response {
   return json({ ok: false, error }, 404);
 }
 
-export function promptBodyError(result: { error: string; status?: number }): Response {
+export function promptBodyError(result: {
+  error: string;
+  status?: number;
+}): Response {
   return json({ error: result.error }, result.status ?? 400);
 }
 
-export function oauthCallbackInput(body: Record<string, unknown>): string | undefined {
+export function oauthCallbackInput(
+  body: Record<string, unknown>
+): string | undefined {
   for (const key of ["url", "redirectUrl", "redirect_uri", "input"] as const) {
     const value = body[key];
     if (typeof value === "string" && value.trim()) return value;
@@ -32,14 +38,29 @@ export function oauthCallbackInput(body: Record<string, unknown>): string | unde
 
 export function agentError(error: unknown): Response {
   const message = redactToolOutput(
-    error instanceof Error ? error.message : String(error),
+    error instanceof Error ? error.message : String(error)
   );
-  const extra = error instanceof Error ? error as Error & { status?: unknown; code?: unknown } : undefined;
+  const extra =
+    error instanceof Error
+      ? (error as Error & { status?: unknown; code?: unknown })
+      : undefined;
   const body: Record<string, unknown> = { ok: false, error: message };
   if (typeof extra?.code === "string") body.code = extra.code;
-  if (typeof extra?.status === "number" && Number.isInteger(extra.status) && extra.status >= 400 && extra.status < 600) {
+  if (
+    typeof extra?.status === "number" &&
+    Number.isInteger(extra.status) &&
+    extra.status >= 400 &&
+    extra.status < 600
+  ) {
     return json(body, extra.status);
   }
+  // A failed provider call is the provider's fault, not Core's: say so instead of answering 500 with its raw JSON.
+  const upstream = describeProviderFailure(message);
+  if (upstream)
+    return json(
+      { ok: false, error: upstream.message, code: upstream.code },
+      upstream.status
+    );
   // No status attached means an unexpected failure: it is a 500, not a guess from the wording.
   return json(body, 500);
 }

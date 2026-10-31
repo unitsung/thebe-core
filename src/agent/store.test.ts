@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, readdir } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { assertMetadataOnly, createAgentStore } from "./store.ts";
 
 describe("AgentStore", () => {
@@ -58,5 +58,28 @@ describe("AgentStore", () => {
     const names = await readdir(dir);
     expect(names.every((name) => name.endsWith(".json"))).toBe(true);
     expect(await store.list()).toHaveLength(ids.length);
+  });
+
+  it("keeps listing valid sessions when one mapping file is damaged", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-agent-damaged-"));
+    const store = createAgentStore(dir);
+    await store.save({
+      thebeSessionId: "thebe-1",
+      runtimeId: "pi-coding-agent",
+      runtimeSessionId: "runtime-1",
+    });
+    await writeFile(join(dir, "damaged.json"), '{"runtimeId":');
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      expect((await store.list()).map((row) => row.thebeSessionId)).toEqual([
+        "thebe-1",
+      ]);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining("damaged.json")
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

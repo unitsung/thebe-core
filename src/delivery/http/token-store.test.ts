@@ -134,6 +134,18 @@ describe("per-device tokens", () => {
     expect((await stat(join(configDir, "tokens.json"))).mode & 0o777).toBe(0o600);
   });
 
+  it("does not replace a tokens.json it cannot parse", async () => {
+    const configDir = await dir();
+    const path = join(configDir, "tokens.json");
+    await writeFile(path, '{"tokens":');
+
+    expect(createDeviceToken({ configDir, name: "iPhone" })).toEqual({
+      ok: false,
+      reason: "store-unreadable",
+    });
+    expect(await readFile(path, "utf8")).toBe('{"tokens":');
+  });
+
   it("names must be unique, plain, and not the reserved ones", async () => {
     const configDir = await dir();
     expect(createDeviceToken({ configDir, name: "iPhone" }).ok).toBe(true);

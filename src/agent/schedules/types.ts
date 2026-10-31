@@ -3,6 +3,8 @@ export type GoalScheduleInput = {
   goal: string;
   criteria?: string[];
   maxIterations?: number;
+  /** Model each occurrence's Goal session (and so its workers and reviewer) uses; the host default when omitted. */
+  model?: { providerId: string; modelId: string };
   startAt: string;
   /** Fixed elapsed time, not a calendar-day rule. */
   intervalMinutes?: number;

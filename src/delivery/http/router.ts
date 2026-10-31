@@ -137,18 +137,37 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const scheduleResponse = await handleScheduleRoutes(context);
       if (scheduleResponse) return scheduleResponse;
       if (isAgentRoute(context.path)) {
-        return (await handleAgentRoutes(context)) ?? json({ ok: false }, 404);
+        return (await handleAgentRoutes(context)) ?? routeNotFound(context);
       }
       if (context.path === "/mcp") {
         // Stateless: no server-initiated SSE stream (GET) and no session to end (DELETE).
         if (request.method !== "POST") {
-          return json({ ok: false }, 405, { allow: "POST" });
+          return json(
+            {
+              ok: false,
+              error: "/mcp accepts POST only",
+              code: "method_not_allowed",
+            },
+            405,
+            { allow: "POST" }
+          );
         }
         return handleMcp(context);
       }
-      return json({ ok: false }, 404);
+      return routeNotFound(context);
     },
   };
+}
+
+function routeNotFound(context: ThebeHttpContext): Response {
+  return json(
+    {
+      ok: false,
+      error: `No such route: ${context.request.method} ${context.path}`,
+      code: "not_found",
+    },
+    404
+  );
 }
 
 function isAgentRoute(path: string): boolean {

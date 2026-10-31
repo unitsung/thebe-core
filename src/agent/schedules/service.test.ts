@@ -45,6 +45,24 @@ describe("durable Goal schedules", () => {
     await expect(f.api.runSchedule(schedule.id)).rejects.toMatchObject({ status: 409 });
     expect((await f.api.getSchedule(schedule.id)).lastError).toContain("skipped");
   });
+  it("keeps the next run when only the title changes", async () => {
+    const f = fixture();
+    const schedule = await f.api.createSchedule({ ...input, intervalMinutes: 60 });
+    f.time("2026-10-06T05:30:00Z");
+    await f.api.tick();
+    expect((await f.api.getSchedule(schedule.id)).nextRunAt).toBe("2026-10-06T06:00:00.000Z");
+
+    const edited = await f.api.updateSchedule(schedule.id, {
+      ...input,
+      title: "Renamed check",
+      intervalMinutes: 60,
+    });
+    expect(edited.nextRunAt).toBe("2026-10-06T06:00:00.000Z");
+
+    f.time("2026-10-06T05:59:00Z");
+    await f.api.tick();
+    expect(f.startGoal).toHaveBeenCalledTimes(1);
+  });
   it("persists edits and pause/resume/delete across recreation without replaying a completed occurrence", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-schedules-")); dirs.push(dir);
     const f = fixture(dir);
