@@ -1,5 +1,6 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
+import type { DeviceRegistry } from "./devices.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
@@ -15,6 +16,9 @@ export type ThebeHttpHandlerOptions = {
   agent?: ThebeAgent;
   allowedHosts?: string[];
   deviceStoreDir?: string;
+  /** Use this registry instead of opening one on `deviceStoreDir`, so the push notifier shares it. */
+  deviceRegistry?: DeviceRegistry;
+  pushIdentity?: { publicKey: string; relayUrl: string };
   workspacePath?: string;
 };
 
@@ -41,6 +45,8 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     version: options.version,
     agent: options.agent,
     deviceStoreDir: options.deviceStoreDir,
+    deviceRegistry: options.deviceRegistry,
+    pushIdentity: options.pushIdentity,
     workspacePath: options.workspacePath,
   });
 

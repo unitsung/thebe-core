@@ -5,7 +5,7 @@ import { handleCompatibility } from "./compat.ts";
 
 /** Health, event collection, device-registration, and legacy message routes. */
 export async function handleHealthEventsCompatibility(
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ): Promise<Response | undefined> {
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
@@ -16,6 +16,15 @@ export async function handleHealthEventsCompatibility(
     (path === "/v1/events" || path === "/v1/event")
   ) {
     return json({ events: agent ? agent.recentEvents() : [] });
+  }
+  if (request.method === "GET" && path === "/v1/push/identity") {
+    const { pushIdentity } = context;
+    return json({
+      ok: true,
+      available: pushIdentity !== undefined,
+      publicKey: pushIdentity?.publicKey ?? null,
+      relayUrl: pushIdentity?.relayUrl ?? null,
+    });
   }
   if (request.method === "GET" && path === "/v1/devices") {
     if (!deviceRegistry) {
@@ -28,9 +37,18 @@ export async function handleHealthEventsCompatibility(
     if (blocked) return blocked;
     const body = await readJson(request);
     const token = typeof body.token === "string" ? body.token.trim() : "";
-    const platform = typeof body.platform === "string" ? body.platform.trim().toLowerCase() : "";
+    const platform =
+      typeof body.platform === "string"
+        ? body.platform.trim().toLowerCase()
+        : "";
     if (!token || token.length > 512) {
-      return json({ ok: false, error: "token is required and must be at most 512 characters" }, 400);
+      return json(
+        {
+          ok: false,
+          error: "token is required and must be at most 512 characters",
+        },
+        400
+      );
     }
     if (platform !== "ios") {
       return json({ ok: false, error: "platform must be 'ios'" }, 400);
@@ -39,9 +57,20 @@ export async function handleHealthEventsCompatibility(
     if (!categoryResult.ok) {
       return json({ ok: false, error: categoryResult.error }, 400);
     }
-    const deviceId = typeof body.deviceId === "string" && body.deviceId.trim()
-      ? body.deviceId.trim()
-      : undefined;
+    const deviceId =
+      typeof body.deviceId === "string" && body.deviceId.trim()
+        ? body.deviceId.trim()
+        : undefined;
+    const relayDeviceId =
+      typeof body.relayDeviceId === "string" && body.relayDeviceId.trim()
+        ? body.relayDeviceId.trim()
+        : undefined;
+    if (relayDeviceId && relayDeviceId.length > 128) {
+      return json(
+        { ok: false, error: "relayDeviceId must be at most 128 characters" },
+        400
+      );
+    }
     if (!deviceRegistry) {
       return json({ ok: false, error: "device registry unavailable" }, 503);
     }
@@ -49,6 +78,7 @@ export async function handleHealthEventsCompatibility(
       token,
       platform,
       deviceId,
+      relayDeviceId,
       categories: categoryResult.categories,
     });
     return json({ ok: true, registered: true, ...registration });

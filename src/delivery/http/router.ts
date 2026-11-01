@@ -32,6 +32,7 @@ export type ThebeHttpRouterOptions = {
   agent?: ThebeHttpContext["agent"];
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
+  pushIdentity?: ThebeHttpContext["pushIdentity"];
   workspacePath?: string;
 };
 

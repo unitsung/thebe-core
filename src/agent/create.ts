@@ -50,6 +50,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "activity")
       : undefined,
     now: ctx.now,
+    onPendingApproval: options.onPendingApproval,
   });
   const diagnosis = createDiagnosisApi({
     now: ctx.now,

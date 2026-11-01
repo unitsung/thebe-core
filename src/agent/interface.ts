@@ -105,6 +105,10 @@ export type CreateThebeAgentOptions = {
   provider: ContainerInfoProvider;
   auditPath?: string;
   agentStoreDir?: string;
+  /** Called when an approval starts waiting for a person, for example to send a push notice. */
+  onPendingApproval?: (
+    record: import("./activity/types.ts").ActivityRecord
+  ) => void;
   now?: () => Date;
   callerId?: string;
   maxToolCalls?: number;

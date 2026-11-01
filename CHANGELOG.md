@@ -5,6 +5,10 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Optional push through a separately deployed Push Relay (`relay/`). With `THEBE_PUSH_RELAY_URL` set, Core keeps an Ed25519 signing key, publishes the public half at `GET /v1/push/identity`, accepts a `relayDeviceId` on `POST /v1/devices`, and sends a signed, minimal event to the relay when an approval starts waiting. Unset, nothing is sent. Core still holds no APNs credentials.
+
 ## [0.1.0] - 2026-10-22
 
 The first release, built from `main`.

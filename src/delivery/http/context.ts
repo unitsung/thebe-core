@@ -12,6 +12,8 @@ export type ThebeHttpContext = {
   agent?: ThebeAgent;
   /** Durable device registration state used by the device push endpoint. */
   deviceRegistry?: DeviceRegistry;
+  /** Where devices register for push and the key Core signs events with; absent when push is off. */
+  pushIdentity?: { publicKey: string; relayUrl: string };
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
@@ -27,6 +29,7 @@ export function createThebeHttpContext(
     agent?: ThebeAgent;
     path?: string;
     deviceRegistry?: DeviceRegistry;
+    pushIdentity?: { publicKey: string; relayUrl: string };
     workspacePath?: string;
   }
 ): ThebeHttpContext {
@@ -40,6 +43,7 @@ export function createThebeHttpContext(
     version: options.version,
     agent: options.agent,
     deviceRegistry: options.deviceRegistry,
+    pushIdentity: options.pushIdentity,
     workspacePath: options.workspacePath,
   };
 }
