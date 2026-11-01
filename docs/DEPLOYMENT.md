@@ -160,15 +160,21 @@ Secret handling:
   plaintext LAN/public traffic. Keep the published port on loopback and use one
   of the TLS paths below.
 
-### 3.1 Push notifications: registration here, delivery elsewhere
+### 3.1 Push notifications: registration here, delivery by a relay
 
 Core stores push device registrations (`GET/POST /v1/devices`, `DELETE
-/v1/devices/{registrationId}`) with a redacted token, and clients register
-notification categories. Core does **not** deliver push notifications and this
-release ships no relay: remote notifications are not delivered. When delivery is
-added it arrives as a separately deployed Push Relay that Core signs events for,
-so a self-hosted Core never embeds Thebe's APNs credentials. Until then, do not
-run or document a relay as part of this deployment.
+/v1/devices/{registrationId}`) with a redacted token. Core holds **no** APNs
+credentials. Delivery is optional and goes through a separately deployed Push
+Relay (`relay/` in this repository), so a self-hosted Core never embeds Thebe's
+APNs key.
+
+Set `THEBE_PUSH_RELAY_URL` to the relay's HTTPS address to turn it on. Core then
+creates an Ed25519 signing key next to its device state (`push-signing-key.pem`,
+owner-only), publishes the public half at `GET /v1/push/identity`, and sends a
+signed, minimal event (a generic line, a category and a `thebe://` deep link) for
+each approval that starts waiting. A device registers its APNs token with the relay
+using that public key, and the relay delivers only events signed by it. Unset, Core
+sends nothing and behaves as before. A relay that is down never fails a request.
 
 ## 4. Network exposure and client connections
 

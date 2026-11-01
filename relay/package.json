@@ -1,0 +1,14 @@
+{
+  "name": "thebe-push-relay",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Optional Push Relay: holds the APNs credentials and forwards events that a Thebe Core signed.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

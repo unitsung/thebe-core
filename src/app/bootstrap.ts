@@ -200,6 +200,7 @@ export async function bootstrapThebe(
     // `thebe token` commands apply without a restart.
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
+    pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
     model: defaultModel,

@@ -13,6 +13,9 @@ import type {
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
+import { createDeviceRegistry } from "../delivery/http/devices.ts";
+import { createPushIdentity } from "./push/identity.ts";
+import { createPushNotifier } from "./push/notifier.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
 import type { McpRegistry } from "../agent/extensions/mcp.ts";
@@ -39,6 +42,8 @@ export function createThebeApp(options: {
     | import("../delivery/http/token-store.ts").TokenVerifier;
   auditPath?: string;
   agentStoreDir?: string;
+  /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
+  pushRelayUrl?: string;
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -78,7 +83,34 @@ export function createThebeApp(options: {
   handler: ReturnType<typeof createThebeHttpHandler>;
 } {
   const storedSettings = options.settingsStore?.load();
+  const deviceDir = options.agentStoreDir
+    ? join(options.agentStoreDir, "devices")
+    : undefined;
+  const deviceRegistry = createDeviceRegistry({ dir: deviceDir });
+  const relayUrl = options.pushRelayUrl?.trim();
+  const pushIdentity = relayUrl
+    ? createPushIdentity({ dir: deviceDir })
+    : undefined;
+  const pushNotifier =
+    relayUrl && pushIdentity
+      ? createPushNotifier({
+          relayUrl,
+          identity: pushIdentity,
+          devices: deviceRegistry,
+        })
+      : undefined;
   const agent = createThebeAgent({
+    onPendingApproval: pushNotifier
+      ? (record) => {
+          void pushNotifier.notify({
+            category: "thebe.permission",
+            title: "Thebe",
+            body: "An action is waiting for your approval.",
+            deepLink: `thebe://approval/${encodeURIComponent(record.id)}`,
+            id: `approval-${record.id}`,
+          });
+        }
+      : undefined,
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,
@@ -129,9 +161,11 @@ export function createThebeApp(options: {
     token: options.token,
     agent,
     allowedHosts: options.allowedHosts ?? resolveAllowedHosts("127.0.0.1"),
-    deviceStoreDir: options.agentStoreDir
-      ? join(options.agentStoreDir, "devices")
-      : undefined,
+    deviceRegistry,
+    pushIdentity:
+      pushIdentity && relayUrl
+        ? { publicKey: pushIdentity.publicKey, relayUrl }
+        : undefined,
     workspacePath: options.workspacePath,
   });
   return { agent, prompt, send: prompt, handler };
