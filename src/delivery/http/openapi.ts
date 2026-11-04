@@ -1207,7 +1207,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     servers: [{ url: "/" }],
     // Token auth is optional in development and required in production; the
     // empty requirement keeps both deployment modes accurately documented.
-    security: [{}, { ThebeToken: [] }],
+    security: [{}, { ThebeToken: [] }, { ThebeBearer: [] }],
     tags: [
       { name: "system", description: "Health and lifecycle controls" },
       { name: "session", description: "Session lifecycle and metadata" },
@@ -1288,6 +1288,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     components: {
       securitySchemes: {
         ThebeToken: { type: "apiKey", in: "header", name: "X-Thebe-Token" },
+        ThebeBearer: { type: "http", scheme: "bearer" },
       },
       schemas: {
         Error: {

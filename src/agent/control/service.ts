@@ -311,7 +311,8 @@ export function createControlApi(
 
   async function invokeMcpTool(
     name: string,
-    args: unknown
+    args: unknown,
+    caller?: { writes: boolean }
   ): Promise<{ text: string; isError: boolean }> {
     if (!(await isMcpWrite(name))) return invokeToolDetailed(name, args);
     if (!ctx.mcpWritesAllowed) {
@@ -319,6 +320,13 @@ export function createControlApi(
         403,
         `${name} changes things, and this Core host has turned off writes over /mcp (THEBE_MCP_WRITES=off)`,
         "mcp_writes_not_enabled"
+      );
+    }
+    if (caller && !caller.writes) {
+      throw httpError(
+        403,
+        `${name} changes things, and this token may only read over /mcp. Make a token that may write with: thebe token create <name> --scope mcp:write`,
+        "mcp_scope_required"
       );
     }
     const params = (args ?? {}) as Record<string, unknown>;

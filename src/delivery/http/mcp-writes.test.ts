@@ -8,7 +8,15 @@ import type { NavidromeProvider } from "../../agent/capabilities/navidrome.ts";
 import type { McpRegistry } from "../../agent/extensions/mcp.ts";
 import { createThebeAgent } from "../../agent/index.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createThebeHttpHandler } from "./handler.ts";
+import {
+  createDeviceToken,
+  createTokenVerifier,
+  type TokenVerifier,
+} from "./token-store.ts";
 
 function containers(): ContainerInfoProvider & { restarts: string[] } {
   let state = "exited";
@@ -119,7 +127,8 @@ function navidrome(created: string[]): NavidromeProvider {
 function setup(
   mcpWritesAllowed: boolean,
   requests: string[] = [],
-  playlists: string[] = []
+  playlists: string[] = [],
+  token?: TokenVerifier
 ) {
   const calls: string[] = [];
   const provider = containers();
@@ -131,12 +140,19 @@ function setup(
     navidrome: navidrome(playlists),
     mcpWritesAllowed,
   });
-  const handler = createThebeHttpHandler({ version: "0.1.0", agent });
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
+  const handler = createThebeHttpHandler({ version: "0.1.0", agent, token });
+  const call = async (
+    name: string,
+    args: Record<string, unknown> = {},
+    bearer?: string
+  ) => {
     const res = await handler.handle(
       new Request("http://127.0.0.1:8787/mcp", {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(bearer && { Authorization: `Bearer ${bearer}` }),
+        },
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -236,6 +252,79 @@ describe("/mcp write tools", () => {
     const { call, provider } = setup(true);
     const reply = await call("container.restart", {});
     expect(reply.result?.isError).toBe(true);
+    expect(provider.restarts).toEqual([]);
+  });
+});
+
+describe("/mcp write tools by token scope", () => {
+  const read = "r".repeat(64);
+  const write = "w".repeat(64);
+  const full = "f".repeat(64);
+
+  async function withTokens(hostAllowsWrites: boolean) {
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-scope-"));
+    createDeviceToken({
+      configDir,
+      name: "Reader",
+      scope: "mcp:read",
+      generate: () => read,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    createDeviceToken({ configDir, name: "iPad", generate: () => full });
+    const requests: string[] = [];
+    const playlists: string[] = [];
+    const box = setup(
+      hostAllowsWrites,
+      requests,
+      playlists,
+      createTokenVerifier({ configDir, env: {} })
+    );
+    return { ...box, requests, playlists };
+  }
+
+  it("a read token reads, and every kind of write is refused with the scope to ask for", async () => {
+    const { call, calls, provider, requests, playlists } =
+      await withTokens(true);
+    for (const [name, args] of [
+      ["container.restart", { id: "ctr-1" }],
+      ["mcp:radarr/delete_movie", { id: 1 }],
+      ["service_api.petstore.deletePet", { petId: 7 }],
+      ["service_api.confirm", { token: "t" }],
+      ["navidrome.playlist.create", { name: "Mix", songIds: ["s1"] }],
+    ] as const) {
+      const reply = await call(name, args, read);
+      expect(reply.result?.isError, name).toBe(true);
+      expect(text(reply), name).toContain("mcp:write");
+    }
+    expect(calls).toEqual([]);
+    expect(provider.restarts).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(playlists).toEqual([]);
+
+    const listed = await call("mcp:radarr/list_movies", {}, read);
+    expect(listed.result?.isError).toBeUndefined();
+    expect(calls).toEqual(["mcp:radarr/list_movies"]);
+  });
+
+  it("a write token, and a token with no scope, can write", async () => {
+    const { call, provider } = await withTokens(true);
+    for (const token of [write, full]) {
+      const reply = await call("container.restart", { id: "ctr-1" }, token);
+      expect(reply.result?.isError, token.slice(0, 1)).toBeUndefined();
+    }
+    expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
+  });
+
+  it("a write token is still refused when the host turns writes off", async () => {
+    const { call, provider } = await withTokens(false);
+    const reply = await call("container.restart", { id: "ctr-1" }, write);
+    expect(reply.result?.isError).toBe(true);
+    expect(text(reply)).toContain("THEBE_MCP_WRITES");
     expect(provider.restarts).toEqual([]);
   });
 });

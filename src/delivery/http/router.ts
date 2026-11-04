@@ -26,6 +26,7 @@ import {
   swaggerUiHtml,
 } from "./openapi.ts";
 import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
+import type { TokenCaller } from "./token-store.ts";
 
 export type ThebeHttpRouterOptions = {
   version: string;
@@ -41,9 +42,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
     options.deviceRegistry ??
     createDeviceRegistry({ dir: options.deviceStoreDir });
   return {
-    async handle(request: Request): Promise<Response> {
+    async handle(request: Request, caller?: TokenCaller): Promise<Response> {
       const context = createThebeHttpContext(request, {
         ...options,
+        caller,
         deviceRegistry,
       });
 

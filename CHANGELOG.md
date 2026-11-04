@@ -7,6 +7,9 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- `Authorization: Bearer <token>` is accepted anywhere `X-Thebe-Token` is, for clients that send a bearer token and cannot set a custom header (Claude's API, most agent frameworks). When a request sends both, `X-Thebe-Token` is the one checked.
+- Scoped device tokens: `thebe token create <name> --scope mcp:read|mcp:write` makes a token that works only on `/mcp`. `mcp:read` runs read tools; `mcp:write` also runs write tools, if the host has not turned writes off (`THEBE_MCP_WRITES=off` still wins). A scoped token is refused with `403 token_scope` on every other route, and a write tool refused for want of `mcp:write` answers at once with the command that grants it; nothing waits. A token made without `--scope`, the shared token and `THEBE_TOKEN` keep full access, and a stored scope Core does not know is refused rather than read as full access. `thebe token list` shows each token's scope.
+
 - Optional push through a separately deployed Push Relay (`relay/`). With `THEBE_PUSH_RELAY_URL` set, Core keeps an Ed25519 signing key, publishes the public half at `GET /v1/push/identity`, accepts a `relayDeviceId` on `POST /v1/devices`, and sends a signed, minimal event to the relay when an approval starts waiting. Unset, nothing is sent. Core still holds no APNs credentials.
 
 ## [0.1.0] - 2026-10-22

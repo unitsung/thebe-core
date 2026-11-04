@@ -20,7 +20,7 @@ Thebe Core is designed to run on your own hardware:
 
 - **Token-gated.** `NODE_ENV=production` refuses to start without `THEBE_TOKEN`,
   and every route except `/docs` and `/openapi.json` requires it as
-  `X-Thebe-Token`.
+  `X-Thebe-Token` or `Authorization: Bearer`.
 - **Loopback by default.** The supported container publishes `127.0.0.1:8787`
   only. Put non-loopback access behind TLS (Tailscale Serve/Funnel or a reverse
   proxy) and add every host name to `THEBE_ALLOWED_HOSTS`.
@@ -31,10 +31,12 @@ Thebe Core is designed to run on your own hardware:
   treated as untrusted, and secrets are redacted. An append-only audit log
   (`audit.jsonl` in the agent store) records each call's method, a hash of its
   parameters, and the result.
-- **Shared token.** One token (or one per device, `thebe token create`) grants
-  full access to the API: there are no scopes. Anyone holding a token can read
-  the audit log, change settings, approve pending permissions, and run any tool
-  the permission mode allows. Treat it like a password.
+- **Shared token.** The shared token, `THEBE_TOKEN`, and a device token made
+  with `thebe token create` and no `--scope` grant full access to the API.
+  Anyone holding one can read the audit log, change settings, approve pending
+  permissions, and run any tool the permission mode allows. Treat it like a
+  password. For an agent that only needs `/mcp`, make a token with
+  `--scope mcp:read` or `--scope mcp:write`: it is refused on every other route.
 - **Writes over `/mcp` are on.** An agent connected over `/mcp` can restart
   containers, edit playlists and use a provider's write tools, and Core does not
   hold those calls for approval: the calling agent and its client decide whether
