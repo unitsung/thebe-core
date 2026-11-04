@@ -23,6 +23,7 @@ import { acceptEditsApproves } from "../security/accept-edits.ts";
 import { buildIsolationReport } from "../security/isolation.ts";
 import { remoteBashAllowed as remoteBashHostAllowed } from "../security/remote-bash.ts";
 import { mcpWritesAllowed as mcpWritesHostAllowed } from "../security/mcp-writes.ts";
+import { mcpIrreversibleAllowed as mcpIrreversibleHostAllowed } from "../security/irreversible.ts";
 import {
   resolveHostSecurity,
   sandboxForcedOff,
@@ -253,6 +254,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     options.remoteBashAllowed ?? remoteBashHostAllowed();
   // Host-only gate for write tools over /mcp (THEBE_MCP_WRITES).
   const mcpWritesAllowed = options.mcpWritesAllowed ?? mcpWritesHostAllowed();
+  // Host-only gate for irreversible deletes over /mcp (THEBE_MCP_IRREVERSIBLE).
+  const mcpIrreversibleAllowed =
+    options.mcpIrreversibleAllowed ?? mcpIrreversibleHostAllowed();
   // Critical commands (storage destruction, disk writes, container breakouts)
   // never reach approval: policy denies them. Dangerous ones still ask, with the
   // risk raised for the approval UI, and everything else falls through to the
@@ -1194,6 +1198,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     getFullAccessSupport,
     remoteBashAllowed,
     mcpWritesAllowed,
+    mcpIrreversibleAllowed,
     remoteCommandDecision,
     setSessionFullAccess,
     setSessionPermissionMode,

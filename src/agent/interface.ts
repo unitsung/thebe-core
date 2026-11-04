@@ -145,6 +145,11 @@ export type CreateThebeAgentOptions = {
    * sets it to `off`.
    */
   mcpWritesAllowed?: boolean;
+  /**
+   * Host gate for irreversible deletes over `/mcp`. Defaults to `THEBE_MCP_IRREVERSIBLE`; on unless the
+   * host sets it to `off`, in which case no token may run one.
+   */
+  mcpIrreversibleAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -178,8 +183,22 @@ export type CreateThebeAgentOptions = {
   artifactStore?: ArtifactStore;
 };
 
-/** Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools. */
-export type McpCaller = { writes: boolean };
+/**
+ * Who is calling over `/mcp`, as far as the gate cares: the token's name, what it may do, and its
+ * scopes as stored. Later gateway rules (category limits, tickets) read the same shape.
+ */
+export type McpCaller = {
+  /** The token's name, recorded in the audit log. */
+  name: string;
+  /** Whether the token may run write tools. */
+  writes: boolean;
+  /** Whether the token may run irreversible deletes (judged per call). */
+  irreversible: boolean;
+  /** The token's scopes; absent for a token with full access. */
+  scopes?: readonly string[];
+  /** The service categories a write token is limited to; absent means every category. */
+  categories?: readonly string[];
+};
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
 export interface ThebeAgent {
@@ -408,8 +427,9 @@ export interface ThebeAgent {
   ): Promise<{ text: string; isError: boolean }>;
   /**
    * `invokeToolDetailed` for a caller on `/mcp`: read tools run as before, and a write tool runs
-   * only when the host has enabled writes over `/mcp` and the caller may write. The caller is
-   * required, so a route that forgets it does not compile instead of quietly allowing writes.
+   * only when the host has enabled writes over `/mcp` and the caller may write. An irreversible
+   * delete (judged per call) also needs the host to allow it and the caller to hold that scope; a
+   * refusal is an immediate error, never a wait. The caller is required, so a route that forgets it does not compile instead of quietly allowing writes.
    * The call is audited.
    */
   invokeMcpTool(

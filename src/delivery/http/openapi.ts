@@ -1351,6 +1351,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
+            caller: { type: "string" },
+            irreversible: { type: "boolean" },
           },
         },
         AuditList: {

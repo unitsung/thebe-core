@@ -24,6 +24,10 @@ export type AuditRecord = {
   sessionId?: string;
   result?: AuditResult;
   durationMs?: number;
+  /** The name of the token that made the call, for calls over `/mcp`. */
+  caller?: string;
+  /** Set when the call was an irreversible delete (judged per call) that was allowed to run. */
+  irreversible?: boolean;
 };
 
 /** Product query for the append-only audit stream. Cursor is an opaque line offset. */
@@ -41,13 +45,15 @@ export type AuditPage = {
 };
 
 export function hashParameters(args: unknown): string {
-  return createHash("sha256").update(canonicalJson(args ?? {})).digest("hex");
+  return createHash("sha256")
+    .update(canonicalJson(args ?? {}))
+    .digest("hex");
 }
 
 /** Canonical JSON with sorted keys. Hash this after argument validation. */
 export function canonicalJson(
   value: unknown,
-  seen: WeakSet<object> = new WeakSet(),
+  seen: WeakSet<object> = new WeakSet()
 ): string {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value) ?? "null";
@@ -87,7 +93,8 @@ export function createAuditLog(path: string, now: () => Date) {
           if (record?.id === id) return record;
         }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT")
+          return undefined;
         throw error;
       } finally {
         lines.close();
@@ -159,7 +166,8 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
   } catch {
     return undefined;
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const row = value as Record<string, unknown>;
   if (
     typeof row.timestamp !== "string" ||
@@ -180,13 +188,16 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
   ) {
     return undefined;
   }
-  if (row.durationMs !== undefined &&
-    (typeof row.durationMs !== "number" || !Number.isFinite(row.durationMs))) {
+  if (
+    row.durationMs !== undefined &&
+    (typeof row.durationMs !== "number" || !Number.isFinite(row.durationMs))
+  ) {
     return undefined;
   }
 
   const record: AuditRecord = {
-    id: typeof row.id === "string" && row.id.trim() ? row.id : legacyAuditId(raw),
+    id:
+      typeof row.id === "string" && row.id.trim() ? row.id : legacyAuditId(raw),
     timestamp: row.timestamp,
     method: row.method,
     parameterHash: row.parameterHash,
@@ -194,9 +205,16 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
     budgetConsumed: row.budgetConsumed,
     redactionFired: row.redactionFired,
   };
-  for (const key of ["identity", "version", "source", "sessionId"] as const) {
+  for (const key of [
+    "identity",
+    "version",
+    "source",
+    "sessionId",
+    "caller",
+  ] as const) {
     if (typeof row[key] === "string") record[key] = row[key];
   }
+  if (row.irreversible === true) record.irreversible = true;
   if (typeof row.result === "string") record.result = row.result as AuditResult;
   if (typeof row.durationMs === "number") record.durationMs = row.durationMs;
   return record;
