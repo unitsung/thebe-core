@@ -5,6 +5,7 @@ export const PRODUCT_HTTP_PATH = {
   usageSummary: "/v1/usage/summary",
   agentSettings: "/v1/settings/agent",
   memory: "/v1/memory",
+  policy: "/v1/policy",
   subagents: "/v1/subagents",
   permissions: "/v1/permissions",
   skills: "/v1/skills",

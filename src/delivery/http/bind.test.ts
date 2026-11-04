@@ -7,6 +7,7 @@ import {
   productionTokenError,
   resolveAllowedHosts,
   resolveThebeListen,
+  resolveThebeMcpListen,
   resolveThebeToken,
 } from "./bind.ts";
 
@@ -92,5 +93,40 @@ describe("resolveThebeToken", () => {
   it("generates in memory when there is no config dir", () => {
     const result = resolveThebeToken({ env: {}, generate: () => "memory" });
     expect(result).toEqual({ token: "memory", generated: true });
+  });
+});
+
+describe("resolveThebeMcpListen", () => {
+  it("is off unless THEBE_MCP_PORT is set", () => {
+    expect(resolveThebeMcpListen({})).toBeUndefined();
+  });
+
+  it("binds the main host by default with 120 requests a minute per token", () => {
+    expect(
+      resolveThebeMcpListen({ THEBE_HOST: "0.0.0.0", THEBE_MCP_PORT: "8788" })
+    ).toEqual({ host: "0.0.0.0", port: 8788, ratePerMinute: 120 });
+  });
+
+  it("takes its own host and rate limit", () => {
+    expect(
+      resolveThebeMcpListen({
+        THEBE_MCP_PORT: "9000",
+        THEBE_MCP_HOST: "127.0.0.1",
+        THEBE_MCP_RATE_LIMIT: "30",
+      })
+    ).toEqual({ host: "127.0.0.1", port: 9000, ratePerMinute: 30 });
+  });
+
+  it("refuses values it cannot honour instead of silently staying off", () => {
+    for (const env of [
+      { THEBE_MCP_PORT: "abc" },
+      { THEBE_MCP_PORT: "70000" },
+      { THEBE_MCP_PORT: "8787" },
+      { THEBE_MCP_PORT: "8788", THEBE_PORT: "8788" },
+      { THEBE_MCP_PORT: "8788", THEBE_MCP_RATE_LIMIT: "0" },
+      { THEBE_MCP_PORT: "8788", THEBE_MCP_RATE_LIMIT: "fast" },
+    ]) {
+      expect(() => resolveThebeMcpListen(env), JSON.stringify(env)).toThrow();
+    }
   });
 });

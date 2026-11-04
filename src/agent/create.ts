@@ -13,6 +13,7 @@ import { createSubagentApi } from "./subagents/api.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { createUsageApi } from "./usage/service.ts";
+import { createPolicyApi } from "./policy/service.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -43,6 +44,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     goals: { ...sessions, ...goals },
     checkWritable: ctx.checkNotQuiesced,
     isQuiesced: () => options.runtime.isQuiesced(),
+  });
+  const policy = createPolicyApi({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "policy")
+      : undefined,
+    now: ctx.now,
   });
   schedules.start();
   ctx.pipelineAdvancer?.start();
@@ -97,6 +104,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     setScheduleEnabled: schedules.setScheduleEnabled,
     deleteSchedule: schedules.deleteSchedule,
     runSchedule: schedules.runSchedule,
+    getPolicy: policy.getPolicy,
+    getPolicyVersion: policy.getPolicyVersion,
+    listPolicyVersions: policy.listPolicyVersions,
+    updatePolicy: policy.updatePolicy,
     async quiesce() {
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
