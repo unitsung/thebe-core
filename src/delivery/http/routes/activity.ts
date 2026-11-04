@@ -12,6 +12,7 @@ import {
   paginateActivityFeed,
   recordToFeedItem,
   toActivityFeed,
+  triggerToFeedItem,
   workerToFeedItem,
 } from "../../../agent/activity/feed.ts";
 import { backgroundTaskActivityId } from "../../../agent/background-tasks/product.ts";
@@ -121,6 +122,10 @@ export async function handleActivityRoutes(
     const capabilityRun = await agent.getCapabilityRun(id);
     if (capabilityRun)
       return json(capabilityRunToFeedItem(capabilityRun, stageContext));
+    const trigger = (await agent.listTriggers()).find(
+      (item) => item.trigger.id === id
+    );
+    if (trigger) return json(triggerToFeedItem(trigger, stageContext));
     const worker = (await agent.listSubagents())
       .map(toProductWorker)
       .find((item) => item.runId === id);
@@ -172,7 +177,8 @@ async function collectFeed(
     capabilityRuns,
     workers,
     backgroundTasks,
-    await agent.activityStageContext()
+    await agent.activityStageContext(),
+    await agent.listTriggers()
   );
 }
 

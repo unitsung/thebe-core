@@ -119,6 +119,15 @@ export type CreateThebeAgentOptions = {
     askedAt: string;
   }) => void;
   now?: () => Date;
+  /**
+   * Event sources. `evaluate` runs for each Trigger that passed the Gate, one at a time per Thread;
+   * `timer` and `pollIntervalMs` replace the poll loop, which tests drive by hand.
+   */
+  sources?: {
+    evaluate?: import("./sources/runtime.ts").SourceEvaluator;
+    timer?: import("./sources/runtime.ts").SourceTimer;
+    pollIntervalMs?: number;
+  };
   callerId?: string;
   maxToolCalls?: number;
   maxBlocks?: number;
@@ -494,6 +503,10 @@ export interface ThebeAgent {
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   /** What projecting items needs besides each item: the agent clock, which goals wait on a confirmation and which tickets wrap what. */
   activityStageContext(): Promise<import("./activity/stage.ts").StageContext>;
+  /** Every Trigger the sources produced, with the Gate outcome recorded for it. */
+  listTriggers(): Promise<import("./sources/types.ts").TriggerRecord[]>;
+  /** How each source is reading; shown in the health response. */
+  sourceHealth(): Record<string, import("./sources/types.ts").SourceHealth>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;
   listAudit(query?: AuditQuery): Promise<AuditPage>;

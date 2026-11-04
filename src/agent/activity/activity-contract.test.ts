@@ -35,6 +35,9 @@ describe("Activity contract", () => {
       { kind: "person", reason: "failed" },
       { kind: "person", reason: "approval" },
       { kind: "person", reason: "failed" },
+      { kind: "ended" },
+      { kind: "ended" },
+      { kind: "ended" },
       { kind: "working" },
     ]);
     expect(contract.needsYou.count).toBe(5);

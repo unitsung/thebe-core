@@ -18,7 +18,10 @@ import {
   NAVIDROME_WRITE_TOOL_NAMES,
   redactNavidromeQueueForStorage,
 } from "../capabilities/navidrome.ts";
-import { hashParameters } from "../../agent/security/audit/audit-log.ts";
+import {
+  hashParameters,
+  withAuditCaller,
+} from "../../agent/security/audit/audit-log.ts";
 import type {
   RuntimeExport,
   RuntimeModelRef,
@@ -423,7 +426,18 @@ export function createControlApi(
     return found?.category ?? "other";
   }
 
-  async function invokeMcpTool(
+  /** Every audit record the call writes, by any tool, names the token that made it. */
+  function invokeMcpTool(
+    name: string,
+    args: unknown,
+    caller: McpCaller
+  ): Promise<{ text: string; isError: boolean }> {
+    return withAuditCaller(caller.name, () =>
+      invokeMcpToolAs(name, args, caller)
+    );
+  }
+
+  async function invokeMcpToolAs(
     name: string,
     args: unknown,
     caller: McpCaller

@@ -284,6 +284,102 @@
       }
     },
     {
+      "name": "container turned unhealthy, passed the gate",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:1",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:1",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event filtered by quiet hours",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:2",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:2",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "filtered",
+            "reason": "quiet_hours"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event repeated, a duplicate",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:3",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:3",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "duplicate",
+            "reason": "duplicate",
+            "duplicateOf": "container-health:ctr-emby:unhealthy:1"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
       "name": "aria2 download running",
       "item": {
         "stage": {
@@ -521,6 +617,93 @@
           "finishedAt": "2026-11-04T09:30:00.000Z",
           "updatedAt": "2026-11-04T09:30:00.000Z",
           "error": "aria2 reports a download error"
+        }
+      }
+    },
+    {
+      "name": "container turned unhealthy, passed the gate",
+      "item": {
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:1",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:1",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event filtered by quiet hours",
+      "item": {
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:2",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:2",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "filtered",
+            "reason": "quiet_hours"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event repeated, a duplicate",
+      "item": {
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:3",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:3",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "duplicate",
+            "reason": "duplicate",
+            "duplicateOf": "container-health:ctr-emby:unhealthy:1"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z"
         }
       }
     },
