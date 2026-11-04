@@ -32,6 +32,7 @@ import type {
 import type { StrmRepairProvider } from "./capabilities/strm.ts";
 import type { AgentSessionMeta } from "./store.ts";
 import type { GoalEvent } from "./goals/runner.ts";
+import type { UsageQuery, UsageSummary } from "./usage/summary.ts";
 import type { SkillInfo } from "./extensions/skills.ts";
 import type {
   HomelabCapability,
@@ -492,6 +493,11 @@ export interface ThebeAgent {
   denyActivity(id: string): Promise<boolean>;
   listAudit(query?: AuditQuery): Promise<AuditPage>;
   getAudit(id: string): Promise<AuditRecord | undefined>;
+  /**
+   * Read-only usage and effect numbers for a day range, computed on demand from the stores Core
+   * already keeps. Stores nothing and reports nothing out.
+   */
+  getUsageSummary(query: UsageQuery): Promise<UsageSummary>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;

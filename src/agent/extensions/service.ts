@@ -95,6 +95,10 @@ export function createExtensionApi(
           serverName: "thebe-core",
           execution: "agent",
           permission: tool.name === "service_api_write" ? "confirm" : "read",
+          // The method and arguments of each request decide, not the tool.
+          ...(tool.name === "service_api_write" && {
+            irreversible: "by_call" as const,
+          }),
         })),
       ...(await serviceOperationCapabilities(
         ctx.options.serviceAPIProviders ?? []
@@ -321,6 +325,8 @@ async function serviceOperationCapabilities(
     execution: "agent",
     destructive: true,
     background: false,
+    // The preview was judged when it was made; confirming only runs that request.
+    irreversible: "by_call",
   });
   for (const provider of providers) {
     if (!provider.operations) continue;
@@ -369,6 +375,8 @@ async function serviceOperationCapabilities(
           execution: "agent",
           destructive: true,
           background: false,
+          // The operation's method, its arguments and the operator's override decide, per call.
+          irreversible: "by_call",
         });
       } else {
         continue;

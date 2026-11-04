@@ -245,6 +245,33 @@ const operations: Operation[] = [
     responseSchema: "AuditRecord",
   },
   {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.usageSummary,
+    summary:
+      "Read-only usage and effect summary for a day range, computed on demand and never stored",
+    tag: "usage",
+    parameters: [
+      queryParameter("from", { type: "string", format: "date" }),
+      queryParameter("to", { type: "string", format: "date" }),
+      queryParameter("days", {
+        type: "integer",
+        minimum: 1,
+        maximum: 366,
+        default: 30,
+      }),
+      queryParameter("utcOffsetMinutes", {
+        type: "integer",
+        minimum: -840,
+        maximum: 840,
+        default: 0,
+      }),
+    ],
+    responseSchema: "UsageSummary",
+    extraStatuses: [
+      { status: 400, description: "Malformed or too wide a range" },
+    ],
+  },
+  {
     method: "post",
     path: `${PRODUCT_HTTP_PATH.capabilities}/{id}/${PRODUCT_HTTP_SEGMENT.invoke}`,
     summary: "Invoke a capability through ThebeAgent",
@@ -1299,6 +1326,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           "Read-only redacted audit records; raw parameters are never returned",
       },
       {
+        name: "usage",
+        description:
+          "Read-only usage and effect numbers computed on demand; nothing is stored or reported out",
+      },
+      {
         name: "workers",
         description: "Subagent runs presented as Workers; no parent transcript",
       },
@@ -1428,6 +1460,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             durationMs: { type: "number" },
             caller: { type: "string" },
             irreversible: { type: "boolean" },
+            override: { type: "string", enum: ["irreversible", "ordinary"] },
           },
         },
         AuditList: {
@@ -1439,6 +1472,127 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { $ref: "#/components/schemas/AuditRecord" },
             },
             nextCursor: { type: "string" },
+          },
+        },
+        UsageTokens: {
+          type: "object",
+          required: [
+            "input",
+            "output",
+            "cacheWrite",
+            "cacheRead",
+            "counted",
+            "cost",
+          ],
+          properties: {
+            input: { type: "number" },
+            output: { type: "number" },
+            cacheWrite: { type: "number" },
+            cacheRead: { type: "number" },
+            counted: {
+              type: "number",
+              description: "input + output + cacheWrite",
+            },
+            cost: { type: "number", description: "Estimated USD" },
+            sessions: { type: "integer" },
+          },
+        },
+        UsageDurations: {
+          type: "object",
+          required: ["count"],
+          properties: {
+            count: { type: "integer" },
+            p50Ms: { type: "number" },
+            p95Ms: { type: "number" },
+            maxMs: { type: "number" },
+          },
+        },
+        UsageSummary: {
+          type: "object",
+          required: [
+            "range",
+            "generatedAt",
+            "days",
+            "totals",
+            "goals",
+            "confirmations",
+            "unreadableSessions",
+          ],
+          properties: {
+            range: {
+              type: "object",
+              required: ["from", "to", "utcOffsetMinutes"],
+              properties: {
+                from: { type: "string" },
+                to: { type: "string" },
+                utcOffsetMinutes: { type: "integer" },
+              },
+            },
+            generatedAt: { type: "string" },
+            days: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["day", "foreground", "background"],
+                properties: {
+                  day: { type: "string" },
+                  foreground: { $ref: "#/components/schemas/UsageTokens" },
+                  background: { $ref: "#/components/schemas/UsageTokens" },
+                },
+              },
+            },
+            totals: {
+              type: "object",
+              required: ["foreground", "background"],
+              properties: {
+                foreground: { $ref: "#/components/schemas/UsageTokens" },
+                background: { $ref: "#/components/schemas/UsageTokens" },
+              },
+            },
+            goals: {
+              type: "object",
+              required: ["outcomes", "completion", "items"],
+              properties: {
+                outcomes: {
+                  type: "object",
+                  additionalProperties: { type: "integer" },
+                },
+                completion: { $ref: "#/components/schemas/UsageDurations" },
+                items: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    required: [
+                      "id",
+                      "title",
+                      "background",
+                      "status",
+                      "createdAt",
+                    ],
+                    properties: {
+                      id: { type: "string" },
+                      title: { type: "string" },
+                      background: { type: "boolean" },
+                      status: { type: "string" },
+                      createdAt: { type: "string" },
+                      finishedAt: { type: "string" },
+                      durationMs: { type: "number" },
+                      tokens: { $ref: "#/components/schemas/UsageTokens" },
+                    },
+                  },
+                },
+              },
+            },
+            confirmations: {
+              type: "object",
+              required: ["answered", "pending", "wait"],
+              properties: {
+                answered: { type: "integer" },
+                pending: { type: "integer" },
+                wait: { $ref: "#/components/schemas/UsageDurations" },
+              },
+            },
+            unreadableSessions: { type: "integer" },
           },
         },
         HomelabCapability: {

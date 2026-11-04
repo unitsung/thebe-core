@@ -4,6 +4,7 @@ import {
   DIAGNOSE_FROM_EVENTS_TOOL,
   LIST_CORE_EVENTS_TOOL,
   listCoreMcpTools,
+  mcpToolVisibleTo,
   toMcpWireTool,
   type McpWireTool,
 } from "../../../agent/extensions/mcp.ts";
@@ -32,6 +33,7 @@ export function toMcpCaller(caller: TokenCaller | undefined): McpCaller {
     writes: tokenMayWrite(caller),
     irreversible: tokenMayDeleteIrreversibly(caller),
     ...(caller?.scopes && { scopes: caller.scopes }),
+    ...(caller?.categories && { categories: caller.categories }),
   };
 }
 
@@ -113,10 +115,12 @@ async function callTool(
 
 /** Sorted by name so the list is the same on every request until the tools change. */
 async function listedTools(
-  agent?: NonNullable<ThebeHttpContext["agent"]>
+  agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
+  caller: McpCaller
 ): Promise<McpWireTool[]> {
   const capabilities = agent ? await agent.listMcpTools() : listCoreMcpTools();
   return capabilities
+    .filter((capability) => mcpToolVisibleTo(capability, caller))
     .map(toMcpWireTool)
     .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
@@ -216,7 +220,7 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     );
   }
   if (method === "tools/list") {
-    const tools = await listedTools(agent);
+    const tools = await listedTools(agent, toMcpCaller(context.caller));
     return reply(
       modern
         ? { tools, ttlMs: TOOLS_LIST_TTL_MS, cacheScope: "private" }
