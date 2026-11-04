@@ -1,5 +1,6 @@
 import type { ProductGoal, ProductGoalStatus } from "../goals/product.ts";
 import type { CapabilityRun } from "../capabilities/invoke.ts";
+import { goalTicketKey } from "../tickets/types.ts";
 import type { ProductWorker } from "../subagents/product.ts";
 import {
   backgroundTaskActivityId,
@@ -54,8 +55,14 @@ export type ActivityCursor = {
   id: string;
 };
 
-/** Where the item stands with respect to the person. Derived on every read, never stored. */
-export type ActivityFeedItemStage = { stage: ActivityStage };
+/**
+ * Where the item stands with respect to the person, derived on every read and never stored, and the
+ * ticket that wraps the item when one does (additive: absent on items no ticket wraps).
+ */
+export type ActivityFeedItemStage = {
+  stage: ActivityStage;
+  ticketId?: string;
+};
 
 export type ActivityFeedItem = ActivityFeedItemStage &
   (
@@ -199,13 +206,17 @@ export function goalToFeedItem(
   context: StageContext = {}
 ): ActivityFeedItem {
   const group = goalActivityGroup(goal.status);
+  const ticketId =
+    goal.ticketId ??
+    context.ticketIds?.get(goalTicketKey(goal.id, goal.createdAt));
   return {
     stage: goalStage(goal, context),
+    ...(ticketId ? { ticketId } : {}),
     type: "goal",
     id: goal.id,
     group,
     updatedAt: goal.updatedAt,
-    goal,
+    goal: ticketId ? { ...goal, ticketId } : goal,
   };
 }
 

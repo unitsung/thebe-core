@@ -13,6 +13,7 @@ export async function handleHealthEventsCompatibility(
       ok: true,
       version: context.version,
       push: context.pushOutbox?.status(),
+      capabilities: { tickets: true },
       sources: agent?.sourceHealth(),
     });
   }

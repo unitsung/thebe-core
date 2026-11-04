@@ -114,7 +114,7 @@ export async function handleActivityRoutes(
     parts[1] === "activity"
   ) {
     const id = decodePathPart(parts[2]);
-    const stageContext = agent.activityStageContext();
+    const stageContext = await agent.activityStageContext();
     const record = await agent.getActivity(id);
     if (record) {
       const item = recordToFeedItem(record, stageContext);
@@ -172,7 +172,7 @@ async function collectFeed(
   group?: "needs_approval" | "running" | "recent"
 ) {
   const records = await agent.listActivity();
-  const goals = (await agent.listGoals()).map(toProductGoal);
+  const goals = (await agent.listGoals()).map((run) => toProductGoal(run));
   const capabilityRuns = await agent.listCapabilityRuns();
   const workers = (await agent.listSubagents()).map(toProductWorker);
   const backgroundTasks = await agent.listAllBackgroundTasks();
@@ -183,7 +183,7 @@ async function collectFeed(
     capabilityRuns,
     workers,
     backgroundTasks,
-    agent.activityStageContext(),
+    await agent.activityStageContext(),
     await agent.listTriggers(),
     await agent.listScheduleObservations()
   );
