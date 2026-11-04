@@ -129,6 +129,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return run;
     },
     goalForTrigger: tickets.goalForTrigger,
+    exclusiveForTrigger: tickets.exclusiveForTrigger,
     listTickets: tickets.listTickets,
     getTicket: tickets.getTicket,
     resolveGoalId: tickets.resolveGoalId,

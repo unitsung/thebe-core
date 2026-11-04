@@ -27,6 +27,7 @@ export function createTicketApi(options: {
 }) {
   let tickets: Map<string, Ticket> | undefined;
   let chain: Promise<unknown> = Promise.resolve();
+  const triggerChains = new Map<string, Promise<unknown>>();
 
   /** Calls run one at a time so accepting the same trigger twice cannot write two tickets. */
   function serial<T>(task: () => Promise<T>): Promise<T> {
@@ -146,6 +147,26 @@ export function createTicketApi(options: {
         all.set(id, ticket);
         return ticket;
       });
+    },
+
+    /**
+     * Runs `task` after every earlier task for the same trigger id has finished. A request that is
+     * retried while the first attempt is still starting then finds the goal the first started, instead of
+     * starting a second one.
+     */
+    exclusiveForTrigger<T>(
+      triggerId: string,
+      task: () => Promise<T>
+    ): Promise<T> {
+      const previous = triggerChains.get(triggerId) ?? Promise.resolve();
+      const run = previous.then(task, task);
+      const tail = run.catch(() => undefined);
+      triggerChains.set(triggerId, tail);
+      void tail.then(() => {
+        if (triggerChains.get(triggerId) === tail)
+          triggerChains.delete(triggerId);
+      });
+      return run;
     },
 
     /** The goal an earlier request with this trigger id started, if any. */

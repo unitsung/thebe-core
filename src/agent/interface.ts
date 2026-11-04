@@ -359,6 +359,8 @@ export interface ThebeAgent {
   }): Promise<GoalRun>;
   /** The goal an earlier request with this trigger id started, if any. */
   goalForTrigger: TicketApi["goalForTrigger"];
+  /** Runs the task after earlier tasks for the same trigger id, so concurrent retries start one goal. */
+  exclusiveForTrigger: TicketApi["exclusiveForTrigger"];
   /** Tickets with their derived stage, newest first. Read-only. */
   listTickets: TicketApi["listTickets"];
   getTicket: TicketApi["getTicket"];

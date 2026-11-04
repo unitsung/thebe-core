@@ -128,68 +128,74 @@ async function createGoal(
   }
   const triggerId =
     typeof rawTriggerId === "string" ? rawTriggerId.trim() : undefined;
-  // The same trigger asked twice is the same goal: answer with it and start nothing.
-  const started = triggerId ? await agent.goalForTrigger(triggerId) : undefined;
-  if (started) return goalResponse(agent, started, 200);
-  const criteria = asStringList(body.criteria);
-  const maxIterations =
-    typeof body.maxIterations === "number" ? body.maxIterations : undefined;
-  const model =
-    body.model && typeof body.model === "object"
-      ? (body.model as Record<string, unknown>)
+  const begin = async (): Promise<Response> => {
+    // The same trigger asked twice is the same goal: answer with it and start nothing.
+    const started = triggerId
+      ? await agent.goalForTrigger(triggerId)
       : undefined;
-  const providerId =
-    typeof model?.providerId === "string" ? model.providerId : "";
-  const modelId = typeof model?.modelId === "string" ? model.modelId : "";
-  if (body.model !== undefined && (!providerId || !modelId)) {
-    return json(
-      {
-        ok: false,
-        error: "model.providerId and model.modelId required",
-        code: "invalid_body",
-      },
-      400
-    );
-  }
-  // The workers and reviewer inherit the parent session's model, so choosing it here chooses it for the Goal.
-  const thebeSessionId =
-    existingSessionId ??
-    (
-      await agent.createSession({
-        title: goalText.slice(0, 80),
-        labels: { kind: "goal" },
-        model: providerId && modelId ? { providerId, modelId } : undefined,
-      })
-    ).thebeSessionId;
-  const current = agent.getGoal(thebeSessionId);
-  if (current?.status === "running" || current?.status === "pausing") {
-    return json(
-      {
-        ok: false,
-        error: "a goal is already running for this session",
-        code: "invalid_transition",
-      },
-      409
-    );
-  }
-  if (current?.status === "paused") {
-    return json(
-      {
-        ok: false,
-        error: "goal is paused; resume it instead of starting a new one",
-        code: "invalid_transition",
-      },
-      409
-    );
-  }
-  const run = await agent.startGoal({
-    thebeSessionId,
-    goal: goalText,
-    criteria,
-    maxIterations,
-    triggerId,
-  });
-  return goalResponse(agent, run, existingSessionId ? 200 : 201);
+    if (started) return goalResponse(agent, started, 200);
+    const criteria = asStringList(body.criteria);
+    const maxIterations =
+      typeof body.maxIterations === "number" ? body.maxIterations : undefined;
+    const model =
+      body.model && typeof body.model === "object"
+        ? (body.model as Record<string, unknown>)
+        : undefined;
+    const providerId =
+      typeof model?.providerId === "string" ? model.providerId : "";
+    const modelId = typeof model?.modelId === "string" ? model.modelId : "";
+    if (body.model !== undefined && (!providerId || !modelId)) {
+      return json(
+        {
+          ok: false,
+          error: "model.providerId and model.modelId required",
+          code: "invalid_body",
+        },
+        400
+      );
+    }
+    // The workers and reviewer inherit the parent session's model, so choosing it here chooses it for the Goal.
+    const thebeSessionId =
+      existingSessionId ??
+      (
+        await agent.createSession({
+          title: goalText.slice(0, 80),
+          labels: { kind: "goal" },
+          model: providerId && modelId ? { providerId, modelId } : undefined,
+        })
+      ).thebeSessionId;
+    const current = agent.getGoal(thebeSessionId);
+    if (current?.status === "running" || current?.status === "pausing") {
+      return json(
+        {
+          ok: false,
+          error: "a goal is already running for this session",
+          code: "invalid_transition",
+        },
+        409
+      );
+    }
+    if (current?.status === "paused") {
+      return json(
+        {
+          ok: false,
+          error: "goal is paused; resume it instead of starting a new one",
+          code: "invalid_transition",
+        },
+        409
+      );
+    }
+    const run = await agent.startGoal({
+      thebeSessionId,
+      goal: goalText,
+      criteria,
+      maxIterations,
+      triggerId,
+    });
+    return goalResponse(agent, run, existingSessionId ? 200 : 201);
+  };
+  // Retries of one request run one at a time, so the second finds the goal the first started.
+  return triggerId ? agent.exclusiveForTrigger(triggerId, begin) : begin();
 }
 
 async function goalResponse(

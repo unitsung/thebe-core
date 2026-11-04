@@ -162,6 +162,23 @@ describe("tickets over HTTP", () => {
     await t.app.agent.waitGoal(String(other.body.id));
   });
 
+  it("concurrent retries with the same trigger start one goal", async () => {
+    const t = build();
+    t.fake.queueTurns(reports(WORKER_READY, REVIEWER_READY));
+    const body = { goal: "Restart the flaky container", triggerId: "retry-1" };
+    const [first, second] = await Promise.all([
+      t.post("/v1/goals", body),
+      t.post("/v1/goals", body),
+    ]);
+    expect([first.status, second.status].sort()).toEqual([200, 201]);
+    expect(second.body.id).toBe(first.body.id);
+    expect(second.body.ticketId).toBe(first.body.ticketId);
+    expect(first.body.ticketId).toMatch(/^[0-9a-f]{32}$/);
+    expect((await t.call("/v1/goals")).body.goals).toHaveLength(1);
+    expect((await t.call("/v1/tickets")).body.tickets).toHaveLength(1);
+    await t.app.agent.waitGoal(String(first.body.id));
+  });
+
   it("treats the same trigger as the same ticket after a restart", async () => {
     const t = await setup();
     t.fake.queueTurns(reports(WORKER_READY, REVIEWER_READY));
