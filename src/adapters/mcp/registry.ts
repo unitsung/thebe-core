@@ -149,6 +149,9 @@ export function createMcpClientRegistry(options: {
         service: state.config.service ?? state.config.name,
         source: "external" as const,
         serverName: state.config.name,
+        ...(state.config.tools?.[tool.name]?.irreversible !== undefined && {
+          irreversibleOverride: state.config.tools[tool.name]!.irreversible,
+        }),
       };
     });
     return state.tools;

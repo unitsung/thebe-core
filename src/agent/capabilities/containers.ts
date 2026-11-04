@@ -1,3 +1,4 @@
+import type { IrreversibleDeclaration } from "../security/irreversible.ts";
 export interface ContainerInfoProvider {
   listContainers(): Promise<ContainerSummary[]>;
   inspectContainer(id: string): Promise<ContainerDetail>;
@@ -82,6 +83,8 @@ export type ContainerCapabilityMetadata = {
   risk: CapabilityRisk;
   approval: CapabilityApproval;
   permission: "read" | "confirm";
+  /** Required of a write; a read says nothing. */
+  irreversible?: IrreversibleDeclaration;
 };
 
 /** Source of truth for container capability policy. Not model-authored. */
@@ -98,6 +101,8 @@ export const CONTAINER_CAPABILITY_METADATA: Record<
     risk: "disruptive",
     approval: "required",
     permission: "confirm",
+    // Interrupts the service, but a restart brings it back.
+    irreversible: false,
   },
 };
 

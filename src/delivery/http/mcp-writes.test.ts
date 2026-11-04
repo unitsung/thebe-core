@@ -201,7 +201,6 @@ describe("/mcp write tools", () => {
     const requests: string[] = [];
     const { call } = setup(false, requests);
     for (const [name, args] of [
-      ["service_api.petstore.deletePet", { petId: 7 }],
       ["service_api.confirm", { token: "t" }],
     ] as const) {
       const reply = await call(name, args);
@@ -304,13 +303,19 @@ describe("/mcp write tools by token scope", () => {
       ["container.restart", { id: "ctr-1" }],
       ["mcp:radarr/delete_movie", { id: 1 }],
       ["service_api.petstore.deletePet", { petId: 7 }],
+      ["service_api.petstore.deletePet", { petId: 7 }],
       ["service_api.confirm", { token: "t" }],
       ["navidrome.playlist.create", { name: "Mix", songIds: ["s1"] }],
       ["strm.repair", { title: "Dune" }],
     ] as const) {
       const reply = await call(name, args, read);
       expect(reply.result?.isError, name).toBe(true);
-      expect(text(reply), name).toContain("mcp:write");
+      // A DELETE operation is an irreversible write, which asks for its own scope first.
+      expect(text(reply), name).toContain(
+        name === "service_api.petstore.deletePet"
+          ? "mcp:irreversible"
+          : "mcp:write"
+      );
     }
     expect(calls).toEqual([]);
     expect(provider.restarts).toEqual([]);

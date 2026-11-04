@@ -1403,6 +1403,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             durationMs: { type: "number" },
             caller: { type: "string" },
             irreversible: { type: "boolean" },
+            override: { type: "string", enum: ["irreversible", "ordinary"] },
           },
         },
         AuditList: {
