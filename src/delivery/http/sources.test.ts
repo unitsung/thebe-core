@@ -128,7 +128,8 @@ describe("container-health source through the Gate", () => {
     expect(items[0]).toMatchObject({
       type: "trigger",
       group: "recent",
-      stage: { kind: "ended" },
+      // Passed the Gate; this test's evaluator records no Decision, so it is still being worked on.
+      stage: { kind: "working" },
       trigger: {
         trigger: {
           source: "container-health",

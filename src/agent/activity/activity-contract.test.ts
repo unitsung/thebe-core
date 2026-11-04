@@ -35,6 +35,8 @@ describe("Activity contract", () => {
       { kind: "person", reason: "failed" },
       { kind: "person", reason: "approval" },
       { kind: "person", reason: "failed" },
+      { kind: "working" },
+      { kind: "ended" },
       { kind: "ended" },
       { kind: "ended" },
       { kind: "ended" },

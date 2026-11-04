@@ -5,7 +5,7 @@ import {
   backgroundTaskActivityId,
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
-import type { TriggerRecord } from "../sources/types.ts";
+import type { TriggerEntry } from "../eval/types.ts";
 import {
   PERSON_REASONS,
   type ActivityStage,
@@ -106,12 +106,12 @@ export type ActivityFeedItem = ActivityFeedItemStage &
         task: ProductBackgroundTask;
       }
     | {
-        /** An event from a source and the Gate's recorded outcome for it. */
+        /** An event from a source, the Gate's recorded outcome for it and, once made, Eval's Decision. */
         type: "trigger";
         id: string;
         group: "recent";
         updatedAt: string;
-        trigger: TriggerRecord;
+        trigger: TriggerEntry;
       }
   );
 
@@ -249,7 +249,7 @@ export function backgroundTaskToFeedItem(
 }
 
 export function triggerToFeedItem(
-  record: TriggerRecord,
+  record: TriggerEntry,
   context: StageContext = {}
 ): ActivityFeedItem {
   return {
@@ -257,7 +257,7 @@ export function triggerToFeedItem(
     type: "trigger",
     id: record.trigger.id,
     group: "recent",
-    updatedAt: record.decidedAt,
+    updatedAt: record.decision?.decidedAt ?? record.decidedAt,
     trigger: record,
   };
 }
@@ -394,7 +394,7 @@ export function toActivityFeed(
   workers: ProductWorker[] = [],
   backgroundTasks: ProductBackgroundTask[] = [],
   stageContext: StageContext = {},
-  triggers: TriggerRecord[] = []
+  triggers: TriggerEntry[] = []
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {

@@ -221,6 +221,65 @@ function cases() {
       )
     ),
     named(
+      "container event assessed in observe mode, would have been taken",
+      triggerToFeedItem(
+        {
+          trigger: containerTrigger("unhealthy", "warning", 4),
+          outcome: { result: "passed" },
+          decidedAt: T1,
+          decision: {
+            triggerId: "container-health:ctr-emby:unhealthy:4",
+            result: "ignore",
+            wouldHaveTaken: true,
+            mode: "observe",
+            policyVersion: 3,
+            matchedRule: {
+              id: "containers/unhealthy",
+              name: "Container is unhealthy",
+            },
+            judgements: [
+              {
+                ruleId: "containers/crashed",
+                name: "Container keeps exiting",
+                matches: false,
+                reason: "It has not exited.",
+              },
+              {
+                ruleId: "containers/unhealthy",
+                name: "Container is unhealthy",
+                matches: true,
+                reason: "The health check keeps failing.",
+              },
+            ],
+            model: { providerId: "deepseek", modelId: "deepseek-chat" },
+            diagnostics: ["container.inspect", "container.logs"],
+            tokens: { input: 812, output: 96, cacheWrite: 0, cacheRead: 0 },
+            decidedAt: T1,
+          },
+        },
+        context
+      )
+    ),
+    named(
+      "container event the model could not decide",
+      triggerToFeedItem(
+        {
+          trigger: containerTrigger("down", "critical", 5),
+          outcome: { result: "passed" },
+          decidedAt: T0,
+          decision: {
+            triggerId: "container-health:ctr-emby:down:5",
+            result: "unavailable",
+            reason: "timeout",
+            mode: "observe",
+            policyVersion: 3,
+            decidedAt: T1,
+          },
+        },
+        context
+      )
+    ),
+    named(
       "aria2 download running",
       backgroundTaskToFeedItem(
         toProductProviderBackgroundTask("aria2", {

@@ -17,6 +17,9 @@ import { createUsageApi } from "./usage/service.ts";
 import { createPolicyApi } from "./policy/service.ts";
 import { CONTAINER_HEALTH_SOURCE } from "./sources/container-health.ts";
 import { createSourceRuntime } from "./sources/runtime.ts";
+import { createEvalService } from "./eval/service.ts";
+import { gatherContainerContext } from "./eval/context.ts";
+import { createPolicyEngine } from "./security/policy/policy-engine.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -55,6 +58,24 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : undefined,
     now: ctx.now,
   });
+  const evaluator = createEvalService({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "eval")
+      : undefined,
+    now: ctx.now,
+    runtime: options.runtime,
+    defaultModel: options.model,
+    getPolicy: policy.getPolicy,
+    // Its own engine, so the call counts of a person's chat are never reset or spent from here.
+    collectContext: (trigger) =>
+      gatherContainerContext(trigger, {
+        baseTools: ctx.baseTools,
+        audit: ctx.audit,
+        policy: createPolicyEngine({ now: ctx.now, maxToolCalls: 6 }),
+      }),
+    timeoutMs: options.sources?.assessmentTimeoutMs,
+    audit: ctx.audit,
+  });
   const sources = createSourceRuntime({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "sources")
@@ -63,10 +84,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     getSettings: async () =>
       (await policy.getPolicy()).sources[CONTAINER_HEALTH_SOURCE],
     now: ctx.now,
-    evaluate: options.sources?.evaluate,
+    evaluate: options.sources?.evaluate ?? evaluator.evaluate,
     timer: options.sources?.timer,
     pollIntervalMs: options.sources?.pollIntervalMs,
   });
+  if (!options.sources?.evaluate) {
+    void sources
+      .listRecords()
+      .then(evaluator.settleInterrupted)
+      .catch(() => undefined);
+  }
   schedules.start();
   sources.start();
   ctx.pipelineAdvancer?.start();
@@ -100,6 +127,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     listMetas: ctx.listMetas,
     listGoals: goals.listGoals,
     activityStore,
+    listDecisions: evaluator.listDecisions,
     openSession: ctx.openSession,
   });
   return {
@@ -121,7 +149,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         ),
       };
     },
-    listTriggers: sources.listRecords,
+    async listTriggers() {
+      return evaluator.join(await sources.listRecords());
+    },
+    listDecisions: evaluator.listDecisions,
     sourceHealth: sources.health,
     getUsageSummary: usage.getUsageSummary,
     listSchedules: schedules.listSchedules,

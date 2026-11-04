@@ -1,3 +1,5 @@
+import type { RuntimeModelRef } from "../runtime/interface.ts";
+
 /** What Thebe may do on its own when an event arrives. Observe is the default. */
 export const ACCEPT_MODES = ["off", "observe", "auto"] as const;
 export type AcceptMode = (typeof ACCEPT_MODES)[number];
@@ -34,6 +36,11 @@ export type PolicyVersion = {
   rules: PolicyRule[];
   defaultSets: PolicyDefaultSet[];
   sources: Record<string, PolicySourceSettings>;
+  /**
+   * The cheaper model for background work such as the Assessment, an API model or a local one. Absent:
+   * the runtime's default model. It is part of the version, so a decision records which one applied.
+   */
+  backgroundModel?: RuntimeModelRef;
 };
 
 /** A version as served: plus the flat list of rules in force (owner rules, then enabled default rules). */
@@ -55,4 +62,6 @@ export type PolicyUpdate = {
   defaultSets?: Record<string, boolean>;
   /** Source id to its settings, or null to remove it; sources not named are kept. */
   sources?: Record<string, PolicySourceSettings | null>;
+  /** The background model, or null to go back to the default. */
+  backgroundModel?: RuntimeModelRef | null;
 };

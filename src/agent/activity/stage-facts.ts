@@ -7,7 +7,7 @@ import type { CapabilityRun } from "../capabilities/invoke.ts";
 import type { ProductBackgroundTask } from "../background-tasks/product.ts";
 import type { ProductGoal } from "../goals/product.ts";
 import { GOAL_REPORT_PROFILES } from "../goals/report-tool.ts";
-import type { TriggerRecord } from "../sources/types.ts";
+import type { TriggerEntry } from "../eval/types.ts";
 import type { ProductWorker } from "../subagents/product.ts";
 import {
   activityStage,
@@ -135,12 +135,17 @@ export function backgroundTaskStageFacts(
 
 /**
  * A Gate outcome needs nobody: it is a record that an event was seen and what became of it. A Trigger that
- * passed waits for its evaluation, which the assessment ticket will give a stage of its own.
+ * passed is being worked on until Eval records its Decision, and ends with it. Every Decision, including
+ * could-not-decide, ends the item: nothing is created for the person yet, and a later ticket gives an
+ * accepted Decision the stage of the work it starts.
  */
 export function triggerStageFacts(
-  _record: TriggerRecord,
+  entry: TriggerEntry,
   _context: StageContext
 ): StageFacts {
+  if (entry.outcome.result === "passed" && !entry.decision) {
+    return { ended: false, executor: "running" };
+  }
   return ENDED;
 }
 
@@ -157,7 +162,7 @@ export const runStage = (
   context: StageContext
 ): ActivityStage => activityStage(runStageFacts(run, context));
 export const triggerStage = (
-  record: TriggerRecord,
+  record: TriggerEntry,
   context: StageContext
 ): ActivityStage => activityStage(triggerStageFacts(record, context));
 export const workerStage = (

@@ -135,8 +135,16 @@ The ordered Triggers for one resource, named by kind and id (`container:<id>`). 
 _Avoid_: threadKey as a stored field, a thread per Trigger
 
 **Gate**:
-The deterministic first layer of Eval, with no model call: source enabled, kind, severity, quiet hours (a `critical` Trigger breaks through), de-duplication. It records one outcome per Trigger, shown in Activity as a `trigger` item: `passed`, `filtered` with a `reason` (`disabled` | `kind` | `severity` | `quiet_hours`), or `duplicate` with `duplicateOf`. A Trigger that passed is handed to the evaluator; the Assessment is a later layer.
+The deterministic first layer of Eval, with no model call: source enabled, kind, severity, quiet hours (a `critical` Trigger breaks through), de-duplication. It records one outcome per Trigger, shown in Activity as a `trigger` item: `passed`, `filtered` with a `reason` (`disabled` | `kind` | `severity` | `quiet_hours`), or `duplicate` with `duplicateOf`. A Trigger that passed is handed to the Assessment.
 _Avoid_: charging a model call for noise, dropping an event without a recorded reason
+
+**Assessment**:
+The model layer of Eval, for a Trigger that passed the Gate (`agent/eval/`). A background model (`policy.backgroundModel`, else the default model) judges each active rule in the policy's order and names the first that matches. Core gathers the read-only context (container inspect, a log tail, redacted) and the model gets text only: its session has no tools. The event's text goes in an untrusted data block, and an answer that names a rule the policy did not list is refused, so an event cannot add or change a rule. Its tokens are background tokens.
+_Avoid_: giving the assessing model tools, letting model output write to the policy, retrying a failed assessment
+
+**Decision**:
+What Eval recorded for one Trigger, once (`trigger.decision` on the Activity item): `accept`, `stop`, `ignore` or `unavailable` (could not decide), with the policy `version`, the accept `mode`, the `matchedRule`, each rule's judgement and a `reason` when no ordinary verdict was reached. In `observe` mode a positive assessment is `ignore` with `wouldHaveTaken: true`, and nothing runs. Only an `accept` in `auto` mode is ever acted on, by the ticket work that follows. A passed Trigger is `working` until its Decision exists and `ended` after.
+_Avoid_: acting on an `ignore`, an error loop when the model fails, a Decision without the policy version
 
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
