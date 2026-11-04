@@ -339,6 +339,14 @@ export function createControlApi(
     return core ? capabilityChangesThings(core) : false;
   }
 
+  /** The service category of a tool, as the tool list reports it; a tool Core cannot place is `other`. */
+  async function mcpToolCategory(name: string): Promise<string> {
+    const found = name.startsWith("mcp:")
+      ? (await mcp.listTools()).find((item) => item.name === name)
+      : coreCapabilities().find((item) => item.name === name);
+    return found?.category ?? "other";
+  }
+
   async function invokeMcpTool(
     name: string,
     args: unknown,
@@ -374,6 +382,16 @@ export function createControlApi(
         `${name} changes things, and this token may only read over /mcp. Make a token that may write with: thebe token create <name> --scope mcp:write`,
         "mcp_scope_required"
       );
+    }
+    if (caller.categories) {
+      const category = await mcpToolCategory(name);
+      if (!caller.categories.includes(category)) {
+        throw httpError(
+          403,
+          `${name} is in the "${category}" category, and this token may write only to: ${caller.categories.join(", ")}. Make a token for it with: thebe token create <name> --scope mcp:write --category ${category}`,
+          "mcp_category_not_allowed"
+        );
+      }
     }
     const params = (args ?? {}) as Record<string, unknown>;
     // Core's own tools write their audit record; this says who called over /mcp and marks an irreversible delete.

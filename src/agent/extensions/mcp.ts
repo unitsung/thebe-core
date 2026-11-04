@@ -282,6 +282,20 @@ export function capabilityChangesThings(
   );
 }
 
+/**
+ * Whether a token is shown this tool: every tool it may call. A read token sees read tools; a write
+ * token also sees write tools, limited to its service categories when it has them. Irreversible
+ * tools are write tools, so they stay visible to any token that may write: they are judged per call.
+ */
+export function mcpToolVisibleTo(
+  capability: Pick<HomelabCapability, "effect" | "permission" | "category">,
+  caller: { writes: boolean; categories?: readonly string[] }
+): boolean {
+  if (!capabilityChangesThings(capability)) return true;
+  if (!caller.writes) return false;
+  return !caller.categories || caller.categories.includes(capability.category);
+}
+
 export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
   const readOnly = !capabilityChangesThings(capability);
   return {
