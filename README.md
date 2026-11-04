@@ -56,7 +56,7 @@ Core does not ship a model. Sign in to a provider from the terminal UI (`/settin
 
 ## Using Core
 
-**With your own agent (MCP).** `POST /mcp` is a stateless JSON-RPC endpoint (tools only) that exposes Core's capabilities. Send the token in an `X-Thebe-Token` header:
+**With your own agent (MCP).** `POST /mcp` is a stateless JSON-RPC endpoint (tools only) that exposes Core's capabilities. It speaks MCP versions 2026-07-28 (no `initialize`; version and capabilities travel in each request), 2025-11-25, 2025-06-18 and 2025-03-26. Send the token in an `X-Thebe-Token` header:
 
 ```bash
 curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \

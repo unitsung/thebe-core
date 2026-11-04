@@ -691,6 +691,11 @@ const operations: Operation[] = [
           "background_task",
         ],
       }),
+      queryParameter("stage", {
+        type: "string",
+        enum: ["ended", "person", "working", "idle"],
+        description: "stage=person is the needs-you list.",
+      }),
       queryParameter("status"),
       queryParameter("updatedAfter", { type: "string", format: "date-time" }),
       queryParameter("updatedBefore", { type: "string", format: "date-time" }),
@@ -703,6 +708,13 @@ const operations: Operation[] = [
       queryParameter("cursor"),
     ],
     responseSchema: "ActivityList",
+  },
+  {
+    method: "get",
+    path: "/v1/activity/summary",
+    summary: "Count the items that need the owner (stage person), by reason",
+    tag: "activity",
+    responseSchema: "NeedsYouSummary",
   },
   {
     method: "get",
@@ -758,6 +770,17 @@ const operations: Operation[] = [
     summary: "Resume a paused Goal",
     tag: "goal",
     parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "post",
+    path: "/v1/goals/{id}/answer",
+    summary:
+      "Answer the Goal's one open question and resume the same session; 409 when no question is open",
+    tag: "goal",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "GoalAnswerRequest",
     responseSchema: "ProductGoal",
   },
   {
@@ -1694,6 +1717,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["needs_approval"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             approval: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1705,6 +1729,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1716,6 +1741,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1727,6 +1753,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             goal: { $ref: "#/components/schemas/ProductGoal" },
           },
         },
@@ -1738,6 +1765,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             run: { $ref: "#/components/schemas/CapabilityRun" },
           },
         },
@@ -1749,6 +1777,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             worker: { $ref: "#/components/schemas/ProductWorker" },
           },
         },
@@ -1760,8 +1789,63 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
+        },
+        ActivityStage: {
+          description:
+            "Where the item stands with respect to the person, worked out on every read from the item's facts and never stored. person means it needs the owner; reason says why.",
+          type: "object",
+          required: ["kind"],
+          properties: {
+            kind: {
+              type: "string",
+              enum: ["ended", "person", "working", "idle"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "delivery",
+                "answer",
+                "approval",
+                "review",
+                "blocked",
+                "failed",
+              ],
+              description: "Only with kind person.",
+            },
+            queued: {
+              type: "boolean",
+              description: "Only with kind working: not started yet.",
+            },
+          },
+        },
+        NeedsYouSummary: {
+          type: "object",
+          required: ["needsYou"],
+          properties: {
+            needsYou: {
+              type: "object",
+              required: ["count", "reasons"],
+              properties: {
+                count: {
+                  type: "integer",
+                  description:
+                    "Items in the person stage; equals the length of GET /v1/activity?stage=person.",
+                },
+                reasons: {
+                  type: "object",
+                  additionalProperties: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
+        GoalAnswerRequest: {
+          type: "object",
+          required: ["answer"],
+          properties: { answer: { type: "string", minLength: 1 } },
         },
         ActivityItem: {
           oneOf: [
@@ -2744,6 +2828,36 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             summary: { type: "string" },
             artifactId: { type: "string" },
             currentRun: { $ref: "#/components/schemas/ProductGoalRun" },
+            report: {
+              type: "object",
+              description:
+                "Latest structured report from the worker or reviewer. Absent until one reports.",
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "progress",
+                    "waiting",
+                    "ready",
+                    "blocked",
+                    "failed",
+                    "dropped",
+                  ],
+                },
+                summary: { type: "string" },
+                at: { type: "string" },
+                role: { type: "string", enum: ["worker", "reviewer"] },
+              },
+            },
+            attention: {
+              type: "object",
+              description:
+                "The one question waiting for the owner. Never more than one.",
+              properties: {
+                question: { type: "string" },
+                askedAt: { type: "string" },
+              },
+            },
             error: {
               type: "object",
               properties: {

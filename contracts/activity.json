@@ -1,0 +1,601 @@
+{
+  "version": 1,
+  "stages": [
+    {
+      "kind": "ended"
+    },
+    {
+      "kind": "person",
+      "reason": "delivery"
+    },
+    {
+      "kind": "person",
+      "reason": "answer"
+    },
+    {
+      "kind": "person",
+      "reason": "approval"
+    },
+    {
+      "kind": "person",
+      "reason": "review"
+    },
+    {
+      "kind": "person",
+      "reason": "blocked"
+    },
+    {
+      "kind": "person",
+      "reason": "failed"
+    },
+    {
+      "kind": "working"
+    },
+    {
+      "kind": "working",
+      "queued": true
+    },
+    {
+      "kind": "idle"
+    }
+  ],
+  "items": [
+    {
+      "name": "goal asking one question",
+      "item": {
+        "stage": {
+          "kind": "person",
+          "reason": "answer"
+        },
+        "type": "goal",
+        "id": "goal-1",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-1",
+          "sessionId": "goal-1",
+          "title": "Tidy the media library",
+          "status": "paused",
+          "phase": "paused",
+          "progress": 0.125,
+          "currentStep": "Paused",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "summary": "Goal paused: waiting for your answer.",
+          "report": {
+            "state": "waiting",
+            "summary": "Two folders match.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "attention": {
+            "question": "Which folder should I clean?",
+            "askedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "controls": {
+            "pause": false,
+            "resume": true,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal blocked",
+      "item": {
+        "stage": {
+          "kind": "person",
+          "reason": "blocked"
+        },
+        "type": "goal",
+        "id": "goal-2",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-2",
+          "sessionId": "goal-2",
+          "title": "Tidy the media library",
+          "status": "paused",
+          "phase": "paused",
+          "progress": 0.125,
+          "currentStep": "Paused",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "report": {
+            "state": "blocked",
+            "summary": "The disk is read-only.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "controls": {
+            "pause": false,
+            "resume": true,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal working",
+      "item": {
+        "stage": {
+          "kind": "working"
+        },
+        "type": "goal",
+        "id": "goal-3",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-3",
+          "sessionId": "goal-3",
+          "title": "Tidy the media library",
+          "status": "running",
+          "phase": "running",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "controls": {
+            "pause": true,
+            "resume": false,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal ended",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "goal",
+        "id": "goal-4",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-4",
+          "sessionId": "goal-4",
+          "title": "Tidy the media library",
+          "status": "succeeded",
+          "phase": "completed",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "report": {
+            "state": "ready",
+            "summary": "All tests pass.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "reviewer"
+          },
+          "controls": {
+            "pause": false,
+            "resume": false,
+            "stop": false
+          }
+        }
+      }
+    },
+    {
+      "name": "goal failed",
+      "item": {
+        "stage": {
+          "kind": "person",
+          "reason": "failed"
+        },
+        "type": "goal",
+        "id": "goal-5",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-5",
+          "sessionId": "goal-5",
+          "title": "Tidy the media library",
+          "status": "failed",
+          "phase": "failed",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "error": {
+            "code": "goal_failed",
+            "message": "The migration cannot be applied."
+          },
+          "report": {
+            "state": "failed",
+            "summary": "The migration cannot be applied.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "controls": {
+            "pause": false,
+            "resume": false,
+            "stop": false
+          }
+        }
+      }
+    },
+    {
+      "name": "confirmation waiting",
+      "item": {
+        "stage": {
+          "kind": "person",
+          "reason": "approval"
+        },
+        "type": "approval",
+        "id": "approval-1",
+        "group": "needs_approval",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "approval": {
+          "id": "approval-1",
+          "kind": "container.restart",
+          "actionId": "container.restart",
+          "resource": {
+            "kind": "container",
+            "id": "ctr-emby",
+            "name": "emby",
+            "provider": "arcane"
+          },
+          "status": "pending",
+          "group": "needs_approval",
+          "summary": "Restart emby",
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "idempotencyKey": "approve:container.restart:ctr-emby:run-1"
+        }
+      }
+    },
+    {
+      "name": "aria2 download failed",
+      "item": {
+        "stage": {
+          "kind": "person",
+          "reason": "failed"
+        },
+        "type": "background_task",
+        "id": "provider-aria2:0123456789abcdef",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "task": {
+          "id": "0123456789abcdef",
+          "sessionId": "provider-aria2",
+          "provider": "aria2",
+          "kind": "download",
+          "name": "movie.mkv",
+          "status": "failed",
+          "startedAt": "2026-11-04T09:00:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "error": "aria2 reports a download error"
+        }
+      }
+    },
+    {
+      "name": "aria2 download running",
+      "item": {
+        "stage": {
+          "kind": "working"
+        },
+        "type": "background_task",
+        "id": "provider-aria2:fedcba9876543210",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "task": {
+          "id": "fedcba9876543210",
+          "sessionId": "provider-aria2",
+          "provider": "aria2",
+          "kind": "download",
+          "name": "show.mkv",
+          "status": "running",
+          "startedAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    }
+  ],
+  "legacy": [
+    {
+      "name": "goal asking one question",
+      "item": {
+        "type": "goal",
+        "id": "goal-1",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-1",
+          "sessionId": "goal-1",
+          "title": "Tidy the media library",
+          "status": "paused",
+          "phase": "paused",
+          "progress": 0.125,
+          "currentStep": "Paused",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "summary": "Goal paused: waiting for your answer.",
+          "report": {
+            "state": "waiting",
+            "summary": "Two folders match.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "attention": {
+            "question": "Which folder should I clean?",
+            "askedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "controls": {
+            "pause": false,
+            "resume": true,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal blocked",
+      "item": {
+        "type": "goal",
+        "id": "goal-2",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-2",
+          "sessionId": "goal-2",
+          "title": "Tidy the media library",
+          "status": "paused",
+          "phase": "paused",
+          "progress": 0.125,
+          "currentStep": "Paused",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "report": {
+            "state": "blocked",
+            "summary": "The disk is read-only.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "controls": {
+            "pause": false,
+            "resume": true,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal working",
+      "item": {
+        "type": "goal",
+        "id": "goal-3",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-3",
+          "sessionId": "goal-3",
+          "title": "Tidy the media library",
+          "status": "running",
+          "phase": "running",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "controls": {
+            "pause": true,
+            "resume": false,
+            "stop": true
+          }
+        }
+      }
+    },
+    {
+      "name": "goal ended",
+      "item": {
+        "type": "goal",
+        "id": "goal-4",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-4",
+          "sessionId": "goal-4",
+          "title": "Tidy the media library",
+          "status": "succeeded",
+          "phase": "completed",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "report": {
+            "state": "ready",
+            "summary": "All tests pass.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "reviewer"
+          },
+          "controls": {
+            "pause": false,
+            "resume": false,
+            "stop": false
+          }
+        }
+      }
+    },
+    {
+      "name": "goal failed",
+      "item": {
+        "type": "goal",
+        "id": "goal-5",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "goal": {
+          "id": "goal-5",
+          "sessionId": "goal-5",
+          "title": "Tidy the media library",
+          "status": "failed",
+          "phase": "failed",
+          "progress": 0.125,
+          "currentStep": "Checkpoint 1 of 8",
+          "iteration": 1,
+          "maxIterations": 8,
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "error": {
+            "code": "goal_failed",
+            "message": "The migration cannot be applied."
+          },
+          "report": {
+            "state": "failed",
+            "summary": "The migration cannot be applied.",
+            "at": "2026-11-04T09:30:00.000Z",
+            "role": "worker"
+          },
+          "controls": {
+            "pause": false,
+            "resume": false,
+            "stop": false
+          }
+        }
+      }
+    },
+    {
+      "name": "confirmation waiting",
+      "item": {
+        "type": "approval",
+        "id": "approval-1",
+        "group": "needs_approval",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "approval": {
+          "id": "approval-1",
+          "kind": "container.restart",
+          "actionId": "container.restart",
+          "resource": {
+            "kind": "container",
+            "id": "ctr-emby",
+            "name": "emby",
+            "provider": "arcane"
+          },
+          "status": "pending",
+          "group": "needs_approval",
+          "summary": "Restart emby",
+          "createdAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "idempotencyKey": "approve:container.restart:ctr-emby:run-1"
+        }
+      }
+    },
+    {
+      "name": "aria2 download failed",
+      "item": {
+        "type": "background_task",
+        "id": "provider-aria2:0123456789abcdef",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "task": {
+          "id": "0123456789abcdef",
+          "sessionId": "provider-aria2",
+          "provider": "aria2",
+          "kind": "download",
+          "name": "movie.mkv",
+          "status": "failed",
+          "startedAt": "2026-11-04T09:00:00.000Z",
+          "finishedAt": "2026-11-04T09:30:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z",
+          "error": "aria2 reports a download error"
+        }
+      }
+    },
+    {
+      "name": "aria2 download running",
+      "item": {
+        "type": "background_task",
+        "id": "provider-aria2:fedcba9876543210",
+        "group": "running",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "task": {
+          "id": "fedcba9876543210",
+          "sessionId": "provider-aria2",
+          "provider": "aria2",
+          "kind": "download",
+          "name": "show.mkv",
+          "status": "running",
+          "startedAt": "2026-11-04T09:00:00.000Z",
+          "updatedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    }
+  ],
+  "withTicketId": {
+    "name": "goal asking one question, wrapped by a ticket",
+    "item": {
+      "stage": {
+        "kind": "person",
+        "reason": "answer"
+      },
+      "type": "goal",
+      "id": "goal-1",
+      "group": "running",
+      "updatedAt": "2026-11-04T09:30:00.000Z",
+      "goal": {
+        "id": "goal-1",
+        "sessionId": "goal-1",
+        "title": "Tidy the media library",
+        "status": "paused",
+        "phase": "paused",
+        "progress": 0.125,
+        "currentStep": "Paused",
+        "iteration": 1,
+        "maxIterations": 8,
+        "createdAt": "2026-11-04T09:00:00.000Z",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "summary": "Goal paused: waiting for your answer.",
+        "report": {
+          "state": "waiting",
+          "summary": "Two folders match.",
+          "at": "2026-11-04T09:30:00.000Z",
+          "role": "worker"
+        },
+        "attention": {
+          "question": "Which folder should I clean?",
+          "askedAt": "2026-11-04T09:30:00.000Z"
+        },
+        "controls": {
+          "pause": false,
+          "resume": true,
+          "stop": true
+        }
+      },
+      "ticketId": "0123456789abcdef0123456789abcdef"
+    }
+  },
+  "needsYou": {
+    "count": 5,
+    "reasons": {
+      "delivery": 0,
+      "answer": 1,
+      "approval": 1,
+      "review": 0,
+      "blocked": 1,
+      "failed": 2
+    }
+  }
+}
