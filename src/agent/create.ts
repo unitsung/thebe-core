@@ -14,6 +14,8 @@ import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { createReportInbox } from "./reports/report.ts";
 import { createPolicyApi } from "./policy/service.ts";
+import { CONTAINER_HEALTH_SOURCE } from "./sources/container-health.ts";
+import { createSourceRuntime } from "./sources/runtime.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -52,7 +54,20 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : undefined,
     now: ctx.now,
   });
+  const sources = createSourceRuntime({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "sources")
+      : undefined,
+    provider: options.provider,
+    getSettings: async () =>
+      (await policy.getPolicy()).sources[CONTAINER_HEALTH_SOURCE],
+    now: ctx.now,
+    evaluate: options.sources?.evaluate,
+    timer: options.sources?.timer,
+    pollIntervalMs: options.sources?.pollIntervalMs,
+  });
   schedules.start();
+  sources.start();
   ctx.pipelineAdvancer?.start();
   const activityStore = createActivityStore({
     dir: options.agentStoreDir
@@ -98,6 +113,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         ),
       };
     },
+    listTriggers: sources.listRecords,
+    sourceHealth: sources.health,
     listSchedules: schedules.listSchedules,
     getSchedule: schedules.getSchedule,
     createSchedule: schedules.createSchedule,
@@ -111,12 +128,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     updatePolicy: policy.updatePolicy,
     async quiesce() {
       ctx.pipelineAdvancer?.stop();
+      sources.stop();
       await schedules.stop();
       await options.runtime.quiesce();
     },
     async unquiesce() {
       await options.runtime.unquiesce();
       schedules.start();
+      sources.start();
       ctx.pipelineAdvancer?.start();
     },
     ...diagnosis,

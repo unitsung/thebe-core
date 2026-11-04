@@ -5,6 +5,7 @@ import {
   backgroundTaskActivityId,
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
+import type { TriggerRecord } from "../sources/types.ts";
 import {
   PERSON_REASONS,
   type ActivityStage,
@@ -17,6 +18,7 @@ import {
   goalStage,
   recordStage,
   runStage,
+  triggerStage,
   workerStage,
 } from "./stage-facts.ts";
 import {
@@ -36,6 +38,7 @@ export const ACTIVITY_FEED_TYPES = [
   "run",
   "worker",
   "background_task",
+  "trigger",
 ] as const;
 
 export type ActivityFeedType = (typeof ACTIVITY_FEED_TYPES)[number];
@@ -101,6 +104,14 @@ export type ActivityFeedItem = ActivityFeedItemStage &
         group: "running" | "recent";
         updatedAt: string;
         task: ProductBackgroundTask;
+      }
+    | {
+        /** An event from a source and the Gate's recorded outcome for it. */
+        type: "trigger";
+        id: string;
+        group: "recent";
+        updatedAt: string;
+        trigger: TriggerRecord;
       }
   );
 
@@ -237,6 +248,20 @@ export function backgroundTaskToFeedItem(
   };
 }
 
+export function triggerToFeedItem(
+  record: TriggerRecord,
+  context: StageContext = {}
+): ActivityFeedItem {
+  return {
+    stage: triggerStage(record, context),
+    type: "trigger",
+    id: record.trigger.id,
+    group: "recent",
+    updatedAt: record.decidedAt,
+    trigger: record,
+  };
+}
+
 export function encodeActivityCursor(
   item: Pick<ActivityFeedItem, "updatedAt" | "id">
 ): string {
@@ -356,6 +381,8 @@ function activityFeedItemStatus(item: ActivityFeedItem): string {
       return item.worker.status;
     case "background_task":
       return item.task.status;
+    case "trigger":
+      return item.trigger.outcome.result;
   }
 }
 
@@ -366,7 +393,8 @@ export function toActivityFeed(
   capabilityRuns: CapabilityRun[] = [],
   workers: ProductWorker[] = [],
   backgroundTasks: ProductBackgroundTask[] = [],
-  stageContext: StageContext = {}
+  stageContext: StageContext = {},
+  triggers: TriggerRecord[] = []
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {
@@ -384,6 +412,9 @@ export function toActivityFeed(
   }
   for (const task of backgroundTasks) {
     items.push(backgroundTaskToFeedItem(task, stageContext));
+  }
+  for (const record of triggers) {
+    items.push(triggerToFeedItem(record, stageContext));
   }
   items.sort(compareActivityItems);
   return group ? items.filter((item) => item.group === group) : items;

@@ -23,7 +23,11 @@ import {
 import { createDeviceRegistry } from "../delivery/http/devices.ts";
 import { createPushIdentity } from "./push/identity.ts";
 import { createPushNotifier } from "./push/notifier.ts";
-import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
+import {
+  createThebeAgent,
+  type CreateThebeAgentOptions,
+  type ThebeAgent,
+} from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
 import type { McpRegistry } from "../agent/extensions/mcp.ts";
 import type { AgentSettingsStore } from "../agent/settings/product.ts";
@@ -59,6 +63,8 @@ export function createThebeApp(options: {
   /** Replaces `fetch` for calls to the Push Relay; tests use it to stand in for the relay. */
   pushFetch?: typeof fetch;
   now?: () => Date;
+  /** Event sources: `evaluate` for Triggers past the Gate; `timer` and `pollIntervalMs` for the poll loop. */
+  sources?: CreateThebeAgentOptions["sources"];
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
   allowedHosts?: string[];
@@ -153,6 +159,7 @@ export function createThebeApp(options: {
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
     now: options.now,
+    sources: options.sources,
     callerId: options.callerId,
     model: options.model,
     sessionIdleTimeoutMs: options.sessionIdleTimeoutMs,

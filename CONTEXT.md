@@ -119,6 +119,22 @@ _Avoid_: a list of open questions, rewriting the model's question, needs_answer 
 Where an Activity item stands with respect to the person, worked out on every read from the item's facts and never stored: `ended`, `person` (with a reason: `delivery` not delivered, `answer` waiting for an answer, `approval` waiting for a confirmation, `review` waiting for review, `blocked`, `failed`), `working` (including queued), or `idle`; the first matching row wins, in that order (`agent/activity/stage.ts`). Every Activity item carries `stage`, added beside its existing fields; an older Core omits it. The "needs you" count is the number of items in the person stage (`GET /v1/activity/summary`) and equals the length of `GET /v1/activity?stage=person`. A finished failure asks for the person for 24 hours and then stays in history only. A goal's own worker and reviewer runs never ask for the person; their goal does. `delivery` and `review` have no producer yet: delivery arrives with the outbox, review with "show me when done".
 _Avoid_: storing the stage, a second Activity group for needs-you, treating a user pause as needing the person
 
+**Source**:
+A durable event stream that holds its read position, so a restart neither replays nor loses events (`agent/sources/`). The first is `container-health`, which polls the container provider every 30 seconds while the policy enables it (`policy.sources["container-health"]`: `enabled`, `minSeverity` default `warning`, `kinds`, `quietHours` default 23:00 to 08:00 or `null`, `dedupWindowMinutes` default 30). Position and Triggers are stored under `<agentStoreDir>/sources/`. Repeated read failures for ten minutes show in `GET /v1/health` as `sources.<id>.failing` and make no Trigger.
+_Avoid_: Signal, SignalSource, reading a source that is switched off
+
+**Trigger**:
+One immutable event from a Source with a stable id (`<source>:<resource id>:<kind>:<sequence>`), a kind, a severity (`info` | `warning` | `critical`) and a Thread. It is stored once however often it arrives. Container-health kinds: `unhealthy`, `restarting`, `down` (died or exited non-zero), `recovered`.
+_Avoid_: Signal, an editable event
+
+**Thread**:
+The ordered Triggers for one resource, named by kind and id (`container:<id>`). At most one evaluation runs per Thread at a time; the next waits for the one in front.
+_Avoid_: threadKey as a stored field, a thread per Trigger
+
+**Gate**:
+The deterministic first layer of Eval, with no model call: source enabled, kind, severity, quiet hours (a `critical` Trigger breaks through), de-duplication. It records one outcome per Trigger, shown in Activity as a `trigger` item: `passed`, `filtered` with a `reason` (`disabled` | `kind` | `severity` | `quiet_hours`), or `duplicate` with `duplicateOf`. A Trigger that passed is handed to the evaluator; the Assessment is a later layer.
+_Avoid_: charging a model call for noise, dropping an event without a recorded reason
+
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
 _Avoid_: reimplementing filesystem/bash tools in Thebe
