@@ -42,6 +42,52 @@ export function resolveThebeListen(
   };
 }
 
+export const DEFAULT_MCP_RATE_LIMIT_PER_MINUTE = 120;
+
+export type ThebeMcpListenConfig = {
+  host: string;
+  port: number;
+  /** Requests one token may make per minute on this port. */
+  ratePerMinute: number;
+};
+
+/**
+ * The optional second port that serves only `/mcp`. Off unless `THEBE_MCP_PORT` is set. It binds
+ * the same host as the main port unless `THEBE_MCP_HOST` says otherwise; `THEBE_MCP_RATE_LIMIT`
+ * is requests per minute for each token. A bad value throws instead of falling back, because a
+ * silently ignored setting would leave the operator believing the port is up.
+ */
+export function resolveThebeMcpListen(
+  env: NodeJS.ProcessEnv = process.env,
+  main: Pick<ThebeListenConfig, "host" | "port"> = resolveThebeListen(env)
+): ThebeMcpListenConfig | undefined {
+  const rawPort = env.THEBE_MCP_PORT?.trim();
+  if (!rawPort) return undefined;
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`THEBE_MCP_PORT must be a port number, got "${rawPort}"`);
+  }
+  if (port === main.port) {
+    throw new Error(
+      `THEBE_MCP_PORT (${port}) must differ from THEBE_PORT: the /mcp-only port exists so the main API stays off it`
+    );
+  }
+  const rawRate = env.THEBE_MCP_RATE_LIMIT?.trim();
+  const ratePerMinute = rawRate
+    ? Number(rawRate)
+    : DEFAULT_MCP_RATE_LIMIT_PER_MINUTE;
+  if (!Number.isInteger(ratePerMinute) || ratePerMinute < 1) {
+    throw new Error(
+      `THEBE_MCP_RATE_LIMIT must be a whole number of requests per minute, got "${rawRate}"`
+    );
+  }
+  return {
+    host: env.THEBE_MCP_HOST?.trim() || main.host,
+    port,
+    ratePerMinute,
+  };
+}
+
 export function resolveAllowedHosts(
   bindHost: string,
   extra: string[] = []
