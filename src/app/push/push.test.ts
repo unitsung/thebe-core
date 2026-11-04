@@ -99,6 +99,7 @@ describe("push notifier", () => {
       deepLink: "thebe://approval/abc",
       id: "approval-abc",
     });
+    await notifier.flush();
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://relay.example/v1/events");

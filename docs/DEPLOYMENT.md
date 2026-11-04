@@ -176,6 +176,22 @@ each approval that starts waiting. A device registers its APNs token with the re
 using that public key, and the relay delivers only events signed by it. Unset, Core
 sends nothing and behaves as before. A relay that is down never fails a request.
 
+Notices go through a durable outbox kept next to the device state
+(`push-outbox.json`), so none is lost when the relay is down or Core restarts.
+The notices for one ticket to one device are sent in order, one at a time, each
+with a sequence number (`seq`) and the ticket id the client can sort by. If the
+relay cannot be reached, the head notice is retried with back-off from 5 to 300
+seconds and the ones behind it wait; nothing is given up on while the relay is
+unreachable. If the relay answers with a transient error (APNs refused the
+notice), the head is recorded as dropped after three of them and the queue moves
+on. A permanent refusal (bad signature, unknown device, malformed event) drops it
+at once. The reason for each drop is recorded and `GET /v1/health` shows
+`push.consecutiveFailures`, `push.pending`, `push.dropped` and `push.lastDrop`.
+A retry keeps the notice's id, which the relay remembers for 24 hours (across its
+own restarts) and passes to APNs as the collapse id, so a device shows a notice
+once. Upgrade the relay before Core: an older relay ignores `ticket` and `seq` but
+still delivers, yet forgets ids on restart.
+
 ## 4. Network exposure and client connections
 
 Pick one TLS path; all three keep Core on loopback and never expose the token in

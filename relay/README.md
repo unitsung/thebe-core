@@ -7,7 +7,8 @@ An optional, separately deployed service. It holds the APNs credentials so a sel
 1. The App registers its APNs token with the relay together with the public key of the Core it trusts (`POST /v1/registrations`). The relay returns a `relayDeviceId`.
 2. Core signs each event with its Ed25519 key and sends it (`POST /v1/events`). The relay checks the signature against the key registered for that device, drops stale (over 5 minutes), repeated and over-rate (30 per minute) events, and sends the alert to APNs over HTTP/2.
 3. An event holds a short generic line, a category and a `thebe://` deep link. Nothing else reaches Apple.
-4. A token APNs reports as gone (410, `Unregistered`, `BadDeviceToken`) is dropped.
+4. Core keeps each notice in a durable outbox and retries it under the same event `id`. The relay remembers delivered ids for 24 hours (kept in `seen.json`, so a restart does not forget them), answers a repeat with `duplicate: true`, and lets a retry through when APNs refused the first try. An event may carry `ticket` and `seq`; both go to the device with the `id`, and the `id` is also the APNs collapse id, so a device shows a notice once and can sort a ticket's notices by `seq`.
+5. A token APNs reports as gone (410, `Unregistered`, `BadDeviceToken`) is dropped.
 
 ## Configuration
 

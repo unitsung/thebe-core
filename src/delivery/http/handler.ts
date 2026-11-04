@@ -1,7 +1,7 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { DeviceRegistry } from "./devices.ts";
-import { normalizedPath } from "./context.ts";
+import { normalizedPath, type ThebeHttpContext } from "./context.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
@@ -21,6 +21,7 @@ export type ThebeHttpHandlerOptions = {
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: { publicKey: string; relayUrl: string };
   workspacePath?: string;
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
 };
 
 /** Stable public composition shell for the HTTP agent. */
@@ -52,6 +53,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
     workspacePath: options.workspacePath,
+    pushOutbox: options.pushOutbox,
   });
 
   return {

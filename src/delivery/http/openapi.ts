@@ -120,7 +120,12 @@ const operations: Operation[] = [
     parameters: [idParameter()],
     responseSchema: "GoalSchedule",
   },
-  { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
+  {
+    method: "get",
+    path: "/v1/health",
+    summary: "Health check, with push delivery state when push is on",
+    tag: "system",
+  },
   {
     method: "get",
     path: "/v1/events",
