@@ -51,6 +51,8 @@ export type ThebeBootstrap = {
   prompt: (text: string) => Promise<{ text: string; tools: string[] }>;
   send: (text: string) => Promise<{ text: string; tools: string[] }>;
   handler: ReturnType<typeof createThebeApp>["handler"];
+  /** The handler for the optional `/mcp`-only port (`THEBE_MCP_PORT`). */
+  createMcpHandler: ReturnType<typeof createThebeApp>["createMcpHandler"];
   version: string;
   model?: { providerId: string; modelId: string };
   workspacePath: string;
@@ -266,6 +268,7 @@ export async function bootstrapThebe(
     prompt: app.prompt,
     send: app.send,
     handler: app.handler,
+    createMcpHandler: app.createMcpHandler,
     version,
     model: defaultModel,
     workspacePath,

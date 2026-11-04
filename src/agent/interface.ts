@@ -19,6 +19,7 @@ import type {
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
 import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
+import type { PolicyApi } from "./policy/service.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { PipelineProviders } from "./tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
@@ -151,6 +152,11 @@ export type CreateThebeAgentOptions = {
    * sets it to `off`.
    */
   mcpWritesAllowed?: boolean;
+  /**
+   * Host gate for irreversible deletes over `/mcp`. Defaults to `THEBE_MCP_IRREVERSIBLE`; on unless the
+   * host sets it to `off`, in which case no token may run one.
+   */
+  mcpIrreversibleAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -184,8 +190,22 @@ export type CreateThebeAgentOptions = {
   artifactStore?: ArtifactStore;
 };
 
-/** Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools. */
-export type McpCaller = { writes: boolean };
+/**
+ * Who is calling over `/mcp`, as far as the gate cares: the token's name, what it may do, and its
+ * scopes as stored. Later gateway rules (category limits, tickets) read the same shape.
+ */
+export type McpCaller = {
+  /** The token's name, recorded in the audit log. */
+  name: string;
+  /** Whether the token may run write tools. */
+  writes: boolean;
+  /** Whether the token may run irreversible deletes (judged per call). */
+  irreversible: boolean;
+  /** The token's scopes; absent for a token with full access. */
+  scopes?: readonly string[];
+  /** The service categories a write token is limited to; absent means every category. */
+  categories?: readonly string[];
+};
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
 export interface ThebeAgent {
@@ -336,6 +356,14 @@ export interface ThebeAgent {
   setScheduleEnabled(id: string, enabled: boolean): Promise<GoalSchedule>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<GoalSchedule>;
+  /**
+   * The versioned policy (rules, accept mode, per-source settings). The owner's HTTP requests are the
+   * only way to change it; no tool exposes it.
+   */
+  getPolicy: PolicyApi["getPolicy"];
+  getPolicyVersion: PolicyApi["getPolicyVersion"];
+  listPolicyVersions: PolicyApi["listPolicyVersions"];
+  updatePolicy: PolicyApi["updatePolicy"];
   getGoal(thebeSessionId: string): GoalRun | undefined;
   listGoals(): Promise<GoalRun[]>;
   goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }>;
@@ -416,8 +444,9 @@ export interface ThebeAgent {
   ): Promise<{ text: string; isError: boolean }>;
   /**
    * `invokeToolDetailed` for a caller on `/mcp`: read tools run as before, and a write tool runs
-   * only when the host has enabled writes over `/mcp` and the caller may write. The caller is
-   * required, so a route that forgets it does not compile instead of quietly allowing writes.
+   * only when the host has enabled writes over `/mcp` and the caller may write. An irreversible
+   * delete (judged per call) also needs the host to allow it and the caller to hold that scope; a
+   * refusal is an immediate error, never a wait. The caller is required, so a route that forgets it does not compile instead of quietly allowing writes.
    * The call is audited.
    */
   invokeMcpTool(

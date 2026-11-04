@@ -16,6 +16,7 @@ import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
 import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
 import { handleMemoryRoutes } from "./routes/memory.ts";
+import { handlePolicyRoutes } from "./routes/policy.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
@@ -34,6 +35,7 @@ export type ThebeHttpRouterOptions = {
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: ThebeHttpContext["pushIdentity"];
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
   workspacePath?: string;
 };
 
@@ -132,6 +134,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const memoryResponse = await handleMemoryRoutes(context);
       if (memoryResponse) {
         return memoryResponse;
+      }
+      const policyResponse = await handlePolicyRoutes(context);
+      if (policyResponse) {
+        return policyResponse;
       }
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {

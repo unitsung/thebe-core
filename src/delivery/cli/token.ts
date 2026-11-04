@@ -17,10 +17,12 @@ import {
 
 const HELP = `thebe token <command>
 
-  create <name> [--scope mcp:read|mcp:write]
+  create <name> [--scope mcp:read|mcp:write|mcp:irreversible]
                   make a token for one device or agent; shown once, only its hash is kept.
                   With --scope the token works only on /mcp: mcp:read for read tools,
-                  mcp:write for write tools too. Without it the token has full access.
+                  mcp:write for write tools too, mcp:irreversible for deletes that cannot be
+                  undone too (each includes the ones before it). --scope may be repeated or
+                  comma-separated. Without it the token has full access.
   list            the device tokens: name, scope, created, last used
   revoke <name>   remove one device's token; the others keep working
   revoke --all    remove every device token and close the shared one
@@ -37,14 +39,17 @@ give each device its own, and revoke only that one if it is lost.
 Run it on the machine where Core runs, with the same THEBE_CONFIG_DIR. A token set through
 THEBE_TOKEN belongs to your environment and is not changed here.`;
 
-/** `create` takes the device name as the words that are left once `--scope <value>` is taken out. */
+/**
+ * `create` takes the device name as the words that are left once `--scope <value>` is taken out.
+ * `--scope` may be repeated and each value may be comma-separated: `--scope mcp:read,mcp:write`.
+ */
 function parseCreateArgs(
   args: readonly string[]
 ):
-  | { ok: true; name: string; scope?: (typeof TOKEN_SCOPES)[number] }
+  | { ok: true; name: string; scope: (typeof TOKEN_SCOPES)[number][] }
   | { ok: false; problem: string } {
   const words: string[] = [];
-  let scope: (typeof TOKEN_SCOPES)[number] | undefined;
+  const scope: (typeof TOKEN_SCOPES)[number][] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg !== "--scope" && !arg.startsWith("--scope=")) {
@@ -52,15 +57,16 @@ function parseCreateArgs(
       continue;
     }
     const value = arg === "--scope" ? args[++i] : arg.slice("--scope=".length);
-    const known = TOKEN_SCOPES.find((candidate) => candidate === value);
-    if (!known) {
-      return {
-        ok: false,
-        problem: `--scope takes ${TOKEN_SCOPES.join(" or ")}.`,
-      };
+    for (const item of (value ?? "").split(",")) {
+      const known = TOKEN_SCOPES.find((candidate) => candidate === item.trim());
+      if (!known) {
+        return {
+          ok: false,
+          problem: `--scope takes ${TOKEN_SCOPES.join(", ")} (repeat it or separate them with commas).`,
+        };
+      }
+      scope.push(known);
     }
-    if (scope) return { ok: false, problem: "Give --scope once." };
-    scope = known;
   }
   return { ok: true, name: words.join(" "), scope };
 }

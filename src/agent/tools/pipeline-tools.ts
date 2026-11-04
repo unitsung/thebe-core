@@ -1,9 +1,11 @@
 import {
+  DOWNLOAD_TOOL_NAMES,
   PIPELINE_TOOL_DESCRIPTIONS,
   PIPELINE_TOOL_SCHEMAS,
   type CloudTransferProvider,
   type DownloadCapability,
   type DownloadProvider,
+  type DownloadToolName,
   type FilesProvider,
   type LibraryRefreshProvider,
   type PipelineToolName,
@@ -64,6 +66,16 @@ export function availablePipelineTools(
   if (providers.libraries?.length)
     names.push("library.scan", "library.refresh_item");
   return names;
+}
+
+/** The download tools the configured providers back, which are the pipeline tools an agent on `/mcp` can reach. */
+export function availableDownloadTools(
+  providers: PipelineProviders
+): DownloadToolName[] {
+  return availablePipelineTools(providers).filter(
+    (name): name is DownloadToolName =>
+      (DOWNLOAD_TOOL_NAMES as readonly string[]).includes(name)
+  );
 }
 
 /** Every pipeline-related tool the configured providers back, including search and jobs. */

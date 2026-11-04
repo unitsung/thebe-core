@@ -1,4 +1,7 @@
-import { hashParameters } from "../security/audit/audit-log.ts";
+import {
+  hashParameters,
+  type AuditRecord,
+} from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { REDACTED, redactToolOutput } from "../security/redaction.ts";
@@ -22,6 +25,8 @@ export function wrapCustomTools(
     onEvent?: (event: NormalizedEvent) => void;
     onStop?: () => void | Promise<void>;
     sessionId?: () => string | undefined;
+    /** Fields added to every audit record this wrapper writes, e.g. who called over `/mcp`. */
+    auditExtra?: Pick<AuditRecord, "source" | "caller" | "irreversible">;
     /** Cap on the text one result adds to the model's context. Omit for callers that need the full result. */
     modelResultLimit?: number;
   }
@@ -38,6 +43,7 @@ export function wrapCustomTools(
       });
       if (decision.block) {
         await options.audit?.append({
+          ...options.auditExtra,
           method: tool.name,
           parameterHash: hashParameters(params),
           responseBytes: 0,
@@ -103,6 +109,7 @@ export function wrapCustomTools(
         const wrapped = wrapResult(tool.name, limit, result);
         const text = wrapped.content.map((block) => block.text).join("\n");
         await options.audit?.append({
+          ...options.auditExtra,
           method: tool.name,
           parameterHash: hashParameters(params),
           responseBytes: Buffer.byteLength(text),
@@ -118,6 +125,7 @@ export function wrapCustomTools(
           error instanceof Error ? error.message : String(error)
         );
         await options.audit?.append({
+          ...options.auditExtra,
           method: tool.name,
           parameterHash: hashParameters(params),
           responseBytes: 0,

@@ -12,7 +12,14 @@ import type {
 } from "../agent/capabilities/media.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
-import { createThebeHttpHandler } from "../delivery/http/handler.ts";
+import {
+  createThebeHttpHandler,
+  type ThebeHttpHandlerOptions,
+} from "../delivery/http/handler.ts";
+import {
+  createRateLimiter,
+  type RateLimit,
+} from "../delivery/http/rate-limit.ts";
 import { createDeviceRegistry } from "../delivery/http/devices.ts";
 import { createPushIdentity } from "./push/identity.ts";
 import { createPushNotifier } from "./push/notifier.ts";
@@ -32,6 +39,11 @@ export type ThebeAppPrompt = (
 /** @deprecated Use ThebeAppPrompt */
 export type ThebeAppSend = ThebeAppPrompt;
 
+export type McpListenerHandlerOptions = {
+  rateLimit?: RateLimit;
+  allowedHosts?: string[];
+};
+
 export function createThebeApp(options: {
   runtime: AgentRuntime;
   provider: ContainerInfoProvider;
@@ -44,7 +56,7 @@ export function createThebeApp(options: {
   agentStoreDir?: string;
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
-  /** Replaces `fetch` for the Push Relay; a test seam. */
+  /** Replaces `fetch` for calls to the Push Relay; tests use it to stand in for the relay. */
   pushFetch?: typeof fetch;
   now?: () => Date;
   callerId?: string;
@@ -59,6 +71,7 @@ export function createThebeApp(options: {
   fullAccessAllowed?: boolean;
   remoteBashAllowed?: boolean;
   mcpWritesAllowed?: boolean;
+  mcpIrreversibleAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -83,6 +96,13 @@ export function createThebeApp(options: {
   prompt: ThebeAppPrompt;
   send: ThebeAppSend;
   handler: ReturnType<typeof createThebeHttpHandler>;
+  /**
+   * A handler for the second listener that serves only `/mcp`, with the same agent, tokens and Host
+   * check. With `rateLimit`, each token gets that many requests per window and then an immediate 429.
+   */
+  createMcpHandler: (
+    options?: McpListenerHandlerOptions
+  ) => ReturnType<typeof createThebeHttpHandler>;
 } {
   const storedSettings = options.settingsStore?.load();
   const deviceDir = options.agentStoreDir
@@ -99,6 +119,7 @@ export function createThebeApp(options: {
           relayUrl,
           identity: pushIdentity,
           devices: deviceRegistry,
+          dir: deviceDir,
           fetch: options.pushFetch,
           now: options.now,
         })
@@ -143,6 +164,7 @@ export function createThebeApp(options: {
     fullAccessAllowed: options.fullAccessAllowed,
     remoteBashAllowed: options.remoteBashAllowed,
     mcpWritesAllowed: options.mcpWritesAllowed,
+    mcpIrreversibleAllowed: options.mcpIrreversibleAllowed,
     maxSubagentConcurrency: options.maxSubagentConcurrency,
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,
@@ -172,7 +194,7 @@ export function createThebeApp(options: {
     const result = await agent.prompt(text);
     return { text: result.text, tools: result.tools };
   };
-  const handler = createThebeHttpHandler({
+  const handlerOptions: ThebeHttpHandlerOptions = {
     version: options.version ?? "0.1.0",
     token: options.token,
     agent,
@@ -183,6 +205,19 @@ export function createThebeApp(options: {
         ? { publicKey: pushIdentity.publicKey, relayUrl }
         : undefined,
     workspacePath: options.workspacePath,
-  });
-  return { agent, prompt, send: prompt, handler };
+    pushOutbox: pushNotifier,
+  };
+  const handler = createThebeHttpHandler(handlerOptions);
+  const createMcpHandler = (mcp: McpListenerHandlerOptions | undefined) =>
+    createThebeHttpHandler({
+      ...handlerOptions,
+      allowedHosts: mcp?.allowedHosts ?? handlerOptions.allowedHosts,
+      mcpOnly: true,
+      rateLimiter: mcp?.rateLimit
+        ? createRateLimiter(mcp.rateLimit, () =>
+            (options.now ?? (() => new Date()))().getTime()
+          )
+        : undefined,
+    });
+  return { agent, prompt, send: prompt, handler, createMcpHandler };
 }

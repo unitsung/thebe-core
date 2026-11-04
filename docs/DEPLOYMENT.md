@@ -138,6 +138,9 @@ enable it by default. This never pushes.
 | `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                               |
 | `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                |
 | `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                        |
+| `THEBE_MCP_PORT`                                                                   | no (off)                 | Second port that serves only `/mcp`, for exposing Core to the internet without the API (section 4.3)                                                                             |
+| `THEBE_MCP_HOST`                                                                   | no (`THEBE_HOST`)        | Bind address of the `/mcp`-only port                                                                                                                                             |
+| `THEBE_MCP_RATE_LIMIT`                                                             | no (120)                 | Requests per minute each token may make on the `/mcp`-only port                                                                                                                  |
 | `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
 | `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                           |
 | `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                          |
@@ -175,6 +178,22 @@ signed, minimal event (a generic line, a category and a `thebe://` deep link) fo
 each approval that starts waiting. A device registers its APNs token with the relay
 using that public key, and the relay delivers only events signed by it. Unset, Core
 sends nothing and behaves as before. A relay that is down never fails a request.
+
+Notices go through a durable outbox kept next to the device state
+(`push-outbox.json`), so none is lost when the relay is down or Core restarts.
+The notices for one ticket to one device are sent in order, one at a time, each
+with a sequence number (`seq`) and the ticket id the client can sort by. If the
+relay cannot be reached, the head notice is retried with back-off from 5 to 300
+seconds and the ones behind it wait; nothing is given up on while the relay is
+unreachable. If the relay answers with a transient error (APNs refused the
+notice), the head is recorded as dropped after three of them and the queue moves
+on. A permanent refusal (bad signature, unknown device, malformed event) drops it
+at once. The reason for each drop is recorded and `GET /v1/health` shows
+`push.consecutiveFailures`, `push.pending`, `push.dropped` and `push.lastDrop`.
+A retry keeps the notice's id, which the relay remembers for 24 hours (across its
+own restarts) and passes to APNs as the collapse id, so a device shows a notice
+once. Upgrade the relay before Core: an older relay ignores `ticket` and `seq` but
+still delivers, yet forgets ids on restart.
 
 ## 4. Network exposure and client connections
 
@@ -261,12 +280,24 @@ An agent that connects over `/mcp` should have its own token, limited to `/mcp`:
 ```bash
 docker compose exec thebe-core node dist/token.js create "Claude Code" --scope mcp:read    # read tools only
 docker compose exec thebe-core node dist/token.js create "Home agent" --scope mcp:write    # read and write tools
+docker compose exec thebe-core node dist/token.js create "Janitor" --scope mcp:irreversible  # ...and deletes that cannot be undone
 ```
+
+`--scope` may be repeated or comma-separated (`--scope mcp:read,mcp:write`), and each scope includes the
+ones before it: `mcp:irreversible` also writes and reads.
 
 The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
 everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
 action. A write tool called with a read-only token fails at once and says which scope to grant;
 nothing waits for approval. `mcp:write` still obeys `THEBE_MCP_WRITES=off`.
+
+Deletes that cannot be undone are judged per call: deleting a download together with its files
+(`download.delete` with `deleteFiles: true`) and deleting a Navidrome playlist. A token without
+`mcp:irreversible` that makes one is refused at once, and the error says to make a token with that
+scope; deleting only a download task is an ordinary write. A token with no scope list keeps full
+access. Set `THEBE_MCP_IRREVERSIBLE=off` on the host to refuse these deletes for every token, whatever
+its scope. An allowed delete is audited (`GET /v1/audit`) with `irreversible: true` and the token's
+name in `caller`, and its result says it was irreversible.
 
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 
@@ -283,6 +314,53 @@ Device tokens live hashed in `{config}/tokens.json` (mode 0600) with last-use ti
 restart. If nothing is configured, nothing is accepted. A token set through `THEBE_TOKEN` belongs to
 your environment: `rotate` and `revoke --all` leave it alone. A token made without `--scope`, the
 shared token and `THEBE_TOKEN` have full access.
+
+### 4.3 Exposing only `/mcp` to the internet
+
+An agent such as Claude on the web has to reach Core from outside your network, but the rest of the
+API (`/v1/*`, `/docs`, `/openapi.json`) should not be reachable from there. Give `/mcp` its own port
+and publish only that one:
+
+```bash
+# .env (the container also needs the port published, see below)
+THEBE_MCP_PORT=8788
+THEBE_MCP_RATE_LIMIT=120   # optional: requests per minute for each token, default 120
+```
+
+Core then listens on two ports:
+
+| Port                    | Serves                                                                                    | Expose it?                         |
+| ----------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------- |
+| `THEBE_PORT` (8787)     | everything, as before                                                                     | no, keep it on loopback or the LAN |
+| `THEBE_MCP_PORT` (8788) | `POST /mcp` only; any other path is `404`, including `/v1/*`, `/docs` and `/openapi.json` | yes                                |
+
+The `/mcp` port checks the token and the `Host` header exactly as the main port does, so it still
+needs the public name in `THEBE_ALLOWED_HOSTS` (a `.ts.net` name is trusted automatically). Create a
+token that can do nothing else for the outside agent: `thebe token create claude --scope mcp:read`
+(or `mcp:write`); see section 4.2.
+
+Each token may make `THEBE_MCP_RATE_LIMIT` requests per minute on this port. Past that, the caller
+gets `429` at once with `code: "rate_limited"` and a `Retry-After` header; nothing queues or waits,
+and other tokens are not affected. Requests with a missing or wrong token are refused before they
+are counted. The count is kept in memory, so a restart starts a fresh minute. The port has no
+protection against guessing tokens beyond the 256-bit token size, so keep it behind a tunnel that
+you can switch off.
+
+Publish just that port:
+
+```bash
+# Tailscale Funnel: public HTTPS for /mcp only; the main port stays on your tailnet or LAN
+tailscale funnel --bg 8443 http://127.0.0.1:8788
+
+# a tunnel (cloudflared) or a reverse proxy: point it at the /mcp port, never at 8787
+cloudflared tunnel --url http://127.0.0.1:8788
+```
+
+In Docker, publish the second port next to the first in `deploy/docker-compose.yml`
+(`"${THEBE_BIND:-127.0.0.1}:8788:8788"`) and set `THEBE_MCP_PORT=8788` in `deploy/.env`. Funnel and the
+tunnel run on the host and talk to the loopback-published port. Then check from outside:
+`POST https://<public name>/mcp` with the token works, and `GET https://<public name>/v1/health`
+and `/docs` answer `404`.
 
 ## 5. Process isolation boundary
 
