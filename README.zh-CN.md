@@ -56,7 +56,7 @@ Core 不自带模型：在终端界面里用 `/settings`，或通过 `GET /v1/pr
 
 ## 怎么用
 
-**接入你自己的 agent（MCP）。** `POST /mcp` 是无状态的 JSON-RPC 端点（只有 tools），暴露 Core 的能力。在 `X-Thebe-Token` 请求头里带 token：
+**接入你自己的 agent（MCP）。** `POST /mcp` 是无状态的 JSON-RPC 端点（只有 tools），暴露 Core 的能力。支持的 MCP 版本：2026-07-28（无需 `initialize`，版本和客户端能力随每个请求携带）、2025-11-25、2025-06-18、2025-03-26。在 `X-Thebe-Token` 请求头里带 token：
 
 ```bash
 curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
