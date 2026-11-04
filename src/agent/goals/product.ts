@@ -1,5 +1,6 @@
 import type { GoalEvent } from "./runner.ts";
 import type { GoalRun, GoalRunStatus, SubagentRun } from "../types.ts";
+import type { ReportRole, ReportState } from "../reports/report.ts";
 
 /** Product-facing Goal status. Runtime `pausing` collapses to `running`. */
 export type ProductGoalStatus =
@@ -34,6 +35,20 @@ export type ProductError = {
   retryable?: boolean;
 };
 
+/** The latest structured word from the goal's worker or reviewer. */
+export type ProductGoalReport = {
+  state: ReportState;
+  summary: string;
+  at: string;
+  role: ReportRole;
+};
+
+/** The one question the goal needs the owner to answer. */
+export type ProductGoalAttention = {
+  question: string;
+  askedAt: string;
+};
+
 export type ProductGoal = {
   id: string;
   sessionId: string;
@@ -52,6 +67,9 @@ export type ProductGoal = {
   artifactId?: string;
   error?: ProductError;
   currentRun?: ProductRun;
+  /** Added fields: absent on goals that never reported. */
+  report?: ProductGoalReport;
+  attention?: ProductGoalAttention;
   controls: ProductGoalControls;
 };
 
@@ -78,7 +96,9 @@ export type ProductGoalEvent = {
 
 const CRITIQUE_LIMIT = 400;
 
-export function mapGoalStatus(status: GoalRunStatus | "failed"): ProductGoalStatus {
+export function mapGoalStatus(
+  status: GoalRunStatus | "failed"
+): ProductGoalStatus {
   switch (status) {
     case "running":
     case "pausing":
@@ -128,13 +148,23 @@ export function toProductGoal(run: GoalRun): ProductGoal {
     artifactId: run.artifactId,
     error: run.error
       ? {
-          code: run.status === "max_iterations" ? "max_iterations" : "goal_failed",
+          code:
+            run.status === "max_iterations" ? "max_iterations" : "goal_failed",
           message: run.error,
         }
       : undefined,
     currentRun: run.activeSubagent
       ? toProductRun(run.thebeSessionId, run.activeSubagent)
       : undefined,
+    ...(run.report ? { report: { ...run.report } } : {}),
+    ...(run.attention
+      ? {
+          attention: {
+            question: run.attention.question,
+            askedAt: run.attention.askedAt,
+          },
+        }
+      : {}),
     controls: goalControls(run.status),
   };
 }
@@ -143,7 +173,7 @@ export function toProductGoalEvent(
   goalId: string,
   event: GoalEvent,
   index: number,
-  at: string,
+  at: string
 ): ProductGoalEvent {
   const id = String(index);
   switch (event.type) {
@@ -198,7 +228,9 @@ export function toProductGoalEvent(
         type: event.type,
         goalId,
         at,
-        status: mapGoalStatus(event.status === "pausing" ? "pausing" : event.status),
+        status: mapGoalStatus(
+          event.status === "pausing" ? "pausing" : event.status
+        ),
         phase: event.status,
         message: event.message,
       };
@@ -220,7 +252,7 @@ export function toProductGoalEvent(
 }
 
 export function isTerminalGoalStatus(
-  status: GoalRunStatus,
+  status: GoalRunStatus
 ): status is "completed" | "cancelled" | "failed" | "max_iterations" {
   return (
     status === "completed" ||
@@ -253,7 +285,8 @@ function currentStep(run: GoalRun): string | undefined {
     return `${run.activeSubagent.profileName} ${run.activeSubagent.status}`;
   }
   if (run.summary) return run.summary;
-  if (run.iteration > 0) return `Checkpoint ${run.iteration} of ${run.maxIterations}`;
+  if (run.iteration > 0)
+    return `Checkpoint ${run.iteration} of ${run.maxIterations}`;
   return undefined;
 }
 
