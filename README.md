@@ -75,7 +75,7 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
 
 ## Safety in short
 
-The token grants full access: there are no scopes. The container listens on loopback by default; put anything wider behind TLS (Tailscale or a reverse proxy) and list the host names in `THEBE_ALLOWED_HOSTS`. The default permission mode asks before editing files or running commands, shell commands are risk-graded and run in an OS sandbox on a host, tool output and MCP data are treated as untrusted, secrets are redacted, and every call is written to an append-only audit log (`audit.jsonl` in the agent store). [SECURITY.md](SECURITY.md) has the full model and how to report a vulnerability.
+A token grants full access unless it was made with `--scope` (see above), which limits it to `/mcp`. The container listens on loopback by default; put anything wider behind TLS (Tailscale or a reverse proxy) and list the host names in `THEBE_ALLOWED_HOSTS`. The default permission mode asks before editing files or running commands, shell commands are risk-graded and run in an OS sandbox on a host, tool output and MCP data are treated as untrusted, secrets are redacted, and every call is written to an append-only audit log (`audit.jsonl` in the agent store). [SECURITY.md](SECURITY.md) has the full model and how to report a vulnerability.
 
 ## Responsible use
 

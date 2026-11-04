@@ -93,6 +93,11 @@ export type TokenScope = (typeof TOKEN_SCOPES)[number];
 /** Whose token it is, and what it may do. No `scopes` means full access, as every token had before scopes. */
 export type TokenCaller = { name: string; scopes?: readonly TokenScope[] };
 
+/** Whether this caller may run write tools: a token with no scope list has full access. */
+export function tokenMayWrite(caller: TokenCaller | undefined): boolean {
+  return !caller?.scopes || caller.scopes.includes("mcp:write");
+}
+
 /** What the HTTP handler asks: whose token is this, if it is one of ours. */
 export type TokenVerifier = {
   verify(received: string): TokenCaller | undefined;
@@ -261,7 +266,10 @@ function knownScopes(
   if (stored === undefined) return undefined;
   const known = (value: unknown): value is TokenScope =>
     (TOKEN_SCOPES as readonly unknown[]).includes(value);
-  return Array.isArray(stored) && stored.every(known) ? stored : "unknown";
+  // An empty list is as unusable as an unknown name: refuse it, do not guess what was meant.
+  return Array.isArray(stored) && stored.length > 0 && stored.every(known)
+    ? stored
+    : "unknown";
 }
 
 /**

@@ -53,6 +53,12 @@ describe("a token limited to /mcp", () => {
     }
   });
 
+  it("works on /mcp/ with a trailing slash, as the router treats it", async () => {
+    const h = await handler();
+    const res = await h.handle(call(reader, "/mcp/", ping));
+    expect(res.status).toBe(200);
+  });
+
   it("is refused everywhere else, so a read token cannot start a session or run an action", async () => {
     const h = await handler();
     const attempts: Array<[string, RequestInit]> = [

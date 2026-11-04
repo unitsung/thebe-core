@@ -285,11 +285,25 @@ describe("per-device tokens", () => {
     expect(runTokenCommand(["create", "Bad", "--scope"], configDir, io)).toBe(
       2
     );
+    expect(
+      runTokenCommand(
+        ["create", "Twice", "--scope", "mcp:read", "--scope", "mcp:write"],
+        configDir,
+        io
+      )
+    ).toBe(2);
     expect(readDeviceTokens(configDir).map((t) => t.name)).toEqual([
       "Claude Code",
       "Hub",
       "iPad",
     ]);
+
+    expect(
+      runTokenCommand(["create", "Eq", "--scope=mcp:read"], configDir, io)
+    ).toBe(0);
+    out.length = 0;
+    runTokenCommand(["list"], configDir, io);
+    expect(out.at(-1)).toContain("Eq\tscope mcp:read\t");
   });
 
   it("create and list through the command", async () => {
@@ -357,7 +371,7 @@ describe("scoped device tokens", () => {
     expect(verify.verify("env-token")).toEqual({ name: "env" });
   });
 
-  it("accept nothing when the stored scope is one Core does not know", async () => {
+  it("accept nothing when the stored scope is one Core does not know, or is not a usable list", async () => {
     const configDir = await dir();
     createDeviceToken({
       configDir,
@@ -367,11 +381,19 @@ describe("scoped device tokens", () => {
     });
     const path = join(configDir, "tokens.json");
     const stored = JSON.parse(await readFile(path, "utf8"));
-    stored.tokens[0].scopes = ["mcp:root"];
-    await writeFile(path, JSON.stringify(stored));
-
-    expect(
-      createTokenVerifier({ configDir, env: {} }).verify(reader)
-    ).toBeUndefined();
+    for (const bad of [
+      ["mcp:root"],
+      ["mcp:read", "mcp:root"],
+      [],
+      "mcp:read",
+      null,
+    ]) {
+      stored.tokens[0].scopes = bad;
+      await writeFile(path, JSON.stringify(stored));
+      expect(
+        createTokenVerifier({ configDir, env: {} }).verify(reader),
+        JSON.stringify(bad)
+      ).toBeUndefined();
+    }
   });
 });

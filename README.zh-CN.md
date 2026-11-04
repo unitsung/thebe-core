@@ -75,7 +75,7 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
 
 ## 安全要点
 
-token 拥有全部权限，没有作用域。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认；shell 命令会先做风险分级，在宿主机上运行于系统沙箱里；工具输出和 MCP 数据都当作不可信数据；密钥会被脱敏；每次调用都写入只追加的审计日志（agent store 目录下的 `audit.jsonl`）。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+token 默认拥有全部权限；用 `--scope` 创建的 token 只能用在 `/mcp`（见上文）。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认；shell 命令会先做风险分级，在宿主机上运行于系统沙箱里；工具输出和 MCP 数据都当作不可信数据；密钥会被脱敏；每次调用都写入只追加的审计日志（agent store 目录下的 `audit.jsonl`）。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 ## 使用须知
 

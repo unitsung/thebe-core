@@ -1,6 +1,7 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { DeviceRegistry } from "./devices.ts";
+import { normalizedPath } from "./context.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
@@ -76,7 +77,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
             401
           );
         }
-        if (caller.scopes && requestPath(request) !== "/mcp") {
+        if (caller.scopes && pathOf(request) !== "/mcp") {
           // A valid token, but not one for this route: 403, so the caller can tell it from a bad token.
           return json(
             {
@@ -99,6 +100,14 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
   };
 }
 
+function pathOf(request: Request): string {
+  try {
+    return normalizedPath(new URL(request.url));
+  } catch {
+    return "";
+  }
+}
+
 /**
  * The token a request carries: `X-Thebe-Token`, or else `Authorization: Bearer`, the form Claude's
  * API and most agent clients send. When both are present the header wins, so one request is never
@@ -111,15 +120,6 @@ function receivedToken(request: Request): string {
     request.headers.get("Authorization")?.trim() ?? ""
   );
   return bearer?.[1] ?? "";
-}
-
-/** The path as routes see it: no trailing slash. */
-function requestPath(request: Request): string {
-  try {
-    return new URL(request.url).pathname.replace(/\/$/, "") || "/";
-  } catch {
-    return "";
-  }
 }
 
 function isDocumentationRequest(request: Request): boolean {

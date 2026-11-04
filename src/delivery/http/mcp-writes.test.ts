@@ -132,12 +132,20 @@ function setup(
 ) {
   const calls: string[] = [];
   const provider = containers();
+  const repairs: unknown[] = [];
   const agent = createThebeAgent({
     runtime: createFakeRuntime().runtime,
     provider,
     mcp: providerRegistry(calls),
     serviceAPIProviders: [petstore(requests)],
     navidrome: navidrome(playlists),
+    strmRepairProvider: {
+      service: "openlist",
+      async repair(input) {
+        repairs.push(input);
+        return { status: "repaired", summary: "repaired" };
+      },
+    },
     mcpWritesAllowed,
   });
   const handler = createThebeHttpHandler({ version: "0.1.0", agent, token });
@@ -166,7 +174,7 @@ function setup(
       error?: unknown;
     };
   };
-  return { call, calls, provider };
+  return { call, calls, provider, repairs };
 }
 
 const text = (reply: Awaited<ReturnType<ReturnType<typeof setup>["call"]>>) =>
@@ -174,10 +182,11 @@ const text = (reply: Awaited<ReturnType<ReturnType<typeof setup>["call"]>>) =>
 
 describe("/mcp write tools", () => {
   it("are refused when the host turns writes off, whoever lists them", async () => {
-    const { call, calls, provider } = setup(false);
+    const { call, calls, provider, repairs } = setup(false);
     for (const [name, args] of [
       ["container.restart", { id: "ctr-1" }],
       ["mcp:radarr/delete_movie", { id: 1 }],
+      ["strm.repair", { title: "Dune" }],
     ] as const) {
       const reply = await call(name, args);
       expect(reply.result?.isError, name).toBe(true);
@@ -185,6 +194,7 @@ describe("/mcp write tools", () => {
     }
     expect(calls).toEqual([]);
     expect(provider.restarts).toEqual([]);
+    expect(repairs).toEqual([]);
   });
 
   it("cannot be previewed and confirmed by the calling agent when writes are off", async () => {
@@ -288,7 +298,7 @@ describe("/mcp write tools by token scope", () => {
   }
 
   it("a read token reads, and every kind of write is refused with the scope to ask for", async () => {
-    const { call, calls, provider, requests, playlists } =
+    const { call, calls, provider, requests, playlists, repairs } =
       await withTokens(true);
     for (const [name, args] of [
       ["container.restart", { id: "ctr-1" }],
@@ -296,6 +306,7 @@ describe("/mcp write tools by token scope", () => {
       ["service_api.petstore.deletePet", { petId: 7 }],
       ["service_api.confirm", { token: "t" }],
       ["navidrome.playlist.create", { name: "Mix", songIds: ["s1"] }],
+      ["strm.repair", { title: "Dune" }],
     ] as const) {
       const reply = await call(name, args, read);
       expect(reply.result?.isError, name).toBe(true);
@@ -305,6 +316,7 @@ describe("/mcp write tools by token scope", () => {
     expect(provider.restarts).toEqual([]);
     expect(requests).toEqual([]);
     expect(playlists).toEqual([]);
+    expect(repairs).toEqual([]);
 
     const listed = await call("mcp:radarr/list_movies", {}, read);
     expect(listed.result?.isError).toBeUndefined();
@@ -312,12 +324,15 @@ describe("/mcp write tools by token scope", () => {
   });
 
   it("a write token, and a token with no scope, can write", async () => {
-    const { call, provider } = await withTokens(true);
+    const { call, provider, repairs } = await withTokens(true);
     for (const token of [write, full]) {
       const reply = await call("container.restart", { id: "ctr-1" }, token);
       expect(reply.result?.isError, token.slice(0, 1)).toBeUndefined();
+      const repaired = await call("strm.repair", { title: "Dune" }, token);
+      expect(repaired.result?.isError, token.slice(0, 1)).toBeUndefined();
     }
     expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
+    expect(repairs).toHaveLength(2);
   });
 
   it("a write token is still refused when the host turns writes off", async () => {
