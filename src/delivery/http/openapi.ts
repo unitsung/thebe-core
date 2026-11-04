@@ -516,7 +516,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: PRODUCT_HTTP_PATH.policy,
-    summary: "Read the current policy: rules, accept mode, default rule sets and source settings",
+    summary:
+      "Read the current policy: rules, accept mode, default rule sets and source settings",
     tag: "policy",
     responseSchema: "Policy",
   },
@@ -546,7 +547,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: `${PRODUCT_HTTP_PATH.policy}/versions/{version}`,
-    summary: "Read one policy version by the number a mandate or decision recorded",
+    summary:
+      "Read one policy version by the number a mandate or decision recorded",
     tag: "policy",
     parameters: [idParameter("version")],
     responseSchema: "Policy",
@@ -1394,6 +1396,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
+            caller: { type: "string" },
+            irreversible: { type: "boolean" },
           },
         },
         AuditList: {
@@ -2643,7 +2647,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             defaultSets: {
               type: "object",
-              description: "Default rule set id to on or off; others keep their state.",
+              description:
+                "Default rule set id to on or off; others keep their state.",
               additionalProperties: { type: "boolean" },
             },
             sources: {

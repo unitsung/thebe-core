@@ -25,6 +25,9 @@ import type {
   ThebeSessionContext,
 } from "../runtime/index.ts";
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
+import { DOWNLOAD_TOOL_NAMES } from "../capabilities/pipeline.ts";
+import { availableDownloadTools } from "../tools/pipeline-tools.ts";
+import { irreversibleCall } from "../security/irreversible.ts";
 import type {
   AuditPage,
   AuditRecord,
@@ -270,12 +273,17 @@ export function createControlApi(
 
   async function runBaseTool(
     name: string,
-    args: unknown
+    args: unknown,
+    auditExtra?: Parameters<typeof wrapCustomTools>[1]["auditExtra"]
   ): Promise<{ text: string; isError: boolean }> {
     // A control-plane invocation is its own run: it has no session key, so without this the shared
     // default budget would count every invocation since the last diagnosis.
     policy.beginRun();
-    const tools = wrapCustomTools(baseTools(), { policy, audit });
+    const tools = wrapCustomTools(baseTools(), {
+      policy,
+      audit,
+      auditExtra,
+    });
     const tool = tools.find((item) => item.name === name);
     if (!tool) {
       throw httpError(404, `unknown tool: ${name}`);
@@ -298,6 +306,9 @@ export function createControlApi(
       emby: Boolean(options.emby),
       jellyfin: Boolean(options.jellyfin),
       immich: Boolean(options.immich),
+      downloadTools: options.pipeline
+        ? availableDownloadTools(options.pipeline)
+        : [],
     });
 
   /** Whether calling this tool changes something, by what Core knows about it. */
@@ -341,6 +352,22 @@ export function createControlApi(
         "mcp_writes_not_enabled"
       );
     }
+    // Judged per call, here in the policy layer: neither the model nor the caller decides what is irreversible.
+    const irreversible = irreversibleCall(name, args);
+    if (irreversible && !ctx.mcpIrreversibleAllowed) {
+      throw httpError(
+        403,
+        `${name} is an irreversible delete (${irreversible.reason}), and this Core host refuses those over /mcp for every token (THEBE_MCP_IRREVERSIBLE=off)`,
+        "mcp_irreversible_not_enabled"
+      );
+    }
+    if (irreversible && !caller.irreversible) {
+      throw httpError(
+        403,
+        `${name} is an irreversible delete (${irreversible.reason}), and this token may not run those. Make a token that may with: thebe token create <name> --scope mcp:irreversible`,
+        "mcp_irreversible_scope_required"
+      );
+    }
     if (!caller.writes) {
       throw httpError(
         403,
@@ -349,6 +376,12 @@ export function createControlApi(
       );
     }
     const params = (args ?? {}) as Record<string, unknown>;
+    // Core's own tools write their audit record; this says who called over /mcp and marks an irreversible delete.
+    const auditExtra = {
+      source: "mcp",
+      caller: caller.name,
+      ...(irreversible && { irreversible: true }),
+    };
     if (name === CONTAINER_RESTART_ACTION_ID) {
       if (!deps.executeAction) {
         throw httpError(503, "container actions are not available");
@@ -377,9 +410,17 @@ export function createControlApi(
     }
     if (
       (NAVIDROME_WRITE_TOOL_NAMES as readonly string[]).includes(name) ||
+      (DOWNLOAD_TOOL_NAMES as readonly string[]).includes(name) ||
       name === SERVICE_API_WRITE_TOOL_NAME
     ) {
-      return runBaseTool(name, args);
+      const done = await runBaseTool(name, args, auditExtra);
+      // The result is the receipt: it says an irreversible delete ran, so the calling agent cannot report it as an ordinary write.
+      return irreversible && !done.isError
+        ? {
+            ...done,
+            text: `Irreversible delete: ${irreversible.reason}. Allowed by the mcp:irreversible scope of token "${caller.name}".\n${done.text}`,
+          }
+        : done;
     }
     if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
     // Core's own tools write their audit record; a provider's tool does not, so Core does.

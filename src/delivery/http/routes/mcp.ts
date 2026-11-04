@@ -10,7 +10,21 @@ import {
 import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
 import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
-import { tokenMayWrite } from "../token-store.ts";
+import {
+  tokenMayDeleteIrreversibly,
+  tokenMayWrite,
+  type TokenCaller,
+} from "../token-store.ts";
+
+/** What the write gate needs to know about the token behind this call. */
+export function toMcpCaller(caller: TokenCaller | undefined): McpCaller {
+  return {
+    name: caller?.name ?? "unknown",
+    writes: tokenMayWrite(caller),
+    irreversible: tokenMayDeleteIrreversibly(caller),
+    ...(caller?.scopes && { scopes: caller.scopes }),
+  };
+}
 
 const MCP_EVENT_TOOLS = [
   LIST_CORE_EVENTS_TOOL,
@@ -169,9 +183,12 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     const name = typeof params.name === "string" ? params.name : "";
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
-      const { text, isError } = await callTool(agent, name, params.arguments, {
-        writes: tokenMayWrite(context.caller),
-      });
+      const { text, isError } = await callTool(
+        agent,
+        name,
+        params.arguments,
+        toMcpCaller(context.caller)
+      );
       return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

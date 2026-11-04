@@ -203,6 +203,69 @@ export const PIPELINE_TOOL_NAMES = [
 ] as const;
 export type PipelineToolName = (typeof PIPELINE_TOOL_NAMES)[number];
 
+/** The download tools an agent on `/mcp` can reach; the file and library tools stay in conversations for now. */
+export const DOWNLOAD_TOOL_NAMES = [
+  "download.list",
+  "download.status",
+  "download.add",
+  "download.pause",
+  "download.resume",
+  "download.delete",
+] as const satisfies readonly PipelineToolName[];
+export type DownloadToolName = (typeof DOWNLOAD_TOOL_NAMES)[number];
+
+/**
+ * How `/mcp` and the capability catalogue describe the download tools. Writes are listed as needing
+ * approval, so direct capability invocation refuses them; over `/mcp` they run for a token that may
+ * write. Whether one call is an irreversible delete is judged per call, not here.
+ */
+export const DOWNLOAD_CAPABILITY_METADATA: Record<
+  DownloadToolName,
+  {
+    permission: "read" | "confirm";
+    effect: "read" | "write";
+    risk: "low" | "disruptive";
+    approval: "none" | "required";
+  }
+> = {
+  "download.list": {
+    permission: "read",
+    effect: "read",
+    risk: "low",
+    approval: "none",
+  },
+  "download.status": {
+    permission: "read",
+    effect: "read",
+    risk: "low",
+    approval: "none",
+  },
+  "download.add": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+  },
+  "download.pause": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+  },
+  "download.resume": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+  },
+  "download.delete": {
+    permission: "confirm",
+    effect: "write",
+    risk: "disruptive",
+    approval: "required",
+  },
+};
+
 const stringArray = (description: string) => ({
   type: "array",
   items: { type: "string" },

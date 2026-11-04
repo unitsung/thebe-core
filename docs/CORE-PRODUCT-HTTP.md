@@ -138,8 +138,9 @@ is not reachable through its web proxy, so Core calls its `/api/*` routes direct
 re-logs in once when the token is refused. `sqmusic_download` queues one song (`plugin`, `id`, the `query` it was found with, optional
 `quality`), or with `kind: "album"` every song of one album (the album's `id`, at most 60
 songs, SQMusic's default quality; `sqmusic_search` takes `kind: "album"` to list albums). It is a write: it is in the session's approval list, is listed as
-`approval: required`, and direct capability invocation or `/mcp` refuses it with 403 like the
-Navidrome playlist writes. Core re-searches to get SQMusic's own record (so the model cannot
+`approval: required`, and direct capability invocation (`POST /v1/capabilities/...`) refuses it with 403 like the
+Navidrome playlist writes. Over `/mcp` it is an ordinary write: it runs for a token that may write while the host allows
+writes (`THEBE_MCP_WRITES`), and a read token or `THEBE_MCP_WRITES=off` refuses it at once. Core re-searches to get SQMusic's own record (so the model cannot
 supply one), rejects a quality the search did not offer, never queues an artist's catalogue or
 more than one album at a time, and reads the task back from SQMusic. Results are bounded and remote text is untrusted data.
 Download buttons in a client are user actions, not agent calls.
@@ -289,6 +290,7 @@ arguments. Core permission modes are `plan`, `manual`, `acceptEdits`, and `bypas
 `POST /mcp` is a stateless JSON-RPC endpoint (protocol `2025-06-18`, `tools` only; no resources or prompts).
 
 - `tools/list` returns each tool with standard `annotations`: `readOnlyHint` and `destructiveHint` come from Core's own `effect`/`risk` classification (never from a remote server's claims), and `openWorldHint` is true for external or public-web tools. Thebe extras are namespaced under `_meta`: `thebe/category`, `thebe/resourceKinds`, `thebe/approval`. No `outputSchema` is advertised yet.
+- Irreversible deletes are judged per call (tool plus arguments): `download.delete` with `deleteFiles: true` and `navidrome.playlist.delete`. They need a token with `mcp:irreversible` (which includes `mcp:write`), or one with no scope list; otherwise the call returns `isError: true` at once, saying it is an irreversible delete and to run `thebe token create <name> --scope mcp:irreversible`. `THEBE_MCP_IRREVERSIBLE=off` on the host refuses them for every token, whatever its scope. `download.delete` with `deleteFiles: false` is an ordinary write. An allowed call is audited with `irreversible: true` and the calling token's name in `caller`, and its result begins with "Irreversible delete: ...". The download tools (`download.list|status|add|pause|resume|delete`) are listed on `/mcp` when a downloader is configured; the file and library tools are not.
 - `tools/call` returns text `content` (the universal fallback) and, when the result is a JSON object, the same data as `structuredContent`.
 - A tool that ran and failed, or rejected its input (including writes that need runtime approval), returns `result.isError: true` with the message as text. Only a failure of the request itself is a JSON-RPC error: `-32602` for an unknown tool, `-32000` when no agent service is attached, `-32003` while quiesced.
 

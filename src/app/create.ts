@@ -69,6 +69,7 @@ export function createThebeApp(options: {
   fullAccessAllowed?: boolean;
   remoteBashAllowed?: boolean;
   mcpWritesAllowed?: boolean;
+  mcpIrreversibleAllowed?: boolean;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
   workspacePath?: string;
@@ -146,6 +147,7 @@ export function createThebeApp(options: {
     fullAccessAllowed: options.fullAccessAllowed,
     remoteBashAllowed: options.remoteBashAllowed,
     mcpWritesAllowed: options.mcpWritesAllowed,
+    mcpIrreversibleAllowed: options.mcpIrreversibleAllowed,
     maxSubagentConcurrency: options.maxSubagentConcurrency,
     maxSubagentsPerParent: options.maxSubagentsPerParent,
     workspacePath: options.workspacePath,

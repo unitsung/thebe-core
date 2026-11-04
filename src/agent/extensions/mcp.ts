@@ -45,6 +45,12 @@ import {
   type NavidromeToolName,
 } from "../capabilities/navidrome.ts";
 import {
+  DOWNLOAD_CAPABILITY_METADATA,
+  PIPELINE_TOOL_DESCRIPTIONS,
+  PIPELINE_TOOL_SCHEMAS,
+  type DownloadToolName,
+} from "../capabilities/pipeline.ts";
+import {
   STRM_REPAIR_CAPABILITY_ID,
   STRM_REPAIR_DESCRIPTION,
   STRM_REPAIR_SCHEMA,
@@ -384,6 +390,8 @@ export function listCoreMcpTools(
     emby?: boolean;
     jellyfin?: boolean;
     immich?: boolean;
+    /** The download tools the configured downloader backs. */
+    downloadTools?: readonly DownloadToolName[];
   } = {}
 ): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
@@ -585,6 +593,27 @@ export function listCoreMcpTools(
         })
       );
     }
+  }
+
+  for (const name of options.downloadTools ?? []) {
+    const meta = DOWNLOAD_CAPABILITY_METADATA[name];
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: PIPELINE_TOOL_DESCRIPTIONS[name],
+        inputSchema: PIPELINE_TOOL_SCHEMAS[name],
+        category: "downloads",
+        permission: meta.permission,
+        effect: meta.effect,
+        risk: meta.risk,
+        approval: meta.approval,
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        execution: meta.effect === "write" ? "agent" : "direct",
+        background: false,
+      })
+    );
   }
 
   if (options.strmRepairProvider) {

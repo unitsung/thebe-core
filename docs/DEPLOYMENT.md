@@ -264,12 +264,24 @@ An agent that connects over `/mcp` should have its own token, limited to `/mcp`:
 ```bash
 docker compose exec thebe-core node dist/token.js create "Claude Code" --scope mcp:read    # read tools only
 docker compose exec thebe-core node dist/token.js create "Home agent" --scope mcp:write    # read and write tools
+docker compose exec thebe-core node dist/token.js create "Janitor" --scope mcp:irreversible  # ...and deletes that cannot be undone
 ```
+
+`--scope` may be repeated or comma-separated (`--scope mcp:read,mcp:write`), and each scope includes the
+ones before it: `mcp:irreversible` also writes and reads.
 
 The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
 everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
 action. A write tool called with a read-only token fails at once and says which scope to grant;
 nothing waits for approval. `mcp:write` still obeys `THEBE_MCP_WRITES=off`.
+
+Deletes that cannot be undone are judged per call: deleting a download together with its files
+(`download.delete` with `deleteFiles: true`) and deleting a Navidrome playlist. A token without
+`mcp:irreversible` that makes one is refused at once, and the error says to make a token with that
+scope; deleting only a download task is an ordinary write. A token with no scope list keeps full
+access. Set `THEBE_MCP_IRREVERSIBLE=off` on the host to refuse these deletes for every token, whatever
+its scope. An allowed delete is audited (`GET /v1/audit`) with `irreversible: true` and the token's
+name in `caller`, and its result says it was irreversible.
 
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 
@@ -301,10 +313,10 @@ THEBE_MCP_RATE_LIMIT=120   # optional: requests per minute for each token, defau
 
 Core then listens on two ports:
 
-| Port | Serves | Expose it? |
-| ---- | ------ | ---------- |
-| `THEBE_PORT` (8787) | everything, as before | no, keep it on loopback or the LAN |
-| `THEBE_MCP_PORT` (8788) | `POST /mcp` only; any other path is `404`, including `/v1/*`, `/docs` and `/openapi.json` | yes |
+| Port                    | Serves                                                                                    | Expose it?                         |
+| ----------------------- | ----------------------------------------------------------------------------------------- | ---------------------------------- |
+| `THEBE_PORT` (8787)     | everything, as before                                                                     | no, keep it on loopback or the LAN |
+| `THEBE_MCP_PORT` (8788) | `POST /mcp` only; any other path is `404`, including `/v1/*`, `/docs` and `/openapi.json` | yes                                |
 
 The `/mcp` port checks the token and the `Host` header exactly as the main port does, so it still
 needs the public name in `THEBE_ALLOWED_HOSTS` (a `.ts.net` name is trusted automatically). Create a

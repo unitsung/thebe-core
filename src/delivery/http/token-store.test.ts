@@ -286,8 +286,18 @@ describe("per-device tokens", () => {
       2
     );
     expect(
+      runTokenCommand(["create", "Empty", "--scope="], configDir, io)
+    ).toBe(2);
+    expect(
       runTokenCommand(
-        ["create", "Twice", "--scope", "mcp:read", "--scope", "mcp:write"],
+        ["create", "Comma", "--scope", "mcp:read,"],
+        configDir,
+        io
+      )
+    ).toBe(2);
+    expect(
+      runTokenCommand(
+        ["create", "Mixed", "--scope", "mcp:read,admin"],
         configDir,
         io
       )
@@ -304,6 +314,62 @@ describe("per-device tokens", () => {
     out.length = 0;
     runTokenCommand(["list"], configDir, io);
     expect(out.at(-1)).toContain("Eq\tscope mcp:read\t");
+  });
+
+  it("create takes --scope repeated or comma-separated, and the irreversible scope includes write and read", async () => {
+    const configDir = await dir();
+    const out: string[] = [];
+    const io = {
+      log: (l: string) => out.push(l),
+      error: () => {},
+      env: {},
+    };
+    expect(
+      runTokenCommand(
+        ["create", "Twice", "--scope", "mcp:read", "--scope", "mcp:write"],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    expect(
+      runTokenCommand(
+        ["create", "Listed", "--scope=mcp:read,mcp:write"],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    expect(
+      runTokenCommand(
+        ["create", "Agent", "--scope", "mcp:irreversible"],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    expect(
+      runTokenCommand(
+        [
+          "create",
+          "Both",
+          "--scope",
+          "mcp:read",
+          "--scope",
+          "mcp:irreversible",
+        ],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    out.length = 0;
+    runTokenCommand(["list"], configDir, io);
+    expect(out[0]).toContain("Twice\tscope mcp:write\t");
+    expect(out[1]).toContain("Listed\tscope mcp:write\t");
+    expect(out[2]).toContain("Agent\tscope mcp:irreversible\t");
+    expect(out[3]).toContain("Both\tscope mcp:irreversible\t");
+    expect(readDeviceTokens(configDir)[2]?.scopes).toEqual([
+      "mcp:read",
+      "mcp:write",
+      "mcp:irreversible",
+    ]);
   });
 
   it("create and list through the command", async () => {

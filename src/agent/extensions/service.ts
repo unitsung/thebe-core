@@ -1,3 +1,4 @@
+import { availableDownloadTools } from "../tools/pipeline-tools.ts";
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { EnabledResource } from "../runtime/index.ts";
 import type { AgentContext } from "../internal/context.ts";
@@ -75,6 +76,9 @@ export function createExtensionApi(
         emby: Boolean(ctx.options.emby),
         jellyfin: Boolean(ctx.options.jellyfin),
         immich: Boolean(ctx.options.immich),
+        downloadTools: ctx.options.pipeline
+          ? availableDownloadTools(ctx.options.pipeline)
+          : [],
       }),
       ...ctx
         .baseTools()
