@@ -123,7 +123,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/health",
-    summary: "Health check, with push delivery state when push is on",
+    summary:
+      "Health check, with push delivery state when push is on and the capabilities this Core offers",
     tag: "system",
   },
   {
@@ -560,6 +561,22 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.tickets,
+    summary:
+      "List tickets, newest first, each with its derived stage and links to the objects it wraps",
+    tag: "tickets",
+    responseSchema: "TicketList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.tickets}/{id}`,
+    summary: "Read one ticket",
+    tag: "tickets",
+    parameters: [idParameter()],
+    responseSchema: "Ticket",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.permissionSettings,
     summary: "Read permission mode",
     tag: "settings",
@@ -751,7 +768,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/goals/{id}",
-    summary: "Read one Goal (id is thebeSessionId)",
+    summary:
+      "Read one Goal (id is the thebeSessionId or the id of the ticket that wraps it)",
     tag: "goal",
     parameters: [idParameter()],
     responseSchema: "ProductGoal",
@@ -1347,6 +1365,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           "Versioned natural-language rules, accept mode (off, observe, auto) and per-source settings. Every change creates a new immutable version; an update must carry the version it read.",
       },
       {
+        name: "tickets",
+        description:
+          "Read-only tickets: the unit of authorised work. A ticket's id is derived from its content, so the same trigger accepted twice yields one ticket. It wraps a goal (and later receipts, artifacts, runs) without copying their state; its stage is derived on every read.",
+      },
+      {
         name: "goal",
         description:
           "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
@@ -1717,6 +1740,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["needs_approval"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             approval: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1729,6 +1753,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1741,6 +1766,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1753,6 +1779,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             goal: { $ref: "#/components/schemas/ProductGoal" },
           },
         },
@@ -1765,6 +1792,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             run: { $ref: "#/components/schemas/CapabilityRun" },
           },
         },
@@ -1777,6 +1805,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             worker: { $ref: "#/components/schemas/ProductWorker" },
           },
         },
@@ -1789,6 +1818,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
         },
@@ -1838,6 +1868,92 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   additionalProperties: { type: "integer" },
                 },
               },
+            },
+          },
+        },
+        ActivityTicketId: {
+          type: "string",
+          description:
+            "The ticket that wraps this item. Absent on items no ticket wraps.",
+        },
+        TicketLinks: {
+          type: "object",
+          description:
+            "The objects the ticket wraps. They keep their own ids and their single writer.",
+          required: [
+            "sessionIds",
+            "capabilityRunIds",
+            "receiptIds",
+            "artifactIds",
+            "pipelineJobIds",
+          ],
+          properties: {
+            legacyGoalId: {
+              type: "string",
+              description: "The goal loop doing the work (its thebeSessionId).",
+            },
+            legacyGoalStartedAt: {
+              type: "string",
+              description: "When that goal run started.",
+            },
+            sessionIds: { type: "array", items: { type: "string" } },
+            capabilityRunIds: { type: "array", items: { type: "string" } },
+            receiptIds: { type: "array", items: { type: "string" } },
+            artifactIds: { type: "array", items: { type: "string" } },
+            pipelineJobIds: { type: "array", items: { type: "string" } },
+          },
+        },
+        Ticket: {
+          type: "object",
+          required: [
+            "id",
+            "title",
+            "createdAt",
+            "mandate",
+            "origin",
+            "links",
+            "stage",
+          ],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "32 hex characters derived from the ticket's content.",
+            },
+            title: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+            mandate: {
+              type: "object",
+              required: ["strength"],
+              properties: {
+                strength: {
+                  type: "string",
+                  enum: ["explicit", "inferred"],
+                  description:
+                    "explicit when the owner asked for the work, inferred when Thebe started it.",
+                },
+              },
+            },
+            origin: {
+              type: "object",
+              required: ["kind", "thread", "triggerId"],
+              properties: {
+                kind: { type: "string", enum: ["direct"] },
+                thread: { type: "string" },
+                triggerId: { type: "string" },
+              },
+            },
+            links: { $ref: "#/components/schemas/TicketLinks" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
+          },
+        },
+        TicketList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Ticket" },
             },
           },
         },
@@ -2570,6 +2686,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            triggerId: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              description:
+                "Names this request (a chat message or client request id). Sending the same one again returns the goal it already started with 200 and creates no second ticket.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2803,6 +2926,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             id: { type: "string" },
             sessionId: { type: "string" },
+            ticketId: {
+              type: "string",
+              description:
+                "The ticket that wraps this goal. Absent on goals started without one.",
+            },
             title: { type: "string" },
             status: {
               type: "string",

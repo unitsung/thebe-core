@@ -1,0 +1,164 @@
+{
+  "version": 1,
+  "list": {
+    "tickets": [
+      {
+        "id": "1c5fc07a17e2e44f05b357f7ca0186e1",
+        "title": "Tidy the media library",
+        "createdAt": "2026-11-04T09:00:00.000Z",
+        "mandate": {
+          "strength": "explicit"
+        },
+        "origin": {
+          "kind": "direct",
+          "thread": "chat",
+          "triggerId": "client:chat-message-42"
+        },
+        "links": {
+          "legacyGoalId": "goal-1",
+          "legacyGoalStartedAt": "2026-11-04T09:00:00.000Z",
+          "sessionIds": [
+            "goal-1"
+          ],
+          "capabilityRunIds": [],
+          "receiptIds": [],
+          "artifactIds": [],
+          "pipelineJobIds": []
+        },
+        "stage": {
+          "kind": "person",
+          "reason": "answer"
+        }
+      },
+      {
+        "id": "c0ea07b09754406496e230d998b5196d",
+        "title": "Check the backups",
+        "createdAt": "2026-11-04T08:00:00.000Z",
+        "mandate": {
+          "strength": "explicit"
+        },
+        "origin": {
+          "kind": "direct",
+          "thread": "session:goal-2",
+          "triggerId": "goal:2026-11-04T08:00:00.000Z"
+        },
+        "links": {
+          "legacyGoalId": "goal-2",
+          "legacyGoalStartedAt": "2026-11-04T08:00:00.000Z",
+          "sessionIds": [
+            "goal-2"
+          ],
+          "capabilityRunIds": [],
+          "receiptIds": [],
+          "artifactIds": [],
+          "pipelineJobIds": []
+        },
+        "stage": {
+          "kind": "ended"
+        }
+      }
+    ]
+  },
+  "item": {
+    "id": "1c5fc07a17e2e44f05b357f7ca0186e1",
+    "title": "Tidy the media library",
+    "createdAt": "2026-11-04T09:00:00.000Z",
+    "mandate": {
+      "strength": "explicit"
+    },
+    "origin": {
+      "kind": "direct",
+      "thread": "chat",
+      "triggerId": "client:chat-message-42"
+    },
+    "links": {
+      "legacyGoalId": "goal-1",
+      "legacyGoalStartedAt": "2026-11-04T09:00:00.000Z",
+      "sessionIds": [
+        "goal-1"
+      ],
+      "capabilityRunIds": [],
+      "receiptIds": [],
+      "artifactIds": [],
+      "pipelineJobIds": []
+    },
+    "stage": {
+      "kind": "person",
+      "reason": "answer"
+    }
+  },
+  "goal": {
+    "withTicketId": {
+      "id": "goal-1",
+      "sessionId": "goal-1",
+      "title": "Tidy the media library",
+      "status": "paused",
+      "phase": "paused",
+      "progress": 0.125,
+      "currentStep": "Paused",
+      "iteration": 1,
+      "maxIterations": 8,
+      "createdAt": "2026-11-04T09:00:00.000Z",
+      "updatedAt": "2026-11-04T09:30:00.000Z",
+      "summary": "Goal paused: waiting for your answer.",
+      "report": {
+        "state": "waiting",
+        "summary": "Two folders match.",
+        "at": "2026-11-04T09:30:00.000Z",
+        "role": "worker"
+      },
+      "attention": {
+        "question": "Which folder should I clean?",
+        "askedAt": "2026-11-04T09:30:00.000Z"
+      },
+      "controls": {
+        "pause": false,
+        "resume": true,
+        "stop": true
+      },
+      "ticketId": "1c5fc07a17e2e44f05b357f7ca0186e1"
+    },
+    "legacy": {
+      "id": "goal-1",
+      "sessionId": "goal-1",
+      "title": "Tidy the media library",
+      "status": "paused",
+      "phase": "paused",
+      "progress": 0.125,
+      "currentStep": "Paused",
+      "iteration": 1,
+      "maxIterations": 8,
+      "createdAt": "2026-11-04T09:00:00.000Z",
+      "updatedAt": "2026-11-04T09:30:00.000Z",
+      "summary": "Goal paused: waiting for your answer.",
+      "report": {
+        "state": "waiting",
+        "summary": "Two folders match.",
+        "at": "2026-11-04T09:30:00.000Z",
+        "role": "worker"
+      },
+      "attention": {
+        "question": "Which folder should I clean?",
+        "askedAt": "2026-11-04T09:30:00.000Z"
+      },
+      "controls": {
+        "pause": false,
+        "resume": true,
+        "stop": true
+      }
+    }
+  },
+  "health": {
+    "withTickets": {
+      "ok": true,
+      "version": "0.1.0",
+      "capabilities": {
+        "tickets": true
+      }
+    },
+    "legacy": {
+      "ok": true,
+      "version": "0.1.0"
+    }
+  }
+}

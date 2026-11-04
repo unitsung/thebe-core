@@ -17,6 +17,7 @@ import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
 import { handleMemoryRoutes } from "./routes/memory.ts";
 import { handlePolicyRoutes } from "./routes/policy.ts";
+import { handleTicketRoutes } from "./routes/tickets.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
@@ -138,6 +139,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const policyResponse = await handlePolicyRoutes(context);
       if (policyResponse) {
         return policyResponse;
+      }
+      const ticketResponse = await handleTicketRoutes(context);
+      if (ticketResponse) {
+        return ticketResponse;
       }
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {

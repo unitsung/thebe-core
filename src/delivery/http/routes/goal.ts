@@ -1,4 +1,6 @@
 import { toProductGoal, toProductGoalEvent } from "../../../agent/index.ts";
+import type { GoalRun } from "../../../agent/types.ts";
+import { goalTicketKey } from "../../../agent/tickets/types.ts";
 import {
   agentUnavailable,
   quiescedWrite,
@@ -11,8 +13,11 @@ import { goalEventStream } from "../protocol/sse.ts";
 
 type Agent = NonNullable<ThebeHttpContext["agent"]>;
 
+const MAX_TRIGGER_ID = 200;
+
 /**
- * Product Goal HTTP. Identity is the parent `thebeSessionId` (no new Goal id).
+ * Product Goal HTTP. Identity is the parent `thebeSessionId` (no new Goal id). `/v1/goals/{id}` also
+ * accepts the id of the ticket that wraps the goal, and every response carries `ticketId` when one does.
  * Canonical session-scoped routes and `/v1/goals` aliases share the same mapper.
  */
 export async function handleGoalRoutes(
@@ -27,7 +32,15 @@ export async function handleGoalRoutes(
     if (parsed.kind === "collection") {
       if (request.method === "GET") {
         const goals = await agent.listGoals();
-        return json({ goals: goals.map(toProductGoal) });
+        const tickets = await agent.ticketIndex();
+        return json({
+          goals: goals.map((run) =>
+            toProductGoal(
+              run,
+              tickets.get(goalTicketKey(run.thebeSessionId, run.createdAt))
+            )
+          ),
+        });
       }
       if (request.method === "POST") {
         const blocked = quiescedWrite(context);
@@ -39,24 +52,29 @@ export async function handleGoalRoutes(
     if (!parsed.sessionId) {
       return json({ ok: false, error: "goal not found" }, 404);
     }
+    // `/v1/goals/{id}` also takes a ticket id; the session routes take only a session id.
+    const sessionId =
+      context.parts[1] === "goals"
+        ? await agent.resolveGoalId(parsed.sessionId)
+        : parsed.sessionId;
     if (parsed.kind === "item") {
-      if (request.method === "GET") return getGoal(agent, parsed.sessionId);
+      if (request.method === "GET") return getGoal(agent, sessionId);
       if (request.method === "POST") {
         const blocked = quiescedWrite(context);
         if (blocked) return blocked;
-        return createGoal(request, agent, parsed.sessionId);
+        return createGoal(request, agent, sessionId);
       }
       return undefined;
     }
     if (parsed.kind === "log") {
       if (request.method !== "GET") return undefined;
-      return goalLog(context, agent, parsed.sessionId);
+      return goalLog(context, agent, sessionId);
     }
     if (parsed.kind === "answer") {
       if (request.method !== "POST") return undefined;
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
-      return answerGoal(request, agent, parsed.sessionId);
+      return answerGoal(request, agent, sessionId);
     }
     if (
       parsed.kind === "pause" ||
@@ -68,7 +86,7 @@ export async function handleGoalRoutes(
         const blocked = quiescedWrite(context);
         if (blocked) return blocked;
       }
-      return controlGoal(agent, parsed.sessionId, parsed.kind);
+      return controlGoal(agent, sessionId, parsed.kind);
     }
     return undefined;
   } catch (error) {
@@ -92,6 +110,27 @@ async function createGoal(
       400
     );
   }
+  const rawTriggerId = body.triggerId;
+  if (
+    rawTriggerId !== undefined &&
+    (typeof rawTriggerId !== "string" ||
+      !rawTriggerId.trim() ||
+      rawTriggerId.length > MAX_TRIGGER_ID)
+  ) {
+    return json(
+      {
+        ok: false,
+        error: `triggerId must be a non-empty string of at most ${MAX_TRIGGER_ID} characters`,
+        code: "invalid_body",
+      },
+      400
+    );
+  }
+  const triggerId =
+    typeof rawTriggerId === "string" ? rawTriggerId.trim() : undefined;
+  // The same trigger asked twice is the same goal: answer with it and start nothing.
+  const started = triggerId ? await agent.goalForTrigger(triggerId) : undefined;
+  if (started) return goalResponse(agent, started, 200);
   const criteria = asStringList(body.criteria);
   const maxIterations =
     typeof body.maxIterations === "number" ? body.maxIterations : undefined;
@@ -148,8 +187,24 @@ async function createGoal(
     goal: goalText,
     criteria,
     maxIterations,
+    triggerId,
   });
-  return json(toProductGoal(run), existingSessionId ? 200 : 201);
+  return goalResponse(agent, run, existingSessionId ? 200 : 201);
+}
+
+async function goalResponse(
+  agent: Agent,
+  run: GoalRun,
+  status = 200
+): Promise<Response> {
+  const tickets = await agent.ticketIndex();
+  return json(
+    toProductGoal(
+      run,
+      tickets.get(goalTicketKey(run.thebeSessionId, run.createdAt))
+    ),
+    status
+  );
 }
 
 async function loadGoal(agent: Agent, sessionId: string) {
@@ -161,7 +216,7 @@ async function loadGoal(agent: Agent, sessionId: string) {
 
 async function getGoal(agent: Agent, sessionId: string): Promise<Response> {
   const run = await loadGoal(agent, sessionId);
-  if (run) return json(toProductGoal(run));
+  if (run) return goalResponse(agent, run);
   return json({ ok: false, error: "goal not found" }, 404);
 }
 
@@ -228,7 +283,7 @@ async function answerGoal(
       409
     );
   }
-  return json(toProductGoal(await agent.answerGoal(sessionId, answer)));
+  return goalResponse(agent, await agent.answerGoal(sessionId, answer));
 }
 
 async function controlGoal(
@@ -281,7 +336,7 @@ async function controlGoal(
       : action === "resume"
         ? await agent.resumeGoal(sessionId)
         : await agent.stopGoal(sessionId);
-  return json(toProductGoal(run));
+  return goalResponse(agent, run);
 }
 
 function parseGoalPath(

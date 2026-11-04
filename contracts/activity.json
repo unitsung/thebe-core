@@ -551,6 +551,7 @@
         "kind": "person",
         "reason": "answer"
       },
+      "ticketId": "0123456789abcdef0123456789abcdef",
       "type": "goal",
       "id": "goal-1",
       "group": "running",
@@ -582,9 +583,9 @@
           "pause": false,
           "resume": true,
           "stop": true
-        }
-      },
-      "ticketId": "0123456789abcdef0123456789abcdef"
+        },
+        "ticketId": "0123456789abcdef0123456789abcdef"
+      }
     }
   },
   "needsYou": {

@@ -14,6 +14,7 @@ import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { createReportInbox } from "./reports/report.ts";
 import { createPolicyApi } from "./policy/service.ts";
+import { createTicketApi } from "./tickets/service.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -51,6 +52,19 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "policy")
       : undefined,
     now: ctx.now,
+  });
+  const baseStageContext = () => ({
+    now: ctx.now(),
+    confirmationSessionIds: new Set(
+      sessions.listPendingPermissions().map((pending) => pending.sessionId)
+    ),
+  });
+  const tickets = createTicketApi({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "tickets")
+      : undefined,
+    listGoals: goals.listGoals,
+    stageContext: baseStageContext,
   });
   schedules.start();
   ctx.pipelineAdvancer?.start();
@@ -90,14 +104,27 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...createControlApi(ctx, artifactStore, {
       executeAction: actions.executeApprovedAction,
     }),
-    activityStageContext() {
-      return {
-        now: ctx.now(),
-        confirmationSessionIds: new Set(
-          sessions.listPendingPermissions().map((pending) => pending.sessionId)
-        ),
-      };
+    async activityStageContext() {
+      return { ...baseStageContext(), ticketIds: await tickets.ticketIndex() };
     },
+    async startGoal({ triggerId, ...input }) {
+      if (triggerId) {
+        const started = await tickets.goalForTrigger(triggerId);
+        if (started) return started;
+      }
+      const run = await goals.startGoal(input);
+      // A goal that is running must not fail to start because its ticket could not be written: the
+      // later backfill wraps goals that have none, idempotently by goal id.
+      await tickets
+        .acceptExplicitGoal({ run, triggerId })
+        .catch(() => undefined);
+      return run;
+    },
+    goalForTrigger: tickets.goalForTrigger,
+    listTickets: tickets.listTickets,
+    getTicket: tickets.getTicket,
+    resolveGoalId: tickets.resolveGoalId,
+    ticketIndex: tickets.ticketIndex,
     listSchedules: schedules.listSchedules,
     getSchedule: schedules.getSchedule,
     createSchedule: schedules.createSchedule,

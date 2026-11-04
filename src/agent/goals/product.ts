@@ -70,6 +70,8 @@ export type ProductGoal = {
   /** Added fields: absent on goals that never reported. */
   report?: ProductGoalReport;
   attention?: ProductGoalAttention;
+  /** The ticket that wraps this goal, when one does. Absent on goals started without one. */
+  ticketId?: string;
   controls: ProductGoalControls;
 };
 
@@ -125,7 +127,7 @@ export function goalControls(status: GoalRunStatus): ProductGoalControls {
   };
 }
 
-export function toProductGoal(run: GoalRun): ProductGoal {
+export function toProductGoal(run: GoalRun, ticketId?: string): ProductGoal {
   const progress =
     run.maxIterations > 0
       ? Math.min(1, Math.max(0, run.iteration / run.maxIterations))
@@ -166,6 +168,7 @@ export function toProductGoal(run: GoalRun): ProductGoal {
         }
       : {}),
     controls: goalControls(run.status),
+    ...(ticketId ? { ticketId } : {}),
   };
 }
 

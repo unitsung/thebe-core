@@ -38,6 +38,14 @@ describe("Activity contract", () => {
       { kind: "working" },
     ]);
     expect(contract.needsYou.count).toBe(5);
-    expect(contract.withTicketId.item).toHaveProperty("ticketId");
+    expect(contract.items.some((entry) => "ticketId" in entry.item)).toBe(
+      false
+    );
+    const wrapped = contract.withTicketId.item as {
+      ticketId?: string;
+      goal: { ticketId?: string };
+    };
+    expect(wrapped.ticketId).toMatch(/^[0-9a-f]{32}$/);
+    expect(wrapped.goal.ticketId).toBe(wrapped.ticketId);
   });
 });
