@@ -136,6 +136,18 @@ export function createThebeApp(options: {
           });
         }
       : undefined,
+    onGoalAttention: pushNotifier
+      ? (attention) => {
+          // One notice per question: the id is keyed by goal and ask time, so a repeat is dropped.
+          void pushNotifier.notify({
+            category: "thebe.activity",
+            title: "Thebe",
+            body: "A task has a question for you.",
+            deepLink: `thebe://goal/${encodeURIComponent(attention.goalId)}`,
+            id: `goal-question-${attention.goalId}-${attention.askedAt}`,
+          });
+        }
+      : undefined,
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,

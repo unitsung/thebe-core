@@ -6,6 +6,20 @@ import {
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 import {
+  PERSON_REASONS,
+  type ActivityStage,
+  type PersonReason,
+  type StageContext,
+  type StageKind,
+} from "./stage.ts";
+import {
+  backgroundTaskStage,
+  goalStage,
+  recordStage,
+  runStage,
+  workerStage,
+} from "./stage-facts.ts";
+import {
   ACTIVITY_KIND_DIAGNOSE,
   ACTIVITY_KIND_RESTART,
   assignActivityGroups,
@@ -34,56 +48,61 @@ export type ActivityCursor = {
   id: string;
 };
 
-export type ActivityFeedItem =
-  | {
-      type: "approval";
-      id: string;
-      group: "needs_approval";
-      updatedAt: string;
-      approval: ActivityRecord;
-    }
-  | {
-      type: "receipt";
-      id: string;
-      group: "running" | "recent";
-      updatedAt: string;
-      receipt: ActivityRecord;
-    }
-  | {
-      type: "diagnosis";
-      id: string;
-      group: "recent";
-      updatedAt: string;
-      diagnosis: ActivityRecord;
-    }
-  | {
-      type: "goal";
-      id: string;
-      group: "running" | "recent";
-      updatedAt: string;
-      goal: ProductGoal;
-    }
-  | {
-      type: "run";
-      id: string;
-      group: "running" | "recent";
-      updatedAt: string;
-      run: CapabilityRun;
-    }
-  | {
-      type: "worker";
-      id: string;
-      group: "running" | "recent";
-      updatedAt: string;
-      worker: ProductWorker;
-    }
-  | {
-      type: "background_task";
-      id: string;
-      group: "running" | "recent";
-      updatedAt: string;
-      task: ProductBackgroundTask;
-    };
+/** Where the item stands with respect to the person. Derived on every read, never stored. */
+export type ActivityFeedItemStage = { stage: ActivityStage };
+
+export type ActivityFeedItem = ActivityFeedItemStage &
+  (
+    | {
+        type: "approval";
+        id: string;
+        group: "needs_approval";
+        updatedAt: string;
+        approval: ActivityRecord;
+      }
+    | {
+        type: "receipt";
+        id: string;
+        group: "running" | "recent";
+        updatedAt: string;
+        receipt: ActivityRecord;
+      }
+    | {
+        type: "diagnosis";
+        id: string;
+        group: "recent";
+        updatedAt: string;
+        diagnosis: ActivityRecord;
+      }
+    | {
+        type: "goal";
+        id: string;
+        group: "running" | "recent";
+        updatedAt: string;
+        goal: ProductGoal;
+      }
+    | {
+        type: "run";
+        id: string;
+        group: "running" | "recent";
+        updatedAt: string;
+        run: CapabilityRun;
+      }
+    | {
+        type: "worker";
+        id: string;
+        group: "running" | "recent";
+        updatedAt: string;
+        worker: ProductWorker;
+      }
+    | {
+        type: "background_task";
+        id: string;
+        group: "running" | "recent";
+        updatedAt: string;
+        task: ProductBackgroundTask;
+      }
+  );
 
 export type ActivityFeedPage = {
   items: ActivityFeedItem[];
@@ -95,10 +114,18 @@ export type ActivityFeedFilters = {
   status?: string;
   updatedAfter?: string;
   updatedBefore?: string;
+  stage?: StageKind;
 };
 
+export const ACTIVITY_STAGE_KINDS = [
+  "ended",
+  "person",
+  "working",
+  "idle",
+] as const satisfies readonly StageKind[];
+
 export function goalActivityGroup(
-  status: ProductGoalStatus,
+  status: ProductGoalStatus
 ): Exclude<ActivityGroup, "needs_approval"> {
   if (status === "queued" || status === "running" || status === "paused") {
     return "running";
@@ -106,10 +133,15 @@ export function goalActivityGroup(
   return "recent";
 }
 
-export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | undefined {
+export function recordToFeedItem(
+  record: ActivityRecord,
+  context: StageContext = {}
+): ActivityFeedItem | undefined {
   const grouped = assignActivityGroups([record])[0] ?? record;
+  const stage = recordStage(grouped, context);
   if (isPendingApproval(grouped)) {
     return {
+      stage,
       type: "approval",
       id: grouped.id,
       group: "needs_approval",
@@ -119,6 +151,7 @@ export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | und
   }
   if (grouped.kind === ACTIVITY_KIND_DIAGNOSE) {
     return {
+      stage,
       type: "diagnosis",
       id: grouped.id,
       group: "recent",
@@ -128,6 +161,7 @@ export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | und
   }
   if (grouped.kind === ACTIVITY_KIND_RESTART && grouped.action) {
     return {
+      stage,
       type: "receipt",
       id: grouped.id,
       group: grouped.group === "running" ? "running" : "recent",
@@ -138,9 +172,13 @@ export function recordToFeedItem(record: ActivityRecord): ActivityFeedItem | und
   return undefined;
 }
 
-export function goalToFeedItem(goal: ProductGoal): ActivityFeedItem {
+export function goalToFeedItem(
+  goal: ProductGoal,
+  context: StageContext = {}
+): ActivityFeedItem {
   const group = goalActivityGroup(goal.status);
   return {
+    stage: goalStage(goal, context),
     type: "goal",
     id: goal.id,
     group,
@@ -149,9 +187,14 @@ export function goalToFeedItem(goal: ProductGoal): ActivityFeedItem {
   };
 }
 
-export function capabilityRunToFeedItem(run: CapabilityRun): ActivityFeedItem {
-  const group = run.status === "queued" || run.status === "running" ? "running" : "recent";
+export function capabilityRunToFeedItem(
+  run: CapabilityRun,
+  context: StageContext = {}
+): ActivityFeedItem {
+  const group =
+    run.status === "queued" || run.status === "running" ? "running" : "recent";
   return {
+    stage: runStage(run, context),
     type: "run",
     id: run.runId,
     group,
@@ -161,13 +204,17 @@ export function capabilityRunToFeedItem(run: CapabilityRun): ActivityFeedItem {
 }
 
 export function workerActivityGroup(
-  status: ProductWorker["status"],
+  status: ProductWorker["status"]
 ): Exclude<ActivityGroup, "needs_approval"> {
   return status === "queued" || status === "running" ? "running" : "recent";
 }
 
-export function workerToFeedItem(run: ProductWorker): ActivityFeedItem {
+export function workerToFeedItem(
+  run: ProductWorker,
+  context: StageContext = {}
+): ActivityFeedItem {
   return {
+    stage: workerStage(run, context),
     type: "worker",
     id: run.runId,
     group: workerActivityGroup(run.status),
@@ -176,8 +223,12 @@ export function workerToFeedItem(run: ProductWorker): ActivityFeedItem {
   };
 }
 
-export function backgroundTaskToFeedItem(task: ProductBackgroundTask): ActivityFeedItem {
+export function backgroundTaskToFeedItem(
+  task: ProductBackgroundTask,
+  context: StageContext = {}
+): ActivityFeedItem {
   return {
+    stage: backgroundTaskStage(task, context),
     type: "background_task",
     id: backgroundTaskActivityId(task.sessionId, task.id),
     group: task.status === "running" ? "running" : "recent",
@@ -186,16 +237,22 @@ export function backgroundTaskToFeedItem(task: ProductBackgroundTask): ActivityF
   };
 }
 
-export function encodeActivityCursor(item: Pick<ActivityFeedItem, "updatedAt" | "id">): string {
+export function encodeActivityCursor(
+  item: Pick<ActivityFeedItem, "updatedAt" | "id">
+): string {
   return Buffer.from(
     JSON.stringify({ version: 1, updatedAt: item.updatedAt, id: item.id }),
-    "utf8",
+    "utf8"
   ).toString("base64url");
 }
 
-export function decodeActivityCursor(value: string): ActivityCursor | undefined {
+export function decodeActivityCursor(
+  value: string
+): ActivityCursor | undefined {
   try {
-    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as {
+    const parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as {
       version?: unknown;
       updatedAt?: unknown;
       id?: unknown;
@@ -224,10 +281,12 @@ export function normalizeActivityLimit(value: number | undefined): number {
 
 export function paginateActivityFeed(
   items: ActivityFeedItem[],
-  options: { limit?: number; cursor?: string } = {},
+  options: { limit?: number; cursor?: string } = {}
 ): ActivityFeedPage {
   const sorted = [...items].sort(compareActivityItems);
-  const cursor = options.cursor ? decodeActivityCursor(options.cursor) : undefined;
+  const cursor = options.cursor
+    ? decodeActivityCursor(options.cursor)
+    : undefined;
   const afterCursor = cursor
     ? sorted.filter((item) => compareActivityItems(item, cursor) > 0)
     : sorted;
@@ -242,18 +301,43 @@ export function paginateActivityFeed(
 
 export function filterActivityFeed(
   items: ActivityFeedItem[],
-  filters: ActivityFeedFilters = {},
+  filters: ActivityFeedFilters = {}
 ): ActivityFeedItem[] {
-  const updatedAfter = filters.updatedAfter ? Date.parse(filters.updatedAfter) : undefined;
-  const updatedBefore = filters.updatedBefore ? Date.parse(filters.updatedBefore) : undefined;
+  const updatedAfter = filters.updatedAfter
+    ? Date.parse(filters.updatedAfter)
+    : undefined;
+  const updatedBefore = filters.updatedBefore
+    ? Date.parse(filters.updatedBefore)
+    : undefined;
   return items.filter((item) => {
     if (filters.source && item.type !== filters.source) return false;
-    if (filters.status && activityFeedItemStatus(item) !== filters.status) return false;
+    if (filters.status && activityFeedItemStatus(item) !== filters.status)
+      return false;
+    if (filters.stage && item.stage.kind !== filters.stage) return false;
     const updatedAt = Date.parse(item.updatedAt);
     if (updatedAfter !== undefined && updatedAt < updatedAfter) return false;
     if (updatedBefore !== undefined && updatedAt > updatedBefore) return false;
     return true;
   });
+}
+
+/** The needs-you summary and the list it opens are both read from the same items, so they cannot differ. */
+export type NeedsYouSummary = {
+  count: number;
+  reasons: Record<PersonReason, number>;
+};
+
+export function summarizeNeedsYou(items: ActivityFeedItem[]): NeedsYouSummary {
+  const reasons = Object.fromEntries(
+    PERSON_REASONS.map((reason) => [reason, 0])
+  ) as Record<PersonReason, number>;
+  let count = 0;
+  for (const item of items) {
+    if (item.stage.kind !== "person") continue;
+    count += 1;
+    reasons[item.stage.reason] += 1;
+  }
+  return { count, reasons };
 }
 
 function activityFeedItemStatus(item: ActivityFeedItem): string {
@@ -282,23 +366,24 @@ export function toActivityFeed(
   capabilityRuns: CapabilityRun[] = [],
   workers: ProductWorker[] = [],
   backgroundTasks: ProductBackgroundTask[] = [],
+  stageContext: StageContext = {}
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {
-    const item = recordToFeedItem(record);
+    const item = recordToFeedItem(record, stageContext);
     if (item) items.push(item);
   }
   for (const goal of goals) {
-    items.push(goalToFeedItem(goal));
+    items.push(goalToFeedItem(goal, stageContext));
   }
   for (const run of capabilityRuns) {
-    items.push(capabilityRunToFeedItem(run));
+    items.push(capabilityRunToFeedItem(run, stageContext));
   }
   for (const worker of workers) {
-    items.push(workerToFeedItem(worker));
+    items.push(workerToFeedItem(worker, stageContext));
   }
   for (const task of backgroundTasks) {
-    items.push(backgroundTaskToFeedItem(task));
+    items.push(backgroundTaskToFeedItem(task, stageContext));
   }
   items.sort(compareActivityItems);
   return group ? items.filter((item) => item.group === group) : items;
@@ -306,7 +391,7 @@ export function toActivityFeed(
 
 function compareActivityItems(
   left: Pick<ActivityFeedItem, "updatedAt" | "id">,
-  right: Pick<ActivityFeedItem, "updatedAt" | "id">,
+  right: Pick<ActivityFeedItem, "updatedAt" | "id">
 ): number {
   if (left.updatedAt < right.updatedAt) return 1;
   if (left.updatedAt > right.updatedAt) return -1;
