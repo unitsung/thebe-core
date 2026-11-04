@@ -39,6 +39,7 @@ import {
 } from "../action/types.ts";
 import {
   CORE_EVENT_TOOLS,
+  capabilityChangesThings,
   listCoreMcpTools,
   withProductMetadata,
   type HomelabCapability,
@@ -71,6 +72,8 @@ import {
   type ProviderBackgroundTask,
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
+
+import type { McpCaller } from "../interface.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL = `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 const RUNTIME_APPROVAL_REQUIRED =
@@ -284,6 +287,19 @@ export function createControlApi(
     };
   }
 
+  /** Core's own capabilities, as the options of this Agent switch them on. */
+  const coreCapabilities = () =>
+    listCoreMcpTools({
+      strmRepairProvider: options.strmRepairProvider,
+      navidrome: Boolean(options.navidrome),
+      musicResearch: Boolean(options.musicResearch),
+      netease: Boolean(options.musicSources?.netease),
+      sqmusic: Boolean(options.musicSources?.sqmusic),
+      emby: Boolean(options.emby),
+      jellyfin: Boolean(options.jellyfin),
+      immich: Boolean(options.immich),
+    });
+
   /** Whether calling this tool changes something, by what Core knows about it. */
   async function isMcpWrite(name: string): Promise<boolean> {
     if (
@@ -306,13 +322,16 @@ export function createControlApi(
       const tool = (await mcp.listTools()).find((item) => item.name === name);
       return !tool || tool.permission !== "read";
     }
-    return false;
+    // Any other Core capability (`strm.repair`, `sqmusic_download`, ...) by what it declares, the same
+    // rule that sets its `readOnlyHint`, so a write cannot slip past because no name list mentions it.
+    const core = coreCapabilities().find((item) => item.name === name);
+    return core ? capabilityChangesThings(core) : false;
   }
 
   async function invokeMcpTool(
     name: string,
     args: unknown,
-    caller?: { writes: boolean }
+    caller: McpCaller
   ): Promise<{ text: string; isError: boolean }> {
     if (!(await isMcpWrite(name))) return invokeToolDetailed(name, args);
     if (!ctx.mcpWritesAllowed) {
@@ -322,7 +341,7 @@ export function createControlApi(
         "mcp_writes_not_enabled"
       );
     }
-    if (caller && !caller.writes) {
+    if (!caller.writes) {
       throw httpError(
         403,
         `${name} changes things, and this token may only read over /mcp. Make a token that may write with: thebe token create <name> --scope mcp:write`,
@@ -665,16 +684,7 @@ export function createControlApi(
       input: CapabilityInvokeInput = {}
     ): Promise<CapabilityInvokeResult> {
       const capabilities = [
-        ...listCoreMcpTools({
-          strmRepairProvider: options.strmRepairProvider,
-          navidrome: Boolean(options.navidrome),
-          musicResearch: Boolean(options.musicResearch),
-          netease: Boolean(options.musicSources?.netease),
-          sqmusic: Boolean(options.musicSources?.sqmusic),
-          emby: Boolean(options.emby),
-          jellyfin: Boolean(options.jellyfin),
-          immich: Boolean(options.immich),
-        }),
+        ...coreCapabilities(),
         ...baseTools()
           .filter((tool) =>
             (SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name)

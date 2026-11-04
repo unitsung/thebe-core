@@ -8,7 +8,9 @@ import {
   type McpWireTool,
 } from "../../../agent/extensions/mcp.ts";
 import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
+import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
+import { tokenMayWrite } from "../token-store.ts";
 
 const MCP_EVENT_TOOLS = [
   LIST_CORE_EVENTS_TOOL,
@@ -56,7 +58,7 @@ async function callTool(
   agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
   name: string,
   args: unknown,
-  caller: { writes: boolean }
+  caller: McpCaller
 ): Promise<{ text: string; isError: boolean }> {
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
     if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
@@ -167,11 +169,8 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     const name = typeof params.name === "string" ? params.name : "";
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
-      // A token without a scope list has full access, as every token did before scopes.
-      const writes =
-        !context.caller?.scopes || context.caller.scopes.includes("mcp:write");
       const { text, isError } = await callTool(agent, name, params.arguments, {
-        writes,
+        writes: tokenMayWrite(context.caller),
       });
       return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
     } catch (error) {

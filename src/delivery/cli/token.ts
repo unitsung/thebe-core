@@ -46,11 +46,12 @@ function parseCreateArgs(
   const words: string[] = [];
   let scope: (typeof TOKEN_SCOPES)[number] | undefined;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] !== "--scope") {
-      words.push(args[i]!);
+    const arg = args[i]!;
+    if (arg !== "--scope" && !arg.startsWith("--scope=")) {
+      words.push(arg);
       continue;
     }
-    const value = args[++i];
+    const value = arg === "--scope" ? args[++i] : arg.slice("--scope=".length);
     const known = TOKEN_SCOPES.find((candidate) => candidate === value);
     if (!known) {
       return {
@@ -58,6 +59,7 @@ function parseCreateArgs(
         problem: `--scope takes ${TOKEN_SCOPES.join(" or ")}.`,
       };
     }
+    if (scope) return { ok: false, problem: "Give --scope once." };
     scope = known;
   }
   return { ok: true, name: words.join(" "), scope };

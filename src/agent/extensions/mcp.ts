@@ -263,10 +263,21 @@ export type McpWireTool = {
  * destructive unless Core classified it `risk: "low"`, which is the safe default for unclassified
  * external tools. Hosts treat these as hints; Core's policy engine remains the enforcement point.
  */
-export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
-  const readOnly =
+/**
+ * Whether calling this capability changes something: the effect it declares, else its permission.
+ * The one rule behind both the `readOnlyHint` a client sees and the write gate over `/mcp`.
+ */
+export function capabilityChangesThings(
+  capability: Pick<HomelabCapability, "effect" | "permission">
+): boolean {
+  return (
     (capability.effect ??
-      (capability.permission === "read" ? "read" : "write")) === "read";
+      (capability.permission === "read" ? "read" : "write")) !== "read"
+  );
+}
+
+export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
+  const readOnly = !capabilityChangesThings(capability);
   return {
     name: capability.name,
     description: capability.description,

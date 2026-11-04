@@ -1,5 +1,5 @@
 export { createThebeAgent } from "./create.ts";
-export type { ThebeAgent } from "./interface.ts";
+export type { McpCaller, ThebeAgent } from "./interface.ts";
 export type {
   HomelabCapability,
   HomelabCapabilityCategory,

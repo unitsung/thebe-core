@@ -25,6 +25,11 @@ export type ThebeHttpRoute = (
   context: ThebeHttpContext
 ) => Response | undefined | Promise<Response | undefined>;
 
+/** The path as routes match it: no trailing slash. The token scope gate uses this same function. */
+export function normalizedPath(url: URL): string {
+  return url.pathname.replace(/\/$/, "") || "/";
+}
+
 export function createThebeHttpContext(
   request: Request,
   options: {
@@ -38,7 +43,7 @@ export function createThebeHttpContext(
   }
 ): ThebeHttpContext {
   const url = new URL(request.url);
-  const path = options.path ?? (url.pathname.replace(/\/$/, "") || "/");
+  const path = options.path ?? normalizedPath(url);
   return {
     request,
     url,

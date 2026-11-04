@@ -178,6 +178,9 @@ export type CreateThebeAgentOptions = {
   artifactStore?: ArtifactStore;
 };
 
+/** Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools. */
+export type McpCaller = { writes: boolean };
+
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
 export interface ThebeAgent {
   readonly runtime: AgentRuntime;
@@ -405,14 +408,14 @@ export interface ThebeAgent {
   ): Promise<{ text: string; isError: boolean }>;
   /**
    * `invokeToolDetailed` for a caller on `/mcp`: read tools run as before, and a write tool runs
-   * only when the host has enabled writes over `/mcp` and the caller may write. A caller that
-   * passes `writes: false` (a token limited to `mcp:read`) is refused on any write tool; leaving
-   * `caller` out means no limit. The call is audited.
+   * only when the host has enabled writes over `/mcp` and the caller may write. The caller is
+   * required, so a route that forgets it does not compile instead of quietly allowing writes.
+   * The call is audited.
    */
   invokeMcpTool(
     name: string,
     args: unknown,
-    caller?: { writes: boolean }
+    caller: McpCaller
   ): Promise<{ text: string; isError: boolean }>;
   invokeCapability(
     id: string,

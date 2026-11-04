@@ -148,7 +148,6 @@ Request contract (verified by `scripts/smoke.mjs`):
 ```text
 /docs, /openapi.json, /swagger   readable without the token
 every other route                401 without X-Thebe-Token (or Authorization: Bearer)
-scoped token, not /mcp           403 token_scope
 mutating routes                  403 when the Host header is not allowlisted
 ```
 
@@ -431,6 +430,7 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 | Symptom                                               | Cause                                                           | Fix                                                                                                                                       |
 | ----------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
 | `401` on every route                                  | Missing/incorrect `X-Thebe-Token`                               | Send the token from `deploy/.env`; `/docs` is the only token-free route                                                                   |
+| `403` with `token_scope` on a route other than `/mcp` | The token was made with `--scope`, which limits it to `/mcp`    | Use a token made without `--scope` for `/v1`; keep scoped tokens for agents on `/mcp`                                                     |
 | `403` on writes, reads fine                           | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
 | Client needs the token                                | First start generated one                                       | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token`                                                           |
 | `docker build` fails with `--mount requires BuildKit` | Legacy (pre-BuildKit) builder                                   | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build`                                                                            |
