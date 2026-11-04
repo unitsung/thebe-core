@@ -4,6 +4,7 @@ export const PRODUCT_HTTP_PATH = {
   audit: "/v1/audit",
   agentSettings: "/v1/settings/agent",
   memory: "/v1/memory",
+  policy: "/v1/policy",
   subagents: "/v1/subagents",
   permissions: "/v1/permissions",
   skills: "/v1/skills",

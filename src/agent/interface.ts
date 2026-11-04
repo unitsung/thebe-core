@@ -19,6 +19,7 @@ import type {
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
 import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
+import type { PolicyApi } from "./policy/service.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { PipelineProviders } from "./tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
@@ -349,6 +350,14 @@ export interface ThebeAgent {
   setScheduleEnabled(id: string, enabled: boolean): Promise<GoalSchedule>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<GoalSchedule>;
+  /**
+   * The versioned policy (rules, accept mode, per-source settings). The owner's HTTP requests are the
+   * only way to change it; no tool exposes it.
+   */
+  getPolicy: PolicyApi["getPolicy"];
+  getPolicyVersion: PolicyApi["getPolicyVersion"];
+  listPolicyVersions: PolicyApi["listPolicyVersions"];
+  updatePolicy: PolicyApi["updatePolicy"];
   getGoal(thebeSessionId: string): GoalRun | undefined;
   listGoals(): Promise<GoalRun[]>;
   goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }>;
