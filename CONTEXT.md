@@ -103,6 +103,10 @@ _Avoid_: treating this as a full Activity product, naming it the user-facing Act
 Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `GET /v1/goals/{id}/log` (JSON or SSE). Session-scoped aliases under `/v1/session/{id}/goal`. Terminal worker/reviewer evidence may be exposed as a linked `report` Artifact. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
 _Avoid_: a second Goal id scheme, `GET /v1/goals/{id}/runs`, exposing Pi/MCP/subagent internals, or treating ActivityRecord as a Goal
 
+**Usage summary**:
+A read-only answer to "what is Thebe costing and doing for me" (`GET /v1/usage/summary`), computed on the request from stores Core already keeps: session metadata and token stats, Goal runs, activity records. Background tokens (a Goal session, or one a schedule started) are reported apart from foreground chat; cache reads are reported separately and are not part of the counted total (input + output + cache write). A session's tokens belong to the day it was last active. It has no storage of its own, no background collector and no outbound call; the App shows it on the "Usage and effect" page and can export the same JSON.
+_Avoid_: telemetry, metrics reporting, a counter updated while sessions run, or sending these numbers anywhere
+
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
 _Avoid_: reimplementing filesystem/bash tools in Thebe

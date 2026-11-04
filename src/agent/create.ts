@@ -12,6 +12,7 @@ import { createSessionApi } from "./sessions/service.ts";
 import { createSubagentApi } from "./subagents/api.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
+import { createUsageApi } from "./usage/service.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -70,6 +71,13 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     activityStore,
     artifactStore,
   });
+  const usage = createUsageApi({
+    now: ctx.now,
+    listMetas: ctx.listMetas,
+    listGoals: goals.listGoals,
+    activityStore,
+    openSession: ctx.openSession,
+  });
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
@@ -81,6 +89,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...createControlApi(ctx, artifactStore, {
       executeAction: actions.executeApprovedAction,
     }),
+    getUsageSummary: usage.getUsageSummary,
     listSchedules: schedules.listSchedules,
     getSchedule: schedules.getSchedule,
     createSchedule: schedules.createSchedule,
