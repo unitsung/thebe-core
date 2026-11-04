@@ -1,4 +1,5 @@
 import type { NormalizedEvent, PromptMode } from "./runtime/index.ts";
+import type { Attention, Report } from "./reports/report.ts";
 
 export type ThebePromptResult = {
   text: string;
@@ -116,6 +117,12 @@ export type GoalRun = {
   /** Bounded product Artifact containing the latest terminal report. */
   artifactId?: string;
   error?: string;
+  /** The latest structured report from a worker or reviewer. */
+  report?: Report;
+  /** The one question waiting for the owner. Never more than one. */
+  attention?: Attention;
+  /** The owner's answer, kept until the next checkpoint's prompt carries it. */
+  answer?: { question: string; text: string; answeredAt: string };
 };
 
 /** @deprecated Use ThebePromptResult */
@@ -141,7 +148,7 @@ export const DEFAULT_MODEL_TEST_TIMEOUT_MS = 60_000;
 export function httpError(
   status: number,
   message: string,
-  code?: string,
+  code?: string
 ): Error {
   return Object.assign(new Error(message), { status, code });
 }

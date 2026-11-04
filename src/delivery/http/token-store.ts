@@ -2,6 +2,10 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { writeFileAtomicSync } from "../../atomic-write.ts";
+import {
+  HOMELAB_CAPABILITY_CATEGORIES,
+  type HomelabCapabilityCategory,
+} from "../../agent/extensions/mcp.ts";
 
 /**
  * The shared token as a value the server asks for on every request, so rotating or revoking it
@@ -95,8 +99,20 @@ export const TOKEN_SCOPES = [
 ] as const;
 export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
-/** Whose token it is, and what it may do. No `scopes` means full access, as every token had before scopes. */
-export type TokenCaller = { name: string; scopes?: readonly TokenScope[] };
+/** A service category a write scope can be limited to: containers, downloads, media, and so on. */
+export type TokenCategory = HomelabCapabilityCategory;
+export const TOKEN_CATEGORIES: readonly TokenCategory[] =
+  HOMELAB_CAPABILITY_CATEGORIES;
+
+/**
+ * Whose token it is, and what it may do. No `scopes` means full access, as every token had before
+ * scopes. `categories` limits the write tools to those service categories; absent means every category.
+ */
+export type TokenCaller = {
+  name: string;
+  scopes?: readonly TokenScope[];
+  categories?: readonly TokenCategory[];
+};
 
 /** Whether this caller may run write tools: a token with no scope list has full access. */
 export function tokenMayWrite(caller: TokenCaller | undefined): boolean {
@@ -129,6 +145,8 @@ export type DeviceToken = {
   createdAt: string;
   /** Absent for full access. Kept as stored, so a value this Core does not know survives a rewrite. */
   scopes?: unknown;
+  /** The service categories a write scope is limited to; absent for every category. Kept as stored, like `scopes`. */
+  categories?: unknown;
 };
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
@@ -211,7 +229,13 @@ export type DeviceTokenResult =
   | { ok: true; name: string; token: string }
   | {
       ok: false;
-      reason: "invalid-name" | "reserved-name" | "exists" | "store-unreadable";
+      reason:
+        | "invalid-name"
+        | "reserved-name"
+        | "exists"
+        | "store-unreadable"
+        | "unknown-category"
+        | "category-needs-write";
     };
 
 /** Makes a token for one device. It is shown once; only its hash is kept. */
@@ -220,6 +244,8 @@ export function createDeviceToken(options: {
   name: string;
   /** Limit the token to `/mcp`; leave out for full access. Each scope includes the ones below it. */
   scope?: TokenScope | readonly TokenScope[];
+  /** Limit the write scope to these service categories; leave out for every category. Needs `mcp:write` or above. */
+  categories?: readonly string[];
   now?: () => Date;
   generate?: () => string;
 }): DeviceTokenResult {
@@ -227,6 +253,18 @@ export function createDeviceToken(options: {
   if (!NAME_PATTERN.test(name)) return { ok: false, reason: "invalid-name" };
   if (RESERVED_NAMES.has(name.toLowerCase()))
     return { ok: false, reason: "reserved-name" };
+  const categories = [...new Set(options.categories ?? [])];
+  const requested = [options.scope ?? []].flat();
+  if (!categories.every(isTokenCategory))
+    return { ok: false, reason: "unknown-category" };
+  // A category limit narrows writes, so it means nothing (and must not look like it does) on a token that cannot write.
+  if (
+    categories.length > 0 &&
+    !(
+      requested.length > 0 && withImpliedScopes(requested).includes("mcp:write")
+    )
+  )
+    return { ok: false, reason: "category-needs-write" };
   let existing: DeviceToken[];
   try {
     existing = readDeviceTokensForUpdate(options.configDir);
@@ -236,12 +274,12 @@ export function createDeviceToken(options: {
   if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase()))
     return { ok: false, reason: "exists" };
   const token = (options.generate ?? (() => randomBytes(32).toString("hex")))();
-  const requested = [options.scope ?? []].flat();
   existing.push({
     name,
     hash: hex(token),
     createdAt: (options.now?.() ?? new Date()).toISOString(),
     ...(requested.length > 0 && { scopes: withImpliedScopes(requested) }),
+    ...(categories.length > 0 && { categories }),
   });
   writeDeviceTokens(options.configDir, existing);
   return { ok: true, name, token };
@@ -268,15 +306,41 @@ export function revokeAllDeviceTokens(configDir: string): number {
 }
 
 /** What a stored token may do, in words: for `thebe token list`. */
-export function describeTokenScopes(stored: unknown): string {
+export function describeTokenScopes(
+  stored: unknown,
+  storedCategories?: unknown
+): string {
   const scopes = knownScopes(stored);
-  if (scopes === undefined) return "full access";
+  const categories = knownCategories(storedCategories);
+  if (categories === "unknown") return "unknown category (refused)";
+  const limit = categories ? ` (${categories.join(", ")})` : "";
+  if (scopes === undefined) return `full access${limit}`;
   if (scopes === "unknown") return "unknown scope (refused)";
-  return scopes.includes("mcp:irreversible")
-    ? "mcp:irreversible"
-    : scopes.includes("mcp:write")
-      ? "mcp:write"
-      : "mcp:read";
+  return (
+    (scopes.includes("mcp:irreversible")
+      ? "mcp:irreversible"
+      : scopes.includes("mcp:write")
+        ? "mcp:write"
+        : "mcp:read") + (scopes.includes("mcp:write") ? limit : "")
+  );
+}
+
+const isTokenCategory = (value: unknown): value is TokenCategory =>
+  (TOKEN_CATEGORIES as readonly unknown[]).includes(value);
+
+/**
+ * The stored category limit as a list, `undefined` for none, or `"unknown"` when anything is not a
+ * category Core defines. Like scopes, an unusable list refuses the token: it is never read as no limit.
+ */
+function knownCategories(
+  stored: unknown
+): readonly TokenCategory[] | undefined | "unknown" {
+  if (stored === undefined) return undefined;
+  return Array.isArray(stored) &&
+    stored.length > 0 &&
+    stored.every(isTokenCategory)
+    ? stored
+    : "unknown";
 }
 
 /** The stored scopes as a list, `undefined` for full access, or `"unknown"` when any entry is not one Core defines. */
@@ -361,11 +425,16 @@ export function createTokenVerifier(options: {
       for (const device of loadDevices()) {
         if (!same(Buffer.from(device.hash, "hex"))) continue;
         const scopes = knownScopes(device.scopes);
-        // A scope this Core does not know is refused, never read as no limit at all.
+        const categories = knownCategories(device.categories);
+        // A scope or category this Core does not know is refused, never read as no limit at all.
         found =
-          scopes === "unknown"
+          scopes === "unknown" || categories === "unknown"
             ? undefined
-            : { name: device.name, ...(scopes && { scopes }) };
+            : {
+                name: device.name,
+                ...(scopes && { scopes }),
+                ...(categories && { categories }),
+              };
       }
       if (found) noteUse(found.name);
       return found;

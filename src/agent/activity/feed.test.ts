@@ -8,7 +8,12 @@ function approval(): ActivityRecord {
     id: "appr-1",
     kind: "container.restart",
     actionId: "container.restart",
-    resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    resource: {
+      kind: "container",
+      id: "ctr-emby",
+      name: "emby",
+      provider: "arcane",
+    },
     status: "pending",
     group: "needs_approval",
     summary: "Restart emby",
@@ -59,6 +64,7 @@ describe("toActivityFeed", () => {
     };
     expect(toActivityFeed([diagnose], [])).toEqual([
       {
+        stage: { kind: "ended" },
         type: "diagnosis",
         id: "run-ok",
         group: "recent",

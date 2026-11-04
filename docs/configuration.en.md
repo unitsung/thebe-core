@@ -312,6 +312,11 @@ sent to the model.
   the previewed request. Both the preview and the execution are audited, and the
   client is expected to show the preview before confirming. The model's
   own write path stays `service_api_write` with runtime approval.
+- `irreversibleOperations` (an object of operation ID or `METHOD /path` to
+  `true`/`false`) overrides, for one operation, whether a write counts as an
+  irreversible delete over `/mcp`. Without it, a `DELETE` method, or a true
+  delete-like argument (`deleteFiles`, `removeData`, `purge`, `wipe`, ...), makes a
+  write irreversible. Each call an override decided is audited.
 - Run `node scripts/accept-service-api.mjs` to check a configured service end to
   end (it spawns Core, lists the per-operation tools, discovers operations, and
   invokes a read; `--preview` checks the two-phase write).
@@ -341,6 +346,7 @@ its own. Tool names are `mcp__<server>__<tool>`.
 
 - `exposure`: `codemode` (default; tools can only be called from `codemode` scripts and take no space in the model's tool list), `deferred` (declared after `tool_search` loads them), `direct`, or `hidden`.
 - URL servers accept a `headers` map (string values) sent on every request, so a provider's own MCP that needs a token — for example `"headers": { "X-Api-Key": "..." }` or a service-specific header such as `{"sqmusic":"<JWT>"}` — is attached without Core growing a vendor adapter. Prefer this over hard-coding the service: point Core at the provider's MCP and it gets those tools instead. `headers` are stored in `.thebe/mcp.json` (mode `600`), never logged, and never sent anywhere but the configured URL.
+- `tools`: per-tool operator verdicts, `{"prune_cache": {"irreversible": false}}`. Over `/mcp` a tool is an irreversible delete when its server declares `destructiveHint: true`; this replaces that for one tool, either way, and each call it decided is audited.
 - `permission`: servers other than `read` need approval on every call. If omitted, the tool's own `readOnlyHint` decides; with no hint, approval is required.
 - Scripts run in Pi's QuickJS sandbox and reach the outside only through tools. Every MCP call from a script still goes through policy, approval, audit, and redaction. The `models` global in `codemode` is disabled.
 - stdio servers inherit only basic variables such as `HOME` and `PATH`, plus their own `env`, never Core's environment.

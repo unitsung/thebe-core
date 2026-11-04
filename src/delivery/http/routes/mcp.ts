@@ -4,12 +4,22 @@ import {
   DIAGNOSE_FROM_EVENTS_TOOL,
   LIST_CORE_EVENTS_TOOL,
   listCoreMcpTools,
+  mcpToolVisibleTo,
   toMcpWireTool,
   type McpWireTool,
 } from "../../../agent/extensions/mcp.ts";
 import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
 import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
+import {
+  classifyMcpRequest,
+  MCP_ERROR,
+  META_SERVER_INFO,
+  modernResult,
+  negotiateLegacyVersion,
+  SUPPORTED_PROTOCOL_VERSIONS,
+  type McpRejection,
+} from "./mcp-protocol.ts";
 import {
   tokenMayDeleteIrreversibly,
   tokenMayWrite,
@@ -23,6 +33,7 @@ export function toMcpCaller(caller: TokenCaller | undefined): McpCaller {
     writes: tokenMayWrite(caller),
     irreversible: tokenMayDeleteIrreversibly(caller),
     ...(caller?.scopes && { scopes: caller.scopes }),
+    ...(caller?.categories && { categories: caller.categories }),
   };
 }
 
@@ -55,16 +66,15 @@ class McpProtocolError extends Error {
   }
 }
 
-const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26"] as const;
-
-/** The client's version when this server speaks it; otherwise the newest one it does. */
-function negotiateProtocolVersion(params: Record<string, unknown>): string {
-  const requested = params.protocolVersion;
-  return (
-    SUPPORTED_PROTOCOL_VERSIONS.find((v) => v === requested) ??
-    SUPPORTED_PROTOCOL_VERSIONS[0]
-  );
-}
+/**
+ * Freshness hints for the newest protocol version. Tools change only when an operator connects or
+ * removes a service, so a minute is long enough to save a round trip and short enough to follow
+ * that. The list is `private`: a later token may be shown fewer tools than another, and a cache
+ * must never hand one token's list to another.
+ */
+const TOOLS_LIST_TTL_MS = 60_000;
+/** What `server/discover` says (versions, capabilities) changes only with a Core release. */
+const DISCOVER_TTL_MS = 300_000;
 
 const AGENT_REQUIRED = "MCP tools require the Thebe agent service";
 
@@ -103,11 +113,16 @@ async function callTool(
   throw new McpProtocolError(`unknown tool: ${name}`, -32602);
 }
 
+/** Sorted by name so the list is the same on every request until the tools change. */
 async function listedTools(
-  agent?: NonNullable<ThebeHttpContext["agent"]>
+  agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
+  caller: McpCaller
 ): Promise<McpWireTool[]> {
   const capabilities = agent ? await agent.listMcpTools() : listCoreMcpTools();
-  return capabilities.map(toMcpWireTool);
+  return capabilities
+    .filter((capability) => mcpToolVisibleTo(capability, caller))
+    .map(toMcpWireTool)
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 /**
@@ -127,8 +142,31 @@ function toolResult(text: string, isError = false): Record<string, unknown> {
   return result;
 }
 
-function mcpError(id: unknown, code: number, message: string): Response {
-  return json({ jsonrpc: "2.0", id, error: { code, message } });
+function mcpError(
+  id: unknown,
+  code: number,
+  message: string,
+  status = 200,
+  data?: unknown
+): Response {
+  return json(
+    {
+      jsonrpc: "2.0",
+      id,
+      error: { code, message, ...(data !== undefined && { data }) },
+    },
+    status
+  );
+}
+
+function rejectRequest(id: unknown, rejection: McpRejection): Response {
+  return mcpError(
+    id,
+    rejection.code,
+    rejection.message,
+    rejection.status,
+    rejection.data
+  );
 }
 
 export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
@@ -143,45 +181,62 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
   ) {
     return new Response(null, { status: 202 });
   }
-  if (method === "ping") {
-    return json({ jsonrpc: "2.0", id, result: {} });
-  }
-  if (method === "initialize") {
-    return json({
+  const era = classifyMcpRequest(context.request, body, method);
+  if (era.kind === "rejected") return rejectRequest(id, era.rejection);
+  const modern = era.kind === "modern";
+  /** Older versions get the bare result they always got; the newest also says it is complete. */
+  const reply = (result: Record<string, unknown>): Response =>
+    json({
       jsonrpc: "2.0",
       id,
-      result: {
-        protocolVersion: negotiateProtocolVersion(asObject(body.params)),
-        capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "thebe-core", version: context.version },
+      result: modern ? modernResult(result, context.version) : result,
+    });
+
+  if (method === "ping") return reply({});
+  if (method === "initialize") {
+    return reply({
+      protocolVersion: negotiateLegacyVersion(asObject(body.params)),
+      capabilities: { tools: { listChanged: false } },
+      serverInfo: { name: "thebe-core", version: context.version },
+    });
+  }
+  if (modern && method === "server/discover") {
+    return reply({
+      supportedVersions: SUPPORTED_PROTOCOL_VERSIONS,
+      capabilities: { tools: { listChanged: false } },
+      _meta: {
+        [META_SERVER_INFO]: { name: "thebe-core", version: context.version },
       },
+      ttlMs: DISCOVER_TTL_MS,
+      cacheScope: "public",
     });
   }
   if (method === "tools/call" && agent?.isQuiesced()) {
-    return json(
-      {
-        jsonrpc: "2.0",
-        id,
-        error: {
-          code: -32003,
-          message:
-            "System is quiesced for maintenance; write operations are temporarily disabled",
-        },
-      },
+    return mcpError(
+      id,
+      -32003,
+      "System is quiesced for maintenance; write operations are temporarily disabled",
       503
     );
   }
   if (method === "tools/list") {
-    return json({
-      jsonrpc: "2.0",
-      id,
-      result: { tools: await listedTools(agent) },
-    });
+    const tools = await listedTools(agent, toMcpCaller(context.caller));
+    return reply(
+      modern
+        ? { tools, ttlMs: TOOLS_LIST_TTL_MS, cacheScope: "private" }
+        : { tools }
+    );
   }
   if (method === "tools/call") {
     const params = asObject(body.params);
     const name = typeof params.name === "string" ? params.name : "";
-    if (!name) return mcpError(id, -32602, "tools/call requires params.name");
+    if (!name) {
+      return mcpError(
+        id,
+        MCP_ERROR.invalidParams,
+        "tools/call requires params.name"
+      );
+    }
     try {
       const { text, isError } = await callTool(
         agent,
@@ -189,14 +244,20 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
         params.arguments,
         toMcpCaller(context.caller)
       );
-      return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
+      return reply(toolResult(text, isError));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (error instanceof McpProtocolError)
         return mcpError(id, error.code, message);
       // The model can read and recover from a tool failure only when it is a result, not a protocol error.
-      return json({ jsonrpc: "2.0", id, result: toolResult(message, true) });
+      return reply(toolResult(message, true));
     }
   }
-  return mcpError(id, -32601, "Method not found");
+  // The newest transport tells an unknown method apart from a missing endpoint with a 404.
+  return mcpError(
+    id,
+    MCP_ERROR.methodNotFound,
+    "Method not found",
+    modern ? 404 : 200
+  );
 }

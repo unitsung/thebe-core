@@ -41,6 +41,14 @@ export type FakeSessionState = {
   probeReply?: string;
   resourceReloads: number;
   backgroundTasks: BackgroundTask[];
+  /** Known token counts for tests; when set they replace the ones derived from message text. */
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+  };
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [

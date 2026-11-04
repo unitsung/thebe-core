@@ -186,6 +186,7 @@ token 只由 Core adapter 使用，不进入 Agent capability 参数。
 
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
 - URL 服务器可带 `headers`（字符串键值），每个请求都会发送，用来接入需要令牌的服务商自带 MCP，例如 `"headers": { "X-Api-Key": "..." }` 或服务专用头 `{"sqmusic":"<JWT>"}`，Core 不用为它新增厂商适配器。有自带 MCP 的服务优先这样接：把 Core 指向它的 MCP，工具就有了。`headers` 保存在 `.thebe/mcp.json`（权限 `600`），不写日志，也只发给配置的 URL。
+- `tools`：逐个工具的运营者判定，如 `{"prune_cache": {"irreversible": false}}`。经 `/mcp` 调用时，服务器声明 `destructiveHint: true` 的工具算不可逆删除；这里的设置只对该工具生效、双向都可以，每次由它决定的调用都会写审计。
 - `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
 - 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
@@ -320,6 +321,7 @@ export MY_SERVICE_API_KEY=...
 - `readMethods`（如 `["GET","HEAD"]`）把这些方法的操作都当作只读；`trustReadOnlyAnnotations: true` 额外信任文档自带的只读标注。两者默认都**关闭**——远端文档不能自己声明自己只读。
 - `excludeOperations`（operationId 或 `METHOD /path`）和 `excludeTags` 把操作从发现和命名工具里隐藏，匹配的请求一律拒绝，读、写、已批准的调用都不例外。用于管理类或破坏性接口。
 - `writeOperations` 把选定的写操作暴露为两阶段工具：调用本身**不做任何改动**，只返回 `preview`（`method`、`path`、`body`）和一次性 `confirmToken`（5 分钟过期）；`service_api.confirm` 携带该 token 才会执行刚才预览的那个请求。预览和执行都会审计。模型自己的写路径仍是 `service_api_write` 加运行时审批。
+- `irreversibleOperations`（操作 ID 或 `METHOD /path` 到 `true`/`false` 的对象）为单个操作覆盖“经 `/mcp` 调用时是否算不可逆删除”的判定。不设置时，`DELETE` 方法，或值为真的删除类参数（`deleteFiles`、`removeData`、`purge`、`wipe` 等），都算不可逆。每次由覆盖决定的调用都会写审计。
 - `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` 和 `THEBE_CLOUDSAVER_BASE_URL` / `THEBE_CLOUDSAVER_TOKEN` 是这两个服务的快捷配置，无需写 `THEBE_SERVICE_APIS`。CloudSaver 的 token 以 Bearer 形式发送。
 - `node scripts/accept-service-api.mjs` 可以端到端检查已配置的服务（启动 Core、列出逐操作工具、发现操作、调用一个读操作；`--preview` 检查两阶段写）。
 

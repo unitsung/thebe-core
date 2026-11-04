@@ -33,6 +33,8 @@ export type FakeRuntimeHarness = {
   compactInstructions(): Array<string | undefined>;
   inboundToolResults(): FakeInboundToolResult[];
   snapshot(id: string): FakeSessionState;
+  /** Fix the token counts a fake session reports in its stats. */
+  setUsage(id: string, usage: NonNullable<FakeSessionState["usage"]>): void;
 };
 
 export function createFakeRuntime(
@@ -254,6 +256,9 @@ export function createFakeRuntime(
     },
     inboundToolResults(): FakeInboundToolResult[] {
       return inboundToolResults.slice();
+    },
+    setUsage(id: string, usage: NonNullable<FakeSessionState["usage"]>): void {
+      getState(id).usage = { ...usage };
     },
     snapshot(id: string): FakeSessionState {
       return getState(id);
