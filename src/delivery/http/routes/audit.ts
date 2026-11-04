@@ -6,15 +6,21 @@ import { asMember, parseLimit } from "../parsing/query.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
 
 export async function handleAuditRoutes(
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ): Promise<Response | undefined> {
   if (!context.path.startsWith(PRODUCT_HTTP_PATH.audit)) return undefined;
   if (!context.agent) return agentUnavailable();
   if (context.request.method !== "GET") return undefined;
 
   try {
-    if (context.parts.length === 3 && context.parts[1] === "audit" && context.parts[2]) {
-      const record = await context.agent.getAudit(decodeURIComponent(context.parts[2]));
+    if (
+      context.parts.length === 3 &&
+      context.parts[1] === "audit" &&
+      context.parts[2]
+    ) {
+      const record = await context.agent.getAudit(
+        decodeURIComponent(context.parts[2])
+      );
       return record ? json(record) : notFound("audit record not found");
     }
     if (context.path !== PRODUCT_HTTP_PATH.audit) return undefined;
@@ -39,13 +45,16 @@ export async function handleAuditRoutes(
       return invalidBody(`result must be ${AUDIT_RESULTS.join(", ")}`);
     }
 
-    return json(await context.agent.listAudit({
-      limit: parsedLimit?.ok ? parsedLimit.limit : undefined,
-      cursor,
-      sessionId: context.url.searchParams.get("sessionId") || undefined,
-      method: context.url.searchParams.get("method") || undefined,
-      result,
-    }));
+    return json(
+      await context.agent.listAudit({
+        limit: parsedLimit?.ok ? parsedLimit.limit : undefined,
+        cursor,
+        sessionId: context.url.searchParams.get("sessionId") || undefined,
+        method: context.url.searchParams.get("method") || undefined,
+        result,
+        caller: context.url.searchParams.get("caller") || undefined,
+      })
+    );
   } catch (error) {
     return agentError(error);
   }
