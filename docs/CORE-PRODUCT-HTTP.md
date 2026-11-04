@@ -291,6 +291,8 @@ arguments. Core permission modes are `plan`, `manual`, `acceptEdits`, and `bypas
 - `tools/call` returns text `content` (the universal fallback) and, when the result is a JSON object, the same data as `structuredContent`.
 - A tool that ran and failed, or rejected its input (including writes that need runtime approval), returns `result.isError: true` with the message as text. Only a failure of the request itself is a JSON-RPC error: `-32602` for an unknown tool, `-32000` when no agent service is attached, `-32003` while quiesced.
 
+`THEBE_MCP_PORT` adds a second listener that serves only this endpoint (see `docs/DEPLOYMENT.md` section 4.3). On it every other path, including `/v1/*`, `/docs` and `/openapi.json`, is `404`; Host and token checks are unchanged; and each token is limited to `THEBE_MCP_RATE_LIMIT` requests per minute (default 120), after which the caller gets an immediate `429` with `{ok:false, code:"rate_limited", retryAfterSeconds}` and a `Retry-After` header. The main port is unaffected.
+
 ## Owner instructions (2026-10-14)
 
 `instructions` on `GET/PATCH /v1/settings/agent` is the owner's standing instruction text, the counterpart of the global `AGENTS.md` / `CLAUDE.md` that Codex, dsh and Claude Code load. Core adds it to the system prompt after its built-in rules, inside an `<owner_instructions>` block that says it cannot relax approval, workspace, sandbox or safety rules.

@@ -33,6 +33,9 @@ services:
       # Loopback by default. For a home LAN set THEBE_BIND to the host's LAN address in .env
       # (never 0.0.0.0); see docs/DEPLOYMENT.md "Home network mode".
       - "${THEBE_BIND:-127.0.0.1}:8787:8787"
+      # To expose only /mcp (docs/DEPLOYMENT.md section 4.3), set THEBE_MCP_PORT=8788 in .env and
+      # publish that port instead of 8787 through Funnel or a tunnel:
+      # - "127.0.0.1:8788:8788"
     volumes:
       - ./data:/data
       - ${THEBE_WORKSPACE:-./workspace}:/workspace

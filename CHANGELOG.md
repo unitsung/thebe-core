@@ -11,6 +11,7 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- `THEBE_MCP_PORT` opens a second port that serves only `POST /mcp`: `/v1/*`, `/docs` and `/openapi.json` are `404` on it, so it is the one port to expose through Tailscale Funnel or a tunnel. The Host and token checks apply as on the main port, which behaves as before. Each token is limited to `THEBE_MCP_RATE_LIMIT` requests per minute (default 120) on that port; past it the caller gets an immediate `429` (`code: "rate_limited"`, `Retry-After`) and other tokens are unaffected. `THEBE_MCP_HOST` sets its bind address. See `docs/DEPLOYMENT.md` section 4.3.
 - `Authorization: Bearer <token>` is accepted anywhere `X-Thebe-Token` is, for clients that send a bearer token and cannot set a custom header (Claude's API, most agent frameworks). When a request sends both, `X-Thebe-Token` is the one checked.
 - Scoped device tokens: `thebe token create <name> --scope mcp:read|mcp:write` makes a token that works only on `/mcp`. `mcp:read` runs read tools; `mcp:write` also runs write tools, if the host has not turned writes off (`THEBE_MCP_WRITES=off` still wins). A scoped token is refused with `403 token_scope` on every other route, and a write tool refused for want of `mcp:write` answers at once with the command that grants it; nothing waits. A token made without `--scope`, the shared token and `THEBE_TOKEN` keep full access, and a stored scope Core does not know is refused rather than read as full access. `thebe token list` shows each token's scope.
 
