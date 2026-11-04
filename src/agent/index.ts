@@ -25,6 +25,7 @@ export type {
   AuditResult,
 } from "./security/audit/audit-log.ts";
 export type { ProductSkill } from "./extensions/product.ts";
+export type { UsageQuery, UsageRange, UsageSummary } from "./usage/summary.ts";
 export { toProductSkill, toProductCapability } from "./extensions/product.ts";
 export type {
   ProductWorker,
