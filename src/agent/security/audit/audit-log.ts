@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
@@ -37,6 +38,8 @@ export type AuditQuery = {
   sessionId?: string;
   method?: string;
   result?: AuditResult;
+  /** Only records made by the token with this name. Older records have no caller and never match. */
+  caller?: string;
 };
 
 export type AuditPage = {
@@ -72,12 +75,28 @@ export function canonicalJson(
   return `{${entries.join(",")}}`;
 }
 
+const callerScope = new AsyncLocalStorage<string>();
+
+/**
+ * Runs `work` as one call made by the named caller (the token behind a call over `/mcp`): every audit
+ * record written inside it, by whichever tool, carries that name. A record that sets its own `caller`
+ * keeps it. Calls the App makes itself are not run through this, so their records have none.
+ */
+export function withAuditCaller<T>(
+  caller: string,
+  work: () => Promise<T>
+): Promise<T> {
+  return callerScope.run(caller, work);
+}
+
 export function createAuditLog(path: string, now: () => Date) {
   return {
     async append(record: Omit<AuditRecord, "id" | "timestamp">): Promise<void> {
+      const caller = callerScope.getStore();
       const row: AuditRecord = {
         id: randomUUID(),
         timestamp: now().toISOString(),
+        ...(caller && { caller }),
         ...record,
       };
       await mkdir(dirname(path), { recursive: true });
@@ -154,6 +173,7 @@ function matchesQuery(record: AuditRecord, query: AuditQuery): boolean {
   if (query.sessionId && record.sessionId !== query.sessionId) return false;
   if (query.method && record.method !== query.method) return false;
   if (query.result && record.result !== query.result) return false;
+  if (query.caller && record.caller !== query.caller) return false;
   return true;
 }
 

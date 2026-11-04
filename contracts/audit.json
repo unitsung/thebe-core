@@ -1,0 +1,53 @@
+{
+  "description": "GET /v1/audit entries, newest first. A record made by a call over /mcp names the token in caller; the App's own calls and records written before callers were kept have none. A client decodes all of them.",
+  "entries": [
+    {
+      "id": "6f0f3c1e-52a4-4a53-9d0a-0d6f6b6f0004",
+      "timestamp": "2026-11-04T09:30:00.000Z",
+      "method": "download.delete",
+      "parameterHash": "4444444444444444444444444444444444444444444444444444444444444444",
+      "responseBytes": 64,
+      "budgetConsumed": 0,
+      "redactionFired": false,
+      "source": "mcp",
+      "result": "ok",
+      "durationMs": 41,
+      "caller": "Hermes",
+      "irreversible": true
+    },
+    {
+      "id": "6f0f3c1e-52a4-4a53-9d0a-0d6f6b6f0003",
+      "timestamp": "2026-11-04T09:20:00.000Z",
+      "method": "container.list",
+      "parameterHash": "3333333333333333333333333333333333333333333333333333333333333333",
+      "responseBytes": 812,
+      "budgetConsumed": 0,
+      "redactionFired": false,
+      "source": "mcp",
+      "result": "ok",
+      "durationMs": 12,
+      "caller": "Claude Desktop"
+    },
+    {
+      "id": "6f0f3c1e-52a4-4a53-9d0a-0d6f6b6f0002",
+      "timestamp": "2026-11-04T09:10:00.000Z",
+      "method": "container.logs",
+      "parameterHash": "2222222222222222222222222222222222222222222222222222222222222222",
+      "responseBytes": 2048,
+      "budgetConsumed": 0,
+      "redactionFired": true,
+      "sessionId": "session-1",
+      "result": "ok",
+      "durationMs": 87
+    },
+    {
+      "id": "legacy-f3bb873b492ef5f99fa99b44486acf3a4cf30ebdce69390f6c16413d9c87ff2f",
+      "timestamp": "2026-09-21T00:00:00.000Z",
+      "method": "container.inspect",
+      "parameterHash": "1111111111111111111111111111111111111111111111111111111111111111",
+      "responseBytes": 20,
+      "budgetConsumed": 0,
+      "redactionFired": false
+    }
+  ]
+}

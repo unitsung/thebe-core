@@ -232,6 +232,7 @@ const operations: Operation[] = [
         type: "string",
         enum: ["ok", "error", "denied"],
       }),
+      queryParameter("caller"),
     ],
     responseSchema: "AuditList",
   },
@@ -1401,7 +1402,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
-            caller: { type: "string" },
+            caller: {
+              type: "string",
+              description:
+                "Name of the token that made the call over /mcp; absent on records the App's own calls wrote and on older records",
+            },
             irreversible: { type: "boolean" },
           },
         },
