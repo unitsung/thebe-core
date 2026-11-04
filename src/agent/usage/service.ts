@@ -1,3 +1,4 @@
+import type { Decision } from "../eval/types.ts";
 import type { ActivityStore } from "../activity/store.ts";
 import type { ThebeSessionStats } from "../runtime/interface.ts";
 import type { AgentSessionMeta } from "../store.ts";
@@ -19,6 +20,7 @@ export function createUsageApi(deps: {
   listMetas: () => Promise<AgentSessionMeta[]>;
   listGoals: () => Promise<GoalRun[]>;
   activityStore: Pick<ActivityStore, "list">;
+  listDecisions?: () => Promise<Decision[]>;
   openSession: (thebeSessionId: string) => Promise<{
     session: {
       getContextUsage(): Promise<{ sessionStats?: ThebeSessionStats }>;
@@ -28,10 +30,11 @@ export function createUsageApi(deps: {
   return {
     async getUsageSummary(query) {
       const range = resolveUsageRange(query, deps.now());
-      const [metas, goals, activity] = await Promise.all([
+      const [metas, goals, activity, decisions] = await Promise.all([
         deps.listMetas(),
         deps.listGoals(),
         deps.activityStore.list(),
+        deps.listDecisions?.() ?? [],
       ]);
       return buildUsageSummary({
         range,
@@ -39,6 +42,7 @@ export function createUsageApi(deps: {
         metas,
         goals,
         activity,
+        decisions,
         async readStats(thebeSessionId) {
           try {
             const opened = await deps.openSession(thebeSessionId);

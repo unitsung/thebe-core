@@ -287,7 +287,7 @@
       "name": "container turned unhealthy, passed the gate",
       "item": {
         "stage": {
-          "kind": "ended"
+          "kind": "working"
         },
         "type": "trigger",
         "id": "container-health:ctr-emby:unhealthy:1",
@@ -376,6 +376,116 @@
             "duplicateOf": "container-health:ctr-emby:unhealthy:1"
           },
           "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event assessed in observe mode, would have been taken",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:4",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:4",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z",
+          "decision": {
+            "triggerId": "container-health:ctr-emby:unhealthy:4",
+            "result": "ignore",
+            "wouldHaveTaken": true,
+            "mode": "observe",
+            "policyVersion": 3,
+            "matchedRule": {
+              "id": "containers/unhealthy",
+              "name": "Container is unhealthy"
+            },
+            "judgements": [
+              {
+                "ruleId": "containers/crashed",
+                "name": "Container keeps exiting",
+                "matches": false,
+                "reason": "It has not exited."
+              },
+              {
+                "ruleId": "containers/unhealthy",
+                "name": "Container is unhealthy",
+                "matches": true,
+                "reason": "The health check keeps failing."
+              }
+            ],
+            "model": {
+              "providerId": "deepseek",
+              "modelId": "deepseek-chat"
+            },
+            "diagnostics": [
+              "container.inspect",
+              "container.logs"
+            ],
+            "tokens": {
+              "input": 812,
+              "output": 96,
+              "cacheWrite": 0,
+              "cacheRead": 0
+            },
+            "decidedAt": "2026-11-04T09:30:00.000Z"
+          }
+        }
+      }
+    },
+    {
+      "name": "container event the model could not decide",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "trigger",
+        "id": "container-health:ctr-emby:down:5",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:down:5",
+            "source": "container-health",
+            "kind": "down",
+            "severity": "critical",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:00:00.000Z",
+          "decision": {
+            "triggerId": "container-health:ctr-emby:down:5",
+            "result": "unavailable",
+            "reason": "timeout",
+            "mode": "observe",
+            "policyVersion": 3,
+            "decidedAt": "2026-11-04T09:30:00.000Z"
+          }
         }
       }
     },
@@ -759,6 +869,110 @@
             "duplicateOf": "container-health:ctr-emby:unhealthy:1"
           },
           "decidedAt": "2026-11-04T09:30:00.000Z"
+        }
+      }
+    },
+    {
+      "name": "container event assessed in observe mode, would have been taken",
+      "item": {
+        "type": "trigger",
+        "id": "container-health:ctr-emby:unhealthy:4",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:unhealthy:4",
+            "source": "container-health",
+            "kind": "unhealthy",
+            "severity": "warning",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:30:00.000Z",
+          "decision": {
+            "triggerId": "container-health:ctr-emby:unhealthy:4",
+            "result": "ignore",
+            "wouldHaveTaken": true,
+            "mode": "observe",
+            "policyVersion": 3,
+            "matchedRule": {
+              "id": "containers/unhealthy",
+              "name": "Container is unhealthy"
+            },
+            "judgements": [
+              {
+                "ruleId": "containers/crashed",
+                "name": "Container keeps exiting",
+                "matches": false,
+                "reason": "It has not exited."
+              },
+              {
+                "ruleId": "containers/unhealthy",
+                "name": "Container is unhealthy",
+                "matches": true,
+                "reason": "The health check keeps failing."
+              }
+            ],
+            "model": {
+              "providerId": "deepseek",
+              "modelId": "deepseek-chat"
+            },
+            "diagnostics": [
+              "container.inspect",
+              "container.logs"
+            ],
+            "tokens": {
+              "input": 812,
+              "output": 96,
+              "cacheWrite": 0,
+              "cacheRead": 0
+            },
+            "decidedAt": "2026-11-04T09:30:00.000Z"
+          }
+        }
+      }
+    },
+    {
+      "name": "container event the model could not decide",
+      "item": {
+        "type": "trigger",
+        "id": "container-health:ctr-emby:down:5",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:30:00.000Z",
+        "trigger": {
+          "trigger": {
+            "id": "container-health:ctr-emby:down:5",
+            "source": "container-health",
+            "kind": "down",
+            "severity": "critical",
+            "thread": {
+              "kind": "container",
+              "id": "ctr-emby",
+              "name": "emby"
+            },
+            "summary": "emby turned unhealthy",
+            "observedAt": "2026-11-04T09:30:00.000Z"
+          },
+          "outcome": {
+            "result": "passed"
+          },
+          "decidedAt": "2026-11-04T09:00:00.000Z",
+          "decision": {
+            "triggerId": "container-health:ctr-emby:down:5",
+            "result": "unavailable",
+            "reason": "timeout",
+            "mode": "observe",
+            "policyVersion": 3,
+            "decidedAt": "2026-11-04T09:30:00.000Z"
+          }
         }
       }
     },

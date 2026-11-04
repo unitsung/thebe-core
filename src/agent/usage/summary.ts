@@ -1,4 +1,5 @@
 import type { ActivityRecord } from "../activity/types.ts";
+import type { Decision } from "../eval/types.ts";
 import type { ThebeSessionStats } from "../runtime/interface.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import { httpError, type GoalRun } from "../types.ts";
@@ -212,6 +213,8 @@ export type UsageInputs = {
   metas: AgentSessionMeta[];
   goals: GoalRun[];
   activity: ActivityRecord[];
+  /** Eval's decisions: each one's assessment is background work, counted on the day it was decided. */
+  decisions?: Array<Pick<Decision, "decidedAt" | "tokens">>;
   /** Reads one session's token stats; undefined when the session cannot be read. */
   readStats(thebeSessionId: string): Promise<ThebeSessionStats | undefined>;
 };
@@ -255,6 +258,27 @@ export async function buildUsageSummary(
       isBackground(meta) ? bucket.background : bucket.foreground,
       tokens
     );
+  }
+
+  for (const decision of input.decisions ?? []) {
+    const day = localDay(decision.decidedAt, offset);
+    const bucket = day && inRange.has(day) ? byDay.get(day) : undefined;
+    if (!bucket || !decision.tokens) continue;
+    const {
+      input: inputTokens,
+      output,
+      cacheWrite,
+      cacheRead,
+    } = decision.tokens;
+    addTokens(bucket.background, {
+      input: inputTokens,
+      output,
+      cacheWrite,
+      cacheRead,
+      counted: inputTokens + output + cacheWrite,
+      // The runtime's cost estimate is not kept on a decision.
+      cost: 0,
+    });
   }
 
   const totals = { foreground: emptyDay(), background: emptyDay() };

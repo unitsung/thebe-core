@@ -126,13 +126,15 @@ export type CreateThebeAgentOptions = {
   now?: () => Date;
   /**
    * Event sources. `evaluate` runs for each Trigger that passed the Gate, one at a time per Thread;
-   * `timer` and `pollIntervalMs` replace the poll loop, which tests drive by hand.
+   * `timer` and `pollIntervalMs` replace the poll loop, which tests drive by hand. Without `evaluate`,
+   * Eval's Assessment runs; `assessmentTimeoutMs` bounds how long it waits for the model.
    */
   schedules?: {
     /** Replaces the one-second scheduler loop; tests drive the returned tick by hand. */
     timer?: import("./schedules/service.ts").ScheduleTimer;
   };
   sources?: {
+    assessmentTimeoutMs?: number;
     evaluate?: import("./sources/runtime.ts").SourceEvaluator;
     timer?: import("./sources/runtime.ts").SourceTimer;
     pollIntervalMs?: number;
@@ -516,8 +518,10 @@ export interface ThebeAgent {
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   /** What projecting items needs besides each item: the agent clock, which goals wait on a confirmation and which tickets wrap what. */
   activityStageContext(): Promise<import("./activity/stage.ts").StageContext>;
-  /** Every Trigger the sources produced, with the Gate outcome recorded for it. */
-  listTriggers(): Promise<import("./sources/types.ts").TriggerRecord[]>;
+  /** Every Trigger the sources produced, with the Gate outcome recorded for it and Eval's Decision once made. */
+  listTriggers(): Promise<import("./eval/types.ts").TriggerEntry[]>;
+  /** Every Decision Eval recorded. */
+  listDecisions(): Promise<import("./eval/types.ts").Decision[]>;
   /** How each source is reading; shown in the health response. */
   sourceHealth(): Record<string, import("./sources/types.ts").SourceHealth>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;

@@ -1986,7 +1986,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         ActivityTriggerItem: {
           description:
-            "An event from a source (such as a container turning unhealthy) and what the Gate decided: passed (may be evaluated), filtered (with the reason), or duplicate (of an earlier Trigger).",
+            "An event from a source (such as a container turning unhealthy) and what the Gate decided: passed (may be evaluated), filtered (with the reason), or duplicate (of an earlier Trigger). A passed Trigger carries Eval's decision once it is made; until then its stage is working.",
           type: "object",
           required: ["type", "id", "group", "updatedAt", "trigger"],
           properties: {
@@ -1996,6 +1996,74 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
             trigger: { $ref: "#/components/schemas/TriggerRecord" },
+          },
+        },
+        TriggerDecision: {
+          description:
+            "What Eval decided about a Trigger that passed the Gate, written once. ignore with wouldHaveTaken is observe mode's record of a positive assessment: nothing ran and no confirmation was created. unavailable means Core could not decide (see reason).",
+          type: "object",
+          required: [
+            "triggerId",
+            "result",
+            "mode",
+            "policyVersion",
+            "decidedAt",
+          ],
+          properties: {
+            triggerId: { type: "string" },
+            result: {
+              type: "string",
+              enum: ["accept", "stop", "ignore", "unavailable"],
+            },
+            wouldHaveTaken: { type: "boolean", enum: [true] },
+            reason: {
+              type: "string",
+              enum: [
+                "mode_off",
+                "no_rules",
+                "model_error",
+                "timeout",
+                "invalid_output",
+                "interrupted",
+              ],
+            },
+            mode: { type: "string", enum: ["off", "observe", "auto"] },
+            policyVersion: {
+              type: "integer",
+              description:
+                "The policy version in force; GET /v1/policy/versions/{version} returns it.",
+            },
+            matchedRule: {
+              type: "object",
+              required: ["id", "name"],
+              properties: { id: { type: "string" }, name: { type: "string" } },
+            },
+            judgements: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["ruleId", "name", "matches"],
+                properties: {
+                  ruleId: { type: "string" },
+                  name: { type: "string" },
+                  matches: { type: "boolean" },
+                  reason: { type: "string" },
+                },
+              },
+            },
+            model: { $ref: "#/components/schemas/PolicyModelRef" },
+            diagnostics: { type: "array", items: { type: "string" } },
+            tokens: {
+              type: "object",
+              description: "Background tokens the assessment used.",
+              properties: {
+                input: { type: "integer" },
+                output: { type: "integer" },
+                cacheWrite: { type: "integer" },
+                cacheRead: { type: "integer" },
+              },
+            },
+            decidedAt: { type: "string" },
           },
         },
         ActivityScheduleObservationItem: {
@@ -2123,6 +2191,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               },
             },
             decidedAt: { type: "string" },
+            decision: { $ref: "#/components/schemas/TriggerDecision" },
           },
         },
         ActivityStage: {
@@ -3138,13 +3207,26 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 "The owner's rules followed by the rules of every enabled default set.",
               items: { $ref: "#/components/schemas/PolicyRule" },
             },
+            backgroundModel: {
+              $ref: "#/components/schemas/PolicyModelRef",
+              description:
+                "The cheaper model for the Assessment and other background work. Absent: the default model.",
+            },
+          },
+        },
+        PolicyModelRef: {
+          type: "object",
+          required: ["providerId", "modelId"],
+          properties: {
+            providerId: { type: "string" },
+            modelId: { type: "string" },
           },
         },
         PolicyUpdate: {
           type: "object",
           required: ["baseVersion"],
           description:
-            "At least one of mode, rules, defaultSets or sources besides baseVersion.",
+            "At least one of mode, rules, defaultSets, sources or backgroundModel besides baseVersion.",
           properties: {
             baseVersion: {
               type: "integer",
@@ -3182,6 +3264,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 nullable: true,
                 properties: { enabled: { type: "boolean" } },
                 additionalProperties: true,
+              },
+            },
+            backgroundModel: {
+              type: "object",
+              nullable: true,
+              description:
+                "The model for background work, an API model or a local one. null goes back to the default model.",
+              required: ["providerId", "modelId"],
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
               },
             },
           },

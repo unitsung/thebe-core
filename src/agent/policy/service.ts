@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RuntimeModelRef } from "../runtime/interface.ts";
 import { httpError } from "../types.ts";
 import { DEFAULT_RULE_SETS } from "./defaults.ts";
 import {
@@ -27,6 +28,7 @@ const UPDATE_KEYS = new Set([
   "rules",
   "defaultSets",
   "sources",
+  "backgroundModel",
 ]);
 
 /**
@@ -192,6 +194,10 @@ function applyUpdate(
   if (Object.keys(sources).length > MAX_SOURCES) {
     throw invalid(`at most ${MAX_SOURCES} sources`);
   }
+  const background =
+    update.backgroundModel === undefined
+      ? current.backgroundModel
+      : (update.backgroundModel ?? undefined);
   return {
     version: current.version + 1,
     createdAt: now.toISOString(),
@@ -205,6 +211,7 @@ function applyUpdate(
       : current.rules,
     defaultSets: resolveDefaultSets(enabled),
     sources: structuredClone(sources),
+    ...(background ? { backgroundModel: { ...background } } : {}),
   };
 }
 
@@ -243,17 +250,40 @@ function parseUpdate(input: unknown): PolicyUpdate {
     update.defaultSets = parseDefaultSets(input.defaultSets);
   }
   if (input.sources !== undefined) update.sources = parseSources(input.sources);
+  if (input.backgroundModel !== undefined) {
+    update.backgroundModel = parseBackgroundModel(input.backgroundModel);
+  }
   if (
     update.mode === undefined &&
     update.rules === undefined &&
     update.defaultSets === undefined &&
-    update.sources === undefined
+    update.sources === undefined &&
+    update.backgroundModel === undefined
   ) {
     throw invalid(
-      "at least one of mode, rules, defaultSets or sources is required"
+      "at least one of mode, rules, defaultSets, sources or backgroundModel is required"
     );
   }
   return update;
+}
+
+function parseBackgroundModel(value: unknown): RuntimeModelRef | null {
+  if (value === null) return null;
+  const fail = () =>
+    invalid("backgroundModel must be null or {providerId, modelId}");
+  if (!isRecord(value)) throw fail();
+  const { providerId, modelId } = value;
+  if (
+    typeof providerId !== "string" ||
+    typeof modelId !== "string" ||
+    !providerId.trim() ||
+    !modelId.trim() ||
+    providerId.length > 100 ||
+    modelId.length > 200
+  ) {
+    throw fail();
+  }
+  return { providerId: providerId.trim(), modelId: modelId.trim() };
 }
 
 function parseRules(value: unknown): NonNullable<PolicyUpdate["rules"]> {
