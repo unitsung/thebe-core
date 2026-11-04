@@ -100,8 +100,20 @@ Persistence for a pending Approval or a completed Receipt (`GET /v1/activity` re
 _Avoid_: treating this as a full Activity product, naming it the user-facing Activity workspace, dumping raw events, calling the model to summarize the list, or persisting Diagnosis as a sibling row
 
 **ProductGoal**:
-Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `GET /v1/goals/{id}/log` (JSON or SSE). Session-scoped aliases under `/v1/session/{id}/goal`. Terminal worker/reviewer evidence may be exposed as a linked `report` Artifact. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
+Durable objective attached to one parent session. Identity is `thebeSessionId` (`id` === `sessionId`). Product status is `queued` | `running` | `paused` | `succeeded` | `failed` | `cancelled`; runtime `pausing` collapses to `running`. HTTP: `POST`/`GET /v1/goals`, `GET /v1/goals/{id}`, pause/resume/stop, `POST /v1/goals/{id}/answer`, `GET /v1/goals/{id}/log` (JSON or SSE). It carries its latest Report and open Attention, when it has them. Session-scoped aliases under `/v1/session/{id}/goal`. Terminal worker/reviewer evidence may be exposed as a linked `report` Artifact. Delivery maps through `toProductGoal` / `toProductGoalEvent`.
 _Avoid_: a second Goal id scheme, `GET /v1/goals/{id}/runs`, exposing Pi/MCP/subagent internals, or treating ActivityRecord as a Goal
+
+**Report**:
+How a goal's worker or reviewer says where its checkpoint stands, as data instead of text markers: `progress` | `waiting` | `ready` | `blocked` | `failed` | `dropped` (nothing to do), with a summary. Sent through the `goal_report` tool that only goal workers and reviewers get; the older `GOAL_STATUS:` / `VERDICT:` footers are still read, in one place, into the same Report. A run stores only its latest Report (`ProductGoal.report`). `waiting` and `blocked` stop the goal at once, paused; `failed` fails it; `dropped` ends it without failing; `ready` and `progress` go on to the independent reviewer. A worker's `ready` is not a request for review: review is asked for only by a task created with "show me when done".
+_Avoid_: guessing waiting or finished from free text, WorkReport, storing the stage in the Report
+
+**Attention**:
+The one question a run needs the owner to answer (`ProductGoal.attention`, `question` + `askedAt`). A run holds at most one open; a second question while one is open is ignored. `POST /v1/goals/{id}/answer` clears it, resumes the same session with the answer in the next checkpoint's prompt, and sends no new notice. Resuming without answering also settles it. The one notice is sent when the question is asked (`thebe://goal/{id}`, push category `thebe.activity`, id keyed by goal and ask time).
+_Avoid_: a list of open questions, rewriting the model's question, needs_answer and the other earlier stage names
+
+**Stage**:
+Where an Activity item stands with respect to the person, worked out on every read from the item's facts and never stored: `ended`, `person` (with a reason: `delivery` not delivered, `answer` waiting for an answer, `approval` waiting for a confirmation, `review` waiting for review, `blocked`, `failed`), `working` (including queued), or `idle`; the first matching row wins, in that order (`agent/activity/stage.ts`). Every Activity item carries `stage`, added beside its existing fields; an older Core omits it. The "needs you" count is the number of items in the person stage (`GET /v1/activity/summary`) and equals the length of `GET /v1/activity?stage=person`. A finished failure asks for the person for 24 hours and then stays in history only. A goal's own worker and reviewer runs never ask for the person; their goal does. `delivery` and `review` have no producer yet: delivery arrives with the outbox, review with "show me when done".
+_Avoid_: storing the stage, a second Activity group for needs-you, treating a user pause as needing the person
 
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.

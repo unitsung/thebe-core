@@ -52,6 +52,12 @@ export async function handleGoalRoutes(
       if (request.method !== "GET") return undefined;
       return goalLog(context, agent, parsed.sessionId);
     }
+    if (parsed.kind === "answer") {
+      if (request.method !== "POST") return undefined;
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      return answerGoal(request, agent, parsed.sessionId);
+    }
     if (
       parsed.kind === "pause" ||
       parsed.kind === "resume" ||
@@ -196,6 +202,35 @@ async function goalLog(
   });
 }
 
+async function answerGoal(
+  request: Request,
+  agent: Agent,
+  sessionId: string
+): Promise<Response> {
+  const body = await readJson(request);
+  const answer = typeof body.answer === "string" ? body.answer.trim() : "";
+  if (!answer) {
+    return json(
+      { ok: false, error: "answer cannot be empty", code: "invalid_body" },
+      400
+    );
+  }
+  const current = await loadGoal(agent, sessionId);
+  if (!current) return json({ ok: false, error: "goal not found" }, 404);
+  // loadGoal also restores a goal that is only persisted, so a question survives a restart.
+  if (!current.attention) {
+    return json(
+      {
+        ok: false,
+        error: "no question is open for this goal",
+        code: "invalid_transition",
+      },
+      409
+    );
+  }
+  return json(toProductGoal(await agent.answerGoal(sessionId, answer)));
+}
+
 async function controlGoal(
   agent: Agent,
   sessionId: string,
@@ -254,7 +289,10 @@ function parseGoalPath(
   parts: string[]
 ):
   | { kind: "collection"; sessionId?: undefined }
-  | { kind: "item" | "log" | "pause" | "resume" | "stop"; sessionId: string }
+  | {
+      kind: "item" | "log" | "pause" | "resume" | "stop" | "answer";
+      sessionId: string;
+    }
   | undefined {
   if (parts[0] !== "v1") return undefined;
   if (parts[1] === "goals") {
@@ -268,7 +306,10 @@ function parseGoalPath(
       return { kind: "log", sessionId: id };
     if (
       parts.length === 4 &&
-      (parts[3] === "pause" || parts[3] === "resume" || parts[3] === "stop")
+      (parts[3] === "pause" ||
+        parts[3] === "resume" ||
+        parts[3] === "stop" ||
+        parts[3] === "answer")
     ) {
       return { kind: parts[3], sessionId: id };
     }
@@ -282,7 +323,10 @@ function parseGoalPath(
       return { kind: "log", sessionId: id };
     if (
       parts.length === 5 &&
-      (parts[4] === "pause" || parts[4] === "resume" || parts[4] === "stop")
+      (parts[4] === "pause" ||
+        parts[4] === "resume" ||
+        parts[4] === "stop" ||
+        parts[4] === "answer")
     ) {
       return { kind: parts[4], sessionId: id };
     }
@@ -306,6 +350,12 @@ function mapGoalError(error: unknown): Response {
   }
   if (/already running|goal is paused/i.test(message)) {
     return json({ ok: false, error: message, code: "invalid_transition" }, 409);
+  }
+  if (/no question is open|not waiting for an answer/i.test(message)) {
+    return json({ ok: false, error: message, code: "invalid_transition" }, 409);
+  }
+  if (/answer cannot be empty/i.test(message)) {
+    return json({ ok: false, error: message, code: "invalid_body" }, 400);
   }
   if (/no goal found/i.test(message)) {
     return json({ ok: false, error: "goal not found" }, 404);

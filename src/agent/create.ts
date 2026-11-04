@@ -12,6 +12,7 @@ import { createSessionApi } from "./sessions/service.ts";
 import { createSubagentApi } from "./subagents/api.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
+import { createReportInbox } from "./reports/report.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -25,8 +26,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       now: ctx.now,
     });
   const extensions = createExtensionApi(ctx, artifactStore);
-  const subagents = createSubagentApi(ctx, artifactStore);
-  const goals = createGoalApi(ctx, subagents, artifactStore);
+  const reportInbox = createReportInbox();
+  const subagents = createSubagentApi(ctx, artifactStore, reportInbox);
+  const goals = createGoalApi(ctx, subagents, artifactStore, reportInbox);
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
@@ -81,6 +83,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...createControlApi(ctx, artifactStore, {
       executeAction: actions.executeApprovedAction,
     }),
+    activityStageContext() {
+      return {
+        now: ctx.now(),
+        confirmationSessionIds: new Set(
+          sessions.listPendingPermissions().map((pending) => pending.sessionId)
+        ),
+      };
+    },
     listSchedules: schedules.listSchedules,
     getSchedule: schedules.getSchedule,
     createSchedule: schedules.createSchedule,

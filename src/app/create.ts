@@ -44,6 +44,8 @@ export function createThebeApp(options: {
   agentStoreDir?: string;
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
+  /** Replaces `fetch` for the Push Relay; a test seam. */
+  pushFetch?: typeof fetch;
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -97,6 +99,8 @@ export function createThebeApp(options: {
           relayUrl,
           identity: pushIdentity,
           devices: deviceRegistry,
+          fetch: options.pushFetch,
+          now: options.now,
         })
       : undefined;
   const agent = createThebeAgent({
@@ -108,6 +112,18 @@ export function createThebeApp(options: {
             body: "An action is waiting for your approval.",
             deepLink: `thebe://approval/${encodeURIComponent(record.id)}`,
             id: `approval-${record.id}`,
+          });
+        }
+      : undefined,
+    onGoalAttention: pushNotifier
+      ? (attention) => {
+          // One notice per question: the id is keyed by goal and ask time, so a repeat is dropped.
+          void pushNotifier.notify({
+            category: "thebe.activity",
+            title: "Thebe",
+            body: "A task has a question for you.",
+            deepLink: `thebe://goal/${encodeURIComponent(attention.goalId)}`,
+            id: `goal-question-${attention.goalId}-${attention.askedAt}`,
           });
         }
       : undefined,

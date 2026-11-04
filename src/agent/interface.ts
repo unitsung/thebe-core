@@ -109,6 +109,12 @@ export type CreateThebeAgentOptions = {
   onPendingApproval?: (
     record: import("./activity/types.ts").ActivityRecord
   ) => void;
+  /** Called once when a goal starts waiting for the owner's answer, for example to send a push notice. */
+  onGoalAttention?: (attention: {
+    goalId: string;
+    question: string;
+    askedAt: string;
+  }) => void;
   now?: () => Date;
   callerId?: string;
   maxToolCalls?: number;
@@ -341,6 +347,8 @@ export interface ThebeAgent {
   waitGoal(thebeSessionId: string): Promise<GoalRun>;
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
+  /** Answers the goal's one open question and resumes the same session. Rejects when none is open. */
+  answerGoal(thebeSessionId: string, answer: string): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
   clearGoal(thebeSessionId: string): void;
 
@@ -436,6 +444,8 @@ export interface ThebeAgent {
   getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
   getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
+  /** What stage derivation needs besides each item: the agent clock and which goals wait on a confirmation. */
+  activityStageContext(): import("./activity/stage.ts").StageContext;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;
   listAudit(query?: AuditQuery): Promise<AuditPage>;

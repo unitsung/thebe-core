@@ -12,6 +12,7 @@ import { createWebSearchProvider } from "../adapters/web-search/client.ts";
 import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client.ts";
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
 import { createAria2DownloadProviderFromEnv } from "../adapters/pipeline/aria2-downloads.ts";
+import { Aria2BackgroundTaskProvider } from "../adapters/pipeline/aria2-tasks.ts";
 import { createDownloadHub } from "../adapters/pipeline/download-hub.ts";
 import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
 import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/openlist-transfer.ts";
@@ -187,6 +188,8 @@ export async function bootstrapThebe(
   const arcaneBackgroundTaskProvider =
     createArcaneBackgroundTaskProviderFromEnv();
 
+  // One aria2 client for the download hub and for Activity.
+  const aria2Downloads = createAria2DownloadProviderFromEnv();
   const version = readPackageVersion(fromDir);
   const agentStoreDir =
     process.env.THEBE_AGENT_STORE_DIR ??
@@ -219,10 +222,9 @@ export async function bootstrapThebe(
     navidrome,
     pipeline: {
       downloads: createDownloadHub(
-        [
-          createQBittorrentDownloadProviderFromEnv(),
-          createAria2DownloadProviderFromEnv(),
-        ].filter((engine) => engine !== undefined),
+        [createQBittorrentDownloadProviderFromEnv(), aria2Downloads].filter(
+          (engine) => engine !== undefined
+        ),
         {
           isIndexerAddress: (url) => releaseSearch?.ownsAddress(url) === true,
         }
@@ -248,6 +250,9 @@ export async function bootstrapThebe(
         const provider = createQBittorrentBackgroundTaskProviderFromEnv();
         return provider ? [provider] : [];
       })(),
+      ...(aria2Downloads
+        ? [new Aria2BackgroundTaskProvider(aria2Downloads)]
+        : []),
       ...(arcaneBackgroundTaskProvider ? [arcaneBackgroundTaskProvider] : []),
       ...(openListBackgroundTaskProvider
         ? [openListBackgroundTaskProvider]
