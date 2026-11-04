@@ -60,11 +60,12 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // a client's "Open API docs" link can launch Safari. Swagger UI still asks
       // for X-Thebe-Token through its Authorize control when trying requests.
       if (verify && !isDocumentationRequest(request)) {
-        if (!verify(request.headers.get("X-Thebe-Token") ?? "")) {
+        if (!verify(receivedToken(request))) {
           return json(
             {
               ok: false,
-              error: "Missing or invalid X-Thebe-Token",
+              error:
+                "Missing or invalid token (send X-Thebe-Token, or Authorization: Bearer)",
               code: "unauthorized",
             },
             401
@@ -80,6 +81,20 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       }
     },
   };
+}
+
+/**
+ * The token a request carries: `X-Thebe-Token`, or else `Authorization: Bearer`, the form Claude's
+ * API and most agent clients send. When both are present the header wins, so one request is never
+ * checked against two tokens.
+ */
+function receivedToken(request: Request): string {
+  const header = request.headers.get("X-Thebe-Token");
+  if (header !== null) return header;
+  const bearer = /^bearer[ \t]+(\S+)$/i.exec(
+    request.headers.get("Authorization")?.trim() ?? ""
+  );
+  return bearer?.[1] ?? "";
 }
 
 function isDocumentationRequest(request: Request): boolean {
