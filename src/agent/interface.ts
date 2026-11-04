@@ -18,7 +18,12 @@ import type {
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
-import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
+import type {
+  GoalSchedule,
+  GoalScheduleInput,
+  ScheduleMode,
+  ScheduleObservationView,
+} from "./schedules/types.ts";
 import type { PolicyApi } from "./policy/service.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { PipelineProviders } from "./tools/pipeline-tools.ts";
@@ -122,6 +127,10 @@ export type CreateThebeAgentOptions = {
    * Event sources. `evaluate` runs for each Trigger that passed the Gate, one at a time per Thread;
    * `timer` and `pollIntervalMs` replace the poll loop, which tests drive by hand.
    */
+  schedules?: {
+    /** Replaces the one-second scheduler loop; tests drive the returned tick by hand. */
+    timer?: import("./schedules/service.ts").ScheduleTimer;
+  };
   sources?: {
     evaluate?: import("./sources/runtime.ts").SourceEvaluator;
     timer?: import("./sources/runtime.ts").SourceTimer;
@@ -364,6 +373,10 @@ export interface ThebeAgent {
   createSchedule(input: GoalScheduleInput): Promise<GoalSchedule>;
   updateSchedule(id: string, input: GoalScheduleInput): Promise<GoalSchedule>;
   setScheduleEnabled(id: string, enabled: boolean): Promise<GoalSchedule>;
+  /** off / observe / auto. Switching to auto runs the next due time once; it starts nothing by itself. */
+  setScheduleMode(id: string, mode: ScheduleMode): Promise<GoalSchedule>;
+  /** What observed schedules would have run, oldest first, with each schedule's mode now. */
+  listScheduleObservations(): Promise<ScheduleObservationView[]>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<GoalSchedule>;
   /**

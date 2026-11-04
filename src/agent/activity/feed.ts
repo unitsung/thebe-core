@@ -6,6 +6,7 @@ import {
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 import type { TriggerRecord } from "../sources/types.ts";
+import type { ScheduleObservationView } from "../schedules/types.ts";
 import {
   PERSON_REASONS,
   type ActivityStage,
@@ -18,6 +19,7 @@ import {
   goalStage,
   recordStage,
   runStage,
+  scheduleObservationStage,
   triggerStage,
   workerStage,
 } from "./stage-facts.ts";
@@ -39,6 +41,7 @@ export const ACTIVITY_FEED_TYPES = [
   "worker",
   "background_task",
   "trigger",
+  "schedule_observation",
 ] as const;
 
 export type ActivityFeedType = (typeof ACTIVITY_FEED_TYPES)[number];
@@ -112,6 +115,14 @@ export type ActivityFeedItem = ActivityFeedItemStage &
         group: "recent";
         updatedAt: string;
         trigger: TriggerRecord;
+      }
+    | {
+        /** What an observed schedule would have run at its due time; nothing was started. */
+        type: "schedule_observation";
+        id: string;
+        group: "recent";
+        updatedAt: string;
+        observation: ScheduleObservationView;
       }
   );
 
@@ -262,6 +273,20 @@ export function triggerToFeedItem(
   };
 }
 
+export function scheduleObservationToFeedItem(
+  record: ScheduleObservationView,
+  context: StageContext = {}
+): ActivityFeedItem {
+  return {
+    stage: scheduleObservationStage(record, context),
+    type: "schedule_observation",
+    id: record.id,
+    group: "recent",
+    updatedAt: record.observedAt,
+    observation: record,
+  };
+}
+
 export function encodeActivityCursor(
   item: Pick<ActivityFeedItem, "updatedAt" | "id">
 ): string {
@@ -383,6 +408,8 @@ function activityFeedItemStatus(item: ActivityFeedItem): string {
       return item.task.status;
     case "trigger":
       return item.trigger.outcome.result;
+    case "schedule_observation":
+      return "would_run";
   }
 }
 
@@ -394,7 +421,8 @@ export function toActivityFeed(
   workers: ProductWorker[] = [],
   backgroundTasks: ProductBackgroundTask[] = [],
   stageContext: StageContext = {},
-  triggers: TriggerRecord[] = []
+  triggers: TriggerRecord[] = [],
+  scheduleObservations: ScheduleObservationView[] = []
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {
@@ -415,6 +443,9 @@ export function toActivityFeed(
   }
   for (const record of triggers) {
     items.push(triggerToFeedItem(record, stageContext));
+  }
+  for (const record of scheduleObservations) {
+    items.push(scheduleObservationToFeedItem(record, stageContext));
   }
   items.sort(compareActivityItems);
   return group ? items.filter((item) => item.group === group) : items;

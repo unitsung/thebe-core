@@ -11,6 +11,7 @@ import {
   normalizeActivityLimit,
   paginateActivityFeed,
   recordToFeedItem,
+  scheduleObservationToFeedItem,
   toActivityFeed,
   triggerToFeedItem,
   workerToFeedItem,
@@ -126,6 +127,11 @@ export async function handleActivityRoutes(
       (item) => item.trigger.id === id
     );
     if (trigger) return json(triggerToFeedItem(trigger, stageContext));
+    const observation = (await agent.listScheduleObservations()).find(
+      (item) => item.id === id
+    );
+    if (observation)
+      return json(scheduleObservationToFeedItem(observation, stageContext));
     const worker = (await agent.listSubagents())
       .map(toProductWorker)
       .find((item) => item.runId === id);
@@ -178,7 +184,8 @@ async function collectFeed(
     workers,
     backgroundTasks,
     agent.activityStageContext(),
-    await agent.listTriggers()
+    await agent.listTriggers(),
+    await agent.listScheduleObservations()
   );
 }
 

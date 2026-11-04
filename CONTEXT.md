@@ -126,6 +126,10 @@ _Avoid_: telemetry, metrics reporting, a counter updated while sessions run, or 
 A durable event stream that holds its read position, so a restart neither replays nor loses events (`agent/sources/`). The first is `container-health`, which polls the container provider every 30 seconds while the policy enables it (`policy.sources["container-health"]`: `enabled`, `minSeverity` default `warning`, `kinds`, `quietHours` default 23:00 to 08:00 or `null`, `dedupWindowMinutes` default 30). Position and Triggers are stored under `<agentStoreDir>/sources/`. Repeated read failures for ten minutes show in `GET /v1/health` as `sources.<id>.failing` and make no Trigger.
 _Avoid_: Signal, SignalSource, reading a source that is switched off
 
+**Schedule accept mode**:
+How a schedule behaves at its due time, per schedule: `off` (nothing, no record), `observe` (the default for a new schedule: no session, Goal, write or confirmation, only a `schedule_observation` Activity item saying it would have run, with its due time, Goal and scope: criteria, iteration limit, model), `auto` (start the Goal; every schedule stored before modes existed). The record offers run once, switch to auto, and delete the schedule; none of them creates a confirmation, and deleting a schedule keeps the Goals it already produced. Separate from the policy accept mode, which governs event-driven work.
+_Avoid_: starting a Goal in observe mode, replaying a recorded occurrence when switching to auto, a confirmation for observing
+
 **Trigger**:
 One immutable event from a Source with a stable id (`<source>:<resource id>:<kind>:<sequence>`), a kind, a severity (`info` | `warning` | `critical`) and a Thread. It is stored once however often it arrives. Container-health kinds: `unhealthy`, `restarting`, `down` (died or exited non-zero), `recovered`.
 _Avoid_: Signal, an editable event

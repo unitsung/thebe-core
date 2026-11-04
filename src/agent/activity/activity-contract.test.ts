@@ -39,6 +39,8 @@ describe("Activity contract", () => {
       { kind: "ended" },
       { kind: "ended" },
       { kind: "working" },
+      { kind: "ended" },
+      { kind: "ended" },
     ]);
     expect(contract.needsYou.count).toBe(5);
     expect(contract.withTicketId.item).toHaveProperty("ticketId");

@@ -1,0 +1,102 @@
+{
+  "version": 1,
+  "schedules": [
+    {
+      "id": "sched-1",
+      "title": "Nightly health check",
+      "goal": "Check that every container is healthy",
+      "criteria": [
+        "Every container is running"
+      ],
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "cron": "0 9 * * *",
+      "timeZone": "Asia/Shanghai",
+      "mode": "observe",
+      "enabled": true,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z"
+    },
+    {
+      "id": "sched-2",
+      "title": "Weekly library tidy",
+      "goal": "Check that every container is healthy",
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "mode": "auto",
+      "enabled": true,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z",
+      "intervalMinutes": 10080,
+      "lastRunAt": "2026-11-04T08:00:02.000Z",
+      "lastSessionId": "goal-1"
+    },
+    {
+      "id": "sched-3",
+      "title": "Paused idea",
+      "goal": "Check that every container is healthy",
+      "criteria": [
+        "Every container is running"
+      ],
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "cron": "0 9 * * *",
+      "timeZone": "Asia/Shanghai",
+      "mode": "off",
+      "enabled": false,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z"
+    }
+  ],
+  "legacy": [
+    {
+      "id": "sched-1",
+      "title": "Nightly health check",
+      "goal": "Check that every container is healthy",
+      "criteria": [
+        "Every container is running"
+      ],
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "cron": "0 9 * * *",
+      "timeZone": "Asia/Shanghai",
+      "enabled": true,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z"
+    },
+    {
+      "id": "sched-2",
+      "title": "Weekly library tidy",
+      "goal": "Check that every container is healthy",
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "enabled": true,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z",
+      "intervalMinutes": 10080,
+      "lastRunAt": "2026-11-04T08:00:02.000Z",
+      "lastSessionId": "goal-1"
+    },
+    {
+      "id": "sched-3",
+      "title": "Paused idea",
+      "goal": "Check that every container is healthy",
+      "criteria": [
+        "Every container is running"
+      ],
+      "maxIterations": 3,
+      "startAt": "2026-11-04T09:00:00.000Z",
+      "cron": "0 9 * * *",
+      "timeZone": "Asia/Shanghai",
+      "enabled": false,
+      "createdAt": "2026-11-01T00:00:00.000Z",
+      "updatedAt": "2026-11-04T09:00:03.000Z",
+      "nextRunAt": "2026-11-05T01:00:00.000Z"
+    }
+  ]
+}
