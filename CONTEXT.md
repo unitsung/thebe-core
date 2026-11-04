@@ -122,6 +122,22 @@ _Avoid_: storing the stage, a second Activity group for needs-you, treating a us
 A read-only answer to "what is Thebe costing and doing for me" (`GET /v1/usage/summary`), computed on the request from stores Core already keeps: session metadata and token stats, Goal runs, activity records. Background tokens (a Goal session, or one a schedule started) are reported apart from foreground chat; cache reads are reported separately and are not part of the counted total (input + output + cache write). A session's tokens belong to the day it was last active. It has no storage of its own, no background collector and no outbound call; the App shows it on the "Usage and effect" page and can export the same JSON.
 _Avoid_: telemetry, metrics reporting, a counter updated while sessions run, or sending these numbers anywhere
 
+**Source**:
+A durable event stream that holds its read position, so a restart neither replays nor loses events (`agent/sources/`). The first is `container-health`, which polls the container provider every 30 seconds while the policy enables it (`policy.sources["container-health"]`: `enabled`, `minSeverity` default `warning`, `kinds`, `quietHours` default 23:00 to 08:00 or `null`, `dedupWindowMinutes` default 30). Position and Triggers are stored under `<agentStoreDir>/sources/`. Repeated read failures for ten minutes show in `GET /v1/health` as `sources.<id>.failing` and make no Trigger.
+_Avoid_: Signal, SignalSource, reading a source that is switched off
+
+**Trigger**:
+One immutable event from a Source with a stable id (`<source>:<resource id>:<kind>:<sequence>`), a kind, a severity (`info` | `warning` | `critical`) and a Thread. It is stored once however often it arrives. Container-health kinds: `unhealthy`, `restarting`, `down` (died or exited non-zero), `recovered`.
+_Avoid_: Signal, an editable event
+
+**Thread**:
+The ordered Triggers for one resource, named by kind and id (`container:<id>`). At most one evaluation runs per Thread at a time; the next waits for the one in front.
+_Avoid_: threadKey as a stored field, a thread per Trigger
+
+**Gate**:
+The deterministic first layer of Eval, with no model call: source enabled, kind, severity, quiet hours (a `critical` Trigger breaks through), de-duplication. It records one outcome per Trigger, shown in Activity as a `trigger` item: `passed`, `filtered` with a `reason` (`disabled` | `kind` | `severity` | `quiet_hours`), or `duplicate` with `duplicateOf`. A Trigger that passed is handed to the evaluator; the Assessment is a later layer.
+_Avoid_: charging a model call for noise, dropping an event without a recorded reason
+
 **Pi built-in tools**:
 Runtime-owned `ls`, `find`, `grep`, `read`, `edit`, `write`, `bash` enabled on the same session as `container.*`.
 _Avoid_: reimplementing filesystem/bash tools in Thebe

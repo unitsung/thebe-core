@@ -7,6 +7,7 @@ import type { CapabilityRun } from "../capabilities/invoke.ts";
 import type { ProductBackgroundTask } from "../background-tasks/product.ts";
 import type { ProductGoal } from "../goals/product.ts";
 import { GOAL_REPORT_PROFILES } from "../goals/report-tool.ts";
+import type { TriggerRecord } from "../sources/types.ts";
 import type { ProductWorker } from "../subagents/product.ts";
 import {
   activityStage,
@@ -132,6 +133,17 @@ export function backgroundTaskStageFacts(
   }
 }
 
+/**
+ * A Gate outcome needs nobody: it is a record that an event was seen and what became of it. A Trigger that
+ * passed waits for its evaluation, which the assessment ticket will give a stage of its own.
+ */
+export function triggerStageFacts(
+  _record: TriggerRecord,
+  _context: StageContext
+): StageFacts {
+  return ENDED;
+}
+
 export const goalStage = (
   goal: ProductGoal,
   context: StageContext
@@ -144,6 +156,10 @@ export const runStage = (
   run: CapabilityRun,
   context: StageContext
 ): ActivityStage => activityStage(runStageFacts(run, context));
+export const triggerStage = (
+  record: TriggerRecord,
+  context: StageContext
+): ActivityStage => activityStage(triggerStageFacts(record, context));
 export const workerStage = (
   worker: ProductWorker,
   context: StageContext

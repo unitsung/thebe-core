@@ -123,7 +123,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/health",
-    summary: "Health check, with push delivery state when push is on",
+    summary:
+      "Health check, with push delivery state when push is on and the read state of each event source",
     tag: "system",
   },
   {
@@ -700,7 +701,7 @@ const operations: Operation[] = [
     method: "get",
     path: "/v1/activity",
     summary:
-      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task)",
+      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task, source trigger)",
     tag: "activity",
     parameters: [
       queryParameter("group", {
@@ -717,6 +718,7 @@ const operations: Operation[] = [
           "run",
           "worker",
           "background_task",
+          "trigger",
         ],
       }),
       queryParameter("stage", {
@@ -1951,6 +1953,84 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
         },
+        ActivityTriggerItem: {
+          description:
+            "An event from a source (such as a container turning unhealthy) and what the Gate decided: passed (may be evaluated), filtered (with the reason), or duplicate (of an earlier Trigger).",
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "trigger"],
+          properties: {
+            type: { type: "string", enum: ["trigger"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["recent"] },
+            updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
+            trigger: { $ref: "#/components/schemas/TriggerRecord" },
+          },
+        },
+        TriggerRecord: {
+          type: "object",
+          required: ["trigger", "outcome", "decidedAt"],
+          properties: {
+            trigger: {
+              type: "object",
+              required: [
+                "id",
+                "source",
+                "kind",
+                "severity",
+                "thread",
+                "summary",
+                "observedAt",
+              ],
+              properties: {
+                id: { type: "string" },
+                source: { type: "string", example: "container-health" },
+                kind: {
+                  type: "string",
+                  description:
+                    "For container-health: unhealthy, restarting, down or recovered.",
+                },
+                severity: {
+                  type: "string",
+                  enum: ["info", "warning", "critical"],
+                },
+                thread: {
+                  type: "object",
+                  required: ["kind", "id"],
+                  properties: {
+                    kind: { type: "string" },
+                    id: { type: "string" },
+                    name: { type: "string" },
+                  },
+                },
+                summary: { type: "string" },
+                observedAt: { type: "string" },
+              },
+            },
+            outcome: {
+              type: "object",
+              required: ["result"],
+              properties: {
+                result: {
+                  type: "string",
+                  enum: ["passed", "filtered", "duplicate"],
+                },
+                reason: {
+                  type: "string",
+                  enum: [
+                    "disabled",
+                    "kind",
+                    "severity",
+                    "quiet_hours",
+                    "duplicate",
+                  ],
+                },
+                duplicateOf: { type: "string" },
+              },
+            },
+            decidedAt: { type: "string" },
+          },
+        },
         ActivityStage: {
           description:
             "Where the item stands with respect to the person, worked out on every read from the item's facts and never stored. person means it needs the owner; reason says why.",
@@ -2014,6 +2094,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             { $ref: "#/components/schemas/ActivityRunItem" },
             { $ref: "#/components/schemas/ActivityWorkerItem" },
             { $ref: "#/components/schemas/ActivityBackgroundTaskItem" },
+            { $ref: "#/components/schemas/ActivityTriggerItem" },
           ],
         },
         ActivityList: {

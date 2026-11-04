@@ -129,6 +129,8 @@ describe("approval push notices go through the outbox", () => {
       runtime: createFakeRuntime().runtime,
       provider: provider(),
     });
-    expect(await health(app)).toEqual({ ok: true, version: "0.1.0" });
+    const body = await health(app);
+    expect(body).toMatchObject({ ok: true, version: "0.1.0" });
+    expect(body).not.toHaveProperty("push");
   });
 });

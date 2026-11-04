@@ -6,8 +6,10 @@ import {
   goalToFeedItem,
   recordToFeedItem,
   summarizeNeedsYou,
+  triggerToFeedItem,
   type ActivityFeedItem,
 } from "./feed.ts";
+import type { Trigger } from "../sources/types.ts";
 import { PERSON_REASONS, type ActivityStage } from "./stage.ts";
 import { ACTIVITY_KIND_RESTART, type ActivityRecord } from "./types.ts";
 
@@ -55,6 +57,22 @@ const restartApproval: ActivityRecord = {
   updatedAt: T1,
   idempotencyKey: "approve:container.restart:ctr-emby:run-1",
 };
+
+function containerTrigger(
+  kind: string,
+  severity: Trigger["severity"],
+  seq: number
+): Trigger {
+  return {
+    id: `container-health:ctr-emby:${kind}:${seq}`,
+    source: "container-health",
+    kind,
+    severity,
+    thread: { kind: "container", id: "ctr-emby", name: "emby" },
+    summary: "emby turned unhealthy",
+    observedAt: T1,
+  };
+}
 
 function named(name: string, item: ActivityFeedItem | undefined) {
   if (!item) throw new Error(`contract case ${name} produced no item`);
@@ -162,6 +180,43 @@ function cases() {
           updatedAt: T1,
           error: "aria2 reports a download error",
         }),
+        context
+      )
+    ),
+    named(
+      "container turned unhealthy, passed the gate",
+      triggerToFeedItem(
+        {
+          trigger: containerTrigger("unhealthy", "warning", 1),
+          outcome: { result: "passed" },
+          decidedAt: T1,
+        },
+        context
+      )
+    ),
+    named(
+      "container event filtered by quiet hours",
+      triggerToFeedItem(
+        {
+          trigger: containerTrigger("unhealthy", "warning", 2),
+          outcome: { result: "filtered", reason: "quiet_hours" },
+          decidedAt: T1,
+        },
+        context
+      )
+    ),
+    named(
+      "container event repeated, a duplicate",
+      triggerToFeedItem(
+        {
+          trigger: containerTrigger("unhealthy", "warning", 3),
+          outcome: {
+            result: "duplicate",
+            reason: "duplicate",
+            duplicateOf: "container-health:ctr-emby:unhealthy:1",
+          },
+          decidedAt: T1,
+        },
         context
       )
     ),
