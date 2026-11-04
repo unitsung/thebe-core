@@ -4,6 +4,7 @@ import type { DeviceRegistry } from "./devices.ts";
 import { normalizedPath, type ThebeHttpContext } from "./context.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
+import type { RateLimiter } from "./rate-limit.ts";
 import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
 import type { TokenCaller, TokenSource, TokenVerifier } from "./token-store.ts";
@@ -22,7 +23,17 @@ export type ThebeHttpHandlerOptions = {
   pushIdentity?: { publicKey: string; relayUrl: string };
   workspacePath?: string;
   pushOutbox?: ThebeHttpContext["pushOutbox"];
+  /**
+   * Serve only the paths in `MCP_LISTENER_PATHS` (today `/mcp`), every other path a 404 before any
+   * token check. This is the handler for the second port that is safe to expose to the internet.
+   */
+  mcpOnly?: boolean;
+  /** Per-token request limit; applied after the token is accepted. */
+  rateLimiter?: RateLimiter;
 };
+
+/** What the `/mcp`-only listener serves. The authorization endpoints join this list when they exist. */
+const MCP_LISTENER_PATHS: ReadonlySet<string> = new Set(["/mcp"]);
 
 /** Stable public composition shell for the HTTP agent. */
 export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
@@ -58,6 +69,9 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
 
   return {
     async handle(request: Request): Promise<Response> {
+      if (options.mcpOnly && !MCP_LISTENER_PATHS.has(pathOf(request))) {
+        return json({ ok: false, error: "Not found", code: "not_found" }, 404);
+      }
       const security = validateRequestSecurity(request, allowedHostsSet);
       if (!security.ok) {
         return json({ ok: false, error: security.reason }, 403);
@@ -88,6 +102,24 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
               code: "token_scope",
             },
             403
+          );
+        }
+      }
+      if (options.rateLimiter) {
+        const name = caller?.name ?? "anonymous";
+        const taken = options.rateLimiter.take(name);
+        if (!taken.ok) {
+          const { limit, windowMs } = options.rateLimiter.limit;
+          const seconds = Math.round(windowMs / 1000);
+          return json(
+            {
+              ok: false,
+              error: `Rate limit reached for token ${name}: ${limit} requests per ${seconds} seconds. Retry in ${taken.retryAfterSeconds} seconds.`,
+              code: "rate_limited",
+              retryAfterSeconds: taken.retryAfterSeconds,
+            },
+            429,
+            { "retry-after": String(taken.retryAfterSeconds) }
           );
         }
       }

@@ -520,6 +520,46 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.policy,
+    summary:
+      "Read the current policy: rules, accept mode, default rule sets and source settings",
+    tag: "policy",
+    responseSchema: "Policy",
+  },
+  {
+    method: "patch",
+    path: PRODUCT_HTTP_PATH.policy,
+    summary: "Change the policy; creates a new version",
+    tag: "policy",
+    requestBody: { required: true },
+    requestSchema: "PolicyUpdate",
+    responseSchema: "Policy",
+    extraStatuses: [
+      {
+        status: 409,
+        description:
+          "baseVersion is not the current version (code stale_revision); read the policy again",
+      },
+    ],
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.policy}/versions`,
+    summary: "List every policy version",
+    tag: "policy",
+    responseSchema: "PolicyVersionList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.policy}/versions/{version}`,
+    summary:
+      "Read one policy version by the number a mandate or decision recorded",
+    tag: "policy",
+    parameters: [idParameter("version")],
+    responseSchema: "Policy",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.permissionSettings,
     summary: "Read permission mode",
     tag: "settings",
@@ -1277,6 +1317,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         name: "activity",
         description:
           "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object",
+      },
+      {
+        name: "policy",
+        description:
+          "Versioned natural-language rules, accept mode (off, observe, auto) and per-source settings. Every change creates a new immutable version; an update must carry the version it read.",
       },
       {
         name: "goal",
@@ -2513,6 +2558,132 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               },
             },
           ],
+        },
+        PolicyRule: {
+          type: "object",
+          required: ["id", "name", "text"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string", maxLength: 80 },
+            text: { type: "string", maxLength: 2000 },
+          },
+        },
+        Policy: {
+          type: "object",
+          required: [
+            "version",
+            "createdAt",
+            "mode",
+            "rules",
+            "defaultSets",
+            "sources",
+            "activeRules",
+          ],
+          properties: {
+            version: { type: "integer", minimum: 1 },
+            createdAt: { type: "string", format: "date-time" },
+            mode: { type: "string", enum: ["off", "observe", "auto"] },
+            rules: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PolicyRule" },
+            },
+            defaultSets: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "title", "description", "enabled", "rules"],
+                properties: {
+                  id: { type: "string" },
+                  title: { type: "string" },
+                  description: { type: "string" },
+                  enabled: { type: "boolean" },
+                  rules: {
+                    type: "array",
+                    items: { $ref: "#/components/schemas/PolicyRule" },
+                  },
+                },
+              },
+            },
+            sources: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                required: ["enabled"],
+                properties: { enabled: { type: "boolean" } },
+                additionalProperties: true,
+              },
+            },
+            activeRules: {
+              type: "array",
+              description:
+                "The owner's rules followed by the rules of every enabled default set.",
+              items: { $ref: "#/components/schemas/PolicyRule" },
+            },
+          },
+        },
+        PolicyUpdate: {
+          type: "object",
+          required: ["baseVersion"],
+          description:
+            "At least one of mode, rules, defaultSets or sources besides baseVersion.",
+          properties: {
+            baseVersion: {
+              type: "integer",
+              minimum: 1,
+              description: "The version you last read.",
+            },
+            mode: { type: "string", enum: ["off", "observe", "auto"] },
+            rules: {
+              type: "array",
+              maxItems: 50,
+              description:
+                "The owner's whole list of rules. An entry without id gets one; keep an id to keep a rule's identity.",
+              items: {
+                type: "object",
+                required: ["name", "text"],
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string", maxLength: 80 },
+                  text: { type: "string", maxLength: 2000 },
+                },
+              },
+            },
+            defaultSets: {
+              type: "object",
+              description:
+                "Default rule set id to on or off; others keep their state.",
+              additionalProperties: { type: "boolean" },
+            },
+            sources: {
+              type: "object",
+              description:
+                "Source id to its settings, or null to remove it; others are kept. Settings need a boolean enabled; other keys belong to the source.",
+              additionalProperties: {
+                type: "object",
+                nullable: true,
+                properties: { enabled: { type: "boolean" } },
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        PolicyVersionList: {
+          type: "object",
+          required: ["versions"],
+          properties: {
+            versions: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["version", "createdAt", "mode"],
+                properties: {
+                  version: { type: "integer" },
+                  createdAt: { type: "string", format: "date-time" },
+                  mode: { type: "string", enum: ["off", "observe", "auto"] },
+                },
+              },
+            },
+          },
         },
         GoalScheduleEnabled: {
           type: "object",
