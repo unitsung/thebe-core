@@ -11,6 +11,7 @@ import {
   normalizeActivityLimit,
   paginateActivityFeed,
   recordToFeedItem,
+  scheduleObservationToFeedItem,
   toActivityFeed,
   triggerToFeedItem,
   workerToFeedItem,
@@ -113,7 +114,7 @@ export async function handleActivityRoutes(
     parts[1] === "activity"
   ) {
     const id = decodePathPart(parts[2]);
-    const stageContext = agent.activityStageContext();
+    const stageContext = await agent.activityStageContext();
     const record = await agent.getActivity(id);
     if (record) {
       const item = recordToFeedItem(record, stageContext);
@@ -126,6 +127,11 @@ export async function handleActivityRoutes(
       (item) => item.trigger.id === id
     );
     if (trigger) return json(triggerToFeedItem(trigger, stageContext));
+    const observation = (await agent.listScheduleObservations()).find(
+      (item) => item.id === id
+    );
+    if (observation)
+      return json(scheduleObservationToFeedItem(observation, stageContext));
     const worker = (await agent.listSubagents())
       .map(toProductWorker)
       .find((item) => item.runId === id);
@@ -166,7 +172,7 @@ async function collectFeed(
   group?: "needs_approval" | "running" | "recent"
 ) {
   const records = await agent.listActivity();
-  const goals = (await agent.listGoals()).map(toProductGoal);
+  const goals = (await agent.listGoals()).map((run) => toProductGoal(run));
   const capabilityRuns = await agent.listCapabilityRuns();
   const workers = (await agent.listSubagents()).map(toProductWorker);
   const backgroundTasks = await agent.listAllBackgroundTasks();
@@ -177,8 +183,9 @@ async function collectFeed(
     capabilityRuns,
     workers,
     backgroundTasks,
-    agent.activityStageContext(),
-    await agent.listTriggers()
+    await agent.activityStageContext(),
+    await agent.listTriggers(),
+    await agent.listScheduleObservations()
   );
 }
 

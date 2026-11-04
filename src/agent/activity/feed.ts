@@ -1,11 +1,13 @@
 import type { ProductGoal, ProductGoalStatus } from "../goals/product.ts";
 import type { CapabilityRun } from "../capabilities/invoke.ts";
+import { goalTicketKey } from "../tickets/types.ts";
 import type { ProductWorker } from "../subagents/product.ts";
 import {
   backgroundTaskActivityId,
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 import type { TriggerEntry } from "../eval/types.ts";
+import type { ScheduleObservationView } from "../schedules/types.ts";
 import {
   PERSON_REASONS,
   type ActivityStage,
@@ -18,6 +20,7 @@ import {
   goalStage,
   recordStage,
   runStage,
+  scheduleObservationStage,
   triggerStage,
   workerStage,
 } from "./stage-facts.ts";
@@ -39,6 +42,7 @@ export const ACTIVITY_FEED_TYPES = [
   "worker",
   "background_task",
   "trigger",
+  "schedule_observation",
 ] as const;
 
 export type ActivityFeedType = (typeof ACTIVITY_FEED_TYPES)[number];
@@ -51,8 +55,14 @@ export type ActivityCursor = {
   id: string;
 };
 
-/** Where the item stands with respect to the person. Derived on every read, never stored. */
-export type ActivityFeedItemStage = { stage: ActivityStage };
+/**
+ * Where the item stands with respect to the person, derived on every read and never stored, and the
+ * ticket that wraps the item when one does (additive: absent on items no ticket wraps).
+ */
+export type ActivityFeedItemStage = {
+  stage: ActivityStage;
+  ticketId?: string;
+};
 
 export type ActivityFeedItem = ActivityFeedItemStage &
   (
@@ -112,6 +122,14 @@ export type ActivityFeedItem = ActivityFeedItemStage &
         group: "recent";
         updatedAt: string;
         trigger: TriggerEntry;
+      }
+    | {
+        /** What an observed schedule would have run at its due time; nothing was started. */
+        type: "schedule_observation";
+        id: string;
+        group: "recent";
+        updatedAt: string;
+        observation: ScheduleObservationView;
       }
   );
 
@@ -188,13 +206,17 @@ export function goalToFeedItem(
   context: StageContext = {}
 ): ActivityFeedItem {
   const group = goalActivityGroup(goal.status);
+  const ticketId =
+    goal.ticketId ??
+    context.ticketIds?.get(goalTicketKey(goal.id, goal.createdAt));
   return {
     stage: goalStage(goal, context),
+    ...(ticketId ? { ticketId } : {}),
     type: "goal",
     id: goal.id,
     group,
     updatedAt: goal.updatedAt,
-    goal,
+    goal: ticketId ? { ...goal, ticketId } : goal,
   };
 }
 
@@ -259,6 +281,20 @@ export function triggerToFeedItem(
     group: "recent",
     updatedAt: record.decision?.decidedAt ?? record.decidedAt,
     trigger: record,
+  };
+}
+
+export function scheduleObservationToFeedItem(
+  record: ScheduleObservationView,
+  context: StageContext = {}
+): ActivityFeedItem {
+  return {
+    stage: scheduleObservationStage(record, context),
+    type: "schedule_observation",
+    id: record.id,
+    group: "recent",
+    updatedAt: record.observedAt,
+    observation: record,
   };
 }
 
@@ -383,6 +419,8 @@ function activityFeedItemStatus(item: ActivityFeedItem): string {
       return item.task.status;
     case "trigger":
       return item.trigger.outcome.result;
+    case "schedule_observation":
+      return "would_run";
   }
 }
 
@@ -394,7 +432,8 @@ export function toActivityFeed(
   workers: ProductWorker[] = [],
   backgroundTasks: ProductBackgroundTask[] = [],
   stageContext: StageContext = {},
-  triggers: TriggerEntry[] = []
+  triggers: TriggerEntry[] = [],
+  scheduleObservations: ScheduleObservationView[] = []
 ): ActivityFeedItem[] {
   const items: ActivityFeedItem[] = [];
   for (const record of records) {
@@ -415,6 +454,9 @@ export function toActivityFeed(
   }
   for (const record of triggers) {
     items.push(triggerToFeedItem(record, stageContext));
+  }
+  for (const record of scheduleObservations) {
+    items.push(scheduleObservationToFeedItem(record, stageContext));
   }
   items.sort(compareActivityItems);
   return group ? items.filter((item) => item.group === group) : items;

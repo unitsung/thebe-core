@@ -6,19 +6,22 @@ import {
   goalToFeedItem,
   recordToFeedItem,
   summarizeNeedsYou,
+  scheduleObservationToFeedItem,
   triggerToFeedItem,
   type ActivityFeedItem,
 } from "./feed.ts";
+import { goalTicketKey } from "../tickets/types.ts";
 import type { Trigger } from "../sources/types.ts";
 import { PERSON_REASONS, type ActivityStage } from "./stage.ts";
+import type { ScheduleObservationView } from "../schedules/types.ts";
 import { ACTIVITY_KIND_RESTART, type ActivityRecord } from "./types.ts";
 
 /**
  * Activity items with the stage Core derives, exported as data for the App's decoders and its Home model.
  * Core owns the file and builds every case with the real feed builders, so the two cannot drift. `stage`
  * is an additive field: `legacy` holds the same items as an older Core sends them, and the App must
- * decode both. `ticketId` is likewise additive and arrives with tickets; `withTicketId` pins its shape.
- * Later tickets extend this file rather than adding another.
+ * decode both. `ticketId` is likewise additive: `withTicketId` is the same builder run with a ticket that
+ * wraps the goal, and `items` carry none. Later tickets extend this file rather than adding another.
  */
 export const ACTIVITY_CONTRACT_PATH = "contracts/activity.json";
 
@@ -39,6 +42,9 @@ function goal(overrides: Partial<GoalRun>): GoalRun {
     ...overrides,
   };
 }
+
+/** A ticket id as the store derives it, pinned here so the file does not change run to run. */
+const TICKET_ID = "0123456789abcdef0123456789abcdef";
 
 const restartApproval: ActivityRecord = {
   id: "approval-1",
@@ -71,6 +77,22 @@ function containerTrigger(
     thread: { kind: "container", id: "ctr-emby", name: "emby" },
     summary: "emby turned unhealthy",
     observedAt: T1,
+  };
+}
+
+function scheduleObservation(
+  overrides: Partial<ScheduleObservationView>
+): ScheduleObservationView {
+  return {
+    id: "sched-1:2026-11-04T09:00:00.000Z",
+    scheduleId: "sched-1",
+    title: "Nightly health check",
+    goal: "Check that every container is healthy",
+    dueAt: "2026-11-04T09:00:00.000Z",
+    observedAt: "2026-11-04T09:00:03.000Z",
+    scope: { criteria: ["Every container is running"], maxIterations: 3 },
+    scheduleMode: "observe",
+    ...overrides,
   };
 }
 
@@ -293,7 +315,53 @@ function cases() {
         context
       )
     ),
+    named(
+      "schedule would have run, still observing",
+      scheduleObservationToFeedItem(scheduleObservation({}), context)
+    ),
+    named(
+      "schedule would have run, since switched to auto",
+      scheduleObservationToFeedItem(
+        scheduleObservation({
+          id: "sched-2:2026-11-04T08:00:00.000Z",
+          scheduleId: "sched-2",
+          title: "Weekly library tidy",
+          dueAt: "2026-11-04T08:00:00.000Z",
+          observedAt: "2026-11-04T08:00:02.000Z",
+          scope: {
+            criteria: [],
+            model: { providerId: "company", modelId: "gpt-5.6-sol" },
+          },
+          scheduleMode: "auto",
+        }),
+        context
+      )
+    ),
   ];
+}
+
+function ticketedGoal(): ActivityFeedItem {
+  const run = goal({
+    status: "paused",
+    summary: "Goal paused: waiting for your answer.",
+    report: {
+      state: "waiting",
+      summary: "Two folders match.",
+      at: T1,
+      role: "worker",
+    },
+    attention: {
+      question: "Which folder should I clean?",
+      askedAt: T1,
+      role: "worker",
+    },
+  });
+  return goalToFeedItem(toProductGoal(run), {
+    now: NOW,
+    ticketIds: new Map([
+      [goalTicketKey(run.thebeSessionId, run.createdAt), TICKET_ID],
+    ]),
+  });
 }
 
 const allStages: ActivityStage[] = [
@@ -307,7 +375,6 @@ const allStages: ActivityStage[] = [
 export function buildActivityContract() {
   const items = cases();
   const feed = items.map((entry) => entry.item);
-  const withTicket = items[0]!;
   return {
     version: 1,
     stages: allStages,
@@ -320,11 +387,8 @@ export function buildActivityContract() {
     }),
     /** An item that also carries the ticket that wraps it; tickets add this field. */
     withTicketId: {
-      name: `${withTicket.name}, wrapped by a ticket`,
-      item: {
-        ...withTicket.item,
-        ticketId: "0123456789abcdef0123456789abcdef",
-      },
+      name: "goal asking one question, wrapped by a ticket",
+      item: ticketedGoal(),
     },
     /** The needs-you summary over `items`; it equals the number of items whose stage is person. */
     needsYou: summarizeNeedsYou(feed),

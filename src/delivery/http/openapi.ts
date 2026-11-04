@@ -97,7 +97,8 @@ const operations: Operation[] = [
   {
     method: "patch",
     path: "/v1/schedules/{id}",
-    summary: "Pause or resume scheduling",
+    summary:
+      "Pause or resume scheduling, or set its accept mode (off, observe, auto)",
     tag: "goal",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -124,7 +125,7 @@ const operations: Operation[] = [
     method: "get",
     path: "/v1/health",
     summary:
-      "Health check, with push delivery state when push is on and the read state of each event source",
+      "Health check, with push delivery state when push is on, the read state of each event source and the capabilities this Core offers",
     tag: "system",
   },
   {
@@ -589,6 +590,22 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.tickets,
+    summary:
+      "List tickets, newest first, each with its derived stage and links to the objects it wraps",
+    tag: "tickets",
+    responseSchema: "TicketList",
+  },
+  {
+    method: "get",
+    path: `${PRODUCT_HTTP_PATH.tickets}/{id}`,
+    summary: "Read one ticket",
+    tag: "tickets",
+    parameters: [idParameter()],
+    responseSchema: "Ticket",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.permissionSettings,
     summary: "Read permission mode",
     tag: "settings",
@@ -701,7 +718,7 @@ const operations: Operation[] = [
     method: "get",
     path: "/v1/activity",
     summary:
-      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task, source trigger)",
+      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task, source trigger, schedule observation)",
     tag: "activity",
     parameters: [
       queryParameter("group", {
@@ -719,6 +736,7 @@ const operations: Operation[] = [
           "worker",
           "background_task",
           "trigger",
+          "schedule_observation",
         ],
       }),
       queryParameter("stage", {
@@ -781,7 +799,8 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/goals/{id}",
-    summary: "Read one Goal (id is thebeSessionId)",
+    summary:
+      "Read one Goal (id is the thebeSessionId or the id of the ticket that wraps it)",
     tag: "goal",
     parameters: [idParameter()],
     responseSchema: "ProductGoal",
@@ -1382,6 +1401,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           "Versioned natural-language rules, accept mode (off, observe, auto) and per-source settings. Every change creates a new immutable version; an update must carry the version it read.",
       },
       {
+        name: "tickets",
+        description:
+          "Read-only tickets: the unit of authorised work. A ticket's id is derived from its content, so the same trigger accepted twice yields one ticket. It wraps a goal (and later receipts, artifacts, runs) without copying their state; its stage is derived on every read.",
+      },
+      {
         name: "goal",
         description:
           "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
@@ -1878,6 +1902,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["needs_approval"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             approval: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1890,6 +1915,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1902,6 +1928,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1914,6 +1941,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             goal: { $ref: "#/components/schemas/ProductGoal" },
           },
         },
@@ -1926,6 +1954,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             run: { $ref: "#/components/schemas/CapabilityRun" },
           },
         },
@@ -1938,6 +1967,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             worker: { $ref: "#/components/schemas/ProductWorker" },
           },
         },
@@ -1950,6 +1980,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
             stage: { $ref: "#/components/schemas/ActivityStage" },
+            ticketId: { $ref: "#/components/schemas/ActivityTicketId" },
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
         },
@@ -2034,6 +2065,69 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             decidedAt: { type: "string" },
           },
+        },
+        ActivityScheduleObservationItem: {
+          description:
+            "What an observed schedule would have run at its due time. Nothing was started. A client offers: run once (POST /v1/schedules/{scheduleId}/run), switch to auto (PATCH mode) while scheduleMode is observe, and delete the schedule (DELETE).",
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "observation"],
+          properties: {
+            type: { type: "string", enum: ["schedule_observation"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["recent"] },
+            updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
+            observation: {
+              $ref: "#/components/schemas/ScheduleObservation",
+            },
+          },
+        },
+        ScheduleObservation: {
+          type: "object",
+          required: [
+            "id",
+            "scheduleId",
+            "title",
+            "goal",
+            "dueAt",
+            "observedAt",
+            "scope",
+            "scheduleMode",
+          ],
+          properties: {
+            id: { type: "string", description: "<scheduleId>:<dueAt>" },
+            scheduleId: { type: "string" },
+            title: { type: "string" },
+            goal: { type: "string" },
+            dueAt: { type: "string", format: "date-time" },
+            observedAt: { type: "string", format: "date-time" },
+            scope: {
+              type: "object",
+              required: ["criteria"],
+              properties: {
+                criteria: { type: "array", items: { type: "string" } },
+                maxIterations: { type: "integer" },
+                model: {
+                  type: "object",
+                  required: ["providerId", "modelId"],
+                  properties: {
+                    providerId: { type: "string" },
+                    modelId: { type: "string" },
+                  },
+                },
+              },
+            },
+            scheduleMode: {
+              $ref: "#/components/schemas/ScheduleMode",
+              description: "The schedule's mode now, not when it was recorded.",
+            },
+          },
+        },
+        ScheduleMode: {
+          type: "string",
+          enum: ["off", "observe", "auto"],
+          description:
+            "off: nothing at the due time. observe: only a record that it would have run. auto: start the Goal.",
         },
         TriggerRecord: {
           type: "object",
@@ -2149,6 +2243,92 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
         },
+        ActivityTicketId: {
+          type: "string",
+          description:
+            "The ticket that wraps this item. Absent on items no ticket wraps.",
+        },
+        TicketLinks: {
+          type: "object",
+          description:
+            "The objects the ticket wraps. They keep their own ids and their single writer.",
+          required: [
+            "sessionIds",
+            "capabilityRunIds",
+            "receiptIds",
+            "artifactIds",
+            "pipelineJobIds",
+          ],
+          properties: {
+            legacyGoalId: {
+              type: "string",
+              description: "The goal loop doing the work (its thebeSessionId).",
+            },
+            legacyGoalStartedAt: {
+              type: "string",
+              description: "When that goal run started.",
+            },
+            sessionIds: { type: "array", items: { type: "string" } },
+            capabilityRunIds: { type: "array", items: { type: "string" } },
+            receiptIds: { type: "array", items: { type: "string" } },
+            artifactIds: { type: "array", items: { type: "string" } },
+            pipelineJobIds: { type: "array", items: { type: "string" } },
+          },
+        },
+        Ticket: {
+          type: "object",
+          required: [
+            "id",
+            "title",
+            "createdAt",
+            "mandate",
+            "origin",
+            "links",
+            "stage",
+          ],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "32 hex characters derived from the ticket's content.",
+            },
+            title: { type: "string" },
+            createdAt: { type: "string", format: "date-time" },
+            mandate: {
+              type: "object",
+              required: ["strength"],
+              properties: {
+                strength: {
+                  type: "string",
+                  enum: ["explicit", "inferred"],
+                  description:
+                    "explicit when the owner asked for the work, inferred when Thebe started it.",
+                },
+              },
+            },
+            origin: {
+              type: "object",
+              required: ["kind", "thread", "triggerId"],
+              properties: {
+                kind: { type: "string", enum: ["direct"] },
+                thread: { type: "string" },
+                triggerId: { type: "string" },
+              },
+            },
+            links: { $ref: "#/components/schemas/TicketLinks" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
+          },
+        },
+        TicketList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Ticket" },
+            },
+          },
+        },
         GoalAnswerRequest: {
           type: "object",
           required: ["answer"],
@@ -2164,6 +2344,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             { $ref: "#/components/schemas/ActivityWorkerItem" },
             { $ref: "#/components/schemas/ActivityBackgroundTaskItem" },
             { $ref: "#/components/schemas/ActivityTriggerItem" },
+            { $ref: "#/components/schemas/ActivityScheduleObservationItem" },
           ],
         },
         ActivityList: {
@@ -2879,6 +3060,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            triggerId: {
+              type: "string",
+              minLength: 1,
+              maxLength: 200,
+              description:
+                "Names this request (a chat message or client request id). Sending the same one again returns the goal it already started with 200 and creates no second ticket.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2922,6 +3110,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            mode: {
+              $ref: "#/components/schemas/ScheduleMode",
+              description:
+                "Defaults to observe on create; left out on edit it keeps the current mode. Schedules stored before modes existed are auto.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2939,7 +3132,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             { $ref: "#/components/schemas/GoalScheduleInput" },
             {
               type: "object",
-              required: ["id", "enabled", "createdAt", "updatedAt"],
+              required: ["id", "mode", "enabled", "createdAt", "updatedAt"],
               properties: {
                 id: { type: "string" },
                 enabled: { type: "boolean" },
@@ -3106,8 +3299,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         GoalScheduleEnabled: {
           type: "object",
-          required: ["enabled"],
-          properties: { enabled: { type: "boolean" } },
+          description: "Send enabled, mode or both.",
+          properties: {
+            enabled: { type: "boolean" },
+            mode: { $ref: "#/components/schemas/ScheduleMode" },
+          },
         },
         GoalScheduleList: {
           type: "object",
@@ -3136,6 +3332,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             id: { type: "string" },
             sessionId: { type: "string" },
+            ticketId: {
+              type: "string",
+              description:
+                "The ticket that wraps this goal. Absent on goals started without one.",
+            },
             title: { type: "string" },
             status: {
               type: "string",

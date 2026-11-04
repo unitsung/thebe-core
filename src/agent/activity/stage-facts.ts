@@ -8,6 +8,7 @@ import type { ProductBackgroundTask } from "../background-tasks/product.ts";
 import type { ProductGoal } from "../goals/product.ts";
 import { GOAL_REPORT_PROFILES } from "../goals/report-tool.ts";
 import type { TriggerEntry } from "../eval/types.ts";
+import type { ScheduleObservationView } from "../schedules/types.ts";
 import type { ProductWorker } from "../subagents/product.ts";
 import {
   activityStage,
@@ -149,6 +150,14 @@ export function triggerStageFacts(
   return ENDED;
 }
 
+/** An observed schedule's record is history: it asks nothing of the person, who may act on it or not. */
+export function scheduleObservationStageFacts(
+  _record: ScheduleObservationView,
+  _context: StageContext
+): StageFacts {
+  return ENDED;
+}
+
 export const goalStage = (
   goal: ProductGoal,
   context: StageContext
@@ -165,6 +174,11 @@ export const triggerStage = (
   record: TriggerEntry,
   context: StageContext
 ): ActivityStage => activityStage(triggerStageFacts(record, context));
+export const scheduleObservationStage = (
+  record: ScheduleObservationView,
+  context: StageContext
+): ActivityStage =>
+  activityStage(scheduleObservationStageFacts(record, context));
 export const workerStage = (
   worker: ProductWorker,
   context: StageContext

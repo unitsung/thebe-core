@@ -130,7 +130,11 @@ describe("approval push notices go through the outbox", () => {
       provider: provider(),
     });
     const body = await health(app);
-    expect(body).toMatchObject({ ok: true, version: "0.1.0" });
+    expect(body).toMatchObject({
+      ok: true,
+      version: "0.1.0",
+      capabilities: { tickets: true },
+    });
     expect(body).not.toHaveProperty("push");
   });
 });

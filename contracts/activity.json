@@ -510,6 +510,61 @@
           "updatedAt": "2026-11-04T09:30:00.000Z"
         }
       }
+    },
+    {
+      "name": "schedule would have run, still observing",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "schedule_observation",
+        "id": "sched-1:2026-11-04T09:00:00.000Z",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:00:03.000Z",
+        "observation": {
+          "id": "sched-1:2026-11-04T09:00:00.000Z",
+          "scheduleId": "sched-1",
+          "title": "Nightly health check",
+          "goal": "Check that every container is healthy",
+          "dueAt": "2026-11-04T09:00:00.000Z",
+          "observedAt": "2026-11-04T09:00:03.000Z",
+          "scope": {
+            "criteria": [
+              "Every container is running"
+            ],
+            "maxIterations": 3
+          },
+          "scheduleMode": "observe"
+        }
+      }
+    },
+    {
+      "name": "schedule would have run, since switched to auto",
+      "item": {
+        "stage": {
+          "kind": "ended"
+        },
+        "type": "schedule_observation",
+        "id": "sched-2:2026-11-04T08:00:00.000Z",
+        "group": "recent",
+        "updatedAt": "2026-11-04T08:00:02.000Z",
+        "observation": {
+          "id": "sched-2:2026-11-04T08:00:00.000Z",
+          "scheduleId": "sched-2",
+          "title": "Weekly library tidy",
+          "goal": "Check that every container is healthy",
+          "dueAt": "2026-11-04T08:00:00.000Z",
+          "observedAt": "2026-11-04T08:00:02.000Z",
+          "scope": {
+            "criteria": [],
+            "model": {
+              "providerId": "company",
+              "modelId": "gpt-5.6-sol"
+            }
+          },
+          "scheduleMode": "auto"
+        }
+      }
     }
   ],
   "legacy": [
@@ -939,6 +994,55 @@
           "updatedAt": "2026-11-04T09:30:00.000Z"
         }
       }
+    },
+    {
+      "name": "schedule would have run, still observing",
+      "item": {
+        "type": "schedule_observation",
+        "id": "sched-1:2026-11-04T09:00:00.000Z",
+        "group": "recent",
+        "updatedAt": "2026-11-04T09:00:03.000Z",
+        "observation": {
+          "id": "sched-1:2026-11-04T09:00:00.000Z",
+          "scheduleId": "sched-1",
+          "title": "Nightly health check",
+          "goal": "Check that every container is healthy",
+          "dueAt": "2026-11-04T09:00:00.000Z",
+          "observedAt": "2026-11-04T09:00:03.000Z",
+          "scope": {
+            "criteria": [
+              "Every container is running"
+            ],
+            "maxIterations": 3
+          },
+          "scheduleMode": "observe"
+        }
+      }
+    },
+    {
+      "name": "schedule would have run, since switched to auto",
+      "item": {
+        "type": "schedule_observation",
+        "id": "sched-2:2026-11-04T08:00:00.000Z",
+        "group": "recent",
+        "updatedAt": "2026-11-04T08:00:02.000Z",
+        "observation": {
+          "id": "sched-2:2026-11-04T08:00:00.000Z",
+          "scheduleId": "sched-2",
+          "title": "Weekly library tidy",
+          "goal": "Check that every container is healthy",
+          "dueAt": "2026-11-04T08:00:00.000Z",
+          "observedAt": "2026-11-04T08:00:02.000Z",
+          "scope": {
+            "criteria": [],
+            "model": {
+              "providerId": "company",
+              "modelId": "gpt-5.6-sol"
+            }
+          },
+          "scheduleMode": "auto"
+        }
+      }
     }
   ],
   "withTicketId": {
@@ -948,6 +1052,7 @@
         "kind": "person",
         "reason": "answer"
       },
+      "ticketId": "0123456789abcdef0123456789abcdef",
       "type": "goal",
       "id": "goal-1",
       "group": "running",
@@ -979,9 +1084,9 @@
           "pause": false,
           "resume": true,
           "stop": true
-        }
-      },
-      "ticketId": "0123456789abcdef0123456789abcdef"
+        },
+        "ticketId": "0123456789abcdef0123456789abcdef"
+      }
     }
   },
   "needsYou": {

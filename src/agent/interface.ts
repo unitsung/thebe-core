@@ -18,8 +18,14 @@ import type {
 } from "./runtime/index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
 import type { ServiceAPIProvider } from "./capabilities/service-api.ts";
-import type { GoalSchedule, GoalScheduleInput } from "./schedules/types.ts";
+import type {
+  GoalSchedule,
+  GoalScheduleInput,
+  ScheduleMode,
+  ScheduleObservationView,
+} from "./schedules/types.ts";
 import type { PolicyApi } from "./policy/service.ts";
+import type { TicketApi } from "./tickets/service.ts";
 import type { NavidromeProvider } from "./capabilities/navidrome.ts";
 import type { PipelineProviders } from "./tools/pipeline-tools.ts";
 import type { MusicResearchProvider } from "./capabilities/music-research.ts";
@@ -123,6 +129,10 @@ export type CreateThebeAgentOptions = {
    * `timer` and `pollIntervalMs` replace the poll loop, which tests drive by hand. Without `evaluate`,
    * Eval's Assessment runs; `assessmentTimeoutMs` bounds how long it waits for the model.
    */
+  schedules?: {
+    /** Replaces the one-second scheduler loop; tests drive the returned tick by hand. */
+    timer?: import("./schedules/service.ts").ScheduleTimer;
+  };
   sources?: {
     assessmentTimeoutMs?: number;
     evaluate?: import("./sources/runtime.ts").SourceEvaluator;
@@ -355,17 +365,38 @@ export interface ThebeAgent {
   enabledResources(): EnabledResource[];
   createEnabledResourceArtifact(): Promise<AgentArtifact>;
 
+  /**
+   * Starts a goal the owner asked for and records the ticket that wraps it. `triggerId` names the
+   * request (a chat message, a client request id): starting again with the same one returns the goal it
+   * already started and produces no second ticket.
+   */
   startGoal(input: {
     thebeSessionId: string;
     goal: string;
     criteria?: string[];
     maxIterations?: number;
+    triggerId?: string;
   }): Promise<GoalRun>;
+  /** The goal an earlier request with this trigger id started, if any. */
+  goalForTrigger: TicketApi["goalForTrigger"];
+  /** Runs the task after earlier tasks for the same trigger id, so concurrent retries start one goal. */
+  exclusiveForTrigger: TicketApi["exclusiveForTrigger"];
+  /** Tickets with their derived stage, newest first. Read-only. */
+  listTickets: TicketApi["listTickets"];
+  getTicket: TicketApi["getTicket"];
+  /** Goal endpoints take a session id or a ticket id; this gives the session id for either. */
+  resolveGoalId: TicketApi["resolveGoalId"];
+  /** Which ticket wraps which object, for putting `ticketId` on responses. */
+  ticketIndex: TicketApi["ticketIndex"];
   listSchedules(): Promise<GoalSchedule[]>;
   getSchedule(id: string): Promise<GoalSchedule>;
   createSchedule(input: GoalScheduleInput): Promise<GoalSchedule>;
   updateSchedule(id: string, input: GoalScheduleInput): Promise<GoalSchedule>;
   setScheduleEnabled(id: string, enabled: boolean): Promise<GoalSchedule>;
+  /** off / observe / auto. Switching to auto runs the next due time once; it starts nothing by itself. */
+  setScheduleMode(id: string, mode: ScheduleMode): Promise<GoalSchedule>;
+  /** What observed schedules would have run, oldest first, with each schedule's mode now. */
+  listScheduleObservations(): Promise<ScheduleObservationView[]>;
   deleteSchedule(id: string): Promise<void>;
   runSchedule(id: string): Promise<GoalSchedule>;
   /**
@@ -485,8 +516,8 @@ export interface ThebeAgent {
   getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
   getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
-  /** What stage derivation needs besides each item: the agent clock and which goals wait on a confirmation. */
-  activityStageContext(): import("./activity/stage.ts").StageContext;
+  /** What projecting items needs besides each item: the agent clock, which goals wait on a confirmation and which tickets wrap what. */
+  activityStageContext(): Promise<import("./activity/stage.ts").StageContext>;
   /** Every Trigger the sources produced, with the Gate outcome recorded for it and Eval's Decision once made. */
   listTriggers(): Promise<import("./eval/types.ts").TriggerEntry[]>;
   /** Every Decision Eval recorded. */

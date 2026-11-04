@@ -6,6 +6,7 @@
  * Borrowed from the dsh-superagent prototype's `ticketStage`: the first matching row wins.
  */
 import type { ReportState } from "../reports/report.ts";
+import type { TicketIndex } from "../tickets/types.ts";
 
 export const PERSON_REASONS = [
   "delivery",
@@ -75,6 +76,8 @@ export type StageContext = {
   now?: Date;
   /** Goal (session) ids that have a tool confirmation waiting. */
   confirmationSessionIds?: ReadonlySet<string>;
+  /** Which ticket wraps which object, so items can carry `ticketId`. Absent means no ticket is known. */
+  ticketIds?: TicketIndex;
 };
 
 /** True when a failure at `at` still asks for the person. */
