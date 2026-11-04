@@ -62,6 +62,11 @@ export type ServiceAPIOperation = {
   readOnly: boolean;
   /** Operator allow-listed for a preview + confirm write tool. */
   writable: boolean;
+  /**
+   * The operator's verdict on whether this one write is irreversible, replacing the rules (a DELETE
+   * method or a true delete-like argument). Absent means the rules decide.
+   */
+  irreversibleOverride?: boolean;
   parameters: ServiceAPIParameter[];
   requestBody?: {
     required: boolean;
@@ -106,6 +111,34 @@ export function serviceOperationWritable(
   return !operation.parameters.some(
     (parameter) => parameter.in === "header" && parameter.required
   );
+}
+
+/**
+ * The documented operation a concrete request belongs to: the same method and a path that fits its
+ * template, preferring the one with the most literal segments. Undefined when the document has none.
+ */
+export function matchServiceOperation(
+  operations: readonly ServiceAPIOperation[],
+  method: string,
+  path: string
+): ServiceAPIOperation | undefined {
+  const wanted = method.trim().toUpperCase();
+  const pathname = path.split("?")[0]!.split("#")[0]!;
+  const parts = pathname.split("/").filter(Boolean);
+  const literals = (template: string) =>
+    template.split("/").filter((part) => part && !part.startsWith("{")).length;
+  return operations
+    .filter((operation) => {
+      if (operation.method.toUpperCase() !== wanted) return false;
+      const template = operation.path.split("/").filter(Boolean);
+      return (
+        template.length === parts.length &&
+        template.every(
+          (part, index) => part.startsWith("{") || part === parts[index]
+        )
+      );
+    })
+    .sort((a, b) => literals(b.path) - literals(a.path))[0];
 }
 
 /** The tool schema for one operation: parameters by name, plus an optional body. */

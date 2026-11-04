@@ -123,6 +123,12 @@ export type McpServerConfig = {
   /** Passed to the runtime's MCP client: how the model reaches this server's tools. */
   exposure?: McpExposure;
   description?: string;
+  /**
+   * Operator verdicts per tool, by the tool's own name: `{ "tools": { "prune_cache": { "irreversible": false } } }`.
+   * Core treats a tool as irreversible when its server declares it destructive; this replaces that for
+   * one tool, in either direction, and each call it decides is audited.
+   */
+  tools?: Record<string, { irreversible?: boolean }>;
 };
 
 export type McpExposure = "codemode" | "deferred" | "direct" | "hidden";
@@ -176,6 +182,7 @@ export function listConfiguredMcpServersSync(options?: {
             permission: isCapabilityPermission(s.permission) ? s.permission : undefined,
             exposure: typeof s.exposure === "string" && EXPOSURES.includes(s.exposure) ? s.exposure as McpExposure : undefined,
             description: typeof s.description === "string" ? s.description : undefined,
+            tools: toolOverrides(s.tools),
           });
         }
       }
@@ -185,6 +192,16 @@ export function listConfiguredMcpServersSync(options?: {
   }
 
   return [...configs.values()];
+}
+
+function toolOverrides(value: unknown): McpServerConfig["tools"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const result: NonNullable<McpServerConfig["tools"]> = {};
+  for (const [tool, entry] of Object.entries(value)) {
+    const irreversible = (entry as { irreversible?: unknown } | null)?.irreversible;
+    if (typeof irreversible === "boolean") result[tool] = { irreversible };
+  }
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 export async function listConfiguredMcpServers(options?: {

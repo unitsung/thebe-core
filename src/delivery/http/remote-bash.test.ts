@@ -86,6 +86,15 @@ describe("Session bash product HTTP", () => {
     expect(JSON.stringify(records[0])).not.toContain("ls -la");
   });
 
+  it("counts a command that ran as an irreversible call as a whole, and a refused one as not run", async () => {
+    const { run, audit } = await setup(true);
+    await run("ls -la");
+    await run("rm -rf /");
+    const [ran, refused] = await audit();
+    expect(ran).toMatchObject({ method: "session.bash", irreversible: true });
+    expect(refused?.irreversible).toBeUndefined();
+  });
+
   it("refuses a command the guard rates critical and records the refusal", async () => {
     const { run, audit } = await setup(true);
     const response = await run("rm -rf /");

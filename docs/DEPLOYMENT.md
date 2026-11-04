@@ -314,6 +314,17 @@ access. Set `THEBE_MCP_IRREVERSIBLE=off` on the host to refuse these deletes for
 its scope. An allowed delete is audited (`GET /v1/audit`) with `irreversible: true` and the token's
 name in `caller`, and its result says it was irreversible.
 
+Writes that Core cannot classify by name follow rules, and the same scope applies. A generic API write
+(`service_api_write` or a per-operation preview) is irreversible when its method is `DELETE` or an
+argument that means "also delete the data" (`deleteFiles`, `removeData`, `purge`, `wipe`, ...) is true.
+A tool from an external MCP server is irreversible when its server declares `destructiveHint: true`.
+You can override one operation or tool in either direction. On a `THEBE_SERVICE_APIS` entry add
+`"irreversibleOperations": {"deleteTag": false, "POST /recyclebin/empty": true}` (operation id or
+`METHOD /path`; `false` marks a `DELETE` that only removes a record as ordinary). On a `.thebe/mcp.json`
+server add `"tools": {"prune_cache": {"irreversible": false}}`. A call an override decided leaves its own
+audit record (`override`, `identity`, `caller`). Moving or copying files onto a name that already exists
+fails at once and changes nothing, so those stay ordinary writes. When in doubt, a call is irreversible.
+
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 
 ```bash

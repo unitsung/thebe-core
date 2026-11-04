@@ -6,6 +6,7 @@ import {
   SERVICE_API_OPERATION_PREFIX,
   SERVICE_API_TOOL_NAMES,
   SERVICE_API_WRITE_TOOL_NAME,
+  matchServiceOperation,
   serviceOperationExposable,
   serviceOperationRequest,
   serviceOperationToolName,
@@ -27,7 +28,13 @@ import type {
 import { wrapCustomTools } from "../../agent/tools/wrapped-tool.ts";
 import { DOWNLOAD_TOOL_NAMES } from "../capabilities/pipeline.ts";
 import { availableDownloadTools } from "../tools/pipeline-tools.ts";
-import { irreversibleCall } from "../security/irreversible.ts";
+import {
+  REMOTE_SHELL_CALL,
+  irreversibleCall,
+  judgeExternalMcpTool,
+  judgeOpenApiWrite,
+  type CallJudgement,
+} from "../security/irreversible.ts";
 import type {
   AuditPage,
   AuditRecord,
@@ -339,6 +346,75 @@ export function createControlApi(
     return core ? capabilityChangesThings(core) : false;
   }
 
+  /**
+   * Whether this call cannot be undone, and in words why. Known tools by name and arguments; a generic
+   * OpenAPI write by its method and delete-like arguments; an external MCP tool by its server's
+   * destructive declaration. An operator override replaces the rules and is named for the audit.
+   */
+  async function judgeIrreversible(
+    name: string,
+    args: unknown
+  ): Promise<CallJudgement & { identity?: string }> {
+    const known = irreversibleCall(name, args);
+    if (known) return { irreversible: known, overridden: false };
+    const params = (args ?? {}) as Record<string, unknown>;
+    if (name === SERVICE_API_WRITE_TOOL_NAME) {
+      const method = typeof params.method === "string" ? params.method : "";
+      const path = typeof params.path === "string" ? params.path : "";
+      const provider = (options.serviceAPIProviders ?? []).find(
+        (candidate) => candidate.id === params.service
+      );
+      let operation: ServiceAPIOperation | undefined;
+      try {
+        operation = provider?.operations
+          ? matchServiceOperation(await provider.operations(), method, path)
+          : undefined;
+      } catch {
+        operation = undefined; // the rules still apply without the document
+      }
+      return {
+        ...judgeOpenApiWrite({
+          method,
+          sources: [params.body, path],
+          override: operation?.irreversibleOverride,
+        }),
+        identity: provider && operation && `${provider.id}.${operation.id}`,
+      };
+    }
+    if (
+      name.startsWith(SERVICE_API_OPERATION_PREFIX) &&
+      name !== SERVICE_API_CONFIRM_TOOL_NAME
+    ) {
+      try {
+        const { provider, operation } = await findServiceOperation(name);
+        if (operation.readOnly)
+          return { irreversible: undefined, overridden: false };
+        return {
+          ...judgeOpenApiWrite({
+            method: operation.method,
+            sources: [params, params.body],
+            override: operation.irreversibleOverride,
+          }),
+          identity: `${provider.id}.${operation.id}`,
+        };
+      } catch {
+        return { irreversible: undefined, overridden: false }; // fails as unknown when it is invoked
+      }
+    }
+    if (name.startsWith("mcp:")) {
+      const tool = (await mcp.listTools()).find((item) => item.name === name);
+      if (!tool) return { irreversible: undefined, overridden: false };
+      return {
+        ...judgeExternalMcpTool({
+          destructiveHint: tool.annotations?.destructiveHint === true,
+          override: tool.irreversibleOverride,
+        }),
+        identity: name,
+      };
+    }
+    return { irreversible: undefined, overridden: false };
+  }
+
   /** The service category of a tool, as the tool list reports it; a tool Core cannot place is `other`. */
   async function mcpToolCategory(name: string): Promise<string> {
     const found = name.startsWith("mcp:")
@@ -361,7 +437,25 @@ export function createControlApi(
       );
     }
     // Judged per call, here in the policy layer: neither the model nor the caller decides what is irreversible.
-    const irreversible = irreversibleCall(name, args);
+    const judgement = await judgeIrreversible(name, args);
+    const irreversible = judgement.irreversible;
+    if (judgement.overridden) {
+      // The operator's override, not the rules, decided this call, so say so whatever happens next.
+      await audit?.append({
+        method: name.startsWith("mcp:")
+          ? "mcp.irreversible_override"
+          : "service_api.irreversible_override",
+        parameterHash: hashParameters(args),
+        responseBytes: 0,
+        budgetConsumed: 0,
+        redactionFired: false,
+        identity: judgement.identity,
+        source: "mcp",
+        caller: caller.name,
+        override: irreversible ? "irreversible" : "ordinary",
+        result: "ok",
+      });
+    }
     if (irreversible && !ctx.mcpIrreversibleAllowed) {
       throw httpError(
         403,
@@ -440,6 +534,18 @@ export function createControlApi(
           }
         : done;
     }
+    if (
+      name.startsWith(SERVICE_API_OPERATION_PREFIX) &&
+      name !== SERVICE_API_CONFIRM_TOOL_NAME
+    ) {
+      // A per-operation write only previews; the preview and the confirmed write both carry who asked.
+      return {
+        text: JSON.stringify(
+          await invokeServiceOperation(name, params, auditExtra)
+        ),
+        isError: false,
+      };
+    }
     if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
     // Core's own tools write their audit record; a provider's tool does not, so Core does.
     const record = (text: string, result: "ok" | "error") =>
@@ -449,7 +555,7 @@ export function createControlApi(
         responseBytes: Buffer.byteLength(text),
         budgetConsumed: 0,
         redactionFired: false,
-        source: "mcp",
+        ...auditExtra,
         result,
       });
     try {
@@ -465,6 +571,8 @@ export function createControlApi(
     }
   }
 
+  type AuditExtra = Pick<AuditRecord, "source" | "caller" | "irreversible">;
+
   // Per-operation service writes are two-phase: the tool returns a preview and a
   // single-use confirm token, and only service_api.confirm executes it. Read
   // tools run directly. Writes and confirmations are audited.
@@ -478,6 +586,8 @@ export function createControlApi(
       operationId: string;
       service: string;
       expires: number;
+      /** Who asked, and whether it was an irreversible delete, for the audit record of the confirmed write. */
+      auditExtra?: AuditExtra;
     }
   >();
 
@@ -501,7 +611,8 @@ export function createControlApi(
 
   async function invokeServiceOperation(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    auditExtra?: AuditExtra
   ): Promise<unknown> {
     const { provider, operation } = await findServiceOperation(name);
     let request: {
@@ -536,6 +647,7 @@ export function createControlApi(
       operationId: operation.id,
       service: provider.id,
       expires: Date.now() + CONFIRM_TTL_MS,
+      auditExtra,
     });
     await audit?.append({
       method: "service_api.write.preview",
@@ -548,6 +660,7 @@ export function createControlApi(
       budgetConsumed: 0,
       redactionFired: false,
       identity: `${provider.id}.${operation.id}`,
+      ...auditExtra,
     });
     return {
       preview: {
@@ -591,6 +704,7 @@ export function createControlApi(
       budgetConsumed: 0,
       redactionFired: false,
       identity: `${entry.service}.${entry.operationId}`,
+      ...entry.auditExtra,
     });
     return result;
   }
@@ -759,6 +873,9 @@ export function createControlApi(
             execution: "agent",
             permission:
               tool.name === SERVICE_API_WRITE_TOOL_NAME ? "confirm" : "read",
+            ...(tool.name === SERVICE_API_WRITE_TOOL_NAME && {
+              irreversible: "by_call" as const,
+            }),
           })),
         ...(await mcp.listTools()),
       ].map(withProductMetadata);
@@ -1092,7 +1209,7 @@ export function createControlApi(
       const parameterHash = hashParameters({ command: trimmed });
       if (ctx.remoteCommandDecision(trimmed) === "deny") {
         await audit?.append({
-          method: "session.bash",
+          method: REMOTE_SHELL_CALL,
           parameterHash,
           responseBytes: 0,
           budgetConsumed: 0,
@@ -1121,12 +1238,14 @@ export function createControlApi(
         });
       } catch (error) {
         await audit?.append({
-          method: "session.bash",
+          method: REMOTE_SHELL_CALL,
           parameterHash,
           responseBytes: 0,
           budgetConsumed: 0,
           redactionFired: false,
           sessionId: thebeSessionId,
+          // A command cannot be classified, so a shell call is irreversible as a whole.
+          irreversible: true,
           result: "error",
           durationMs: Date.now() - startedAt,
         });
@@ -1138,12 +1257,13 @@ export function createControlApi(
         ? redacted.slice(-REMOTE_BASH_OUTPUT_LIMIT)
         : redacted;
       await audit?.append({
-        method: "session.bash",
+        method: REMOTE_SHELL_CALL,
         parameterHash,
         responseBytes: output.length,
         budgetConsumed: 0,
         redactionFired: redacted !== result.output,
         sessionId: thebeSessionId,
+        irreversible: true,
         result: result.exitCode === 0 ? "ok" : "error",
         durationMs: Date.now() - startedAt,
       });

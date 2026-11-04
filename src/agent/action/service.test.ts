@@ -65,6 +65,7 @@ describe("container.restart policy metadata", () => {
       risk: "disruptive",
       approval: "required",
       permission: "confirm",
+      irreversible: false,
     });
     const decision = decide({
       toolName: "container.restart",
