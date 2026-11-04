@@ -11,6 +11,7 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- A versioned policy at `GET/PATCH /v1/policy`: the owner's rules in plain language (a name and a paragraph each), an accept mode (`off`, `observe`, `auto`), per-source settings and switchable default rule sets (containers, downloads, media library, storage). Every change creates a new immutable version, an update must carry the version it read (a stale one answers 409 `stale_revision`), and `GET /v1/policy/versions/{version}` returns any earlier version. Text in events or tool output cannot change it. Nothing acts on the policy yet.
 - `Authorization: Bearer <token>` is accepted anywhere `X-Thebe-Token` is, for clients that send a bearer token and cannot set a custom header (Claude's API, most agent frameworks). When a request sends both, `X-Thebe-Token` is the one checked.
 - Scoped device tokens: `thebe token create <name> --scope mcp:read|mcp:write` makes a token that works only on `/mcp`. `mcp:read` runs read tools; `mcp:write` also runs write tools, if the host has not turned writes off (`THEBE_MCP_WRITES=off` still wins). A scoped token is refused with `403 token_scope` on every other route, and a write tool refused for want of `mcp:write` answers at once with the command that grants it; nothing waits. A token made without `--scope`, the shared token and `THEBE_TOKEN` keep full access, and a stored scope Core does not know is refused rather than read as full access. `thebe token list` shows each token's scope.
 
