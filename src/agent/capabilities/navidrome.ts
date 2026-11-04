@@ -1,3 +1,4 @@
+import type { IrreversibleDeclaration } from "../security/irreversible.ts";
 export const NAVIDROME_PROVIDER_ID = "navidrome";
 
 export type NavidromeLibraryMode =
@@ -398,6 +399,8 @@ export type NavidromeCapabilityMetadata = {
   risk: "low" | "disruptive";
   approval: "none" | "required";
   permission: "read" | "confirm";
+  /** Required of a write; a read says nothing. */
+  irreversible?: IrreversibleDeclaration;
 };
 
 export const NAVIDROME_CAPABILITY_METADATA: Record<
@@ -439,18 +442,22 @@ export const NAVIDROME_CAPABILITY_METADATA: Record<
     risk: "low",
     approval: "required",
     permission: "confirm",
+    irreversible: false,
   },
   "navidrome.playlist.update": {
     effect: "write",
     risk: "low",
     approval: "required",
     permission: "confirm",
+    irreversible: false,
   },
   "navidrome.playlist.delete": {
     effect: "write",
     risk: "disruptive",
     approval: "required",
     permission: "confirm",
+    // Treated as irreversible until Navidrome is shown to keep a recoverable copy.
+    irreversible: true,
   },
 };
 

@@ -286,6 +286,21 @@ docker compose exec thebe-core node dist/token.js create "Janitor" --scope mcp:i
 `--scope` may be repeated or comma-separated (`--scope mcp:read,mcp:write`), and each scope includes the
 ones before it: `mcp:irreversible` also writes and reads.
 
+A token sees only the tools it may call: `tools/list` gives a read token the read tools, and a write
+token the read and write tools. Deletes that cannot be undone stay listed for a token that may write,
+because they are judged per call (below). To limit a write token to some kinds of service, add
+`--category` (repeatable or comma-separated; it needs a write scope):
+
+```bash
+docker compose exec thebe-core node dist/token.js create "Box agent" --scope mcp:write --category containers,downloads
+```
+
+The categories are `files`, `media`, `downloads`, `containers`, `automation`, `diagnostics`, `compute`,
+`storage`, `network`, `photos` and `other`. That token reads everything, lists only the write tools in
+its categories, and a write outside them fails at once naming the category it would need.
+`thebe token list` shows the limit next to the scope. A category list in `tokens.json` that Core does
+not know makes that token unusable (`401`); it is never read as no limit.
+
 The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
 everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
 action. A write tool called with a read-only token fails at once and says which scope to grant;
@@ -298,6 +313,17 @@ scope; deleting only a download task is an ordinary write. A token with no scope
 access. Set `THEBE_MCP_IRREVERSIBLE=off` on the host to refuse these deletes for every token, whatever
 its scope. An allowed delete is audited (`GET /v1/audit`) with `irreversible: true` and the token's
 name in `caller`, and its result says it was irreversible.
+
+Writes that Core cannot classify by name follow rules, and the same scope applies. A generic API write
+(`service_api_write` or a per-operation preview) is irreversible when its method is `DELETE` or an
+argument that means "also delete the data" (`deleteFiles`, `removeData`, `purge`, `wipe`, ...) is true.
+A tool from an external MCP server is irreversible when its server declares `destructiveHint: true`.
+You can override one operation or tool in either direction. On a `THEBE_SERVICE_APIS` entry add
+`"irreversibleOperations": {"deleteTag": false, "POST /recyclebin/empty": true}` (operation id or
+`METHOD /path`; `false` marks a `DELETE` that only removes a record as ordinary). On a `.thebe/mcp.json`
+server add `"tools": {"prune_cache": {"irreversible": false}}`. A call an override decided leaves its own
+audit record (`override`, `identity`, `caller`). Moving or copying files onto a name that already exists
+fails at once and changes nothing, so those stay ordinary writes. When in doubt, a call is irreversible.
 
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 

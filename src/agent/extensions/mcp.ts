@@ -1,3 +1,4 @@
+import type { IrreversibleDeclaration } from "../security/irreversible.ts";
 import type { RuntimeMcpServer } from "../runtime/interface.ts";
 import {
   CONTAINER_CAPABILITY_METADATA,
@@ -144,6 +145,15 @@ export type HomelabCapability = {
   background?: boolean;
   destructive?: boolean;
   outputKind?: string;
+  /**
+   * Whether calling this write cannot be undone: `true` always, `false` never, `"by_call"` when the
+   * arguments decide (`download.delete` with `deleteFiles`). Every write Core itself registers must say;
+   * a read says nothing. An external server's tool does not say: the rules judge it from its
+   * `destructiveHint`.
+   */
+  irreversible?: IrreversibleDeclaration;
+  /** An external tool only: the operator's verdict from the server's configuration, replacing the rules. */
+  irreversibleOverride?: boolean;
 };
 
 /** MCP-compatible alias retained for existing callers and clients. */
@@ -282,6 +292,20 @@ export function capabilityChangesThings(
   );
 }
 
+/**
+ * Whether a token is shown this tool: every tool it may call. A read token sees read tools; a write
+ * token also sees write tools, limited to its service categories when it has them. Irreversible
+ * tools are write tools, so they stay visible to any token that may write: they are judged per call.
+ */
+export function mcpToolVisibleTo(
+  capability: Pick<HomelabCapability, "effect" | "permission" | "category">,
+  caller: { writes: boolean; categories?: readonly string[] }
+): boolean {
+  if (!capabilityChangesThings(capability)) return true;
+  if (!caller.writes) return false;
+  return !caller.categories || caller.categories.includes(capability.category);
+}
+
 export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
   const readOnly = !capabilityChangesThings(capability);
   return {
@@ -301,13 +325,39 @@ export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
         ? { "thebe/resourceKinds": capability.resourceKinds }
         : {}),
       ...(capability.approval ? { "thebe/approval": capability.approval } : {}),
+      ...(capability.irreversible !== undefined
+        ? { "thebe/irreversible": capability.irreversible }
+        : {}),
     },
   };
+}
+
+/**
+ * A write that Core registers must say whether it is irreversible, so a new provider cannot add one
+ * whose judgement nobody made. External servers' tools are exempt: the rules judge them per call.
+ */
+export function assertIrreversibleDeclared(
+  capability: Pick<
+    HomelabCapability,
+    "name" | "effect" | "permission" | "source" | "irreversible"
+  >
+): void {
+  if (
+    capability.source === EXTERNAL_CAPABILITY_SOURCE ||
+    !capabilityChangesThings(capability) ||
+    capability.irreversible !== undefined
+  ) {
+    return;
+  }
+  throw new Error(
+    `${capability.name} is a write and cannot be registered without saying whether it is irreversible (irreversible: true, false or "by_call")`
+  );
 }
 
 export function withProductMetadata(
   capability: HomelabCapability
 ): HomelabCapability {
+  assertIrreversibleDeclared(capability);
   return {
     ...capability,
     resourceKinds: capability.resourceKinds ?? defaultResourceKinds(capability),
@@ -450,6 +500,7 @@ export function listCoreMcpTools(
         effect: "write",
         risk: "low",
         approval: "required",
+        irreversible: false,
         service: "sqmusic",
         source: CORE_CAPABILITY_SOURCE,
         serverName: CORE_CAPABILITY_SERVER,
@@ -470,6 +521,7 @@ export function listCoreMcpTools(
         effect: meta.effect,
         risk: meta.risk,
         approval: meta.approval,
+        irreversible: meta.irreversible,
         service: CORE_CONTAINER_SERVICE,
         source: CORE_CAPABILITY_SOURCE,
         serverName: CORE_CAPABILITY_SERVER,
@@ -489,6 +541,7 @@ export function listCoreMcpTools(
       effect: restartMeta.effect,
       risk: restartMeta.risk,
       approval: restartMeta.approval,
+      irreversible: restartMeta.irreversible,
       service: CORE_CONTAINER_SERVICE,
       source: CORE_CAPABILITY_SOURCE,
       serverName: CORE_CAPABILITY_SERVER,
@@ -583,6 +636,7 @@ export function listCoreMcpTools(
           effect: meta.effect,
           risk: meta.risk,
           approval: meta.approval,
+          irreversible: meta.irreversible,
           service: NAVIDROME_PROVIDER_ID,
           source: CORE_CAPABILITY_SOURCE,
           serverName: CORE_CAPABILITY_SERVER,
@@ -603,11 +657,12 @@ export function listCoreMcpTools(
         name,
         description: PIPELINE_TOOL_DESCRIPTIONS[name],
         inputSchema: PIPELINE_TOOL_SCHEMAS[name],
-        category: "downloads",
+        category: name.startsWith("files.") ? "files" : "downloads",
         permission: meta.permission,
         effect: meta.effect,
         risk: meta.risk,
         approval: meta.approval,
+        irreversible: meta.irreversible,
         source: CORE_CAPABILITY_SOURCE,
         serverName: CORE_CAPABILITY_SERVER,
         execution: meta.effect === "write" ? "agent" : "direct",
@@ -628,6 +683,7 @@ export function listCoreMcpTools(
         effect: "write",
         risk: "low",
         approval: "none",
+        irreversible: false,
         service: options.strmRepairProvider.service,
         source: CORE_CAPABILITY_SOURCE,
         serverName: CORE_CAPABILITY_SERVER,

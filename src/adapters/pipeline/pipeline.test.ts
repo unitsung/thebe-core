@@ -437,8 +437,11 @@ describe("OpenList files", () => {
         names: ["Movie"],
       })
     ).toEqual({ taskIds: ["t1"] });
-    expect(calls[0]?.url).toContain("/api/fs/copy");
-    expect(calls[0]?.body).toMatchObject({
+    // The destination is listed first so a name clash fails before anything changes.
+    expect(calls[0]?.url).toContain("/api/fs/list");
+    expect(calls[0]?.body).toMatchObject({ path: "/lib/Movies" });
+    const copy = calls.find((call) => call.url.includes("/api/fs/copy"));
+    expect(copy?.body).toMatchObject({
       src_dir: "/dl",
       dst_dir: "/lib/Movies",
       names: ["Movie"],

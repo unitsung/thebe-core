@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "note": "Responses of GET /v1/usage/summary for a seeded store and for an empty one.",
+  "cases": [
+    {
+      "name": "seeded",
+      "query": "from=2026-11-01&to=2026-11-03",
+      "response": {
+        "range": {
+          "from": "2026-11-01",
+          "to": "2026-11-03",
+          "utcOffsetMinutes": 0
+        },
+        "generatedAt": "2026-11-03T12:00:00.000Z",
+        "days": [
+          {
+            "day": "2026-11-01",
+            "foreground": {
+              "input": 1000,
+              "output": 200,
+              "cacheWrite": 300,
+              "cacheRead": 5000,
+              "counted": 1500,
+              "cost": 0.05,
+              "sessions": 1
+            },
+            "background": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            }
+          },
+          {
+            "day": "2026-11-02",
+            "foreground": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            },
+            "background": {
+              "input": 25000,
+              "output": 3500,
+              "cacheWrite": 1000,
+              "cacheRead": 40000,
+              "counted": 29500,
+              "cost": 0.5,
+              "sessions": 2
+            }
+          },
+          {
+            "day": "2026-11-03",
+            "foreground": {
+              "input": 400,
+              "output": 100,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 500,
+              "cost": 0.01,
+              "sessions": 1
+            },
+            "background": {
+              "input": 100,
+              "output": 50,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 150,
+              "cost": 0.002,
+              "sessions": 1
+            }
+          }
+        ],
+        "totals": {
+          "foreground": {
+            "input": 1400,
+            "output": 300,
+            "cacheWrite": 300,
+            "cacheRead": 5000,
+            "counted": 2000,
+            "cost": 0.06,
+            "sessions": 2
+          },
+          "background": {
+            "input": 25100,
+            "output": 3550,
+            "cacheWrite": 1000,
+            "cacheRead": 40000,
+            "counted": 29650,
+            "cost": 0.502,
+            "sessions": 3
+          }
+        },
+        "goals": {
+          "outcomes": {
+            "completed": 1,
+            "max_iterations": 1,
+            "failed": 1,
+            "cancelled": 0,
+            "running": 0,
+            "paused": 0
+          },
+          "completion": {
+            "count": 3,
+            "p50Ms": 1800000,
+            "p95Ms": 2400000,
+            "maxMs": 2400000
+          },
+          "items": [
+            {
+              "id": "goal-chat",
+              "title": "goal-chat",
+              "background": true,
+              "status": "max_iterations",
+              "createdAt": "2026-11-03T08:00:00Z",
+              "finishedAt": "2026-11-03T08:30:00Z",
+              "durationMs": 1800000,
+              "tokens": {
+                "input": 100,
+                "output": 50,
+                "cacheWrite": 0,
+                "cacheRead": 0,
+                "counted": 150,
+                "cost": 0.002
+              }
+            },
+            {
+              "id": "goal-failed",
+              "title": "goal-failed",
+              "background": true,
+              "status": "failed",
+              "createdAt": "2026-11-02T03:00:00Z",
+              "finishedAt": "2026-11-02T03:40:00Z",
+              "durationMs": 2400000,
+              "tokens": {
+                "input": 5000,
+                "output": 500,
+                "cacheWrite": 0,
+                "cacheRead": 0,
+                "counted": 5500,
+                "cost": 0.1
+              }
+            },
+            {
+              "id": "goal-done",
+              "title": "goal-done",
+              "background": true,
+              "status": "completed",
+              "createdAt": "2026-11-02T01:00:00Z",
+              "finishedAt": "2026-11-02T01:10:00Z",
+              "durationMs": 600000,
+              "tokens": {
+                "input": 20000,
+                "output": 3000,
+                "cacheWrite": 1000,
+                "cacheRead": 40000,
+                "counted": 24000,
+                "cost": 0.4
+              }
+            }
+          ]
+        },
+        "confirmations": {
+          "answered": 2,
+          "pending": 1,
+          "wait": {
+            "count": 2,
+            "p50Ms": 300000,
+            "p95Ms": 1200000,
+            "maxMs": 1200000
+          }
+        },
+        "unreadableSessions": 0
+      }
+    },
+    {
+      "name": "empty",
+      "query": "from=2026-11-02&to=2026-11-03&utcOffsetMinutes=480",
+      "response": {
+        "range": {
+          "from": "2026-11-02",
+          "to": "2026-11-03",
+          "utcOffsetMinutes": 480
+        },
+        "generatedAt": "2026-11-03T12:00:00.000Z",
+        "days": [
+          {
+            "day": "2026-11-02",
+            "foreground": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            },
+            "background": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            }
+          },
+          {
+            "day": "2026-11-03",
+            "foreground": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            },
+            "background": {
+              "input": 0,
+              "output": 0,
+              "cacheWrite": 0,
+              "cacheRead": 0,
+              "counted": 0,
+              "cost": 0,
+              "sessions": 0
+            }
+          }
+        ],
+        "totals": {
+          "foreground": {
+            "input": 0,
+            "output": 0,
+            "cacheWrite": 0,
+            "cacheRead": 0,
+            "counted": 0,
+            "cost": 0,
+            "sessions": 0
+          },
+          "background": {
+            "input": 0,
+            "output": 0,
+            "cacheWrite": 0,
+            "cacheRead": 0,
+            "counted": 0,
+            "cost": 0,
+            "sessions": 0
+          }
+        },
+        "goals": {
+          "outcomes": {
+            "completed": 0,
+            "max_iterations": 0,
+            "failed": 0,
+            "cancelled": 0,
+            "running": 0,
+            "paused": 0
+          },
+          "completion": {
+            "count": 0
+          },
+          "items": []
+        },
+        "confirmations": {
+          "answered": 0,
+          "pending": 0,
+          "wait": {
+            "count": 0
+          }
+        },
+        "unreadableSessions": 0
+      }
+    }
+  ]
+}

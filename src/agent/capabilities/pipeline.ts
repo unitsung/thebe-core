@@ -6,6 +6,8 @@
  * swapping the downloader or the media server.
  */
 
+import type { IrreversibleDeclaration } from "../security/irreversible.ts";
+
 export type DownloadState =
   | "downloading"
   | "seeding"
@@ -203,7 +205,10 @@ export const PIPELINE_TOOL_NAMES = [
 ] as const;
 export type PipelineToolName = (typeof PIPELINE_TOOL_NAMES)[number];
 
-/** The download tools an agent on `/mcp` can reach; the file and library tools stay in conversations for now. */
+/**
+ * The pipeline tools an agent on `/mcp` can reach: the download tools and the file manager's. The
+ * library tools stay in conversations for now. (The name predates the file tools.)
+ */
 export const DOWNLOAD_TOOL_NAMES = [
   "download.list",
   "download.status",
@@ -211,6 +216,11 @@ export const DOWNLOAD_TOOL_NAMES = [
   "download.pause",
   "download.resume",
   "download.delete",
+  "files.list",
+  "files.mkdir",
+  "files.copy",
+  "files.move",
+  "files.offline_download",
 ] as const satisfies readonly PipelineToolName[];
 export type DownloadToolName = (typeof DOWNLOAD_TOOL_NAMES)[number];
 
@@ -226,6 +236,8 @@ export const DOWNLOAD_CAPABILITY_METADATA: Record<
     effect: "read" | "write";
     risk: "low" | "disruptive";
     approval: "none" | "required";
+    /** Required of a write; a read says nothing. */
+    irreversible?: IrreversibleDeclaration;
   }
 > = {
   "download.list": {
@@ -245,24 +257,65 @@ export const DOWNLOAD_CAPABILITY_METADATA: Record<
     effect: "write",
     risk: "low",
     approval: "required",
+    irreversible: false,
   },
   "download.pause": {
     permission: "confirm",
     effect: "write",
     risk: "low",
     approval: "required",
+    irreversible: false,
   },
   "download.resume": {
     permission: "confirm",
     effect: "write",
     risk: "low",
     approval: "required",
+    irreversible: false,
   },
   "download.delete": {
     permission: "confirm",
     effect: "write",
     risk: "disruptive",
     approval: "required",
+    // The task alone is an ordinary write; `deleteFiles: true` is not.
+    irreversible: "by_call",
+  },
+  "files.list": {
+    permission: "read",
+    effect: "read",
+    risk: "low",
+    approval: "none",
+  },
+  // Moving and copying fail on a name clash before changing anything, so they never overwrite.
+  "files.mkdir": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+    irreversible: false,
+  },
+  "files.copy": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+    irreversible: false,
+  },
+  "files.move": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+    irreversible: false,
+  },
+  // Only the file manager's own temporary files are removed once the upload succeeds.
+  "files.offline_download": {
+    permission: "confirm",
+    effect: "write",
+    risk: "low",
+    approval: "required",
+    irreversible: false,
   },
 };
 

@@ -372,6 +372,66 @@ describe("per-device tokens", () => {
     ]);
   });
 
+  it("create takes --category for a write scope, and list shows it", async () => {
+    const configDir = await dir();
+    const out: string[] = [];
+    const err: string[] = [];
+    const io = {
+      log: (l: string) => out.push(l),
+      error: (l: string) => err.push(l),
+      env: {},
+    };
+    expect(
+      runTokenCommand(
+        [
+          "create",
+          "Ops",
+          "--scope",
+          "mcp:write",
+          "--category",
+          "containers,downloads",
+        ],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    expect(
+      runTokenCommand(
+        [
+          "create",
+          "Media",
+          "--scope=mcp:write",
+          "--category=media",
+          "--category",
+          "files",
+        ],
+        configDir,
+        io
+      )
+    ).toBe(0);
+    out.length = 0;
+    expect(runTokenCommand(["list"], configDir, io)).toBe(0);
+    expect(out[0]).toContain("Ops\tscope mcp:write (containers, downloads)\t");
+    expect(out[1]).toContain("Media\tscope mcp:write (media, files)\t");
+    expect(readDeviceTokens(configDir)[0]?.categories).toEqual([
+      "containers",
+      "downloads",
+    ]);
+    // A limit on a token that cannot write, or on a category Core does not have, makes no token.
+    for (const argv of [
+      ["create", "R", "--scope", "mcp:read", "--category", "media"],
+      ["create", "F", "--category", "media"],
+      ["create", "X", "--scope", "mcp:write", "--category", "spaceships"],
+      ["create", "Y", "--scope", "mcp:write", "--category"],
+    ]) {
+      expect(runTokenCommand(argv, configDir, io), argv.join(" ")).not.toBe(0);
+    }
+    expect(readDeviceTokens(configDir)).toHaveLength(2);
+    out.length = 0;
+    runTokenCommand(["help"], configDir, io);
+    expect(err.join("\n")).toContain("--category");
+  });
+
   it("create and list through the command", async () => {
     const configDir = await dir();
     const out: string[] = [];

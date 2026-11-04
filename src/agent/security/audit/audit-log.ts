@@ -28,6 +28,11 @@ export type AuditRecord = {
   caller?: string;
   /** Set when the call was an irreversible delete (judged per call) that was allowed to run. */
   irreversible?: boolean;
+  /**
+   * Set on the record an operator override leaves when it decided a call: what the operator made the call
+   * (`identity` names the operation or tool), whatever the rules would have said.
+   */
+  override?: "irreversible" | "ordinary";
 };
 
 /** Product query for the append-only audit stream. Cursor is an opaque line offset. */
@@ -215,6 +220,9 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
     if (typeof row[key] === "string") record[key] = row[key];
   }
   if (row.irreversible === true) record.irreversible = true;
+  if (row.override === "irreversible" || row.override === "ordinary") {
+    record.override = row.override;
+  }
   if (typeof row.result === "string") record.result = row.result as AuditResult;
   if (typeof row.durationMs === "number") record.durationMs = row.durationMs;
   return record;

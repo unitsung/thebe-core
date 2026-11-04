@@ -22,6 +22,12 @@ export type OpenAPIConnection = {
   trustReadOnlyAnnotations?: boolean;
   /** Operator allow-list of operations exposed as preview + confirm write tools. */
   writeOperations?: string[];
+  /**
+   * Operator verdicts on single writes, by operation ID or `METHOD /path`: `true` marks one irreversible
+   * (a POST that empties a trash), `false` marks one ordinary (a DELETE that only removes a tag).
+   * Each override that decides a call is audited. Operations not listed are judged by the rules.
+   */
+  irreversibleOperations?: Record<string, boolean>;
   /** Operator deny-list: operation IDs or `METHOD /path`. Hidden from discovery and refused on every route. */
   excludeOperations?: string[];
   /** Operator deny-list by OpenAPI tag, same effect as excludeOperations. */
@@ -320,6 +326,7 @@ export class OpenAPIService implements ServiceAPIProvider {
             : {}),
           readOnly: this.readable(op),
           writable: this.isWritable(op),
+          ...this.irreversibleOverride(op),
           parameters,
           ...(Object.keys(requestBody).length > 0
             ? {
@@ -354,6 +361,16 @@ export class OpenAPIService implements ServiceAPIProvider {
       this.connection.writeOperations?.includes(`${op.method} ${op.path}`) ===
         true
     );
+  }
+  private irreversibleOverride(op: Operation): {
+    irreversibleOverride?: boolean;
+  } {
+    const overrides = this.connection.irreversibleOperations;
+    const verdict =
+      overrides?.[op.id] ?? overrides?.[`${op.method} ${op.path}`];
+    return typeof verdict === "boolean"
+      ? { irreversibleOverride: verdict }
+      : {};
   }
   private readable(op: Operation): boolean {
     if (
@@ -638,6 +655,13 @@ async function boundedText(
   return Buffer.concat(chunks).toString("utf8");
 }
 
+function booleanMap(value: unknown): Record<string, boolean> | undefined {
+  const entries = Object.entries(object(value)).filter(
+    (entry): entry is [string, boolean] => typeof entry[1] === "boolean"
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 /** Connection configuration, not function registration. New services need no code. */
 export function openAPIConnectionsFromEnv(
   env: Record<string, string | undefined> = process.env
@@ -688,6 +712,7 @@ export function openAPIConnectionsFromEnv(
             (item): item is string => typeof item === "string"
           )
         : undefined,
+      irreversibleOperations: booleanMap(entry.irreversibleOperations),
       excludeOperations: Array.isArray(entry.excludeOperations)
         ? entry.excludeOperations.filter(
             (item): item is string => typeof item === "string"

@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
+  TOKEN_CATEGORIES,
   TOKEN_SCOPES,
   createDeviceToken,
   describeTokenScopes,
@@ -17,12 +18,15 @@ import {
 
 const HELP = `thebe token <command>
 
-  create <name> [--scope mcp:read|mcp:write|mcp:irreversible]
+  create <name> [--scope mcp:read|mcp:write|mcp:irreversible] [--category <category>]
                   make a token for one device or agent; shown once, only its hash is kept.
                   With --scope the token works only on /mcp: mcp:read for read tools,
                   mcp:write for write tools too, mcp:irreversible for deletes that cannot be
                   undone too (each includes the ones before it). --scope may be repeated or
                   comma-separated. Without it the token has full access.
+                  With --category (needs a write scope; repeatable or comma-separated) the
+                  token writes only to those service categories: ${TOKEN_CATEGORIES.join(", ")}.
+                  Reads and the tool list are not limited by it; a write outside them is refused.Reads are not limited by it; a write outside them is refused, and the tool list leaves those write tools out.
   list            the device tokens: name, scope, created, last used
   revoke <name>   remove one device's token; the others keep working
   revoke --all    remove every device token and close the shared one
@@ -43,15 +47,36 @@ THEBE_TOKEN belongs to your environment and is not changed here.`;
  * `create` takes the device name as the words that are left once `--scope <value>` is taken out.
  * `--scope` may be repeated and each value may be comma-separated: `--scope mcp:read,mcp:write`.
  */
-function parseCreateArgs(
-  args: readonly string[]
-):
-  | { ok: true; name: string; scope: (typeof TOKEN_SCOPES)[number][] }
+function parseCreateArgs(args: readonly string[]):
+  | {
+      ok: true;
+      name: string;
+      scope: (typeof TOKEN_SCOPES)[number][];
+      categories: string[];
+    }
   | { ok: false; problem: string } {
   const words: string[] = [];
   const scope: (typeof TOKEN_SCOPES)[number][] = [];
+  const categories: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
+    if (arg === "--category" || arg.startsWith("--category=")) {
+      const value =
+        arg === "--category" ? args[++i] : arg.slice("--category=".length);
+      for (const item of (value ?? "").split(",")) {
+        const known = TOKEN_CATEGORIES.find(
+          (candidate) => candidate === item.trim()
+        );
+        if (!known) {
+          return {
+            ok: false,
+            problem: `--category takes ${TOKEN_CATEGORIES.join(", ")} (repeat it or separate them with commas).`,
+          };
+        }
+        categories.push(known);
+      }
+      continue;
+    }
     if (arg !== "--scope" && !arg.startsWith("--scope=")) {
       words.push(arg);
       continue;
@@ -68,7 +93,7 @@ function parseCreateArgs(
       scope.push(known);
     }
   }
-  return { ok: true, name: words.join(" "), scope };
+  return { ok: true, name: words.join(" "), scope, categories };
 }
 
 export function runTokenCommand(
@@ -120,6 +145,7 @@ export function runTokenCommand(
         configDir,
         name: parsed.name,
         scope: parsed.scope,
+        categories: parsed.categories,
       });
       if (!result.ok) {
         io.error(
@@ -127,9 +153,13 @@ export function runTokenCommand(
             ? "A device token with that name already exists."
             : result.reason === "reserved-name"
               ? "That name is reserved; pick another."
-              : result.reason === "store-unreadable"
-                ? "tokens.json could not be read; it was left untouched. Fix or move it, then try again."
-                : "Name the device in 1-40 letters, digits, spaces, dots, dashes or underscores."
+              : result.reason === "category-needs-write"
+                ? "--category limits a write scope; add --scope mcp:write (a read token cannot write at all)."
+                : result.reason === "unknown-category"
+                  ? `--category takes ${TOKEN_CATEGORIES.join(", ")}.`
+                  : result.reason === "store-unreadable"
+                    ? "tokens.json could not be read; it was left untouched. Fix or move it, then try again."
+                    : "Name the device in 1-40 letters, digits, spaces, dots, dashes or underscores."
         );
         return 1;
       }
@@ -145,7 +175,7 @@ export function runTokenCommand(
       if (!devices.length) io.log("no device tokens");
       for (const device of devices) {
         io.log(
-          `${device.name}\tscope ${describeTokenScopes(device.scopes)}\tcreated ${device.createdAt}\tlast used ${usage[device.name] ?? "never"}`
+          `${device.name}\tscope ${describeTokenScopes(device.scopes, device.categories)}\tcreated ${device.createdAt}\tlast used ${usage[device.name] ?? "never"}`
         );
       }
       return 0;

@@ -62,7 +62,8 @@ export function buildNavidromeContract() {
       NAVIDROME_TOOL_NAMES.map((name) => [
         name,
         {
-          ...NAVIDROME_CAPABILITY_METADATA[name],
+          // `irreversible` is Core's own write judgement, not part of what a client depends on.
+          ...withoutIrreversible(NAVIDROME_CAPABILITY_METADATA[name]),
           inputSchema: NAVIDROME_TOOL_SCHEMAS[name],
         },
       ])
@@ -72,4 +73,11 @@ export function buildNavidromeContract() {
       "navidrome.lyrics": NAVIDROME_LYRICS_EXAMPLE,
     },
   };
+}
+
+function withoutIrreversible<T extends { irreversible?: unknown }>(
+  metadata: T
+): Omit<T, "irreversible"> {
+  const { irreversible: _irreversible, ...rest } = metadata;
+  return rest;
 }
