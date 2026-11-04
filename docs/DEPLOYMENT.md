@@ -286,6 +286,21 @@ docker compose exec thebe-core node dist/token.js create "Janitor" --scope mcp:i
 `--scope` may be repeated or comma-separated (`--scope mcp:read,mcp:write`), and each scope includes the
 ones before it: `mcp:irreversible` also writes and reads.
 
+A token sees only the tools it may call: `tools/list` gives a read token the read tools, and a write
+token the read and write tools. Deletes that cannot be undone stay listed for a token that may write,
+because they are judged per call (below). To limit a write token to some kinds of service, add
+`--category` (repeatable or comma-separated; it needs a write scope):
+
+```bash
+docker compose exec thebe-core node dist/token.js create "Box agent" --scope mcp:write --category containers,downloads
+```
+
+The categories are `files`, `media`, `downloads`, `containers`, `automation`, `diagnostics`, `compute`,
+`storage`, `network`, `photos` and `other`. That token reads everything, lists only the write tools in
+its categories, and a write outside them fails at once naming the category it would need.
+`thebe token list` shows the limit next to the scope. A category list in `tokens.json` that Core does
+not know makes that token unusable (`401`); it is never read as no limit.
+
 The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
 everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
 action. A write tool called with a read-only token fails at once and says which scope to grant;
