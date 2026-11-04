@@ -114,12 +114,13 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
-- **Scoped tokens.** A token has full access today, and `thebe token create` already makes
-  named, revocable device tokens. Give each token a set of scopes, with full access as the
-  default so nothing changes for existing tokens. Possible scopes: read-only; `/mcp` only;
-  `/mcp` with writes; no admin routes (token management, provider keys, settings); no shell
-  or file routes; one named tool or capability. The token's name goes into the audit record
-  as the caller. Not scheduled.
+- **Scoped tokens.** Shipped in part: `thebe token create <name> --scope mcp:read|mcp:write`
+  limits a token to `/mcp`, read-only or with writes; full access stays the default so nothing
+  changes for existing tokens. Still open: a scope for one service category or one named tool, a
+  scope for "no admin routes" on `/v1`, `tools/list` filtered to what the token may call, a switch
+  that refuses irreversible deletes whatever the scope, a listener that serves only `/mcp` for
+  exposing it to the internet, and the token's name in the audit record as the caller. Not
+  scheduled.
 - **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are on by default, with a host
   switch (`THEBE_MCP_WRITES=off`), and the calling agent asks its own user. A stricter option would hold
   each write until a person approves it in Core (an out-of-band queue, with scoped tokens so

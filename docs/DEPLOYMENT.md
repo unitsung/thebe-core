@@ -135,7 +135,7 @@ enable it by default. This never pushes.
 | Variable                                                                           | Required                 | Meaning                                                                                                                                                                          |
 | ---------------------------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                          |
-| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token`. Generated and persisted on first start when unset, then printed once                                                          |
+| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                               |
 | `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                |
 | `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                        |
 | `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
@@ -147,7 +147,8 @@ Request contract (verified by `scripts/smoke.mjs`):
 
 ```text
 /docs, /openapi.json, /swagger   readable without the token
-every other route                401 without X-Thebe-Token
+every other route                401 without X-Thebe-Token (or Authorization: Bearer)
+scoped token, not /mcp           403 token_scope
 mutating routes                  403 when the Host header is not allowlisted
 ```
 
@@ -256,6 +257,18 @@ docker compose exec thebe-core node dist/token.js list                 # name, c
 docker compose exec thebe-core node dist/token.js revoke "My iPhone"   # that device only
 ```
 
+An agent that connects over `/mcp` should have its own token, limited to `/mcp`:
+
+```bash
+docker compose exec thebe-core node dist/token.js create "Claude Code" --scope mcp:read    # read tools only
+docker compose exec thebe-core node dist/token.js create "Home agent" --scope mcp:write    # read and write tools
+```
+
+The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
+everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
+action. A write tool called with a read-only token fails at once and says which scope to grant;
+nothing waits for approval. `mcp:write` still obeys `THEBE_MCP_WRITES=off`.
+
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 
 ```bash
@@ -269,8 +282,8 @@ Outside a container: `npm run token -- <command>` with the same `THEBE_CONFIG_DI
 Device tokens live hashed in `{config}/tokens.json` (mode 0600) with last-use times in
 `token-usage.json`; the server re-reads them as they change, so every command applies at once, with no
 restart. If nothing is configured, nothing is accepted. A token set through `THEBE_TOKEN` belongs to
-your environment: `rotate` and `revoke --all` leave it alone. Tokens carry no scopes: every token has
-the same access.
+your environment: `rotate` and `revoke --all` leave it alone. A token made without `--scope`, the
+shared token and `THEBE_TOKEN` have full access.
 
 ## 5. Process isolation boundary
 

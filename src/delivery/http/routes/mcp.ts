@@ -55,16 +55,17 @@ const AGENT_REQUIRED = "MCP tools require the Thebe agent service";
 async function callTool(
   agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
   name: string,
-  args: unknown
+  args: unknown,
+  caller: { writes: boolean }
 ): Promise<{ text: string; isError: boolean }> {
   if ((MCP_EVENT_TOOLS as readonly string[]).includes(name)) {
     if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
-    return agent.invokeMcpTool(name, asObject(args) ?? {});
+    return agent.invokeMcpTool(name, asObject(args) ?? {}, caller);
   }
   const mapped = ALIASES[name] ?? name;
   if (ALL_TOOL_NAMES.has(name)) {
     if (!agent) throw new McpProtocolError(AGENT_REQUIRED, -32000);
-    return agent.invokeMcpTool(mapped, asObject(args) ?? {});
+    return agent.invokeMcpTool(mapped, asObject(args) ?? {}, caller);
   }
   if (agent) {
     const coreCapability = (await agent.listMcpTools()).find((tool) => {
@@ -73,11 +74,15 @@ async function callTool(
       );
     });
     if (coreCapability) {
-      return agent.invokeMcpTool(coreCapability.name, asObject(args) ?? {});
+      return agent.invokeMcpTool(
+        coreCapability.name,
+        asObject(args) ?? {},
+        caller
+      );
     }
   }
   if (agent && name.startsWith("mcp:")) {
-    return agent.invokeMcpTool(name, asObject(args) ?? {});
+    return agent.invokeMcpTool(name, asObject(args) ?? {}, caller);
   }
   throw new McpProtocolError(`unknown tool: ${name}`, -32602);
 }
@@ -162,7 +167,12 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     const name = typeof params.name === "string" ? params.name : "";
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
-      const { text, isError } = await callTool(agent, name, params.arguments);
+      // A token without a scope list has full access, as every token did before scopes.
+      const writes =
+        !context.caller?.scopes || context.caller.scopes.includes("mcp:write");
+      const { text, isError } = await callTool(agent, name, params.arguments, {
+        writes,
+      });
       return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

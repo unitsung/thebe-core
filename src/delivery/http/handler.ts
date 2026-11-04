@@ -5,7 +5,7 @@ import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
-import type { TokenSource, TokenVerifier } from "./token-store.ts";
+import type { TokenCaller, TokenSource, TokenVerifier } from "./token-store.ts";
 
 export { validateRequestSecurity } from "./security.ts";
 
@@ -24,19 +24,22 @@ export type ThebeHttpHandlerOptions = {
 
 /** Stable public composition shell for the HTTP agent. */
 export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
-  const verify: ((received: string) => boolean) | undefined =
+  const identify: ((received: string) => TokenCaller | undefined) | undefined =
     typeof options.token === "object" && options.token !== null
-      ? (received) =>
-          (options.token as TokenVerifier).verify(received) !== undefined
+      ? (received) => (options.token as TokenVerifier).verify(received)
       : typeof options.token === "function"
         ? (received) => {
             // A source with no token (revoked, unreadable) refuses everything rather than opening up.
             const expected = (options.token as TokenSource)();
-            return !!expected && tokensEqual(received, expected);
+            return expected && tokensEqual(received, expected)
+              ? { name: "default" }
+              : undefined;
           }
         : options.token?.trim()
           ? (received) =>
               tokensEqual(received, (options.token as string).trim())
+                ? { name: "default" }
+                : undefined
           : undefined;
   const allowedHostsSet = options.allowedHosts
     ? new Set(options.allowedHosts)
@@ -59,8 +62,10 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // Documentation is intentionally readable without the shared token so
       // a client's "Open API docs" link can launch Safari. Swagger UI still asks
       // for X-Thebe-Token through its Authorize control when trying requests.
-      if (verify && !isDocumentationRequest(request)) {
-        if (!verify(receivedToken(request))) {
+      let caller: TokenCaller | undefined;
+      if (identify && !isDocumentationRequest(request)) {
+        caller = identify(receivedToken(request));
+        if (!caller) {
           return json(
             {
               ok: false,
@@ -71,9 +76,20 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
             401
           );
         }
+        if (caller.scopes && requestPath(request) !== "/mcp") {
+          // A valid token, but not one for this route: 403, so the caller can tell it from a bad token.
+          return json(
+            {
+              ok: false,
+              error: `This token (${caller.name}) is limited to /mcp (${caller.scopes.join(", ")}). Use a token made without --scope for other routes.`,
+              code: "token_scope",
+            },
+            403
+          );
+        }
       }
       try {
-        return await router.handle(request);
+        return await router.handle(request, caller);
       } catch (error) {
         // A failure that names its own status (a bad body, an unknown id) is an answer, not a crash.
         if (hasHttpStatus(error)) return agentError(error);
@@ -95,6 +111,15 @@ function receivedToken(request: Request): string {
     request.headers.get("Authorization")?.trim() ?? ""
   );
   return bearer?.[1] ?? "";
+}
+
+/** The path as routes see it: no trailing slash. */
+function requestPath(request: Request): string {
+  try {
+    return new URL(request.url).pathname.replace(/\/$/, "") || "/";
+  } catch {
+    return "";
+  }
 }
 
 function isDocumentationRequest(request: Request): boolean {

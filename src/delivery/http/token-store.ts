@@ -66,7 +66,10 @@ export function revokeToken(options: {
   return result.ok ? { ...result, token: "" } : result;
 }
 
-export function tokenStatus(options: { configDir: string; env?: NodeJS.ProcessEnv }): {
+export function tokenStatus(options: {
+  configDir: string;
+  env?: NodeJS.ProcessEnv;
+}): {
   managedBy: "env" | "file" | "none";
   path: string;
   modifiedAt?: Date;
@@ -78,13 +81,30 @@ export function tokenStatus(options: { configDir: string; env?: NodeJS.ProcessEn
   return { managedBy: "file", path, modifiedAt: statSync(path).mtime };
 }
 
-
 // ---- Per-device tokens ----------------------------------------------------------------------
 
-/** What the HTTP handler asks: whose token is this, if it is one of ours. */
-export type TokenVerifier = { verify(received: string): string | undefined };
+/**
+ * What a token may do, beyond the full access every token has by default. A token with scopes works
+ * only on `/mcp`: `mcp:read` for read tools, `mcp:write` (which includes `mcp:read`) for write tools too.
+ */
+export const TOKEN_SCOPES = ["mcp:read", "mcp:write"] as const;
+export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
-export type DeviceToken = { name: string; hash: string; createdAt: string };
+/** Whose token it is, and what it may do. No `scopes` means full access, as every token had before scopes. */
+export type TokenCaller = { name: string; scopes?: readonly TokenScope[] };
+
+/** What the HTTP handler asks: whose token is this, if it is one of ours. */
+export type TokenVerifier = {
+  verify(received: string): TokenCaller | undefined;
+};
+
+export type DeviceToken = {
+  name: string;
+  hash: string;
+  createdAt: string;
+  /** Absent for full access. Kept as stored, so a value this Core does not know survives a rewrite. */
+  scopes?: unknown;
+};
 
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$/;
 const RESERVED_NAMES = new Set(["default", "env"]);
@@ -103,11 +123,15 @@ function usagePath(configDir: string): string {
 
 export function readDeviceTokens(configDir: string): DeviceToken[] {
   try {
-    const parsed = JSON.parse(readFileSync(deviceTokensPath(configDir), "utf8")) as { tokens?: unknown };
+    const parsed = JSON.parse(
+      readFileSync(deviceTokensPath(configDir), "utf8")
+    ) as { tokens?: unknown };
     return Array.isArray(parsed.tokens)
       ? parsed.tokens.filter(
           (t): t is DeviceToken =>
-            !!t && typeof (t as DeviceToken).name === "string" && typeof (t as DeviceToken).hash === "string"
+            !!t &&
+            typeof (t as DeviceToken).name === "string" &&
+            typeof (t as DeviceToken).hash === "string"
         )
       : [];
   } catch {
@@ -131,19 +155,28 @@ function readDeviceTokensForUpdate(configDir: string): DeviceToken[] {
   }
   return parsed.tokens.filter(
     (t): t is DeviceToken =>
-      !!t && typeof (t as DeviceToken).name === "string" && typeof (t as DeviceToken).hash === "string"
+      !!t &&
+      typeof (t as DeviceToken).name === "string" &&
+      typeof (t as DeviceToken).hash === "string"
   );
 }
 
 function writeDeviceTokens(configDir: string, tokens: DeviceToken[]): void {
-  writeFileAtomicSync(deviceTokensPath(configDir), `${JSON.stringify({ version: 1, tokens }, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  writeFileAtomicSync(
+    deviceTokensPath(configDir),
+    `${JSON.stringify({ version: 1, tokens }, null, 2)}\n`,
+    {
+      mode: 0o600,
+    }
+  );
 }
 
 export function readTokenUsage(configDir: string): Record<string, string> {
   try {
-    return JSON.parse(readFileSync(usagePath(configDir), "utf8")) as Record<string, string>;
+    return JSON.parse(readFileSync(usagePath(configDir), "utf8")) as Record<
+      string,
+      string
+    >;
   } catch {
     return {};
   }
@@ -151,35 +184,57 @@ export function readTokenUsage(configDir: string): Record<string, string> {
 
 export type DeviceTokenResult =
   | { ok: true; name: string; token: string }
-  | { ok: false; reason: "invalid-name" | "reserved-name" | "exists" | "store-unreadable" };
+  | {
+      ok: false;
+      reason: "invalid-name" | "reserved-name" | "exists" | "store-unreadable";
+    };
 
 /** Makes a token for one device. It is shown once; only its hash is kept. */
 export function createDeviceToken(options: {
   configDir: string;
   name: string;
+  /** Limit the token to `/mcp`; leave out for full access. */
+  scope?: TokenScope;
   now?: () => Date;
   generate?: () => string;
 }): DeviceTokenResult {
   const name = options.name.trim();
   if (!NAME_PATTERN.test(name)) return { ok: false, reason: "invalid-name" };
-  if (RESERVED_NAMES.has(name.toLowerCase())) return { ok: false, reason: "reserved-name" };
+  if (RESERVED_NAMES.has(name.toLowerCase()))
+    return { ok: false, reason: "reserved-name" };
   let existing: DeviceToken[];
   try {
     existing = readDeviceTokensForUpdate(options.configDir);
   } catch {
     return { ok: false, reason: "store-unreadable" };
   }
-  if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase())) return { ok: false, reason: "exists" };
+  if (existing.some((t) => t.name.toLowerCase() === name.toLowerCase()))
+    return { ok: false, reason: "exists" };
   const token = (options.generate ?? (() => randomBytes(32).toString("hex")))();
-  existing.push({ name, hash: hex(token), createdAt: (options.now?.() ?? new Date()).toISOString() });
+  existing.push({
+    name,
+    hash: hex(token),
+    createdAt: (options.now?.() ?? new Date()).toISOString(),
+    ...(options.scope && {
+      scopes:
+        options.scope === "mcp:write"
+          ? ["mcp:read", "mcp:write"]
+          : ["mcp:read"],
+    }),
+  });
   writeDeviceTokens(options.configDir, existing);
   return { ok: true, name, token };
 }
 
 /** Removes one device's token; the others keep working. */
-export function revokeDeviceToken(options: { configDir: string; name: string }): boolean {
+export function revokeDeviceToken(options: {
+  configDir: string;
+  name: string;
+}): boolean {
   const existing = readDeviceTokens(options.configDir);
-  const kept = existing.filter((t) => t.name.toLowerCase() !== options.name.trim().toLowerCase());
+  const kept = existing.filter(
+    (t) => t.name.toLowerCase() !== options.name.trim().toLowerCase()
+  );
   if (kept.length === existing.length) return false;
   writeDeviceTokens(options.configDir, kept);
   return true;
@@ -189,6 +244,24 @@ export function revokeAllDeviceTokens(configDir: string): number {
   const existing = readDeviceTokens(configDir);
   if (existing.length) writeDeviceTokens(configDir, []);
   return existing.length;
+}
+
+/** What a stored token may do, in words: for `thebe token list`. */
+export function describeTokenScopes(stored: unknown): string {
+  const scopes = knownScopes(stored);
+  if (scopes === undefined) return "full access";
+  if (scopes === "unknown") return "unknown scope (refused)";
+  return scopes.includes("mcp:write") ? "mcp:write" : "mcp:read";
+}
+
+/** The stored scopes as a list, `undefined` for full access, or `"unknown"` when any entry is not one Core defines. */
+function knownScopes(
+  stored: unknown
+): readonly TokenScope[] | undefined | "unknown" {
+  if (stored === undefined) return undefined;
+  const known = (value: unknown): value is TokenScope =>
+    (TOKEN_SCOPES as readonly unknown[]).includes(value);
+  return Array.isArray(stored) && stored.every(known) ? stored : "unknown";
 }
 
 /**
@@ -230,7 +303,11 @@ export function createTokenVerifier(options: {
     if (now() - (flushed.get(name) ?? 0) >= USAGE_FLUSH_MS) {
       flushed.set(name, now());
       try {
-        writeFileAtomicSync(usagePath(options.configDir), `${JSON.stringify({ ...readTokenUsage(options.configDir), ...Object.fromEntries(used) })}\n`, { mode: 0o600 });
+        writeFileAtomicSync(
+          usagePath(options.configDir),
+          `${JSON.stringify({ ...readTokenUsage(options.configDir), ...Object.fromEntries(used) })}\n`,
+          { mode: 0o600 }
+        );
       } catch {
         // Usage is a convenience; a failed write must not fail the request.
       }
@@ -241,16 +318,28 @@ export function createTokenVerifier(options: {
     verify(received) {
       if (!received) return undefined;
       const digest = sha256(received);
-      const same = (candidate: Buffer) => candidate.length === digest.length && timingSafeEqual(candidate, digest);
+      const same = (candidate: Buffer) =>
+        candidate.length === digest.length &&
+        timingSafeEqual(candidate, digest);
       const envToken = env.THEBE_TOKEN?.trim();
-      if (envToken && same(sha256(envToken))) return "env";
-      const file = fileToken() ?? (existsSync(tokenFilePath(options.configDir)) ? undefined : options.fallback);
-      if (file && same(sha256(file))) return "default";
-      let found: string | undefined;
+      if (envToken && same(sha256(envToken))) return { name: "env" };
+      const file =
+        fileToken() ??
+        (existsSync(tokenFilePath(options.configDir))
+          ? undefined
+          : options.fallback);
+      if (file && same(sha256(file))) return { name: "default" };
+      let found: TokenCaller | undefined;
       for (const device of loadDevices()) {
-        if (same(Buffer.from(device.hash, "hex"))) found = device.name;
+        if (!same(Buffer.from(device.hash, "hex"))) continue;
+        const scopes = knownScopes(device.scopes);
+        // A scope this Core does not know is refused, never read as no limit at all.
+        found =
+          scopes === "unknown"
+            ? undefined
+            : { name: device.name, ...(scopes && { scopes }) };
       }
-      if (found) noteUse(found);
+      if (found) noteUse(found.name);
       return found;
     },
   };
