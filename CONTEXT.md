@@ -163,6 +163,10 @@ _Avoid_: MCP elicitation as an approval gate (Core cannot tell whether a person 
 A call that destroys data nobody can recover through Thebe or the service, judged per call (tool plus arguments) in `irreversibleCall` (`src/agent/security/irreversible.ts`), never by the model or the caller. Known cases: `download.delete` with `deleteFiles: true`, and `navidrome.playlist.delete` (until Navidrome is shown to keep a copy). Deleting only a download task is an ordinary write. Over `/mcp` it needs the `mcp:irreversible` token scope (a token with no scope list has full access), and `THEBE_MCP_IRREVERSIBLE=off` refuses it for every token. A refusal is an immediate tool error that says how to allow it; an allowed call is audited with `irreversible: true` and the token name, and its result says it was irreversible. Generic API writes, external MCP tools and file moves are not judged yet.
 _Avoid_: asking a person to approve it over `/mcp`, deciding it from the tool name alone
 
+**Push outbox**:
+The durable queue push notices go through (`push-outbox.json` beside the device state). One ordered queue per ticket per device, each notice with a sequence number and an idempotency key (`id`) shared with the Push Relay. The head is retried with back-off from 5 s to 300 s while the relay is unreachable, without limit; three transient relay errors drop it, a permanent refusal drops it at once, and each drop is recorded with its reason. Consecutive failures show in `GET /v1/health` under `push`.
+_Avoid_: best-effort push, a fire-and-forget send, giving up on a notice because the relay was down
+
 **`/mcp`-only port**:
 With `THEBE_MCP_PORT` set, Core listens on a second port that serves only `POST /mcp`: every other path is `404` before any token check, so only that port needs to reach the internet. Host and token checks are the same as on the main port. Each token is limited to `THEBE_MCP_RATE_LIMIT` requests a minute there and gets an immediate `429` over it; the main port is unchanged and has no limit.
 _Avoid_: exposing `THEBE_PORT` to the internet, queueing or delaying a rate-limited call

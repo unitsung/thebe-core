@@ -1,4 +1,5 @@
 import type { ThebeAgent } from "../../agent/index.ts";
+import type { PushOutboxStatus } from "./push-status.ts";
 import { json } from "./json.ts";
 import type { DeviceRegistry } from "./devices.ts";
 import type { TokenCaller } from "./token-store.ts";
@@ -17,6 +18,8 @@ export type ThebeHttpContext = {
   deviceRegistry?: DeviceRegistry;
   /** Where devices register for push and the key Core signs events with; absent when push is off. */
   pushIdentity?: { publicKey: string; relayUrl: string };
+  /** Push delivery state for the health response; absent when push is off. */
+  pushOutbox?: { status(): PushOutboxStatus };
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
@@ -39,6 +42,7 @@ export function createThebeHttpContext(
     path?: string;
     deviceRegistry?: DeviceRegistry;
     pushIdentity?: { publicKey: string; relayUrl: string };
+    pushOutbox?: ThebeHttpContext["pushOutbox"];
     workspacePath?: string;
   }
 ): ThebeHttpContext {
@@ -54,6 +58,7 @@ export function createThebeHttpContext(
     caller: options.caller,
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
+    pushOutbox: options.pushOutbox,
     workspacePath: options.workspacePath,
   };
 }

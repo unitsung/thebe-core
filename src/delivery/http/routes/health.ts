@@ -9,7 +9,11 @@ export async function handleHealthEventsCompatibility(
 ): Promise<Response | undefined> {
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
-    return json({ ok: true, version: context.version });
+    return json({
+      ok: true,
+      version: context.version,
+      push: context.pushOutbox?.status(),
+    });
   }
   if (
     request.method === "GET" &&

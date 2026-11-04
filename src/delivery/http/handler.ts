@@ -1,7 +1,7 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { DeviceRegistry } from "./devices.ts";
-import { normalizedPath } from "./context.ts";
+import { normalizedPath, type ThebeHttpContext } from "./context.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import type { RateLimiter } from "./rate-limit.ts";
@@ -22,6 +22,7 @@ export type ThebeHttpHandlerOptions = {
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: { publicKey: string; relayUrl: string };
   workspacePath?: string;
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
   /**
    * Serve only the paths in `MCP_LISTENER_PATHS` (today `/mcp`), every other path a 404 before any
    * token check. This is the handler for the second port that is safe to expose to the internet.
@@ -63,6 +64,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
     workspacePath: options.workspacePath,
+    pushOutbox: options.pushOutbox,
   });
 
   return {

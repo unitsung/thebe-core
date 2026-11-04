@@ -56,6 +56,8 @@ export function createThebeApp(options: {
   agentStoreDir?: string;
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
+  /** Replaces `fetch` for calls to the Push Relay; tests use it to stand in for the relay. */
+  pushFetch?: typeof fetch;
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -117,6 +119,9 @@ export function createThebeApp(options: {
           relayUrl,
           identity: pushIdentity,
           devices: deviceRegistry,
+          dir: deviceDir,
+          fetch: options.pushFetch,
+          now: options.now,
         })
       : undefined;
   const agent = createThebeAgent({
@@ -188,6 +193,7 @@ export function createThebeApp(options: {
         ? { publicKey: pushIdentity.publicKey, relayUrl }
         : undefined,
     workspacePath: options.workspacePath,
+    pushOutbox: pushNotifier,
   };
   const handler = createThebeHttpHandler(handlerOptions);
   const createMcpHandler = (mcp: McpListenerHandlerOptions | undefined) =>

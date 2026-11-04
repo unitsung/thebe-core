@@ -35,6 +35,7 @@ export type ThebeHttpRouterOptions = {
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: ThebeHttpContext["pushIdentity"];
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
   workspacePath?: string;
 };
 
