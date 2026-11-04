@@ -65,6 +65,8 @@ export function createThebeApp(options: {
   now?: () => Date;
   /** Event sources: `evaluate` for Triggers past the Gate; `timer` and `pollIntervalMs` for the poll loop. */
   sources?: CreateThebeAgentOptions["sources"];
+  /** Tests replace the scheduler's loop with a tick they call by hand. */
+  schedules?: CreateThebeAgentOptions["schedules"];
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
   allowedHosts?: string[];
@@ -160,6 +162,7 @@ export function createThebeApp(options: {
     agentStoreDir: options.agentStoreDir,
     now: options.now,
     sources: options.sources,
+    schedules: options.schedules,
     callerId: options.callerId,
     model: options.model,
     sessionIdleTimeoutMs: options.sessionIdleTimeoutMs,

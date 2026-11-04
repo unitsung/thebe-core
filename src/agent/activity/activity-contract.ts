@@ -6,11 +6,13 @@ import {
   goalToFeedItem,
   recordToFeedItem,
   summarizeNeedsYou,
+  scheduleObservationToFeedItem,
   triggerToFeedItem,
   type ActivityFeedItem,
 } from "./feed.ts";
 import type { Trigger } from "../sources/types.ts";
 import { PERSON_REASONS, type ActivityStage } from "./stage.ts";
+import type { ScheduleObservationView } from "../schedules/types.ts";
 import { ACTIVITY_KIND_RESTART, type ActivityRecord } from "./types.ts";
 
 /**
@@ -71,6 +73,22 @@ function containerTrigger(
     thread: { kind: "container", id: "ctr-emby", name: "emby" },
     summary: "emby turned unhealthy",
     observedAt: T1,
+  };
+}
+
+function scheduleObservation(
+  overrides: Partial<ScheduleObservationView>
+): ScheduleObservationView {
+  return {
+    id: "sched-1:2026-11-04T09:00:00.000Z",
+    scheduleId: "sched-1",
+    title: "Nightly health check",
+    goal: "Check that every container is healthy",
+    dueAt: "2026-11-04T09:00:00.000Z",
+    observedAt: "2026-11-04T09:00:03.000Z",
+    scope: { criteria: ["Every container is running"], maxIterations: 3 },
+    scheduleMode: "observe",
+    ...overrides,
   };
 }
 
@@ -230,6 +248,28 @@ function cases() {
           status: "running",
           startedAt: T0,
           updatedAt: T1,
+        }),
+        context
+      )
+    ),
+    named(
+      "schedule would have run, still observing",
+      scheduleObservationToFeedItem(scheduleObservation({}), context)
+    ),
+    named(
+      "schedule would have run, since switched to auto",
+      scheduleObservationToFeedItem(
+        scheduleObservation({
+          id: "sched-2:2026-11-04T08:00:00.000Z",
+          scheduleId: "sched-2",
+          title: "Weekly library tidy",
+          dueAt: "2026-11-04T08:00:00.000Z",
+          observedAt: "2026-11-04T08:00:02.000Z",
+          scope: {
+            criteria: [],
+            model: { providerId: "company", modelId: "gpt-5.6-sol" },
+          },
+          scheduleMode: "auto",
         }),
         context
       )

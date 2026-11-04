@@ -4,10 +4,23 @@ import { join } from "node:path";
 import { httpError } from "../types.ts";
 import { redactToolOutput } from "../security/redaction.ts";
 import type { ThebeAgent } from "../interface.ts";
-import type { GoalSchedule, GoalScheduleInput } from "./types.ts";
+import { ACCEPT_MODES } from "../policy/types.ts";
+import type {
+  GoalSchedule,
+  GoalScheduleInput,
+  ScheduleMode,
+  ScheduleObservation,
+  ScheduleObservationView,
+} from "./types.ts";
 import { isValidTimeZone, nextCronRun, parseCron } from "./cron.ts";
 
 type GoalPort = Pick<ThebeAgent, "createSession" | "startGoal" | "listGoals">;
+
+/** Replaces the one-second poll loop; tests call the returned tick by hand. */
+export type ScheduleTimer = (tick: () => Promise<void>) => () => void;
+
+/** Records kept per schedule; the oldest go first. */
+const MAX_OBSERVATIONS_PER_SCHEDULE = 20;
 
 /** A single Core process owns scheduling. Reservations are durable before a
  * Goal starts; an interrupted dispatch is never replayed after restart. */
@@ -17,24 +30,35 @@ export function createScheduleApi(options: {
   goals: GoalPort;
   checkWritable: () => void;
   isQuiesced: () => boolean;
+  timer?: ScheduleTimer;
 }) {
   let rows: GoalSchedule[] = [];
+  let observations: ScheduleObservation[] = [];
+  let cancelTimer: (() => void) | undefined;
   let loaded = false;
   let chain = Promise.resolve();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let active = false;
 
+  async function write(name: string, value: unknown) {
+    if (!options.dir) return;
+    await mkdir(options.dir, { recursive: true });
+    const temporary = join(options.dir, `${randomUUID()}.tmp`);
+    await writeFile(temporary, JSON.stringify(value), {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    await rename(temporary, join(options.dir, name));
+  }
+
   async function persist(next: GoalSchedule[]) {
-    if (options.dir) {
-      await mkdir(options.dir, { recursive: true });
-      const temporary = join(options.dir, `${randomUUID()}.tmp`);
-      await writeFile(temporary, JSON.stringify(next), {
-        encoding: "utf8",
-        mode: 0o600,
-      });
-      await rename(temporary, join(options.dir, "schedules.json"));
-    }
+    await write("schedules.json", next);
     rows = next;
+  }
+
+  async function persistObservations(next: ScheduleObservation[]) {
+    await write("observations.json", next);
+    observations = next;
   }
 
   async function load() {
@@ -51,16 +75,27 @@ export function createScheduleApi(options: {
           validate(row);
           if (!row.id || typeof row.enabled !== "boolean")
             throw new Error("Invalid schedule store");
-          return row.dispatching
+          // A schedule stored before accept modes ran its Goals: it stays on auto.
+          const stored = { ...row, mode: row.mode ?? "auto" };
+          return stored.dispatching
             ? {
-                ...row,
+                ...stored,
                 dispatching: false,
                 lastError:
                   "Core restarted during dispatch; inspect the linked Goal before scheduling another run.",
               }
-            : row;
+            : stored;
         });
         await persist(rows);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      try {
+        const data: unknown = JSON.parse(
+          await readFile(join(options.dir, "observations.json"), "utf8")
+        );
+        if (!Array.isArray(data)) throw new Error("Invalid schedule records");
+        observations = data as ScheduleObservation[];
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
@@ -202,6 +237,40 @@ export function createScheduleApi(options: {
     };
   }
 
+  /** Observe mode: the occurrence leaves a record and nothing else. */
+  async function observe(row: GoalSchedule) {
+    const dueAt = new Date(row.nextRunAt ?? row.startAt).toISOString();
+    const id = `${row.id}:${dueAt}`;
+    if (!observations.some((record) => record.id === id)) {
+      const record: ScheduleObservation = {
+        id,
+        scheduleId: row.id,
+        title: row.title,
+        goal: row.goal,
+        dueAt,
+        observedAt: options.now().toISOString(),
+        scope: {
+          criteria: row.criteria?.slice() ?? [],
+          ...(row.maxIterations !== undefined
+            ? { maxIterations: row.maxIterations }
+            : {}),
+          ...(row.model ? { model: { ...row.model } } : {}),
+        },
+      };
+      const own = observations.filter((item) => item.scheduleId === row.id);
+      const dropped = new Set(
+        own
+          .slice(0, Math.max(0, own.length - MAX_OBSERVATIONS_PER_SCHEDULE + 1))
+          .map((item) => item.id)
+      );
+      await persistObservations([
+        ...observations.filter((item) => !dropped.has(item.id)),
+        record,
+      ]);
+    }
+    await save(advance(row));
+  }
+
   async function tick() {
     return serial(async () => {
       if (options.isQuiesced()) return;
@@ -210,8 +279,11 @@ export function createScheduleApi(options: {
           row.enabled &&
           row.nextRunAt &&
           Date.parse(row.nextRunAt) <= options.now().getTime()
-        )
-          await dispatch(row);
+        ) {
+          if (row.mode === "auto") await dispatch(row);
+          else if (row.mode === "observe") await observe(row);
+          else await save(advance(row));
+        }
       }
     });
   }
@@ -230,6 +302,25 @@ export function createScheduleApi(options: {
   return {
     listSchedules: () => serial(async () => rows.map(copy)),
     getSchedule: (id: string) => serial(async () => copy(find(id))),
+    listScheduleObservations: () =>
+      serial(async (): Promise<ScheduleObservationView[]> => {
+        const modes = new Map(rows.map((row) => [row.id, row.mode]));
+        return observations.flatMap((record) => {
+          const scheduleMode = modes.get(record.scheduleId);
+          return scheduleMode
+            ? [
+                {
+                  ...record,
+                  scope: {
+                    ...record.scope,
+                    criteria: record.scope.criteria.slice(),
+                  },
+                  scheduleMode,
+                },
+              ]
+            : [];
+        });
+      }),
     createSchedule: (input: GoalScheduleInput) =>
       serial(async () => {
         options.checkWritable();
@@ -240,6 +331,7 @@ export function createScheduleApi(options: {
         const row: GoalSchedule = {
           ...normalized,
           id: randomUUID(),
+          mode: normalized.mode ?? "observe",
           enabled: true,
           createdAt: stamp,
           updatedAt: stamp,
@@ -306,11 +398,33 @@ export function createScheduleApi(options: {
         await save(updated);
         return copy(updated);
       }),
+    setScheduleMode: (id: string, mode: ScheduleMode) =>
+      serial(async () => {
+        options.checkWritable();
+        if (!ACCEPT_MODES.includes(mode))
+          throw httpError(
+            400,
+            "mode must be off, observe or auto",
+            "invalid_body"
+          );
+        const updated: GoalSchedule = {
+          ...find(id),
+          mode,
+          updatedAt: options.now().toISOString(),
+        };
+        await save(updated);
+        return copy(updated);
+      }),
     deleteSchedule: (id: string) =>
       serial(async () => {
         options.checkWritable();
         find(id);
         await persist(rows.filter((row) => row.id !== id));
+        // Goals the schedule already started are left alone; only its own records go.
+        if (observations.some((record) => record.scheduleId === id))
+          await persistObservations(
+            observations.filter((record) => record.scheduleId !== id)
+          );
       }),
     runSchedule: (id: string) =>
       serial(async () => {
@@ -321,12 +435,20 @@ export function createScheduleApi(options: {
     start() {
       if (!active) {
         active = true;
-        arm();
+        if (options.timer) {
+          cancelTimer = options.timer(() =>
+            tick().catch(() => {
+              /* Same as the built-in loop: store failures stay visible on reads. */
+            })
+          );
+        } else arm();
       }
     },
     async stop() {
       active = false;
       if (timer) clearTimeout(timer);
+      cancelTimer?.();
+      cancelTimer = undefined;
       await chain;
     },
   };
@@ -422,6 +544,11 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
       "criteria must contain up to 32 nonempty strings",
       "invalid_body"
     );
+  if (
+    input.mode !== undefined &&
+    !ACCEPT_MODES.includes(input.mode as ScheduleMode)
+  )
+    throw httpError(400, "mode must be off, observe or auto", "invalid_body");
   const model = input.model;
   if (
     model !== undefined &&
@@ -450,6 +577,7 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
         }
       : {}),
     maxIterations: input.maxIterations,
+    ...(input.mode ? { mode: input.mode } : {}),
     ...(model
       ? {
           model: {

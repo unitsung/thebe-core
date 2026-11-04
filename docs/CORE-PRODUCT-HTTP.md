@@ -26,7 +26,7 @@ Durable Goal schedules now expose `GET/POST /v1/schedules`,
 `GET/PUT/PATCH/DELETE /v1/schedules/{id}` and `POST .../{id}/run`.
 Create/edit accepts `title`, `goal`, ISO `startAt`, an optional `model` (`providerId` + `modelId`; each occurrence's Goal session, workers and reviewer use it, omitted means the host default), optional `criteria`,
 `maxIterations` (1–32) and `intervalMinutes` (5–525600). Omit the interval
-for a one-shot schedule. PATCH accepts `{ enabled: boolean }`. Dates include
+for a one-shot schedule. PATCH accepts `{ enabled?: boolean, mode?: "off" | "observe" | "auto" }` (at least one). Dates include
 a timezone; recurrence uses elapsed minutes, not calendar-day or DST rules.
 A client can create/edit, pause/resume, delete, run-now and follow the linked Goal/log. Run-now does not change the next scheduled occurrence. Schedule
 deletion does not delete or cancel the resulting Goal.
@@ -41,6 +41,23 @@ and skips backlog; active or paused prior Goals prevent overlap. A reservation
 is persisted before dispatch. Interrupted reservations are surfaced for manual
 inspection and never replayed automatically. One Core process must own a given
 store directory. This does not add multi-process scheduling or remote push.
+
+Schedule accept mode (spec #12): every schedule has a `mode`. A new schedule starts in `observe`
+(`mode` may be sent on create; left out on edit it keeps the current one). At its due time `auto`
+starts the Goal as above, `observe` starts nothing (no session, Goal, write or confirmation) and
+records that it would have run, and `off` does nothing and records nothing; all three move on to the
+next occurrence. Schedules stored before modes existed are `auto`. The record is an Activity item,
+`type: "schedule_observation"` (`?source=schedule_observation`, `status` `would_run`, stage
+`ended`, so it never counts under needs-you), with `observation: { id, scheduleId, title, goal,
+dueAt, observedAt, scope: { criteria, maxIterations?, model? }, scheduleMode }`. `id` is
+`<scheduleId>:<dueAt>`, so one occurrence is recorded once; `scheduleMode` is the schedule's mode
+now. A client offers three actions on it: run once (`POST /v1/schedules/{scheduleId}/run`, exactly
+one run), switch to auto (`PATCH` `{ "mode": "auto" }`; the next due time runs once, nothing starts
+at the switch; a finished one-shot has no next due time, so use run once), and delete
+(`DELETE /v1/schedules/{scheduleId}`, which removes the schedule and its records but not the Goals it
+produced). Records persist in `{agentStoreDir}/schedules/observations.json`, at most 20 per
+schedule. The per-schedule mode is independent of the policy accept mode. Fixture:
+`contracts/schedules.json`, and two schedule records in `contracts/activity.json`.
 
 qBittorrent is an additional native task source. Configure
 `THEBE_QBITTORRENT_URL`, `THEBE_QBITTORRENT_USERNAME` and

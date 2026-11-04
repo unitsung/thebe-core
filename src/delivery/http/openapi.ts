@@ -97,7 +97,8 @@ const operations: Operation[] = [
   {
     method: "patch",
     path: "/v1/schedules/{id}",
-    summary: "Pause or resume scheduling",
+    summary:
+      "Pause or resume scheduling, or set its accept mode (off, observe, auto)",
     tag: "goal",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -701,7 +702,7 @@ const operations: Operation[] = [
     method: "get",
     path: "/v1/activity",
     summary:
-      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task, source trigger)",
+      "List Activity workspace items (approval, receipt, diagnosis, goal, run, worker, background task, source trigger, schedule observation)",
     tag: "activity",
     parameters: [
       queryParameter("group", {
@@ -719,6 +720,7 @@ const operations: Operation[] = [
           "worker",
           "background_task",
           "trigger",
+          "schedule_observation",
         ],
       }),
       queryParameter("stage", {
@@ -1967,6 +1969,69 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             trigger: { $ref: "#/components/schemas/TriggerRecord" },
           },
         },
+        ActivityScheduleObservationItem: {
+          description:
+            "What an observed schedule would have run at its due time. Nothing was started. A client offers: run once (POST /v1/schedules/{scheduleId}/run), switch to auto (PATCH mode) while scheduleMode is observe, and delete the schedule (DELETE).",
+          type: "object",
+          required: ["type", "id", "group", "updatedAt", "observation"],
+          properties: {
+            type: { type: "string", enum: ["schedule_observation"] },
+            id: { type: "string" },
+            group: { type: "string", enum: ["recent"] },
+            updatedAt: { type: "string" },
+            stage: { $ref: "#/components/schemas/ActivityStage" },
+            observation: {
+              $ref: "#/components/schemas/ScheduleObservation",
+            },
+          },
+        },
+        ScheduleObservation: {
+          type: "object",
+          required: [
+            "id",
+            "scheduleId",
+            "title",
+            "goal",
+            "dueAt",
+            "observedAt",
+            "scope",
+            "scheduleMode",
+          ],
+          properties: {
+            id: { type: "string", description: "<scheduleId>:<dueAt>" },
+            scheduleId: { type: "string" },
+            title: { type: "string" },
+            goal: { type: "string" },
+            dueAt: { type: "string", format: "date-time" },
+            observedAt: { type: "string", format: "date-time" },
+            scope: {
+              type: "object",
+              required: ["criteria"],
+              properties: {
+                criteria: { type: "array", items: { type: "string" } },
+                maxIterations: { type: "integer" },
+                model: {
+                  type: "object",
+                  required: ["providerId", "modelId"],
+                  properties: {
+                    providerId: { type: "string" },
+                    modelId: { type: "string" },
+                  },
+                },
+              },
+            },
+            scheduleMode: {
+              $ref: "#/components/schemas/ScheduleMode",
+              description: "The schedule's mode now, not when it was recorded.",
+            },
+          },
+        },
+        ScheduleMode: {
+          type: "string",
+          enum: ["off", "observe", "auto"],
+          description:
+            "off: nothing at the due time. observe: only a record that it would have run. auto: start the Goal.",
+        },
         TriggerRecord: {
           type: "object",
           required: ["trigger", "outcome", "decidedAt"],
@@ -2095,6 +2160,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             { $ref: "#/components/schemas/ActivityWorkerItem" },
             { $ref: "#/components/schemas/ActivityBackgroundTaskItem" },
             { $ref: "#/components/schemas/ActivityTriggerItem" },
+            { $ref: "#/components/schemas/ActivityScheduleObservationItem" },
           ],
         },
         ActivityList: {
@@ -2853,6 +2919,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            mode: {
+              $ref: "#/components/schemas/ScheduleMode",
+              description:
+                "Defaults to observe on create; left out on edit it keeps the current mode. Schedules stored before modes existed are auto.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2870,7 +2941,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             { $ref: "#/components/schemas/GoalScheduleInput" },
             {
               type: "object",
-              required: ["id", "enabled", "createdAt", "updatedAt"],
+              required: ["id", "mode", "enabled", "createdAt", "updatedAt"],
               properties: {
                 id: { type: "string" },
                 enabled: { type: "boolean" },
@@ -3013,8 +3084,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         GoalScheduleEnabled: {
           type: "object",
-          required: ["enabled"],
-          properties: { enabled: { type: "boolean" } },
+          description: "Send enabled, mode or both.",
+          properties: {
+            enabled: { type: "boolean" },
+            mode: { $ref: "#/components/schemas/ScheduleMode" },
+          },
         },
         GoalScheduleList: {
           type: "object",

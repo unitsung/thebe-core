@@ -48,6 +48,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     goals: { ...sessions, ...goals },
     checkWritable: ctx.checkNotQuiesced,
     isQuiesced: () => options.runtime.isQuiesced(),
+    timer: options.schedules?.timer,
   });
   const policy = createPolicyApi({
     dir: options.agentStoreDir
@@ -129,6 +130,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     createSchedule: schedules.createSchedule,
     updateSchedule: schedules.updateSchedule,
     setScheduleEnabled: schedules.setScheduleEnabled,
+    setScheduleMode: schedules.setScheduleMode,
+    listScheduleObservations: schedules.listScheduleObservations,
     deleteSchedule: schedules.deleteSchedule,
     runSchedule: schedules.runSchedule,
     getPolicy: policy.getPolicy,
