@@ -908,6 +908,28 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   ) {
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
     const isChatOnly = effectiveBuiltinTools.length === 0;
+    const toolsRequiringApproval = [
+      ...TOOLS_REQUIRING_APPROVAL,
+      ...WORKSPACE_READ_TOOLS,
+      ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
+      ...(options.musicSources?.sqmusic ? [SQMUSIC_DOWNLOAD_TOOL_NAME] : []),
+      ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
+      ...(options.serviceAPIProviders?.length
+        ? [SERVICE_API_WRITE_TOOL_NAME]
+        : []),
+      ...(options.pipeline
+        ? [
+            ...PIPELINE_WRITE_TOOL_NAMES.filter((name) =>
+              availablePipelineTools(options.pipeline!).includes(name)
+            ),
+            ...(allPipelineToolNames(options.pipeline).includes(
+              "pipeline_acquire"
+            )
+              ? ["pipeline_acquire"]
+              : []),
+          ]
+        : []),
+    ];
     // Resolved live: a session opened without an explicit id uses the active one.
     const fullAccessScopeId = () =>
       explicitSessionId ?? getActive()?.meta.thebeSessionId;
@@ -944,6 +966,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             {
               policy: sessionPolicy,
               audit,
+              // What a call that asks for approval did is worth reading afterwards, not only hashing.
+              summarizeCall: (name) => toolsRequiringApproval.includes(name),
               toolWatchdogMs: options.toolWatchdogMs,
               modelResultLimit:
                 options.modelResultLimit && options.modelResultLimit > 0
@@ -977,28 +1001,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         fullAccessScopeId
       ),
       fullAccess: () => isSessionFullAccess(fullAccessScopeId()),
-      toolsRequiringApproval: [
-        ...TOOLS_REQUIRING_APPROVAL,
-        ...WORKSPACE_READ_TOOLS,
-        ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
-        ...(options.musicSources?.sqmusic ? [SQMUSIC_DOWNLOAD_TOOL_NAME] : []),
-        ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
-        ...(options.serviceAPIProviders?.length
-          ? [SERVICE_API_WRITE_TOOL_NAME]
-          : []),
-        ...(options.pipeline
-          ? [
-              ...PIPELINE_WRITE_TOOL_NAMES.filter((name) =>
-                availablePipelineTools(options.pipeline!).includes(name)
-              ),
-              ...(allPipelineToolNames(options.pipeline).includes(
-                "pipeline_acquire"
-              )
-                ? ["pipeline_acquire"]
-                : []),
-            ]
-          : []),
-      ],
+      toolsRequiringApproval,
       autoCompact: autoCompactOverride,
     };
   }

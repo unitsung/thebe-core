@@ -10,7 +10,13 @@ function tool(
   name: string,
   execute: CustomToolDefinition["execute"]
 ): CustomToolDefinition {
-  return { name, label: name, description: "", parameters: {}, execute } as CustomToolDefinition;
+  return {
+    name,
+    label: name,
+    description: "",
+    parameters: {},
+    execute,
+  } as CustomToolDefinition;
 }
 
 describe("wrapped custom tools", () => {
@@ -88,11 +94,46 @@ describe("wrapped custom tools", () => {
 
   it("returns a normal result unchanged when no watchdog fires", async () => {
     const [fast] = wrapCustomTools(
-      [tool("fast", async () => ({ content: [{ type: "text", text: "ok" }], details: {} }))],
+      [
+        tool("fast", async () => ({
+          content: [{ type: "text", text: "ok" }],
+          details: {},
+        })),
+      ],
       { policy: policyFor("fast"), toolWatchdogMs: 1000 }
     );
     const result = await fast!.execute("1", {}, new AbortController().signal);
     expect(result.isError).toBeFalsy();
     expect(result.content[0]!.text).toContain("ok");
+  });
+
+  it("says in the audit record what a call that changes something was, redacted, and not for a read", async () => {
+    const appended: Array<{ method: string; summary?: string }> = [];
+    const audit = {
+      append: async (row: never) => void appended.push(row),
+    } as never;
+    const ok = async () => ({
+      content: [{ type: "text" as const, text: "ok" }],
+      details: {},
+    });
+    const [write, read] = wrapCustomTools(
+      [tool("service_write", ok), tool("service_read", ok)],
+      {
+        policy: policyFor("service_write", "service_read"),
+        audit,
+        summarizeCall: (name) => name === "service_write",
+      }
+    );
+    const args = {
+      service: "docker",
+      method: "POST",
+      path: "/containers/emby/restart",
+      note: "Authorization: Bearer abcdefghijklmnop",
+    };
+    await write!.execute("1", args, new AbortController().signal);
+    await read!.execute("2", args, new AbortController().signal);
+    expect(appended[0]!.summary).toContain("/containers/emby/restart");
+    expect(appended[0]!.summary).not.toContain("abcdefghijklmnop");
+    expect(appended[1]!.summary).toBeUndefined();
   });
 });
