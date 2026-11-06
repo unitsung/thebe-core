@@ -29,6 +29,8 @@ describe("the /mcp-only gateway handler", () => {
     for (const path of [
       "/v1/health",
       "/v1/tickets",
+      "/v1/policy",
+      "/v1/decisions",
       "/v1/session",
       "/openapi.json",
       "/docs",

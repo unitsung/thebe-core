@@ -9,11 +9,11 @@ export async function handleHealthEventsCompatibility(
 ): Promise<Response | undefined> {
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
-    // `tickets` tells a client this Core can list the Tickets that authorise its tasks.
+    // What this Core can do beyond the basics: list Tickets, hold a Policy, and keep Decisions.
     return json({
       ok: true,
       version: context.version,
-      capabilities: context.agent ? ["tickets"] : [],
+      capabilities: context.agent ? ["tickets", "policy", "decisions"] : [],
     });
   }
   if (

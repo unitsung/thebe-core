@@ -7,6 +7,9 @@ import { createTicketStore } from "./tickets/store.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
 import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
+import { createDecisionStore } from "./eval/decision-store.ts";
+import { createPolicyStore } from "./eval/policy-store.ts";
+import { createEvalService } from "./eval/service.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
@@ -69,6 +72,59 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "triggers")
       : undefined,
   });
+  const policyStore = createPolicyStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "eval")
+      : undefined,
+    now: ctx.now,
+  });
+  const decisionStore = createDecisionStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "eval", "decisions")
+      : undefined,
+  });
+  const evalService = createEvalService({
+    policy: policyStore,
+    decisions: decisionStore,
+    sources: options.sources?.containerHealth ? "container-health" : "",
+    now: ctx.now,
+    onError: () => {
+      // A failed Eval leaves no Decision; the next start weighs it again.
+    },
+    // One question to the model with no tools. The session exists only for this answer.
+    assess: async (prompt, model) => {
+      const session = await sessions.createSession({
+        title: "eval assessment",
+        builtinTools: [],
+        labels: { purpose: "eval-assessment" },
+        model,
+      });
+      try {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error("assessment timed out")),
+            60_000
+          );
+          timer.unref?.();
+        });
+        try {
+          const reply = await Promise.race([
+            prompts.prompt(prompt, {
+              thebeSessionId: session.thebeSessionId,
+              nonInteractive: true,
+            }),
+            timeout,
+          ]);
+          return reply.text;
+        } finally {
+          if (timer) clearTimeout(timer);
+        }
+      } finally {
+        await sessions.deleteSession(session.thebeSessionId).catch(() => {});
+      }
+    },
+  });
   const sourceRunner = createSourceRunner({
     sources: options.sources?.containerHealth
       ? [
@@ -80,10 +136,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : [],
     store: triggerStore,
     intervalMs: options.sources?.intervalMs,
+    onTriggers: (triggers) => evalService.enqueue(triggers),
     onError: () => {
       // A Source that cannot be read this time (for example Docker is down) is tried again next tick.
     },
   });
+  // Triggers recorded before a restart that no Decision covers are weighed now, within an age bound.
+  if (options.sources?.containerHealth) {
+    void triggerStore.list().then((rows) => evalService.recover(rows));
+  }
   sourceRunner.start();
   const diagnosis = createDiagnosisApi({
     now: ctx.now,
@@ -114,6 +175,18 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...createControlApi(ctx, artifactStore, {
       executeAction: actions.executeApprovedAction,
     }),
+    async getPolicy() {
+      return policyStore.get();
+    },
+    async setPolicy(input) {
+      return policyStore.set(input);
+    },
+    async listDecisions(query) {
+      return decisionStore.list(query);
+    },
+    async getDecision(id) {
+      return decisionStore.get(id);
+    },
     async listTriggers(query) {
       return triggerStore.list(query);
     },
@@ -148,6 +221,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     runSchedule: schedules.runSchedule,
     async quiesce() {
       sourceRunner.stop();
+      evalService.stop();
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
       await options.runtime.quiesce();
@@ -155,6 +229,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async unquiesce() {
       await options.runtime.unquiesce();
       schedules.start();
+      evalService.start();
       sourceRunner.start();
       ctx.pipelineAdvancer?.start();
     },
