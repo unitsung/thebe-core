@@ -63,6 +63,9 @@ export function createSessionApi(
         labels: init?.labels,
         selectedContext: init?.selectedContext,
         builtinTools: init?.builtinTools ? [...init.builtinTools] : undefined,
+        model: effectiveModel
+          ? { providerId: effectiveModel.providerId, modelId: effectiveModel.modelId }
+          : undefined,
       });
       await persist(meta);
       ctx.active = { meta, session };
@@ -399,6 +402,11 @@ export function createSessionApi(
       }
       const opened = await openSession(thebeSessionId);
       await opened.session.setModel(model);
+      opened.meta = touchMeta({
+        ...opened.meta,
+        model: { providerId: model.providerId, modelId: model.modelId },
+      });
+      await persist(opened.meta);
     },
     async setThinkingLevel(
       thebeSessionId: string,

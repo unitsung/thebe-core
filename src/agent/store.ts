@@ -75,6 +75,11 @@ export type AgentSessionMeta = {
    */
   permissionMode?: import("./runtime/interface.ts").PermissionMode;
   builtinTools?: string[];
+  /**
+   * The model this session was pinned to. A session that has not yet run a prompt is not written by
+   * the runtime, so without this a restart would resume it on the default model.
+   */
+  model?: { providerId: string; modelId: string };
   firstMessage?: string;
   messageCount?: number;
   /** Current Pi/fake tree leaf. Used with `branch_in_place` forks. */

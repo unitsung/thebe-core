@@ -1,5 +1,11 @@
 import type { GoalEvent } from "./runner.ts";
-import type { GoalRun, GoalRunStatus, SubagentRun } from "../types.ts";
+import type {
+  GoalAttention,
+  GoalReport,
+  GoalRun,
+  GoalRunStatus,
+  SubagentRun,
+} from "../types.ts";
 
 /** Product-facing Goal status. Runtime `pausing` collapses to `running`. */
 export type ProductGoalStatus =
@@ -53,6 +59,10 @@ export type ProductGoal = {
   error?: ProductError;
   currentRun?: ProductRun;
   controls: ProductGoalControls;
+  /** The one open request for the person: a question to answer, or a finished result to accept. */
+  attention?: GoalAttention;
+  /** What the worker last reported through `goal_report`. */
+  report?: GoalReport;
 };
 
 export type ProductGoalEvent = {
@@ -78,7 +88,9 @@ export type ProductGoalEvent = {
 
 const CRITIQUE_LIMIT = 400;
 
-export function mapGoalStatus(status: GoalRunStatus | "failed"): ProductGoalStatus {
+export function mapGoalStatus(
+  status: GoalRunStatus | "failed"
+): ProductGoalStatus {
   switch (status) {
     case "running":
     case "pausing":
@@ -128,14 +140,24 @@ export function toProductGoal(run: GoalRun): ProductGoal {
     artifactId: run.artifactId,
     error: run.error
       ? {
-          code: run.status === "max_iterations" ? "max_iterations" : "goal_failed",
+          code: run.blocked
+            ? "goal_blocked"
+            : run.status === "max_iterations"
+              ? "max_iterations"
+              : "goal_failed",
           message: run.error,
         }
       : undefined,
     currentRun: run.activeSubagent
       ? toProductRun(run.thebeSessionId, run.activeSubagent)
       : undefined,
-    controls: goalControls(run.status),
+    controls: {
+      ...goalControls(run.status),
+      // A paused task with an open request is resumed by answering it, never by a plain resume.
+      resume: run.status === "paused" && !run.attention,
+    },
+    ...(run.attention ? { attention: { ...run.attention } } : {}),
+    ...(run.report ? { report: { ...run.report } } : {}),
   };
 }
 
@@ -143,7 +165,7 @@ export function toProductGoalEvent(
   goalId: string,
   event: GoalEvent,
   index: number,
-  at: string,
+  at: string
 ): ProductGoalEvent {
   const id = String(index);
   switch (event.type) {
@@ -198,7 +220,9 @@ export function toProductGoalEvent(
         type: event.type,
         goalId,
         at,
-        status: mapGoalStatus(event.status === "pausing" ? "pausing" : event.status),
+        status: mapGoalStatus(
+          event.status === "pausing" ? "pausing" : event.status
+        ),
         phase: event.status,
         message: event.message,
       };
@@ -220,7 +244,7 @@ export function toProductGoalEvent(
 }
 
 export function isTerminalGoalStatus(
-  status: GoalRunStatus,
+  status: GoalRunStatus
 ): status is "completed" | "cancelled" | "failed" | "max_iterations" {
   return (
     status === "completed" ||
@@ -253,7 +277,8 @@ function currentStep(run: GoalRun): string | undefined {
     return `${run.activeSubagent.profileName} ${run.activeSubagent.status}`;
   }
   if (run.summary) return run.summary;
-  if (run.iteration > 0) return `Checkpoint ${run.iteration} of ${run.maxIterations}`;
+  if (run.iteration > 0)
+    return `Checkpoint ${run.iteration} of ${run.maxIterations}`;
   return undefined;
 }
 

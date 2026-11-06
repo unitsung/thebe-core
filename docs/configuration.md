@@ -187,6 +187,7 @@ token 只由 Core adapter 使用，不进入 Agent capability 参数。
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
 - URL 服务器可带 `headers`（字符串键值），每个请求都会发送，用来接入需要令牌的服务商自带 MCP，例如 `"headers": { "X-Api-Key": "..." }` 或服务专用头 `{"sqmusic":"<JWT>"}`，Core 不用为它新增厂商适配器。有自带 MCP 的服务优先这样接：把 Core 指向它的 MCP，工具就有了。`headers` 保存在 `.thebe/mcp.json`（权限 `600`），不写日志，也只发给配置的 URL。
 - `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
+- `irreversible`（可选，工具名 → 布尔）：经 `/mcp` 调用时，哪些工具的调用无法撤销。默认只看服务器自己的 `destructiveHint`；你的标注优先：`true` 要求 token 带 `mcp:irreversible`，`false` 把服务器标了 destructive 的工具当普通写。例：`"irreversible": { "delete_movie": true, "clear_cache": false }`。
 - 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
 - 新添加的服务器默认禁用；启用、禁用、删除走 `/v1/extensions/mcp/servers`，会话在下次 reload 时生效。
@@ -318,6 +319,7 @@ export MY_SERVICE_API_KEY=...
 - `openapiPath` 相对 `baseURL` 获取。服务不在那里提供文档时，用 `openapiURL` 给出绝对的 `http(s)` 地址（获取文档时不带 API 的认证头，认证头只发给 API 主机）。
 - `readOperations` 是运维人员指定的只读白名单（operationId 或 `METHOD /path`）。白名单内的每个读操作会成为独立工具 `service_api.<id>.<operationId>`，有真实的入参 schema，出现在 `/mcp` 和 `/v1/capabilities` 里。其余操作仍走 `service_api_discover` / `service_api_write`，写需要运行时审批。需要请求头参数的操作不会这样暴露（请求头由运维人员持有）。
 - `readMethods`（如 `["GET","HEAD"]`）把这些方法的操作都当作只读；`trustReadOnlyAnnotations: true` 额外信任文档自带的只读标注。两者默认都**关闭**——远端文档不能自己声明自己只读。
+- `irreversibleOperations` / `reversibleOperations`（operationId 或 `METHOD /path`）：你对某个操作能否撤销的标注，经 `/mcp` 调用时优先于 HTTP 方法规则（默认 `DELETE` 和带 `deleteFiles`、`purge` 一类参数的算不可逆）。前者要求 token 带 `mcp:irreversible`，后者放行只删记录的 `DELETE`；两处都列同一操作时按不可逆处理。
 - `excludeOperations`（operationId 或 `METHOD /path`）和 `excludeTags` 把操作从发现和命名工具里隐藏，匹配的请求一律拒绝，读、写、已批准的调用都不例外。用于管理类或破坏性接口。
 - `writeOperations` 把选定的写操作暴露为两阶段工具：调用本身**不做任何改动**，只返回 `preview`（`method`、`path`、`body`）和一次性 `confirmToken`（5 分钟过期）；`service_api.confirm` 携带该 token 才会执行刚才预览的那个请求。预览和执行都会审计。模型自己的写路径仍是 `service_api_write` 加运行时审批。
 - `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` 和 `THEBE_CLOUDSAVER_BASE_URL` / `THEBE_CLOUDSAVER_TOKEN` 是这两个服务的快捷配置，无需写 `THEBE_SERVICE_APIS`。CloudSaver 的 token 以 Bearer 形式发送。

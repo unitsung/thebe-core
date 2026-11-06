@@ -21,6 +21,8 @@ export type ThebeHttpHandlerOptions = {
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: { publicKey: string; relayUrl: string };
   workspacePath?: string;
+  /** Calls a minute a scoped token may make over `/mcp`; 0 is no limit. Default: `THEBE_MCP_RATE_LIMIT`, else 120. */
+  mcpRateLimit?: number;
 };
 
 /** Stable public composition shell for the HTTP agent. */
@@ -52,6 +54,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
     workspacePath: options.workspacePath,
+    mcpRateLimit: options.mcpRateLimit,
   });
 
   return {

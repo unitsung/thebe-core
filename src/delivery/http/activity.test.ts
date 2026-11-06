@@ -1227,3 +1227,106 @@ describe("GET /v1/activity", () => {
     expect(listed.items).toEqual([]);
   });
 });
+
+describe("GET /v1/activity stages", () => {
+  it("marks a waiting approval as person, and ?stage=person lists exactly the items marked person", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    const diagnosed = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/diagnosis", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            resource: {
+              kind: "container",
+              id: "ctr-emby",
+              name: "emby",
+              provider: "arcane",
+            },
+          }),
+        })
+      )
+    );
+    const get = async (query = "") =>
+      json(
+        await app.handler.handle(
+          new Request(`http://127.0.0.1:8787/v1/activity${query}`)
+        )
+      );
+    const all = (await get()).items as Array<Record<string, unknown>>;
+    expect(all.map((row) => [row.type, row.stage, row.reason])).toEqual([
+      ["approval", "person", "approval"],
+    ]);
+    const person = (await get("?stage=person")).items as Array<
+      Record<string, unknown>
+    >;
+    expect(person.map((row) => row.id)).toEqual(
+      all.filter((row) => row.stage === "person").map((row) => row.id)
+    );
+    expect(person.map((row) => row.id)).toEqual([diagnosed.approvalId]);
+
+    const detail = await json(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/activity/${diagnosed.approvalId}`)
+      )
+    );
+    expect(detail).toMatchObject({
+      type: "approval",
+      stage: "person",
+      reason: "approval",
+    });
+
+    const bad = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/activity?stage=nope")
+    );
+    expect(bad.status).toBe(400);
+  });
+});
+
+describe("GET /v1/metrics/summary", () => {
+  it("summarizes Goals, approvals and gateway calls, and checks its window", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/diagnosis", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          resource: {
+            kind: "container",
+            id: "ctr-emby",
+            name: "emby",
+            provider: "arcane",
+          },
+        }),
+      })
+    );
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/metrics/summary?days=7")
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      windowDays: 7,
+      goals: { started: 0, observeOnly: 0 },
+      approvals: { pending: 1 },
+      gateway: { calls: 0, byCaller: [] },
+    });
+    for (const days of ["0", "400", "x"]) {
+      const bad = await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/metrics/summary?days=${days}`)
+      );
+      expect(bad.status, days).toBe(400);
+    }
+    const wrong = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/metrics/summary", {
+        method: "POST",
+      })
+    );
+    expect(wrong.status).toBe(405);
+  });
+});

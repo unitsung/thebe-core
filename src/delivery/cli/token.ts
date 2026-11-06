@@ -17,10 +17,11 @@ import {
 
 const HELP = `thebe token <command>
 
-  create <name> [--scope mcp:read|mcp:write]
+  create <name> [--scope mcp:read|mcp:write|mcp:irreversible]
                   make a token for one device or agent; shown once, only its hash is kept.
                   With --scope the token works only on /mcp: mcp:read for read tools,
-                  mcp:write for write tools too. Without it the token has full access.
+                  mcp:write for write tools too, mcp:irreversible also for deletes that
+                  cannot be undone. Without it the token has full access.
   list            the device tokens: name, scope, created, last used
   revoke <name>   remove one device's token; the others keep working
   revoke --all    remove every device token and close the shared one

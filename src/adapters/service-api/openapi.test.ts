@@ -538,4 +538,49 @@ describe("dynamic OpenAPI service capability", () => {
       })
     ).rejects.toThrow("excluded");
   });
+
+  it("carries the operator's irreversible marks on operations, by id or by METHOD /path", async () => {
+    const doc = spec({
+      "/jobs": {
+        post: { operationId: "createJob" },
+        delete: { operationId: "deleteAllJobs" },
+      },
+      "/jobs/{id}": {
+        parameters: [
+          {
+            name: "id",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          },
+        ],
+        delete: { operationId: "cancelJob" },
+        get: { operationId: "getJob" },
+      },
+    });
+    const provider = new OpenAPIService(
+      {
+        id: "scheduler",
+        baseURL: "https://service.invalid",
+        openapiPath: "/spec.json",
+        readMethods: ["GET"],
+        writeOperations: ["createJob", "deleteAllJobs", "cancelJob"],
+        irreversibleOperations: ["createJob"],
+        reversibleOperations: ["DELETE /jobs/{id}", "createJob"],
+      },
+      vi
+        .fn<typeof fetch>()
+        .mockImplementation(async () => new Response(JSON.stringify(doc)))
+    );
+    const marks = Object.fromEntries(
+      (await provider.operations()).map((op) => [op.id, op.irreversible])
+    );
+    // createJob is on both lists: the safer reading wins. Unlisted operations carry no mark.
+    expect(marks).toEqual({
+      createJob: true,
+      deleteAllJobs: undefined,
+      cancelJob: false,
+      getJob: undefined,
+    });
+  });
 });

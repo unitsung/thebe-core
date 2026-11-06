@@ -30,76 +30,103 @@ const RESPONSE_AND_FILE_OUTPUT_POLICY = [
 ].join("\n");
 
 /** Built-ins are data only; discovery and execution live in their own modules. */
-export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> = {
-  diagnostics: {
-    name: "diagnostics",
-    description: "Inspect homelab health and identify failing services.",
-    systemPrompt: [
-      "You are a specialized Homelab Diagnostics Subagent.",
-      "Inspect container states, resource metrics, and service health.",
-      "Identify failing containers, restart loops, high resource consumers, and unhealthy services.",
-      "Provide a concise diagnostic report with evidence and likely root causes.",
-      RESPONSE_AND_FILE_OUTPUT_POLICY,
-    ].join("\n"),
-    tools: ["container.list", "container.inspect", "bash"],
-    maxTurns: 6,
-  },
-  "log-analyzer": {
-    name: "log-analyzer",
-    description: "Inspect container logs and isolate error timelines.",
-    systemPrompt: [
-      "You are a specialized Homelab Log Analysis Subagent.",
-      "Read container logs, extract actionable error stacks, and identify root causes.",
-      "Summarize the error timeline and recommend the smallest safe remediation.",
-      RESPONSE_AND_FILE_OUTPUT_POLICY,
-    ].join("\n"),
-    tools: ["container.logs", "container.inspect", "bash"],
-    maxTurns: 5,
-  },
-  "network-prober": {
-    name: "network-prober",
-    description: "Diagnose local network reachability, ports, and DNS.",
-    systemPrompt: [
-      "You are a specialized Homelab Network Probing Subagent.",
-      "Diagnose reachability, ports, and local DNS without changing network configuration.",
-      "Report evidence, likely causes, and safe next steps.",
-      RESPONSE_AND_FILE_OUTPUT_POLICY,
-    ].join("\n"),
-    tools: ["bash"],
-    maxTurns: 5,
-  },
-  "goal-worker": {
-    name: "goal-worker",
-    description: "Execute one explicit goal checkpoint with approved coding tools.",
-    systemPrompt: [
-      "You are the execution worker for one durable coding goal.",
-      "You receive only the explicit checkpoint task below; do not assume parent conversation context.",
-      "Inspect the configured workspace, make the smallest focused change needed, and verify it. Never search outside the configured workspace.",
-      "Preserve unrelated user changes. Request approval normally for shell, edit, or write operations.",
-      "Report evidence and remaining work; never claim completion without verification.",
-      "Use Pi's native find for filename searches and Pi's native grep for content searches.",
-      "Do not use bash or rg for ordinary searches.",
-      "Use bash only when the task genuinely requires executing a shell command.",
-      RESPONSE_AND_FILE_OUTPUT_POLICY,
-    ].join("\n"),
-    tools: ["ls", "find", "grep", "read", "edit", "write", "bash"],
-    maxTurns: 8,
-    allowWrites: true,
-  },
-  "goal-reviewer": {
-    name: "goal-reviewer",
-    description: "Independently verify a goal checkpoint without edit/write tools.",
-    systemPrompt: [
-      "You are an independent evidence reviewer.",
-      "You have no parent transcript and must not trust the worker's completion claim.",
-      "Inspect the workspace and verify the stated evidence against the objective.",
-      "Do not edit files. Return a concise verdict with concrete evidence or the exact remaining work.",
-      "Use Pi's native find for filename searches and Pi's native grep for content searches.",
-      "Do not use bash or rg for ordinary searches.",
-      "Use bash only when the task genuinely requires executing a shell command.",
-      RESPONSE_AND_FILE_OUTPUT_POLICY,
-    ].join("\n"),
-    tools: ["ls", "find", "grep", "read", "bash"],
-    maxTurns: 5,
-  },
-};
+export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
+  {
+    diagnostics: {
+      name: "diagnostics",
+      description: "Inspect homelab health and identify failing services.",
+      systemPrompt: [
+        "You are a specialized Homelab Diagnostics Subagent.",
+        "Inspect container states, resource metrics, and service health.",
+        "Identify failing containers, restart loops, high resource consumers, and unhealthy services.",
+        "Provide a concise diagnostic report with evidence and likely root causes.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["container.list", "container.inspect", "bash"],
+      maxTurns: 6,
+    },
+    "log-analyzer": {
+      name: "log-analyzer",
+      description: "Inspect container logs and isolate error timelines.",
+      systemPrompt: [
+        "You are a specialized Homelab Log Analysis Subagent.",
+        "Read container logs, extract actionable error stacks, and identify root causes.",
+        "Summarize the error timeline and recommend the smallest safe remediation.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["container.logs", "container.inspect", "bash"],
+      maxTurns: 5,
+    },
+    "network-prober": {
+      name: "network-prober",
+      description: "Diagnose local network reachability, ports, and DNS.",
+      systemPrompt: [
+        "You are a specialized Homelab Network Probing Subagent.",
+        "Diagnose reachability, ports, and local DNS without changing network configuration.",
+        "Report evidence, likely causes, and safe next steps.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["bash"],
+      maxTurns: 5,
+    },
+    "goal-worker": {
+      name: "goal-worker",
+      description:
+        "Execute one explicit goal checkpoint with approved coding tools.",
+      systemPrompt: [
+        "You are the execution worker for one durable coding goal.",
+        "You receive only the explicit checkpoint task below; do not assume parent conversation context.",
+        "Inspect the configured workspace, make the smallest focused change needed, and verify it. Never search outside the configured workspace.",
+        "Preserve unrelated user changes. Request approval normally for shell, edit, or write operations.",
+        "Report evidence and remaining work; never claim completion without verification.",
+        "Use Pi's native find for filename searches and Pi's native grep for content searches.",
+        "Do not use bash or rg for ordinary searches.",
+        "Use bash only when the task genuinely requires executing a shell command.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: [
+        "ls",
+        "find",
+        "grep",
+        "read",
+        "edit",
+        "write",
+        "bash",
+        "goal_report",
+      ],
+      maxTurns: 8,
+      allowWrites: true,
+    },
+    "goal-observer": {
+      name: "goal-observer",
+      description:
+        "Investigate one goal checkpoint read-only and report what it would do, changing nothing.",
+      systemPrompt: [
+        "You are the observation worker for one durable goal. You can look but not change anything.",
+        "You receive only the explicit checkpoint task below; do not assume parent conversation context.",
+        "Inspect the configured workspace and the evidence the task names. Never search outside the configured workspace.",
+        "Report what you found and exactly what you would do about it, with evidence. Never claim you changed or fixed anything.",
+        "Use Pi's native find for filename searches and Pi's native grep for content searches.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["ls", "find", "grep", "read", "goal_report"],
+      maxTurns: 8,
+    },
+    "goal-reviewer": {
+      name: "goal-reviewer",
+      description:
+        "Independently verify a goal checkpoint without edit/write tools.",
+      systemPrompt: [
+        "You are an independent evidence reviewer.",
+        "You have no parent transcript and must not trust the worker's completion claim.",
+        "Inspect the workspace and verify the stated evidence against the objective.",
+        "Do not edit files. Return a concise verdict with concrete evidence or the exact remaining work.",
+        "Use Pi's native find for filename searches and Pi's native grep for content searches.",
+        "Do not use bash or rg for ordinary searches.",
+        "Use bash only when the task genuinely requires executing a shell command.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["ls", "find", "grep", "read", "bash"],
+      maxTurns: 5,
+    },
+  };

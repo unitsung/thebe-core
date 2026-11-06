@@ -1,4 +1,9 @@
-import { addConfiguredMcpServer, listConfiguredMcpServersSync, removeConfiguredMcpServer, type McpServerConfig } from "./config.ts";
+import {
+  addConfiguredMcpServer,
+  listConfiguredMcpServersSync,
+  removeConfiguredMcpServer,
+  type McpServerConfig,
+} from "./config.ts";
 import { McpConnection } from "./connection.ts";
 import type {
   HomelabCapabilityCategory,
@@ -43,32 +48,59 @@ const configKey = (config: McpServerConfig): string => JSON.stringify(config);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : undefined;
 }
 
-const qualifiedName = (serverName: string, toolName: string): string => `mcp:${serverName}/${toolName}`;
+const qualifiedName = (serverName: string, toolName: string): string =>
+  `mcp:${serverName}/${toolName}`;
 
-function inferCategory(name: string, description: string): HomelabCapabilityCategory {
+function inferCategory(
+  name: string,
+  description: string
+): HomelabCapabilityCategory {
   const value = `${name} ${description}`.toLowerCase();
-  if (/(file|folder|directory|nas|openlist|storage)/.test(value)) return "files";
-  if (/(movie|music|anime|media|jellyfin|emby|navidrome|radarr|sonarr|lidarr)/.test(value)) return "media";
-  if (/(download|torrent|aria2|qbittorrent|queue|cloudsaver)/.test(value)) return "downloads";
+  if (/(file|folder|directory|nas|openlist|storage)/.test(value))
+    return "files";
+  if (
+    /(movie|music|anime|media|jellyfin|emby|navidrome|radarr|sonarr|lidarr)/.test(
+      value
+    )
+  )
+    return "media";
+  if (/(download|torrent|aria2|qbittorrent|queue|cloudsaver)/.test(value))
+    return "downloads";
   if (/(container|docker|portainer|arcane)/.test(value)) return "containers";
   if (/(schedule|cron|task|automation|job)/.test(value)) return "automation";
-  if (/(health|status|inspect|log|diagnos|monitor|uptime)/.test(value)) return "diagnostics";
+  if (/(health|status|inspect|log|diagnos|monitor|uptime)/.test(value))
+    return "diagnostics";
   return "other";
 }
 
-function inferPermission(name: string, description: string, annotations?: Record<string, unknown>): HomelabCapabilityPermission {
+function inferPermission(
+  name: string,
+  description: string,
+  annotations?: Record<string, unknown>
+): HomelabCapabilityPermission {
   if (annotations?.destructiveHint === true) return "admin";
   const value = `${name} ${description}`.toLowerCase();
-  if (/(delete|remove|destroy|admin|credential|permission|shutdown)/.test(value)) return "admin";
-  if (/(create|update|write|save|submit|download|move|copy|rename|restart|start|stop|pause|resume|schedule|run)/.test(value)) return "confirm";
+  if (
+    /(delete|remove|destroy|admin|credential|permission|shutdown)/.test(value)
+  )
+    return "admin";
+  if (
+    /(create|update|write|save|submit|download|move|copy|rename|restart|start|stop|pause|resume|schedule|run)/.test(
+      value
+    )
+  )
+    return "confirm";
   return annotations?.readOnlyHint === true ? "read" : "confirm";
 }
 
-function serverDisabled(config: McpServerConfig, overrides: Map<string, boolean>): boolean {
+function serverDisabled(
+  config: McpServerConfig,
+  overrides: Map<string, boolean>
+): boolean {
   const enabled = overrides.get(config.name);
   return enabled === undefined ? config.disabled === true : !enabled;
 }
@@ -78,20 +110,25 @@ function serverDisabled(config: McpServerConfig, overrides: Map<string, boolean>
  * that run outside a session. A model call never goes through here; the runtime connects its own
  * servers from `runtimeServers()`.
  */
-export function createMcpClientRegistry(options: {
-  cwd?: string;
-  homeDir?: string;
-  timeoutMs?: number;
-  serverStates?: readonly McpServerState[];
-} = {}) {
+export function createMcpClientRegistry(
+  options: {
+    cwd?: string;
+    homeDir?: string;
+    timeoutMs?: number;
+    serverStates?: readonly McpServerState[];
+  } = {}
+) {
   const states = new Map<string, ServerState>();
   let registrationQueue: Promise<void> = Promise.resolve();
   const serverOverrides = new Map(
-    (options.serverStates ?? []).map((state) => [state.name, state.enabled]),
+    (options.serverStates ?? []).map((state) => [state.name, state.enabled])
   );
-  const createConnection = (config: McpServerConfig): McpConnection => new McpConnection(
-    config, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.cwd,
-  );
+  const createConnection = (config: McpServerConfig): McpConnection =>
+    new McpConnection(
+      config,
+      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      options.cwd
+    );
 
   function sync(): McpServerConfig[] {
     const configs = listConfiguredMcpServersSync(options);
@@ -107,7 +144,12 @@ export function createMcpClientRegistry(options: {
       const previous = states.get(config.name);
       if (previous && previous.configKey === key) continue;
       previous?.connection.close();
-      states.set(config.name, { config, configKey: key, connection: createConnection(config), tools: [] });
+      states.set(config.name, {
+        config,
+        configKey: key,
+        connection: createConnection(config),
+        tools: [],
+      });
     }
     return configs;
   }
@@ -122,19 +164,23 @@ export function createMcpClientRegistry(options: {
   const serverView = (state: ServerState): McpServerView => ({
     ...state.config,
     disabled: serverDisabled(state.config, serverOverrides),
-    status: serverDisabled(state.config, serverOverrides) ? "disabled" : "configured",
+    status: serverDisabled(state.config, serverOverrides)
+      ? "disabled"
+      : "configured",
   });
 
   async function loadTools(state: ServerState): Promise<McpToolInfo[]> {
     if (serverDisabled(state.config, serverOverrides)) return [];
-    if (!state.config.command && !state.config.url) throw new Error("MCP server must define command or url");
+    if (!state.config.command && !state.config.url)
+      throw new Error("MCP server must define command or url");
     const connection = state.connection;
     const raw = await connection.listTools();
     // A reconfiguration swaps the connection while this list is in flight.
     if (state.connection !== connection) return [];
     state.tools = raw.map((tool) => {
       const name = qualifiedName(state.config.name, tool.name);
-      const description = tool.description ?? `Tool ${tool.name} from ${state.config.name}`;
+      const description =
+        tool.description ?? `Tool ${tool.name} from ${state.config.name}`;
       const annotations = asRecord(tool.annotations);
       return {
         id: name,
@@ -144,11 +190,17 @@ export function createMcpClientRegistry(options: {
         outputSchema: asRecord(tool.outputSchema),
         annotations,
         originalName: tool.name,
-        category: state.config.category ?? inferCategory(tool.name, description),
-        permission: state.config.permission ?? inferPermission(tool.name, description, annotations),
+        category:
+          state.config.category ?? inferCategory(tool.name, description),
+        permission:
+          state.config.permission ??
+          inferPermission(tool.name, description, annotations),
         service: state.config.service ?? state.config.name,
         source: "external" as const,
         serverName: state.config.name,
+        ...(state.config.irreversible?.[tool.name] !== undefined && {
+          irreversible: state.config.irreversible[tool.name],
+        }),
       };
     });
     return state.tools;
@@ -163,7 +215,13 @@ export function createMcpClientRegistry(options: {
       });
       registrationQueue = operation.catch(() => {});
       await operation;
-      return { name: input.name, command: input.command, url: input.url, status: "disabled", disabled: true };
+      return {
+        name: input.name,
+        command: input.command,
+        url: input.url,
+        status: "disabled",
+        disabled: true,
+      };
     },
     async removeServer(name: string): Promise<boolean> {
       const operation = registrationQueue.then(async () => {
@@ -172,7 +230,10 @@ export function createMcpClientRegistry(options: {
         sync();
         return removed;
       });
-      registrationQueue = operation.then(() => {}, () => {});
+      registrationQueue = operation.then(
+        () => {},
+        () => {}
+      );
       return operation;
     },
     /** Server list for the runtime's own MCP client: configuration plus the saved enabled state. */
@@ -194,7 +255,11 @@ export function createMcpClientRegistry(options: {
       sync();
       const tools: McpToolInfo[] = [];
       for (const state of states.values()) {
-        try { tools.push(...await loadTools(state)); } catch { /* an unreachable server lists no tools */ }
+        try {
+          tools.push(...(await loadTools(state)));
+        } catch {
+          /* an unreachable server lists no tools */
+        }
       }
       return tools;
     },
@@ -202,7 +267,10 @@ export function createMcpClientRegistry(options: {
       sync();
       return [...states.values()].map(serverView);
     },
-    async setServerEnabled(name: string, enabled: boolean): Promise<McpServerInfo | undefined> {
+    async setServerEnabled(
+      name: string,
+      enabled: boolean
+    ): Promise<McpServerInfo | undefined> {
       sync();
       const state = states.get(name);
       if (!state) return undefined;
@@ -212,8 +280,13 @@ export function createMcpClientRegistry(options: {
       state.tools = [];
       return serverView(state);
     },
-    async invokeToolResult(name: string, args: unknown, signal?: AbortSignal): Promise<McpCallResult> {
-      if (!name.startsWith("mcp:")) throw new Error(`invalid MCP tool name: ${name}`);
+    async invokeToolResult(
+      name: string,
+      args: unknown,
+      signal?: AbortSignal
+    ): Promise<McpCallResult> {
+      if (!name.startsWith("mcp:"))
+        throw new Error(`invalid MCP tool name: ${name}`);
       sync();
       const rest = name.slice("mcp:".length);
       const separator = rest.indexOf("/");
@@ -222,15 +295,26 @@ export function createMcpClientRegistry(options: {
       const originalName = rest.slice(separator + 1);
       const state = states.get(serverName);
       if (!state) throw httpError(404, `unknown MCP server: ${serverName}`);
-      if (serverDisabled(state.config, serverOverrides)) throw new Error(`MCP server disabled: ${serverName}`);
-      if (!state.tools.some((tool) => tool.originalName === originalName)) await loadTools(state);
-      if (!state.tools.some((tool) => tool.originalName === originalName)) throw httpError(404, `unknown MCP tool: ${name}`);
-      return await state.connection.callToolResult(originalName, args, signal) as unknown as McpCallResult;
+      if (serverDisabled(state.config, serverOverrides))
+        throw new Error(`MCP server disabled: ${serverName}`);
+      if (!state.tools.some((tool) => tool.originalName === originalName))
+        await loadTools(state);
+      if (!state.tools.some((tool) => tool.originalName === originalName))
+        throw httpError(404, `unknown MCP tool: ${name}`);
+      return (await state.connection.callToolResult(
+        originalName,
+        args,
+        signal
+      )) as unknown as McpCallResult;
     },
     async invokeTool(name: string, args: unknown): Promise<string | undefined> {
       if (!name.startsWith("mcp:")) return undefined;
       const result = await registry.invokeToolResult(name, args);
-      const text = result.content.map((block) => block.type === "text" ? String(block.text) : JSON.stringify(block)).join("\n");
+      const text = result.content
+        .map((block) =>
+          block.type === "text" ? String(block.text) : JSON.stringify(block)
+        )
+        .join("\n");
       if (result.isError) throw new Error(text || "MCP tool failed");
       return text || JSON.stringify(result.structuredContent ?? result);
     },

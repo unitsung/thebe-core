@@ -210,6 +210,22 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.metricsSummary,
+    summary:
+      "Summarize how the assistant has been working (Goal outcomes and durations, approval waits, external-agent calls), computed on request from what Core already keeps",
+    tag: "metrics",
+    parameters: [
+      queryParameter("days", {
+        type: "integer",
+        minimum: 1,
+        maximum: 365,
+        default: 30,
+      }),
+    ],
+    responseSchema: "MetricsSummary",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.audit,
     summary: "Read the redacted append-only audit log",
     tag: "audit",
@@ -223,6 +239,7 @@ const operations: Operation[] = [
       queryParameter("cursor", { type: "string" }),
       queryParameter("sessionId"),
       queryParameter("method"),
+      queryParameter("identity"),
       queryParameter("result", {
         type: "string",
         enum: ["ok", "error", "denied"],
@@ -646,6 +663,10 @@ const operations: Operation[] = [
           "background_task",
         ],
       }),
+      queryParameter("stage", {
+        type: "string",
+        enum: ["person", "working", "idle", "ended"],
+      }),
       queryParameter("status"),
       queryParameter("updatedAfter", { type: "string", format: "date-time" }),
       queryParameter("updatedBefore", { type: "string", format: "date-time" }),
@@ -710,9 +731,21 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/goals/{id}/resume",
-    summary: "Resume a paused Goal",
+    summary:
+      "Resume a paused Goal (409 attention_open while it waits on an answer or review: use /answer)",
     tag: "goal",
     parameters: [idParameter()],
+    responseSchema: "ProductGoal",
+  },
+  {
+    method: "post",
+    path: "/v1/goals/{id}/answer",
+    summary:
+      "Answer the question a paused Goal is waiting on, or accept / send back a result waiting for review",
+    tag: "goal",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "GoalAnswerRequest",
     responseSchema: "ProductGoal",
   },
   {
@@ -1140,6 +1173,28 @@ function schemaRef(name?: string): Record<string, unknown> {
   return name ? { $ref: `#/components/schemas/${name}` } : jsonSchema;
 }
 
+/**
+ * Where an Activity item stands for the person, derived on every read and never stored. `person` needs
+ * them now (`reason` approval: a write waits for their yes; failed: it did not finish in the last 24
+ * hours), `working` is queued or running, `idle` is paused, `ended` is history. The stages never
+ * overlap and cover every item; `GET /v1/activity?stage=person` is the list Home counts.
+ */
+const ACTIVITY_STAGE_PROPERTIES = {
+  stage: { type: "string", enum: ["person", "working", "idle", "ended"] },
+  reason: { type: "string", enum: ["approval", "failed"] },
+} as const;
+
+/** A count with the median and 95th percentile of what was counted. */
+const SPREAD = {
+  type: "object",
+  required: ["count"],
+  properties: {
+    count: { type: "integer" },
+    p50: { type: "number" },
+    p95: { type: "number" },
+  },
+} as const;
+
 export function createOpenApiDocument(version: string): OpenApiDocument {
   const paths: OpenApiDocument["paths"] = {};
   for (const operation of operations) {
@@ -1222,6 +1277,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "capabilities",
         description: "Homelab capability discovery and Agent-mediated invoke",
+      },
+      {
+        name: "metrics",
+        description:
+          "Read-only summary computed from existing records; nothing is collected or sent anywhere",
       },
       {
         name: "audit",
@@ -1351,6 +1411,75 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
+          },
+        },
+        MetricsSummary: {
+          type: "object",
+          required: [
+            "windowDays",
+            "generatedAt",
+            "goals",
+            "approvals",
+            "gateway",
+          ],
+          properties: {
+            windowDays: { type: "integer" },
+            generatedAt: { type: "string" },
+            goals: {
+              type: "object",
+              required: [
+                "started",
+                "outcomes",
+                "observeOnly",
+                "completionSeconds",
+              ],
+              properties: {
+                started: { type: "integer" },
+                outcomes: {
+                  type: "object",
+                  properties: {
+                    succeeded: { type: "integer" },
+                    failed: { type: "integer" },
+                    blocked: { type: "integer" },
+                    cancelled: { type: "integer" },
+                    running: { type: "integer" },
+                    paused: { type: "integer" },
+                  },
+                },
+                observeOnly: { type: "integer" },
+                completionSeconds: SPREAD,
+              },
+            },
+            approvals: {
+              type: "object",
+              required: ["decided", "pending", "waitSeconds"],
+              properties: {
+                decided: { type: "integer" },
+                pending: { type: "integer" },
+                waitSeconds: SPREAD,
+              },
+            },
+            gateway: {
+              type: "object",
+              required: ["calls", "denied", "errors", "byCaller"],
+              properties: {
+                calls: { type: "integer" },
+                denied: { type: "integer" },
+                errors: { type: "integer" },
+                byCaller: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      identity: { type: "string" },
+                      calls: { type: "integer" },
+                      denied: { type: "integer" },
+                      errors: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         AuditList: {
@@ -1641,6 +1770,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["needs_approval"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             approval: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1652,6 +1782,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1663,6 +1794,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1674,6 +1806,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             goal: { $ref: "#/components/schemas/ProductGoal" },
           },
         },
@@ -1685,6 +1818,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             run: { $ref: "#/components/schemas/CapabilityRun" },
           },
         },
@@ -1696,6 +1830,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             worker: { $ref: "#/components/schemas/ProductWorker" },
           },
         },
@@ -1707,6 +1842,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
         },
@@ -2434,6 +2570,21 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            observe: {
+              type: "boolean",
+              description:
+                "Run read-only: the worker has no edit, write or shell tool and reports what it found and would do.",
+            },
+            allowAsk: {
+              type: "boolean",
+              description:
+                "Let the worker ask the person one question mid-run (the Goal pauses with an `attention`). Without it, a need becomes a blocker.",
+            },
+            reviewBeforeDone: {
+              type: "boolean",
+              description:
+                "After the independent review passes, pause with a review `attention` and wait for the person to accept or send it back.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2477,6 +2628,22 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
             maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            acceptMode: {
+              type: "string",
+              enum: ["auto", "observe"],
+              description:
+                "observe runs each occurrence read-only: its worker has no edit, write or shell tool and reports what it found and would do.",
+            },
+            allowAsk: {
+              type: "boolean",
+              description:
+                "Each occurrence's worker may ask the person one question mid-run.",
+            },
+            reviewBeforeDone: {
+              type: "boolean",
+              description:
+                "Each occurrence waits for the person to accept after it passes its independent review.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2577,9 +2744,75 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "object",
               properties: {
                 pause: { type: "boolean" },
-                resume: { type: "boolean" },
+                resume: {
+                  type: "boolean",
+                  description:
+                    "False while the Goal waits on an `attention`: answer it instead of resuming.",
+                },
                 stop: { type: "boolean" },
               },
+            },
+            attention: {
+              type: "object",
+              description:
+                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/goals/{id}/answer.",
+              required: ["id", "kind", "question", "askedAt"],
+              properties: {
+                id: { type: "string" },
+                kind: { type: "string", enum: ["answer", "review"] },
+                question: { type: "string" },
+                options: { type: "array", items: { type: "string" } },
+                askedAt: { type: "string" },
+              },
+            },
+            report: {
+              type: "object",
+              description:
+                "What the worker last reported through the goal_report tool.",
+              required: ["state", "at"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "progress",
+                    "ready",
+                    "blocked",
+                    "waiting",
+                    "ask",
+                    "dropped",
+                  ],
+                },
+                summary: { type: "string" },
+                evidence: { type: "string" },
+                blocker: { type: "string" },
+                question: { type: "string" },
+                options: { type: "array", items: { type: "string" } },
+                reason: { type: "string" },
+                at: { type: "string" },
+              },
+            },
+          },
+        },
+        GoalAnswerRequest: {
+          type: "object",
+          required: ["attentionId"],
+          properties: {
+            attentionId: {
+              type: "string",
+              description:
+                "The `attention.id` being answered; a stale or already answered one is 409.",
+            },
+            answer: {
+              type: "string",
+              maxLength: 4000,
+              description:
+                "The answer to a question, or the note when sending a result back.",
+            },
+            decision: {
+              type: "string",
+              enum: ["accept", "reject"],
+              description:
+                "For a review request: accept finishes the Goal; reject needs an answer saying what to change.",
             },
           },
         },

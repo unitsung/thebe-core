@@ -178,8 +178,16 @@ export type CreateThebeAgentOptions = {
   artifactStore?: ArtifactStore;
 };
 
-/** Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools. */
-export type McpCaller = { writes: boolean };
+/**
+ * Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools,
+ * and whether it may also run the deletes that cannot be undone.
+ */
+export type McpCaller = {
+  /** The token's name, recorded in the audit log; absent when no token is configured. */
+  name?: string;
+  writes: boolean;
+  irreversible: boolean;
+};
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
 export interface ThebeAgent {
@@ -322,6 +330,12 @@ export interface ThebeAgent {
     goal: string;
     criteria?: string[];
     maxIterations?: number;
+    /** Run read-only: report what it finds and would do, change nothing. */
+    observe?: boolean;
+    /** Let the worker ask the person one question mid-run; without it a need becomes `blocked`. */
+    allowAsk?: boolean;
+    /** After the independent review passes, wait for the person to accept before finishing. */
+    reviewBeforeDone?: boolean;
   }): Promise<GoalRun>;
   listSchedules(): Promise<GoalSchedule[]>;
   getSchedule(id: string): Promise<GoalSchedule>;
@@ -341,6 +355,15 @@ export interface ThebeAgent {
   waitGoal(thebeSessionId: string): Promise<GoalRun>;
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
+  /** Answer the one open question on a paused Goal, or accept / send back a result waiting for review. */
+  answerGoal(
+    thebeSessionId: string,
+    input: {
+      attentionId: string;
+      answer?: string;
+      decision?: "accept" | "reject";
+    }
+  ): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
   clearGoal(thebeSessionId: string): void;
 

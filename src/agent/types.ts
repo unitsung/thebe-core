@@ -93,6 +93,35 @@ export type GoalRunStatus =
   | "cancelled"
   | "failed";
 
+/** What a Goal's worker said about a checkpoint through `goal_report`. */
+export type GoalReportState =
+  | "progress"
+  | "ready"
+  | "blocked"
+  | "waiting"
+  | "ask"
+  | "dropped";
+
+export type GoalReport = {
+  state: GoalReportState;
+  summary?: string;
+  evidence?: string;
+  blocker?: string;
+  question?: string;
+  options?: string[];
+  reason?: string;
+  at: string;
+};
+
+/** The one open request for the person on a Goal: a question to answer, or a finished result to accept. */
+export type GoalAttention = {
+  id: string;
+  kind: "answer" | "review";
+  question: string;
+  options?: string[];
+  askedAt: string;
+};
+
 export type GoalRun = {
   thebeSessionId: string;
   goal: string;
@@ -116,6 +145,20 @@ export type GoalRun = {
   /** Bounded product Artifact containing the latest terminal report. */
   artifactId?: string;
   error?: string;
+  /** Ended `failed` because the review reported a blocker that only the person can clear. */
+  blocked?: boolean;
+  /** Read-only run: the worker cannot edit, write or run commands, only look and report. */
+  observe?: boolean;
+  /** The worker's latest structured report. */
+  report?: GoalReport;
+  /** Set while the Goal is paused waiting for the person; cleared by their answer. */
+  attention?: GoalAttention;
+  /** The task opted in to the worker asking the person a question mid-run. */
+  allowAsk?: boolean;
+  /** After the independent review passes, wait for the person to accept instead of finishing. */
+  reviewBeforeDone?: boolean;
+  /** The person's answers and review notes so far, given to every later checkpoint. */
+  guidance?: string[];
 };
 
 /** @deprecated Use ThebePromptResult */
@@ -141,7 +184,7 @@ export const DEFAULT_MODEL_TEST_TIMEOUT_MS = 60_000;
 export function httpError(
   status: number,
   message: string,
-  code?: string,
+  code?: string
 ): Error {
   return Object.assign(new Error(message), { status, code });
 }

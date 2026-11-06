@@ -36,7 +36,9 @@ Thebe Core is designed to run on your own hardware:
   Anyone holding one can read the audit log, change settings, approve pending
   permissions, and run any tool the permission mode allows. Treat it like a
   password. For an agent that only needs `/mcp`, make a token with
-  `--scope mcp:read` or `--scope mcp:write`: it is refused on every other route.
+  `--scope mcp:read` or `--scope mcp:write`: it is refused on every other route. Deletes that cannot be
+  undone (a download with its files, a playlist, an HTTP `DELETE` to a service) need the separate
+  `--scope mcp:irreversible`; a `mcp:write` token is refused them at once.
 - **Writes over `/mcp` are on.** An agent connected over `/mcp` can restart
   containers, edit playlists and use a provider's write tools, and Core does not
   hold those calls for approval: the calling agent and its client decide whether

@@ -10,7 +10,7 @@ import {
 import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
 import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
-import { tokenMayWrite } from "../token-store.ts";
+import { tokenMayDeleteIrreversibly, tokenMayWrite } from "../token-store.ts";
 
 const MCP_EVENT_TOOLS = [
   LIST_CORE_EVENTS_TOOL,
@@ -89,11 +89,18 @@ async function callTool(
   throw new McpProtocolError(`unknown tool: ${name}`, -32602);
 }
 
+/**
+ * A token that may not write is not shown the write tools, so its agent does not plan around calls
+ * that would be refused. The deletes that cannot be undone stay listed: they are judged per call.
+ */
 async function listedTools(
-  agent?: NonNullable<ThebeHttpContext["agent"]>
+  agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
+  mayWrite: boolean
 ): Promise<McpWireTool[]> {
   const capabilities = agent ? await agent.listMcpTools() : listCoreMcpTools();
-  return capabilities.map(toMcpWireTool);
+  return capabilities
+    .map(toMcpWireTool)
+    .filter((tool) => mayWrite || tool.annotations.readOnlyHint);
 }
 
 /**
@@ -161,7 +168,9 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     return json({
       jsonrpc: "2.0",
       id,
-      result: { tools: await listedTools(agent) },
+      result: {
+        tools: await listedTools(agent, tokenMayWrite(context.caller)),
+      },
     });
   }
   if (method === "tools/call") {
@@ -170,7 +179,9 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
     try {
       const { text, isError } = await callTool(agent, name, params.arguments, {
+        name: context.caller?.name,
         writes: tokenMayWrite(context.caller),
+        irreversible: tokenMayDeleteIrreversibly(context.caller),
       });
       return json({ jsonrpc: "2.0", id, result: toolResult(text, isError) });
     } catch (error) {

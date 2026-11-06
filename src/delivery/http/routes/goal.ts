@@ -52,6 +52,12 @@ export async function handleGoalRoutes(
       if (request.method !== "GET") return undefined;
       return goalLog(context, agent, parsed.sessionId);
     }
+    if (parsed.kind === "answer") {
+      if (request.method !== "POST") return undefined;
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      return answerGoal(request, agent, parsed.sessionId);
+    }
     if (
       parsed.kind === "pause" ||
       parsed.kind === "resume" ||
@@ -142,6 +148,9 @@ async function createGoal(
     goal: goalText,
     criteria,
     maxIterations,
+    ...(body.observe === true ? { observe: true } : {}),
+    ...(body.allowAsk === true ? { allowAsk: true } : {}),
+    ...(body.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
   });
   return json(toProductGoal(run), existingSessionId ? 200 : 201);
 }
@@ -194,6 +203,43 @@ async function goalLog(
     ),
     next: agent.goalEvents(sessionId).length,
   });
+}
+
+async function answerGoal(
+  request: Request,
+  agent: Agent,
+  sessionId: string
+): Promise<Response> {
+  if (!(await loadGoal(agent, sessionId))) {
+    return json({ ok: false, error: "goal not found" }, 404);
+  }
+  const body = await readJson(request);
+  if (typeof body.attentionId !== "string" || !body.attentionId) {
+    return json(
+      { ok: false, error: "attentionId is required", code: "invalid_body" },
+      400
+    );
+  }
+  if (
+    body.decision !== undefined &&
+    body.decision !== "accept" &&
+    body.decision !== "reject"
+  ) {
+    return json(
+      {
+        ok: false,
+        error: "decision must be accept or reject",
+        code: "invalid_body",
+      },
+      400
+    );
+  }
+  const run = await agent.answerGoal(sessionId, {
+    attentionId: body.attentionId,
+    answer: typeof body.answer === "string" ? body.answer : undefined,
+    decision: body.decision as "accept" | "reject" | undefined,
+  });
+  return json(toProductGoal(run));
 }
 
 async function controlGoal(
@@ -254,7 +300,10 @@ function parseGoalPath(
   parts: string[]
 ):
   | { kind: "collection"; sessionId?: undefined }
-  | { kind: "item" | "log" | "pause" | "resume" | "stop"; sessionId: string }
+  | {
+      kind: "item" | "log" | "pause" | "resume" | "stop" | "answer";
+      sessionId: string;
+    }
   | undefined {
   if (parts[0] !== "v1") return undefined;
   if (parts[1] === "goals") {
@@ -268,7 +317,10 @@ function parseGoalPath(
       return { kind: "log", sessionId: id };
     if (
       parts.length === 4 &&
-      (parts[3] === "pause" || parts[3] === "resume" || parts[3] === "stop")
+      (parts[3] === "pause" ||
+        parts[3] === "resume" ||
+        parts[3] === "stop" ||
+        parts[3] === "answer")
     ) {
       return { kind: parts[3], sessionId: id };
     }
@@ -282,7 +334,10 @@ function parseGoalPath(
       return { kind: "log", sessionId: id };
     if (
       parts.length === 5 &&
-      (parts[4] === "pause" || parts[4] === "resume" || parts[4] === "stop")
+      (parts[4] === "pause" ||
+        parts[4] === "resume" ||
+        parts[4] === "stop" ||
+        parts[4] === "answer")
     ) {
       return { kind: parts[4], sessionId: id };
     }

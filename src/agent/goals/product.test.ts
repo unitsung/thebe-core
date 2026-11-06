@@ -19,7 +19,14 @@ function subagent(overrides: Partial<SubagentRun> = {}): SubagentRun {
     maxTurns: 8,
     createdAt: "2026-01-01T00:00:00.000Z",
     startedAt: "2026-01-01T00:00:01.000Z",
-    activity: [{ id: 1, at: "2026-01-01T00:00:02.000Z", kind: "tool", title: "grep src" }],
+    activity: [
+      {
+        id: 1,
+        at: "2026-01-01T00:00:02.000Z",
+        kind: "tool",
+        title: "grep src",
+      },
+    ],
     ...overrides,
   };
 }
@@ -44,7 +51,7 @@ describe("product Goal mapper", () => {
       goalRun({
         status: "pausing",
         activeSubagent: subagent(),
-      }),
+      })
     );
     expect(pausing.id).toBe("sess-1");
     expect(pausing.sessionId).toBe("sess-1");
@@ -53,7 +60,11 @@ describe("product Goal mapper", () => {
     expect(pausing.phase).toBe("pausing");
     expect(pausing.currentStep).toBe("Pausing current checkpoint");
     expect(pausing.progress).toBe(0.25);
-    expect(pausing.controls).toEqual({ pause: false, resume: false, stop: true });
+    expect(pausing.controls).toEqual({
+      pause: false,
+      resume: false,
+      stop: true,
+    });
     expect(pausing).not.toHaveProperty("thebeSessionId");
     expect(pausing).not.toHaveProperty("finalReport");
     expect(pausing).not.toHaveProperty("subagentRunIds");
@@ -68,9 +79,21 @@ describe("product Goal mapper", () => {
     expect(mapGoalStatus("max_iterations")).toBe("failed");
     expect(mapGoalStatus("failed")).toBe("failed");
 
-    expect(goalControls("running")).toEqual({ pause: true, resume: false, stop: true });
-    expect(goalControls("paused")).toEqual({ pause: false, resume: true, stop: true });
-    expect(goalControls("completed")).toEqual({ pause: false, resume: false, stop: false });
+    expect(goalControls("running")).toEqual({
+      pause: true,
+      resume: false,
+      stop: true,
+    });
+    expect(goalControls("paused")).toEqual({
+      pause: false,
+      resume: true,
+      stop: true,
+    });
+    expect(goalControls("completed")).toEqual({
+      pause: false,
+      resume: false,
+      stop: false,
+    });
 
     const failed = toProductGoal(
       goalRun({
@@ -78,7 +101,7 @@ describe("product Goal mapper", () => {
         error: "stopped after 8 checkpoints",
         finishedAt: "2026-01-01T00:01:00.000Z",
         iteration: 8,
-      }),
+      })
     );
     expect(failed.status).toBe("failed");
     expect(failed.error).toEqual({
@@ -101,7 +124,7 @@ describe("product Goal mapper", () => {
         remainingTasks: ["fix test"],
       },
       3,
-      "2026-01-01T00:00:03.000Z",
+      "2026-01-01T00:00:03.000Z"
     );
     expect(reviewed.critique).toHaveLength(401);
     expect(reviewed.critique?.endsWith("…")).toBe(true);
@@ -117,7 +140,7 @@ describe("product Goal mapper", () => {
         event: { type: "text_delta", text: "secret-runtime" },
       },
       4,
-      "2026-01-01T00:00:04.000Z",
+      "2026-01-01T00:00:04.000Z"
     );
     expect(child.worker).toEqual({
       id: "run-1",
@@ -136,7 +159,7 @@ describe("product Goal mapper", () => {
       "sess-1",
       { type: "goal_started", goal: "Ship the change", maxIterations: 8 },
       0,
-      "t0",
+      "t0"
     );
     expect(started).toMatchObject({
       id: "0",
@@ -155,7 +178,7 @@ describe("product Goal mapper", () => {
         summary: "done",
       },
       1,
-      "t1",
+      "t1"
     );
     expect(completed.status).toBe("succeeded");
     expect(completed.phase).toBe("completed");
@@ -168,5 +191,20 @@ describe("product Goal mapper", () => {
     const status = toProductGoalEvent("sess-1", pausing, 2, "t2");
     expect(status.status).toBe("running");
     expect(status.phase).toBe("pausing");
+  });
+});
+
+describe("a blocked goal", () => {
+  it("is a failed task whose error says it is blocked, not a machinery failure", () => {
+    const blocked = toProductGoal(
+      goalRun({ status: "failed", blocked: true, error: "grant access" })
+    );
+    expect(blocked.status).toBe("failed");
+    expect(blocked.error).toEqual({
+      code: "goal_blocked",
+      message: "grant access",
+    });
+    const failed = toProductGoal(goalRun({ status: "failed", error: "boom" }));
+    expect(failed.error?.code).toBe("goal_failed");
   });
 });

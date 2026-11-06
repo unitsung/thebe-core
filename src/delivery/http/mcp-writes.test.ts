@@ -55,6 +55,9 @@ function providerRegistry(calls: string[]): McpRegistry {
     inputSchema: { type: "object" },
     category: "media" as const,
     permission,
+    ...(permission === "admin" && {
+      annotations: { destructiveHint: true },
+    }),
     source: "external" as const,
     serverName: "radarr",
   });
@@ -128,7 +131,8 @@ function setup(
   mcpWritesAllowed: boolean,
   requests: string[] = [],
   playlists: string[] = [],
-  token?: TokenVerifier
+  token?: TokenVerifier,
+  auditPath?: string
 ) {
   const calls: string[] = [];
   const provider = containers();
@@ -147,6 +151,7 @@ function setup(
       },
     },
     mcpWritesAllowed,
+    auditPath,
   });
   const handler = createThebeHttpHandler({ version: "0.1.0", agent, token });
   const call = async (
@@ -174,7 +179,7 @@ function setup(
       error?: unknown;
     };
   };
-  return { call, calls, provider, repairs };
+  return { call, calls, provider, repairs, agent, handler };
 }
 
 const text = (reply: Awaited<ReturnType<ReturnType<typeof setup>["call"]>>) =>
@@ -270,6 +275,7 @@ describe("/mcp write tools by token scope", () => {
   const read = "r".repeat(64);
   const write = "w".repeat(64);
   const full = "f".repeat(64);
+  const irreversible = "i".repeat(64);
 
   async function withTokens(hostAllowsWrites: boolean) {
     const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-scope-"));
@@ -284,6 +290,12 @@ describe("/mcp write tools by token scope", () => {
       name: "Writer",
       scope: "mcp:write",
       generate: () => write,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Cleaner",
+      scope: "mcp:irreversible",
+      generate: () => irreversible,
     });
     createDeviceToken({ configDir, name: "iPad", generate: () => full });
     const requests: string[] = [];
@@ -341,5 +353,361 @@ describe("/mcp write tools by token scope", () => {
     expect(reply.result?.isError).toBe(true);
     expect(text(reply)).toContain("THEBE_MCP_WRITES");
     expect(provider.restarts).toEqual([]);
+  });
+
+  it("a write token is refused a delete that cannot be undone, at once, naming the scope", async () => {
+    const { call, calls, requests, playlists } = await withTokens(true);
+    for (const [name, args] of [
+      ["mcp:radarr/delete_movie", { id: 1 }],
+      ["service_api.petstore.deletePet", { petId: 7 }],
+      ["navidrome.playlist.delete", { id: "p1" }],
+    ] as const) {
+      const reply = await call(name, args, write);
+      expect(reply.result?.isError, name).toBe(true);
+      expect(text(reply), name).toContain("mcp:irreversible");
+    }
+    expect(calls).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(playlists).toEqual([]);
+  });
+
+  it("an irreversible token, and a token with no scope, can run them", async () => {
+    const { call, calls } = await withTokens(true);
+    for (const token of [irreversible, full]) {
+      const reply = await call("mcp:radarr/delete_movie", { id: 1 }, token);
+      expect(reply.result?.isError, token.slice(0, 1)).toBeUndefined();
+    }
+    expect(calls).toEqual([
+      "mcp:radarr/delete_movie",
+      "mcp:radarr/delete_movie",
+    ]);
+  });
+
+  it("an irreversible token is still refused while the host has writes off", async () => {
+    const { call, calls } = await withTokens(false);
+    const reply = await call(
+      "mcp:radarr/delete_movie",
+      { id: 1 },
+      irreversible
+    );
+    expect(reply.result?.isError).toBe(true);
+    expect(text(reply)).toContain("THEBE_MCP_WRITES");
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("/mcp audit rows", () => {
+  it("name the token, mark a refusal as denied, and filter by caller", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-audit-"));
+    const read = "r".repeat(64);
+    const write = "w".repeat(64);
+    createDeviceToken({
+      configDir,
+      name: "Reader",
+      scope: "mcp:read",
+      generate: () => read,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    const auditPath = join(configDir, "audit.jsonl");
+    const { call, agent } = setup(
+      true,
+      [],
+      [],
+      createTokenVerifier({ configDir, env: {} }),
+      auditPath
+    );
+
+    await call("mcp:radarr/list_movies", {}, read);
+    await call("container.restart", { id: "ctr-1" }, read); // refused: read token
+    await call("mcp:radarr/delete_movie", { id: 1 }, write); // refused: needs mcp:irreversible
+
+    const rows = (await agent.listAudit({ identity: "Reader" })).entries;
+    expect(rows.map((r) => [r.method, r.result, r.source]).sort()).toEqual([
+      ["container.restart", "denied", "mcp"],
+      ["mcp:radarr/list_movies", "ok", "mcp"],
+    ]);
+    const writer = (await agent.listAudit({ identity: "Writer" })).entries;
+    expect(writer).toHaveLength(1);
+    expect(writer[0]).toMatchObject({
+      method: "mcp:radarr/delete_movie",
+      result: "denied",
+    });
+    // The row keeps a hash of the arguments, never the arguments.
+    expect(JSON.stringify(writer[0])).not.toContain('"id":1');
+  });
+});
+
+describe("/mcp tools/list by token scope", () => {
+  const read = "r".repeat(64);
+  const write = "w".repeat(64);
+
+  async function list(token: string) {
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-list-"));
+    createDeviceToken({
+      configDir,
+      name: "Reader",
+      scope: "mcp:read",
+      generate: () => read,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    const box = setup(
+      true,
+      [],
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+    const res = await box.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      })
+    );
+    const body = (await res.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    return body.result.tools.map((tool) => tool.name);
+  }
+
+  it("a read token is not shown the write tools, a write token is", async () => {
+    const readerSees = await list(read);
+    expect(readerSees).toContain("mcp:radarr/list_movies");
+    for (const hidden of [
+      "container.restart",
+      "mcp:radarr/delete_movie",
+      "navidrome.playlist.create",
+    ]) {
+      expect(readerSees, hidden).not.toContain(hidden);
+    }
+    const writerSees = await list(write);
+    for (const shown of [
+      "container.restart",
+      "mcp:radarr/delete_movie",
+      "navidrome.playlist.delete",
+    ]) {
+      expect(writerSees, shown).toContain(shown);
+    }
+  });
+});
+
+describe("/mcp service_api.confirm", () => {
+  it("cannot run a DELETE the preview's caller was not allowed to send", async () => {
+    const write = "w".repeat(64);
+    const full = "f".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-confirm-"));
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    createDeviceToken({ configDir, name: "iPad", generate: () => full });
+    const requests: string[] = [];
+    const { call } = setup(
+      true,
+      requests,
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+    // A full-access caller previews the DELETE; a write-only caller then tries to confirm it.
+    const preview = await call(
+      "service_api.petstore.deletePet",
+      { petId: 7 },
+      full
+    );
+    const confirmToken =
+      JSON.parse(text(preview)).confirmToken ?? JSON.parse(text(preview)).token;
+    expect(confirmToken, text(preview)).toBeTruthy();
+    const refused = await call(
+      "service_api.confirm",
+      { token: confirmToken },
+      write
+    );
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("mcp:irreversible");
+    expect(requests).toEqual([]);
+    const allowed = await call(
+      "service_api.confirm",
+      { token: confirmToken },
+      full
+    );
+    expect(allowed.result?.isError).toBeUndefined();
+    expect(requests).toEqual(["DELETE /pet/7"]);
+  });
+});
+
+describe("/mcp operator marks on provider tools", () => {
+  function marked() {
+    const calls: string[] = [];
+    const tool = (name: string, extra: Record<string, unknown>) => ({
+      id: `mcp:box/${name}`,
+      name: `mcp:box/${name}`,
+      description: name,
+      inputSchema: { type: "object" },
+      category: "other" as const,
+      permission: "confirm" as const,
+      source: "external" as const,
+      serverName: "box",
+      ...extra,
+    });
+    const registry: McpRegistry = {
+      async listTools() {
+        return [
+          // The server calls it destructive; the operator says it can be undone.
+          tool("wipe_cache", {
+            annotations: { destructiveHint: true },
+            irreversible: false,
+          }),
+          // The server says nothing; the operator says it cannot be undone.
+          tool("purge_library", { irreversible: true }),
+        ];
+      },
+      async listServers() {
+        return [];
+      },
+      async setServerEnabled(name, enabled) {
+        return { name, status: enabled ? "configured" : "disabled" };
+      },
+      async invokeTool(name) {
+        calls.push(name);
+        return "done";
+      },
+      close() {},
+    };
+    return { registry, calls };
+  }
+
+  it("beat the server's hint in both directions, for a token that may only write", async () => {
+    const write = "w".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-marks-"));
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    const { registry, calls } = marked();
+    const agent = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: containers(),
+      mcp: registry,
+      mcpWritesAllowed: true,
+    });
+    const handler = createThebeHttpHandler({
+      version: "0.1.0",
+      agent,
+      token: createTokenVerifier({ configDir, env: {} }),
+    });
+    const run = async (name: string) => {
+      const res = await handler.handle(
+        new Request("http://127.0.0.1:8787/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: `Bearer ${write}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: {} },
+          }),
+        })
+      );
+      return (await res.json()) as {
+        result?: { isError?: boolean; content?: Array<{ text: string }> };
+      };
+    };
+    expect((await run("mcp:box/wipe_cache")).result?.isError).toBeUndefined();
+    const refused = await run("mcp:box/purge_library");
+    expect(refused.result?.isError).toBe(true);
+    expect(refused.result?.content?.[0]?.text).toContain("mcp:irreversible");
+    expect(calls).toEqual(["mcp:box/wipe_cache"]);
+  });
+});
+
+describe("/mcp operator marks on service API operations", () => {
+  it("replace the HTTP-method rule: a DELETE marked reversible runs, a POST marked irreversible is held", async () => {
+    const write = "w".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-opmarks-"));
+    createDeviceToken({
+      configDir,
+      name: "Writer",
+      scope: "mcp:write",
+      generate: () => write,
+    });
+    const requests: string[] = [];
+    const op = (id: string, method: string, irreversible: boolean) => ({
+      id,
+      method,
+      path: `/${id}`,
+      readOnly: false,
+      writable: true,
+      irreversible,
+      parameters: [],
+    });
+    const provider: ServiceAPIProvider = {
+      id: "shop",
+      catalog: () => ({ operations: [] }),
+      request: async (input) => {
+        requests.push(`${input.method} ${input.path}`);
+        return { ok: true, status: 200, body: {} };
+      },
+      operations: async () => [
+        op("removeNote", "DELETE", false),
+        op("emptyTrash", "POST", true),
+      ],
+    };
+    const agent = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: containers(),
+      serviceAPIProviders: [provider],
+      mcpWritesAllowed: true,
+    });
+    const handler = createThebeHttpHandler({
+      version: "0.1.0",
+      agent,
+      token: createTokenVerifier({ configDir, env: {} }),
+    });
+    const call = async (name: string, args: Record<string, unknown> = {}) => {
+      const res = await handler.handle(
+        new Request("http://127.0.0.1:8787/mcp", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            Authorization: `Bearer ${write}`,
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: args },
+          }),
+        })
+      );
+      return (await res.json()) as {
+        result?: { isError?: boolean; content?: Array<{ text: string }> };
+      };
+    };
+    const reversible = await call("service_api.shop.removeNote");
+    expect(reversible.result?.isError).toBeUndefined();
+    const held = await call("service_api.shop.emptyTrash");
+    expect(held.result?.isError).toBe(true);
+    expect(held.result?.content?.[0]?.text).toContain("mcp:irreversible");
+    // The held one never reached a preview, so there is nothing to confirm.
+    expect(requests).toEqual([]);
   });
 });

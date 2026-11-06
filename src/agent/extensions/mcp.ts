@@ -137,6 +137,8 @@ export type HomelabCapability = {
   execution?: HomelabCapabilityExecution;
   background?: boolean;
   destructive?: boolean;
+  /** The operator's word, from `.thebe/mcp.json`, on whether a call cannot be undone; beats the server's hint. */
+  irreversible?: boolean;
   outputKind?: string;
 };
 

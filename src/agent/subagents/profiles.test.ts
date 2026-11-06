@@ -11,27 +11,58 @@ describe("built-in subagent profiles", () => {
       "log-analyzer",
       "network-prober",
       "goal-worker",
+      "goal-observer",
       "goal-reviewer",
     ]);
     expect(RESERVED_SUBAGENT_TOOLS).toContain("run_subagent");
-    expect(BUILTIN_SUBAGENT_PROFILES.diagnostics?.tools).toContain("container.list");
+    expect(BUILTIN_SUBAGENT_PROFILES.diagnostics?.tools).toContain(
+      "container.list"
+    );
+  });
+
+  it("gives the observer only tools that cannot change anything", () => {
+    const observer = BUILTIN_SUBAGENT_PROFILES["goal-observer"]!;
+    expect(observer.allowWrites).toBeFalsy();
+    for (const writing of ["edit", "write", "bash"]) {
+      expect(observer.tools).not.toContain(writing);
+    }
+    // goal_report only records the worker's report for its own Goal; it changes nothing in the world.
+    expect(observer.tools).toEqual([
+      "ls",
+      "find",
+      "grep",
+      "read",
+      "goal_report",
+    ]);
   });
 
   it("gives every built-in the explicit response and file-output policy", () => {
     for (const profile of Object.values(BUILTIN_SUBAGENT_PROFILES)) {
-      expect(profile.systemPrompt).toContain("Return ordinary answers and research results to the parent conversation buffer by default.");
-      expect(profile.systemPrompt).toContain("Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.");
-      expect(profile.systemPrompt).toContain("Never create output.md, docs files, or any other file merely to display an answer.");
-      expect(profile.systemPrompt).toContain("outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.");
+      expect(profile.systemPrompt).toContain(
+        "Return ordinary answers and research results to the parent conversation buffer by default."
+      );
+      expect(profile.systemPrompt).toContain(
+        "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files."
+      );
+      expect(profile.systemPrompt).toContain(
+        "Never create output.md, docs files, or any other file merely to display an answer."
+      );
+      expect(profile.systemPrompt).toContain(
+        "outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output."
+      );
     }
   });
 
   it("gives coding subagents the native search policy", () => {
     for (const name of ["goal-worker", "goal-reviewer"]) {
       const prompt = BUILTIN_SUBAGENT_PROFILES[name]!.systemPrompt;
-      expect(prompt).toContain("Use Pi's native find for filename searches and Pi's native grep for content searches.");
+      expect(prompt).toContain(
+        "Use Pi's native find for filename searches and Pi's native grep for content searches."
+      );
       expect(prompt).toContain("Do not use bash or rg for ordinary searches.");
-      expect(prompt).toContain("Use bash only when the task genuinely requires executing a shell command.");
+      expect(prompt).toContain(
+        "Use bash only when the task genuinely requires executing a shell command."
+      );
     }
   });
 });
