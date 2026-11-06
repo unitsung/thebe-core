@@ -39,10 +39,10 @@ export function createEvalService(options: {
   now: () => Date;
   /** Questions to the model per hour before the rest are recorded as `assessment_limit`. 0 is no limit. */
   maxPerHour?: number;
-  /** Whether the host allows `auto` (`THEBE_EVAL_AUTO`). Without it a policy in `auto` acts like `observe`. */
-  autoAllowed?: boolean;
   /** What `auto` does with a positive assessment. Without it nothing is done. */
   act?: AutoRestart;
+  /** Called after a Decision that took something on (`accept`) is kept, to give it its Ticket. Never throws into Eval. */
+  onAccepted?: (decision: Decision) => Promise<void>;
   backlogAgeMs?: number;
   onError?: (error: unknown) => void;
 }): EvalService {
@@ -192,13 +192,21 @@ export function createEvalService(options: {
       const takenOn =
         action.kind === "restart" ||
         (action.kind === "diagnose" && action.status === "awaiting_approval");
-      await record({
+      const kept = await record({
         outcome: takenOn ? "accept" : "ignore",
         wouldAccept: true,
         matchedRuleIds: verdict.matchedRuleIds,
         reason: verdict.reason,
         action,
       });
+      if (takenOn) {
+        // Taken on means a Ticket: the authorised unit of work, with the Mandate it was taken on under.
+        try {
+          await options.onAccepted?.(kept);
+        } catch (error) {
+          options.onError?.(error);
+        }
+      }
       return;
     }
     // observe: a positive assessment is what Core WOULD have taken on; it takes on nothing.
@@ -217,11 +225,11 @@ export function createEvalService(options: {
     triggers: Trigger[],
     policy: Policy
   ): Promise<DecisionAction> {
-    if (!options.autoAllowed || !options.act) {
+    if (!options.act) {
       return {
         kind: "none",
-        status: "auto_disabled",
-        note: "the host has not allowed auto, so nothing was done",
+        status: "no_executor",
+        note: "this Core has nothing to carry the action out, so nothing was done",
       };
     }
     // A quiesce that came while the model was thinking still stops the action.

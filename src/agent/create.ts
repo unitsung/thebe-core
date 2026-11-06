@@ -9,6 +9,7 @@ import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
+import type { Policy } from "./eval/types.ts";
 import { createAutoRestart } from "./eval/auto-restart.ts";
 import { createEvalService } from "./eval/service.ts";
 import { createActivityStore } from "./activity/store.ts";
@@ -78,7 +79,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "eval")
       : undefined,
     now: ctx.now,
-    autoAllowed: options.evalAutoAllowed === true,
   });
   const decisionStore = createDecisionStore({
     dir: options.agentStoreDir
@@ -108,7 +108,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     decisions: decisionStore,
     sources: options.sources?.containerHealth ? "container-health" : "",
     maxPerHour: options.evalMaxPerHour,
-    autoAllowed: options.evalAutoAllowed === true,
     act: createAutoRestart({
       provider: options.provider,
       actions,
@@ -116,6 +115,29 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       diagnose: diagnosis.diagnose,
       now: ctx.now,
     }),
+    onAccepted: async (decision) => {
+      const action = decision.action;
+      if (!action) return;
+      const container = action.container ?? decision.thread;
+      await ticketStore.recordAccepted({
+        evalId: decision.evalId,
+        decisionId: decision.id,
+        thread: decision.thread,
+        at: decision.at,
+        title:
+          action.kind === "restart"
+            ? `Restart ${container}`
+            : `Look at ${container}`,
+        requester: "container-health",
+        policyVersion: decision.policyVersion,
+        matchedRuleIds: decision.matchedRuleIds,
+        // The authority is the person's list, narrowed to this container. A Ticket that only handed the
+        // container to the person authorises nothing to be done without them.
+        scope:
+          action.kind === "restart" ? [`container.restart:${container}`] : [],
+        receiptIds: action.receiptId ? [action.receiptId] : undefined,
+      });
+    },
     now: ctx.now,
     onError: () => {
       // A failed Eval leaves no Decision; the next start weighs it again.
@@ -187,17 +209,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       executeAction: actions.executeApprovedAction,
     }),
     async getPolicy() {
-      // `autoAvailable` is the host's switch, so a client can offer the mode only where it can be set.
-      return {
-        ...(await policyStore.get()),
-        autoAvailable: options.evalAutoAllowed === true,
-      };
+      return withAutoList(await policyStore.get());
     },
     async setPolicy(input) {
-      return {
-        ...(await policyStore.set(input)),
-        autoAvailable: options.evalAutoAllowed === true,
-      };
+      return withAutoList(await policyStore.set(input));
     },
     async listDecisions(query) {
       return decisionStore.list(query);
@@ -263,4 +278,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return artifactStore.getContent(artifactId);
     },
   };
+}
+
+/**
+ * A Core that has the `auto` mode always says which containers it may restart, empty or not. A client
+ * learns from that list being there that the mode exists: an older Core never sends it.
+ */
+function withAutoList(policy: Policy): Policy & { autoContainers: string[] } {
+  return { ...policy, autoContainers: policy.autoContainers ?? [] };
 }

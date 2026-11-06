@@ -75,16 +75,13 @@ const accept = (policy: { rules: { id: string }[] }) =>
   });
 
 describe("policy", () => {
-  it("starts empty in observe, and refuses auto unless the host allows it", async () => {
+  it("starts empty in observe, and refuses what it cannot read", async () => {
     const policy = createPolicyStore({ now: () => new Date(T0) });
     expect(await policy.get()).toMatchObject({
       rules: [],
       acceptMode: "observe",
       revision: 0,
     });
-    await expect(policy.set({ acceptMode: "auto" })).rejects.toThrow(
-      /THEBE_EVAL_AUTO/
-    );
     await expect(policy.set({ acceptMode: "wild" })).rejects.toBeInstanceOf(
       PolicyError
     );

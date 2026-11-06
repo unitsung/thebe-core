@@ -36,14 +36,12 @@ function open(
   opts: {
     watch?: boolean;
     provider?: ContainerInfoProvider;
-    auto?: boolean;
   } = {}
 ) {
   const fake = createFakeRuntime();
   const app = createThebeApp({
     runtime: fake.runtime,
     provider: opts.provider ?? docker("running").provider,
-    evalAutoAllowed: opts.auto,
     ...(opts.watch
       ? { sources: { containerHealth: true, intervalMs: 1000 } }
       : {}),
@@ -82,18 +80,12 @@ describe("policy over HTTP", () => {
     expect(saved.body.rules).toHaveLength(1);
     expect(saved.body.rules[0].id).toMatch(/^[a-f0-9]{12}$/);
     expect((await call("/v1/policy")).body).toEqual(saved.body);
-    // Whether this Core lets the mode be auto is part of what it says about its policy.
-    expect(saved.body.autoAvailable).toBe(false);
   });
 
-  it("takes auto and the containers it may restart only where the host allows it", async () => {
-    const off = open();
-    const refused = await off.put({ acceptMode: "auto" });
-    expect(refused.status).toBe(400);
-    expect(refused.body.error).toContain("THEBE_EVAL_AUTO");
-
-    const on = open({ auto: true });
-    const saved = await on.put({
+  it("takes auto and the containers it may restart, and says the list even when it is empty", async () => {
+    const { call, put } = open();
+    expect((await call("/v1/policy")).body.autoContainers).toEqual([]);
+    const saved = await put({
       rules: ["Restart a media server that stopped"],
       acceptMode: "auto",
       autoContainers: ["emby", " jellyfin "],
@@ -102,22 +94,21 @@ describe("policy over HTTP", () => {
     expect(saved.body).toMatchObject({
       acceptMode: "auto",
       autoContainers: ["emby", "jellyfin"],
-      autoAvailable: true,
     });
-    expect((await on.call("/v1/policy")).body).toEqual(saved.body);
+    expect((await call("/v1/policy")).body).toEqual(saved.body);
     // Going back to observe keeps the list; a bad list is a 400 and changes nothing.
-    expect(
-      (await on.put({ acceptMode: "observe" })).body.autoContainers
-    ).toEqual(["emby", "jellyfin"]);
-    const bad = await on.put({ autoContainers: "emby" });
+    expect((await put({ acceptMode: "observe" })).body.autoContainers).toEqual([
+      "emby",
+      "jellyfin",
+    ]);
+    const bad = await put({ autoContainers: "emby" });
     expect(bad.status).toBe(400);
     expect(bad.body.code).toBe("invalid_policy");
   });
 
-  it("refuses auto here (the host has not allowed it) and other bad input with 400, and other methods with 405", async () => {
+  it("refuses an unknown mode and other bad input with 400, and other methods with 405", async () => {
     const { call, put } = open();
     for (const body of [
-      { acceptMode: "auto" },
       { acceptMode: "x" },
       { rules: "nope" },
       { rules: [""] },

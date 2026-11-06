@@ -121,11 +121,6 @@ export type CreateThebeAgentOptions = {
    * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.
    */
   evalMaxPerHour?: number;
-  /**
-   * Whether the host allows the accept mode `auto`, in which Core restarts a stopped container on the
-   * person's list by itself. Off unless given: setting the mode is then refused.
-   */
-  evalAutoAllowed?: boolean;
   /** Called when an approval starts waiting for a person, for example to send a push notice. */
   onPendingApproval?: (
     record: import("./activity/types.ts").ActivityRecord
@@ -484,13 +479,13 @@ export interface ThebeAgent {
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
   /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
-  getPolicy(): Promise<Policy & { autoAvailable: boolean }>;
+  getPolicy(): Promise<Policy & { autoContainers: string[] }>;
   setPolicy(input: {
     rules?: unknown;
     acceptMode?: unknown;
     model?: unknown;
     autoContainers?: unknown;
-  }): Promise<Policy & { autoAvailable: boolean }>;
+  }): Promise<Policy & { autoContainers: string[] }>;
   /** What Eval decided, newest first. In observe, `wouldAccept` marks what Core would have taken on. */
   listDecisions(query?: {
     thread?: string;
