@@ -682,7 +682,7 @@ describe("Thebe TUI agent slash commands", () => {
       {
         kind: "tools",
         calls: [
-          { name: "container.list", id: "call_container_list", args: {} },
+          { name: "container_list", id: "call_container_list", args: {} },
         ],
       },
       { kind: "text", text: "after tool" },
@@ -701,7 +701,7 @@ describe("Thebe TUI agent slash commands", () => {
     const transcript = tui.children
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(transcript).toContain("container.list");
+    expect(transcript).toContain("container_list");
     expect(transcript).toContain("after tool");
   });
 

@@ -76,9 +76,9 @@ export function buildListingContract() {
   return {
     version: 1,
     examples: {
-      "container.list": CONTAINER_LIST_EXAMPLE,
-      "download.list": DOWNLOAD_LIST_EXAMPLE,
-      "files.list": FILES_LIST_EXAMPLE,
+      container_list: CONTAINER_LIST_EXAMPLE,
+      download_list: DOWNLOAD_LIST_EXAMPLE,
+      files_list: FILES_LIST_EXAMPLE,
     },
   };
 }

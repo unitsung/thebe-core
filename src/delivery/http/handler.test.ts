@@ -186,7 +186,7 @@ describe("Thebe HTTP handler", () => {
     expect(capabilities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "container.list",
+          id: "container_list",
           category: "containers",
           permission: "read",
           service: "arcane",
@@ -197,63 +197,63 @@ describe("Thebe HTTP handler", () => {
           permission: "read",
         }),
         expect.objectContaining({
-          id: "emby.libraries",
+          id: "emby_libraries",
           category: "media",
           permission: "read",
           source: "core",
           service: "emby",
         }),
         expect.objectContaining({
-          id: "emby.recent",
+          id: "emby_recent",
           category: "media",
           permission: "read",
           source: "core",
           service: "emby",
         }),
         expect.objectContaining({
-          id: "emby.sessions",
+          id: "emby_sessions",
           category: "media",
           permission: "read",
           source: "core",
           service: "emby",
         }),
         expect.objectContaining({
-          id: "jellyfin.libraries",
+          id: "jellyfin_libraries",
           category: "media",
           permission: "read",
           source: "core",
           service: "jellyfin",
         }),
         expect.objectContaining({
-          id: "jellyfin.recent",
+          id: "jellyfin_recent",
           category: "media",
           permission: "read",
           source: "core",
           service: "jellyfin",
         }),
         expect.objectContaining({
-          id: "jellyfin.sessions",
+          id: "jellyfin_sessions",
           category: "media",
           permission: "read",
           source: "core",
           service: "jellyfin",
         }),
         expect.objectContaining({
-          id: "immich.assets",
+          id: "immich_assets",
           category: "media",
           permission: "read",
           source: "core",
           service: "immich",
         }),
         expect.objectContaining({
-          id: "immich.albums",
+          id: "immich_albums",
           category: "media",
           permission: "read",
           source: "core",
           service: "immich",
         }),
         expect.objectContaining({
-          id: "immich.statistics",
+          id: "immich_statistics",
           category: "media",
           permission: "read",
           source: "core",
@@ -322,22 +322,22 @@ describe("Thebe HTTP handler", () => {
     const names = (result.tools ?? []).map((t) => t.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        "container.list",
-        "container.inspect",
-        "container.logs",
-        "container.status_summary",
+        "container_list",
+        "container_inspect",
+        "container_logs",
+        "container_status_summary",
         "list_core_events",
         "diagnose_from_events",
-        "emby.libraries",
-        "jellyfin.libraries",
-        "immich.assets",
+        "emby_libraries",
+        "jellyfin_libraries",
+        "immich_assets",
       ])
     );
     const inspect = (result.tools ?? []).find(
-      (tool) => tool.name === "container.inspect"
+      (tool) => tool.name === "container_inspect"
     ) as { inputSchema?: { required?: string[] } } | undefined;
     const logs = (result.tools ?? []).find(
-      (tool) => tool.name === "container.logs"
+      (tool) => tool.name === "container_logs"
     ) as { inputSchema?: { required?: string[] } } | undefined;
     expect(inspect?.inputSchema?.required).toEqual(["id"]);
     expect(logs?.inputSchema?.required).toEqual(["id"]);
@@ -475,7 +475,7 @@ describe("Thebe HTTP handler", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "container.status_summary" },
+          params: { name: "container_status_summary" },
         }),
       })
     );
@@ -486,7 +486,7 @@ describe("Thebe HTTP handler", () => {
     });
   });
 
-  it("POST /mcp tools/call container.status_summary goes through the agent", async () => {
+  it("POST /mcp tools/call container_status_summary goes through the agent", async () => {
     const { createFakeRuntime } =
       await import("../../testing/runtime/index.ts");
     const { createThebeApp } = await import("../../app/create.ts");
@@ -504,7 +504,7 @@ describe("Thebe HTTP handler", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "container.status_summary" },
+          params: { name: "container_status_summary" },
         }),
       })
     );
@@ -546,7 +546,7 @@ describe("Thebe HTTP handler", () => {
           id: 1,
           method: "tools/call",
           params: {
-            name: "strm.repair",
+            name: "strm_repair",
             arguments: {
               arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
               resource: {
@@ -608,7 +608,7 @@ describe("Thebe HTTP handler", () => {
           id: 1,
           method: "tools/call",
           params: {
-            name: "strm.repair",
+            name: "strm_repair",
             arguments: {
               arguments: { title: "Dune", itemId: "/Movies/Dune.strm" },
               resource: {
@@ -630,7 +630,7 @@ describe("Thebe HTTP handler", () => {
         content: [
           {
             type: "text",
-            text: "strm.repair requires resource.provider=openlist",
+            text: "strm_repair requires resource.provider=openlist",
           },
         ],
       },
@@ -1713,15 +1713,15 @@ describe("Thebe HTTP handler", () => {
     ).tools.map((tool) => tool.name);
     expect(names).toEqual(
       expect.arrayContaining([
-        "service_api.petstore.findPetsByStatus",
-        "service_api.petstore.deletePet",
-        "service_api.confirm",
+        "service__petstore__findPetsByStatus",
+        "service__petstore__deletePet",
+        "service_confirm",
       ])
     );
-    expect(names).not.toContain("service_api.petstore.purge"); // not allow-listed
+    expect(names).not.toContain("service__petstore__purge"); // not allow-listed
 
     const read = await json(
-      await call(2, "service_api.petstore.findPetsByStatus", {
+      await call(2, "service__petstore__findPetsByStatus", {
         status: "available",
       })
     );
@@ -1740,7 +1740,7 @@ describe("Thebe HTTP handler", () => {
 
     // A write never executes directly: it returns a preview and a confirm token.
     const preview = await json(
-      await call(3, "service_api.petstore.deletePet", { petId: 7 })
+      await call(3, "service__petstore__deletePet", { petId: 7 })
     );
     const previewBody = JSON.parse(
       (preview.result as { content: Array<{ text: string }> }).content[0]!.text
@@ -1755,7 +1755,7 @@ describe("Thebe HTTP handler", () => {
     expect(calls).toHaveLength(1); // still only the read
 
     const confirmed = await json(
-      await call(4, "service_api.confirm", { token: previewBody.confirmToken })
+      await call(4, "service_confirm", { token: previewBody.confirmToken })
     );
     expect(
       JSON.parse(
@@ -1771,10 +1771,10 @@ describe("Thebe HTTP handler", () => {
 
     // The token is single-use, and an unlisted operation is refused.
     const replayed = await json(
-      await call(5, "service_api.confirm", { token: previewBody.confirmToken })
+      await call(5, "service_confirm", { token: previewBody.confirmToken })
     );
     expect(JSON.stringify(replayed)).toMatch(/unknown or expired/i);
-    const refused = await json(await call(6, "service_api.petstore.purge", {}));
+    const refused = await json(await call(6, "service__petstore__purge", {}));
     expect(JSON.stringify(refused)).toMatch(/approval|unknown/i);
   });
 });

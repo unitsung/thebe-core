@@ -50,7 +50,7 @@ weak signal only: most community servers are not listed.
 | Proxmox                                                                        | `RekklesNA/ProxmoxMCP-Plus` (MIT, **584★**, 8 workflows, 30 releases, ~18 contributors, 0 open issues, active)                                                                                                                                                                                | Strongest infra community server; attach it. No Core adapter                                                                                                                                                                                                      |
 | TrueNAS                                                                        | `truenas/truenas-mcp` — **vendor org, but self-labelled "Research Preview"** (GPL-3.0, ~3 months quiet, no tests) · `spranab/truenas-mcp` (MIT, 278 actions)                                                                                                                                  | Vendor preview or the community one; TrueNAS also exposes a JSON API for `service_api_*`                                                                                                                                                                          |
 | UniFi                                                                          | `sirkirby/unifi-mcp` (MIT, **893★**, 26 workflows, ~41 contributors, very active) · `enuno/unifi-mcp-server` (Apache-2.0, "official UniFi API")                                                                                                                                               | Best community project in the set; attach it                                                                                                                                                                                                                      |
-| Arcane                                                                         | Core already ships the Arcane vendor adapter (`container.*` + activity); the community `Arcane-MCP-Server` (19★) is stale                                                                                                                                                                     | Keep the Core adapter                                                                                                                                                                                                                                             |
+| Arcane                                                                         | Core already ships the Arcane vendor adapter (`container_*` + activity); the community `Arcane-MCP-Server` (19★) is stale                                                                                                                                                                     | Keep the Core adapter                                                                                                                                                                                                                                             |
 | Pi-hole, AdGuard, Gitea, Uptime Kuma, Komodo, Beszel, Healthchecks, Technitium | Nothing notable in the registry                                                                                                                                                                                                                                                               | `service_api_*` when the service serves an OpenAPI/Swagger document; otherwise none                                                                                                                                                                               |
 
 ### Quality bar before recommending a community server
@@ -84,7 +84,7 @@ them with `thebe mcp add`, and this document says which are worth trusting.
 generic tool: each read operation the operator allow-lists in `readOperations` is
 exposed as its own MCP tool (`service_api.<id>.<operationId>`) with a real input
 schema, on both `/mcp` and `/v1/capabilities`. Writes and header-parameter
-operations stay behind `service_api_write` + runtime approval. A spec that lives
+operations stay behind `service_write` + runtime approval. A spec that lives
 elsewhere than the API host is loaded with `openapiURL` (its auth headers are not
 sent off-host).
 
@@ -106,7 +106,7 @@ export RADARR_API_KEY=...
 ```
 
 Writes are exposed per operation only when `writeOperations` allow-lists them,
-and then as a preview + `service_api.confirm` pair — never a one-call mutation.
+and then as a preview + `service_confirm` pair — never a one-call mutation.
 
 ## How this was verified
 

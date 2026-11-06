@@ -16,7 +16,7 @@ import {
  * Core never opens `docker.sock` directly and only ever talks to the configured
  * proxy root; redirects are refused so a proxy cannot redirect Core elsewhere.
  * Reads are unprivileged on the client side, and the one write
- * (`container.restart`) stays on the product action path with on-device
+ * (`container_restart`) stays on the product action path with on-device
  * approval, execute, verify, and receipt — it is never attached to the model's
  * tool loop.
  */

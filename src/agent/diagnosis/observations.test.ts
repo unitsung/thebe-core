@@ -42,16 +42,22 @@ describe("diagnosis observations", () => {
     });
 
     expect(result.observations.length).toBeGreaterThan(0);
-    expect(result.observations.some((item) => item.kind === "state")).toBe(true);
-    expect(result.observations.some((item) => /no space/i.test(item.fact))).toBe(true);
+    expect(result.observations.some((item) => item.kind === "state")).toBe(
+      true
+    );
+    expect(
+      result.observations.some((item) => /no space/i.test(item.fact))
+    ).toBe(true);
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain(secret);
     expect(serialized).toContain(REDACTED);
-    expect(result.evidence.every((item) => item.excerpt.length <= 800)).toBe(true);
+    expect(result.evidence.every((item) => item.excerpt.length <= 800)).toBe(
+      true
+    );
     expect(result.toolTranscript.map((item) => item.tool)).toEqual([
-      "container.inspect",
-      "container.logs",
-      "container.status_summary",
+      "container_inspect",
+      "container_logs",
+      "container_status_summary",
     ]);
   });
 

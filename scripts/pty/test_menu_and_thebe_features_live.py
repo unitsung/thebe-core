@@ -53,7 +53,7 @@ def main() -> int:
         session.clear_editor()
         session.send("/mcp list\r")
         mcp_out = strip_ansi(session.read_until_quiet(timeout=0.6, max_wait=5.0))
-        check("/mcp lists core tools", "container.list" in mcp_out or "list_core_events" in mcp_out, mcp_out[-300:])
+        check("/mcp lists core tools", "container_list" in mcp_out or "list_core_events" in mcp_out, mcp_out[-300:])
         session.clear_editor()
         session.send("/subagent list\r")
         sub_out = strip_ansi(session.read_until_quiet(timeout=0.6, max_wait=5.0))

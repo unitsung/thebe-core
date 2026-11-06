@@ -1,14 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
-import type { MediaLibraryProvider, PhotoLibraryProvider } from "./capabilities/media.ts";
+import type {
+  MediaLibraryProvider,
+  PhotoLibraryProvider,
+} from "./capabilities/media.ts";
 import { createThebeAgent } from "./index.ts";
 import { createFakeRuntime } from "../testing/runtime/index.ts";
 
 function containerProvider(): ContainerInfoProvider {
   return {
-    async listContainers() { return []; },
-    async inspectContainer() { throw new Error("unused"); },
-    async getContainerLogs() { return ""; },
+    async listContainers() {
+      return [];
+    },
+    async inspectContainer() {
+      throw new Error("unused");
+    },
+    async getContainerLogs() {
+      return "";
+    },
     async getStatusSummary() {
       return {
         totalContainers: 0,
@@ -23,9 +32,15 @@ function containerProvider(): ContainerInfoProvider {
 
 function library(detailOverview: string): MediaLibraryProvider {
   return {
-    async listLibraries() { return []; },
-    async listRecent() { return []; },
-    async listSessions() { return []; },
+    async listLibraries() {
+      return [];
+    },
+    async listRecent() {
+      return [];
+    },
+    async listSessions() {
+      return [];
+    },
     async searchItems() {
       return {
         items: [{ id: "item-1", title: "Arrival", type: "Movie", year: 2016 }],
@@ -52,14 +67,18 @@ describe("media library capabilities", () => {
     const creates: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
     const runtime = {
       ...fake.runtime,
-      async createSession(create: Parameters<typeof fake.runtime.createSession>[0]) {
+      async createSession(
+        create: Parameters<typeof fake.runtime.createSession>[0]
+      ) {
         creates.push(create);
         return fake.runtime.createSession(create);
       },
     };
     const absent = createThebeAgent({ runtime, provider: containerProvider() });
     await absent.createSession();
-    expect(creates[0]!.customTools.some((tool) => tool.name === "emby.search")).toBe(false);
+    expect(
+      creates[0]!.customTools.some((tool) => tool.name === "emby_search")
+    ).toBe(false);
 
     const overview = "A".repeat(2001);
     const agent = createThebeAgent({
@@ -67,9 +86,15 @@ describe("media library capabilities", () => {
       provider: containerProvider(),
       emby: library(overview),
       immich: {
-        async listAssets() { return []; },
-        async listAlbums() { return []; },
-        async getStatistics() { return { images: 0, videos: 0, total: 0 }; },
+        async listAssets() {
+          return [];
+        },
+        async listAlbums() {
+          return [];
+        },
+        async getStatistics() {
+          return { images: 0, videos: 0, total: 0 };
+        },
         async searchSemantic() {
           return [{ id: "asset-1", title: "beach.jpg", type: "IMAGE" }];
         },
@@ -77,26 +102,41 @@ describe("media library capabilities", () => {
     });
     await agent.createSession();
     const names = creates[1]!.customTools.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["emby.search", "emby.item", "immich.search"]));
-    expect(names).not.toContain("jellyfin.search");
+    expect(names).toEqual(
+      expect.arrayContaining(["emby_search", "emby_item", "immich_search"])
+    );
+    expect(names).not.toContain("jellyfin_search");
 
-    const capabilities = (await agent.listCapabilities()).map((item) => item.id);
-    expect(capabilities).toEqual(expect.arrayContaining(["emby.search", "emby.item", "immich.search"]));
-    expect(capabilities).not.toContain("jellyfin.item");
+    const capabilities = (await agent.listCapabilities()).map(
+      (item) => item.id
+    );
+    expect(capabilities).toEqual(
+      expect.arrayContaining(["emby_search", "emby_item", "immich_search"])
+    );
+    expect(capabilities).not.toContain("jellyfin_item");
 
-    const item = creates[1]!.customTools.find((tool) => tool.name === "emby.item")!;
+    const item = creates[1]!.customTools.find(
+      (tool) => tool.name === "emby_item"
+    )!;
     const observation = await item.execute("call-1", { id: "item-1" });
     const text = observation.content.map((part) => part.text).join("");
     expect(text).toContain('"overviewTruncated":true');
     expect(text).not.toContain("A".repeat(2001));
 
-    const full = await agent.invokeTool("emby.item", { id: "item-1" });
+    const full = await agent.invokeTool("emby_item", { id: "item-1" });
     expect(full).toContain("A".repeat(2001));
     expect(full).not.toContain("overviewTruncated");
-    const search = await agent.invokeTool("emby.search", { query: "Arrival", year: 2016 });
+    const search = await agent.invokeTool("emby_search", {
+      query: "Arrival",
+      year: 2016,
+    });
     expect(search).toContain('"id":"item-1"');
-    const photos = await agent.invokeTool("immich.search", { query: "bicycle" });
+    const photos = await agent.invokeTool("immich_search", {
+      query: "bicycle",
+    });
     expect(photos).toContain('"id":"asset-1"');
-    expect(await agent.invokeTool("emby.item", { id: "missing" })).toContain("null");
+    expect(await agent.invokeTool("emby_item", { id: "missing" })).toContain(
+      "null"
+    );
   });
 });

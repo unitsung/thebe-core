@@ -3,14 +3,19 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
-import { createAuditLog, hashParameters } from "../../agent/security/audit/audit-log.ts";
+import {
+  createAuditLog,
+  hashParameters,
+} from "../../agent/security/audit/audit-log.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
 function provider(): ContainerInfoProvider {
   return {
     listContainers: async () => [],
-    inspectContainer: async () => { throw new Error("unused"); },
+    inspectContainer: async () => {
+      throw new Error("unused");
+    },
     getContainerLogs: async () => "ok",
     getStatusSummary: async () => ({
       totalContainers: 0,
@@ -32,14 +37,17 @@ describe("GET /v1/audit", () => {
     const auditPath = join(dir, "audit.jsonl");
     const legacy = {
       timestamp: "2026-09-21T00:00:00.000Z",
-      method: "container.logs",
+      method: "container_logs",
       parameterHash: hashParameters({ id: "legacy" }),
       responseBytes: 20,
       budgetConsumed: 0,
       redactionFired: false,
     };
     await writeFile(auditPath, `${JSON.stringify(legacy)}\n`, "utf8");
-    const audit = createAuditLog(auditPath, () => new Date("2026-09-21T00:00:00Z"));
+    const audit = createAuditLog(
+      auditPath,
+      () => new Date("2026-09-21T00:00:00Z")
+    );
 
     const page = await audit.list();
     const entry = page.entries[0];
@@ -53,10 +61,10 @@ describe("GET /v1/audit", () => {
     let timestamp = 0;
     const audit = createAuditLog(
       auditPath,
-      () => new Date(Date.UTC(2026, 8, 21, 0, 0, timestamp++)),
+      () => new Date(Date.UTC(2026, 8, 21, 0, 0, timestamp++))
     );
     await audit.append({
-      method: "container.inspect",
+      method: "container_inspect",
       parameterHash: hashParameters({ id: "one", secret: "never persisted" }),
       responseBytes: 12,
       budgetConsumed: 0,
@@ -65,7 +73,7 @@ describe("GET /v1/audit", () => {
       result: "ok",
     });
     await audit.append({
-      method: "container.logs",
+      method: "container_logs",
       parameterHash: hashParameters({ id: "two" }),
       responseBytes: 20,
       budgetConsumed: 0,
@@ -74,7 +82,7 @@ describe("GET /v1/audit", () => {
       result: "error",
     });
     await audit.append({
-      method: "container.inspect",
+      method: "container_inspect",
       parameterHash: hashParameters({ id: "three" }),
       responseBytes: 24,
       budgetConsumed: 0,
@@ -88,44 +96,59 @@ describe("GET /v1/audit", () => {
       provider: provider(),
       auditPath,
     });
-    const first = await body(await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/audit?limit=2"),
-    ));
+    const first = await body(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/audit?limit=2")
+      )
+    );
     const entries = first.entries as Array<Record<string, unknown>>;
     expect(entries.map((entry) => entry.method)).toEqual([
-      "container.inspect",
-      "container.logs",
+      "container_inspect",
+      "container_logs",
     ]);
     expect(entries[1]?.id).toEqual(expect.any(String));
     expect(first.nextCursor).toEqual(expect.any(String));
     expect(JSON.stringify(first)).not.toContain("never persisted");
 
     const detail = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/audit/${entries[1]?.id}`),
+      new Request(`http://127.0.0.1:8787/v1/audit/${entries[1]?.id}`)
     );
     expect(detail.status).toBe(200);
     expect(await body(detail)).toMatchObject({
       id: entries[1]?.id,
-      method: "container.logs",
+      method: "container_logs",
       sessionId: "session-a",
     });
 
     const missing = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/audit/missing"),
+      new Request("http://127.0.0.1:8787/v1/audit/missing")
     );
     expect(missing.status).toBe(404);
 
-    const older = await body(await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/audit?cursor=${first.nextCursor}`),
-    ));
-    expect((older.entries as Array<Record<string, unknown>>).map((entry) => entry.method))
-      .toEqual(["container.inspect"]);
+    const older = await body(
+      await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/audit?cursor=${first.nextCursor}`)
+      )
+    );
+    expect(
+      (older.entries as Array<Record<string, unknown>>).map(
+        (entry) => entry.method
+      )
+    ).toEqual(["container_inspect"]);
 
-    const filtered = await body(await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/audit?sessionId=session-a&result=error"),
-    ));
+    const filtered = await body(
+      await app.handler.handle(
+        new Request(
+          "http://127.0.0.1:8787/v1/audit?sessionId=session-a&result=error"
+        )
+      )
+    );
     expect(filtered.entries).toEqual([
-      expect.objectContaining({ method: "container.logs", sessionId: "session-a", result: "error" }),
+      expect.objectContaining({
+        method: "container_logs",
+        sessionId: "session-a",
+        result: "error",
+      }),
     ]);
   });
 
@@ -136,13 +159,13 @@ describe("GET /v1/audit", () => {
     });
     for (const query of ["limit=0", "cursor=-1", "result=unknown"]) {
       const response = await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/audit?${query}`),
+        new Request(`http://127.0.0.1:8787/v1/audit?${query}`)
       );
       expect(response.status).toBe(400);
     }
-    const empty = await body(await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/audit"),
-    ));
+    const empty = await body(
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/audit"))
+    );
     expect(empty).toEqual({ entries: [] });
   });
 
@@ -152,13 +175,18 @@ describe("GET /v1/audit", () => {
       provider: provider(),
     });
     const response = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/openapi.json"),
+      new Request("http://127.0.0.1:8787/openapi.json")
     );
     const document = await body(response);
     expect(document.paths).toHaveProperty("/v1/audit");
     expect(document.paths).toHaveProperty("/v1/audit/{id}");
-    expect(document.components).toEqual(expect.objectContaining({
-      schemas: expect.objectContaining({ AuditRecord: expect.any(Object), AuditList: expect.any(Object) }),
-    }));
+    expect(document.components).toEqual(
+      expect.objectContaining({
+        schemas: expect.objectContaining({
+          AuditRecord: expect.any(Object),
+          AuditList: expect.any(Object),
+        }),
+      })
+    );
   });
 });

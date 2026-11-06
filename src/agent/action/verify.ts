@@ -1,13 +1,15 @@
-import type { ContainerDetail, ContainerInfoProvider } from "../capabilities/containers.ts";
+import type {
+  ContainerDetail,
+  ContainerInfoProvider,
+} from "../capabilities/containers.ts";
 import type { ResourceRef } from "../diagnosis/types.ts";
 import type { VerificationCheck, VerificationResult } from "./types.ts";
 
-const EMBY_PATHS = [
-  "/emby/System/Info/Public",
-  "/System/Info/Public",
-];
+const EMBY_PATHS = ["/emby/System/Info/Public", "/System/Info/Public"];
 
-export type ProbeHealth = (url: string) => Promise<{ ok: boolean; status?: number }>;
+export type ProbeHealth = (
+  url: string
+) => Promise<{ ok: boolean; status?: number }>;
 
 export async function verifyRestart(input: {
   provider: ContainerInfoProvider;
@@ -28,7 +30,7 @@ export async function verifyRestart(input: {
           ok: false,
           expected: "running",
           actual: "unavailable",
-          source: "container.inspect",
+          source: "container_inspect",
           observedAt,
         },
       ],
@@ -43,7 +45,7 @@ export async function verifyRestart(input: {
       ok: running,
       expected: "running",
       actual: detail.state,
-      source: "container.inspect",
+      source: "container_inspect",
       observedAt,
     },
   ];
@@ -61,17 +63,26 @@ export async function verifyRestart(input: {
   const failed = checks.some((item) => !item.ok && !item.skipped);
   const skippedOnly = checks.every((item) => item.ok || item.skipped);
   return {
-    status: failed ? "failed" : skippedOnly && !running ? "failed" : running ? "passed" : "failed",
+    status: failed
+      ? "failed"
+      : skippedOnly && !running
+        ? "failed"
+        : running
+          ? "passed"
+          : "failed",
     checks,
   };
 }
 
-export function isEmby(resource: ResourceRef, detail: ContainerDetail): boolean {
+export function isEmby(
+  resource: ResourceRef,
+  detail: ContainerDetail
+): boolean {
   const blob = [
     resource.name,
     detail.name,
     detail.image,
-    ...(Object.values(detail.config.labels ?? {})),
+    ...Object.values(detail.config.labels ?? {}),
   ]
     .filter(Boolean)
     .join(" ")
@@ -86,11 +97,11 @@ async function verifyEmbyHealth(input: {
 }): Promise<VerificationCheck> {
   if (!input.probe) {
     return {
-      id: "emby.health",
+      id: "emby_health",
       ok: true,
       expected: "reachable",
       actual: "skipped",
-      source: "emby.public_info",
+      source: "emby_public_info",
       observedAt: input.observedAt,
       skipped: true,
     };
@@ -98,11 +109,11 @@ async function verifyEmbyHealth(input: {
   const urls = embyUrls(input.detail);
   if (urls.length === 0) {
     return {
-      id: "emby.health",
+      id: "emby_health",
       ok: true,
       expected: "reachable",
       actual: "no published endpoint",
-      source: "emby.public_info",
+      source: "emby_public_info",
       observedAt: input.observedAt,
       skipped: true,
     };
@@ -112,11 +123,11 @@ async function verifyEmbyHealth(input: {
       const result = await input.probe(url);
       if (result.ok) {
         return {
-          id: "emby.health",
+          id: "emby_health",
           ok: true,
           expected: "reachable",
           actual: `HTTP ${result.status ?? 200}`,
-          source: "emby.public_info",
+          source: "emby_public_info",
           observedAt: input.observedAt,
         };
       }
@@ -125,11 +136,11 @@ async function verifyEmbyHealth(input: {
     }
   }
   return {
-    id: "emby.health",
+    id: "emby_health",
     ok: false,
     expected: "reachable",
     actual: "unreachable",
-    source: "emby.public_info",
+    source: "emby_public_info",
     observedAt: input.observedAt,
   };
 }
@@ -140,7 +151,10 @@ function embyUrls(detail: ContainerDetail): string[] {
   for (const [containerPort, hosts] of Object.entries(ports)) {
     if (!/8096/.test(containerPort) && !/443/.test(containerPort)) continue;
     for (const host of hosts ?? []) {
-      const ip = !host.HostIp || host.HostIp === "0.0.0.0" || host.HostIp === "::" ? "127.0.0.1" : host.HostIp;
+      const ip =
+        !host.HostIp || host.HostIp === "0.0.0.0" || host.HostIp === "::"
+          ? "127.0.0.1"
+          : host.HostIp;
       const port = host.HostPort;
       if (!port) continue;
       const scheme = /443/.test(containerPort) ? "https" : "http";

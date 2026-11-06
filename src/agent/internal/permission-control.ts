@@ -40,6 +40,21 @@ export function createPermissionControl(input: {
    * request does (a file write inside the workspace, a command the sandbox contains).
    */
   autoApprove?(request: PermissionRequest): Promise<boolean>;
+  /**
+   * Whether the Ticket this session carries out authorises the request without asking: the write is
+   * inside its Mandate. A session with no Ticket, or a write outside the scope, is not allowed here and
+   * falls through to the normal asking (and, for an unattended run, to an immediate refusal).
+   */
+  mandateAllows?(
+    thebeSessionId: string,
+    request: PermissionRequest
+  ): Promise<boolean>;
+  /**
+   * Whether nobody is there to answer this session's questions: a Ticket Eval accepted on its own is
+   * carried out with no person watching. Such a session is refused at once what it may not do, so the
+   * work fails fast instead of waiting for an answer that will not come.
+   */
+  unattended?(thebeSessionId: string): Promise<boolean>;
   lookupRemembered(
     thebeSessionId: string
   ): Promise<Record<string, "allow" | "deny"> | undefined>;
@@ -52,6 +67,14 @@ export function createPermissionControl(input: {
   let mode: PermissionMode = input.initialMode ?? "manual";
   const nonInteractiveRuns = new Set<string>();
   const pendingPermissions = new Map<string, PendingPermission>();
+
+  async function noOneIsThere(
+    thebeSessionId: string | undefined
+  ): Promise<boolean> {
+    if (!thebeSessionId) return false;
+    if (nonInteractiveRuns.has(thebeSessionId)) return true;
+    return (await input.unattended?.(thebeSessionId)) === true;
+  }
 
   function permissionMode(): PermissionMode {
     return mode;
@@ -130,12 +153,16 @@ export function createPermissionControl(input: {
           return "deny";
         if (policy === "allow" || remembered === "allow") return "allow";
         if (
+          thebeSessionId &&
+          (await input.mandateAllows?.(thebeSessionId, request)) === true
+        )
+          return "allow";
+        if (
           effective === "acceptEdits" &&
           (await input.autoApprove?.(request)) === true
         )
           return "allow";
-        if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
-          return "deny";
+        if (await noOneIsThere(thebeSessionId)) return "deny";
         return "ask";
       },
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
@@ -155,8 +182,7 @@ export function createPermissionControl(input: {
             : "deny";
         }
         if (remembered === "allow") return remembered;
-        if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
-          return "deny";
+        if (await noOneIsThere(thebeSessionId)) return "deny";
         return new Promise<"allow" | "deny">((resolve) => {
           const timer = setTimeout(() => {
             const pending = pendingPermissions.get(request.permissionId);

@@ -20,6 +20,13 @@ import {
 } from "../pipeline/job-runner.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
+import {
+  asObject,
+  integerOptional,
+  optionalString,
+  requiredString,
+  textResult,
+} from "./tool-args.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 
@@ -49,20 +56,20 @@ export function availablePipelineTools(
 ): PipelineToolName[] {
   const names: PipelineToolName[] = [];
   if (providers.downloads)
-    names.push("download.add", "download.list", "download.status");
-  if (providers.downloads?.pause) names.push("download.pause");
-  if (providers.downloads?.resume) names.push("download.resume");
-  if (providers.downloads?.remove) names.push("download.delete");
+    names.push("download_add", "download_list", "download_status");
+  if (providers.downloads?.pause) names.push("download_pause");
+  if (providers.downloads?.resume) names.push("download_resume");
+  if (providers.downloads?.remove) names.push("download_delete");
   if (providers.files)
     names.push(
-      "files.list",
-      "files.mkdir",
-      "files.copy",
-      "files.move",
-      "files.offline_download"
+      "files_list",
+      "files_mkdir",
+      "files_copy",
+      "files_move",
+      "files_offline_download"
     );
   if (providers.libraries?.length)
-    names.push("library.scan", "library.refresh_item");
+    names.push("library_scan", "library_refresh_item");
   return names;
 }
 
@@ -72,7 +79,7 @@ export function allPipelineToolNames(providers: PipelineProviders): string[] {
     ...availablePipelineTools(providers),
     ...(providers.search ? [RESOURCE_SEARCH_TOOL_NAME] : []),
     ...(canRunJobs(providers)
-      ? ["pipeline.acquire", "pipeline.advance", "pipeline.status"]
+      ? ["pipeline_acquire", "pipeline_advance", "pipeline_status"]
       : []),
   ];
 }
@@ -90,7 +97,7 @@ const JOB_SCHEMAS: Record<string, Record<string, unknown>> = {
     },
     required: ["query"],
   },
-  "pipeline.acquire": {
+  pipeline_acquire: {
     type: "object",
     properties: {
       kind: {
@@ -136,12 +143,12 @@ const JOB_SCHEMAS: Record<string, Record<string, unknown>> = {
     },
     required: ["title", "filesSourceDir", "libraryDir"],
   },
-  "pipeline.advance": {
+  pipeline_advance: {
     type: "object",
     properties: { jobId: { type: "string" } },
     required: ["jobId"],
   },
-  "pipeline.status": {
+  pipeline_status: {
     type: "object",
     properties: {
       jobId: { type: "string", description: "Omit to list all jobs." },
@@ -152,11 +159,11 @@ const JOB_SCHEMAS: Record<string, Record<string, unknown>> = {
 const JOB_DESCRIPTIONS: Record<string, string> = {
   [RESOURCE_SEARCH_TOOL_NAME]:
     "Search torrent indexers (Prowlarr) for a title. Returns ranked releases with size, seeders, quality and a downloadUrl. Search never downloads; show the best few to the user and let them choose.",
-  "pipeline.acquire":
-    "Start a deterministic acquisition job for the chosen release: download (or transfer the chosen share from the network drive), copy into the library folder, scan the media server and verify the item appears. Requires approval once for the whole plan. The job advances itself with fixed, bounded retries; call pipeline.advance to move it forward and pipeline.status to inspect it.",
-  "pipeline.advance":
+  pipeline_acquire:
+    "Start a deterministic acquisition job for the chosen release: download (or transfer the chosen share from the network drive), copy into the library folder, scan the media server and verify the item appears. Requires approval once for the whole plan. The job advances itself with fixed, bounded retries; call pipeline_advance to move it forward and pipeline_status to inspect it.",
+  pipeline_advance:
     "Advance a job by performing whatever step is possible now (never blocks). Call it repeatedly until stage is done or failed. A failed job carries a reason and advice; fix the cause, then advance again to resume.",
-  "pipeline.status":
+  pipeline_status:
     "Show jobs, their stage, attempt counts, log and any failure advice. Read-only.",
 };
 
@@ -209,12 +216,12 @@ export function createPipelineTools(
           args.type === "movie" || args.type === "tv" || args.type === "music"
             ? args.type
             : "any",
-        limit: integer(args.limit),
+        limit: integerOptional(args.limit),
       }),
     }));
   }
   if (book) {
-    define("pipeline.acquire", async (args) => {
+    define("pipeline_acquire", async (args) => {
       const job = await book.acquire({
         kind:
           args.kind === "cloud_transfer"
@@ -223,7 +230,7 @@ export function createPipelineTools(
               ? "torrent"
               : undefined,
         title: requiredString(args.title, "title"),
-        year: integer(args.year),
+        year: integerOptional(args.year),
         magnet: optionalString(args.magnet),
         transferSource: optionalString(args.transferSource),
         transferTool: optionalString(args.transferTool),
@@ -239,10 +246,10 @@ export function createPipelineTools(
       options.onAcquired?.(job.id);
       return view(job);
     });
-    define("pipeline.advance", async (args) =>
+    define("pipeline_advance", async (args) =>
       view(await book.advance(requiredString(args.jobId, "jobId")))
     );
-    define("pipeline.status", (args) => ({
+    define("pipeline_status", (args) => ({
       jobs: book.status(optionalString(args.jobId)).map(view),
     }));
   }
@@ -276,8 +283,8 @@ function view(job: import("../pipeline/job-runner.ts").Job) {
       job.stage === "done"
         ? "Finished. Report the result."
         : job.stage === "failed"
-          ? "Fix the cause in failure.advice, then call pipeline.advance."
-          : "Call pipeline.advance later to continue.",
+          ? "Fix the cause in failure.advice, then call pipeline_advance."
+          : "Call pipeline_advance later to continue.",
   };
 }
 
@@ -303,7 +310,7 @@ async function run(
   providers: PipelineProviders
 ): Promise<unknown> {
   switch (name) {
-    case "download.add": {
+    case "download_add": {
       const submitted = await providers.downloads!.add({
         urls: stringArray(args.urls, "urls"),
         savePath: optionalString(args.savePath),
@@ -313,22 +320,22 @@ async function run(
       });
       return {
         ...submitted,
-        note: "Submitted, not finished. Poll download.list or download.status for progress.",
+        note: "Submitted, not finished. Poll download_list or download_status for progress.",
       };
     }
-    case "download.pause":
-    case "download.resume": {
+    case "download_pause":
+    case "download_resume": {
       const hashes = stringArray(args.hashes, "hashes");
-      const verb = name === "download.pause" ? "pause" : "resume";
+      const verb = name === "download_pause" ? "pause" : "resume";
       await requireCapability(providers.downloads!, hashes, verb);
       await providers.downloads![verb]!(hashes);
       return {
         requested: hashes.length,
         hashes,
-        note: `Requested ${verb}. Confirm with download.status.`,
+        note: `Requested ${verb}. Confirm with download_status.`,
       };
     }
-    case "download.delete": {
+    case "download_delete": {
       const hashes = stringArray(args.hashes, "hashes");
       if (typeof args.deleteFiles !== "boolean")
         throw new Error("deleteFiles must be stated as true or false");
@@ -342,14 +349,14 @@ async function run(
         requested: hashes.length,
         hashes,
         deleteFiles: args.deleteFiles,
-        note: "Requested removal. Confirm with download.list.",
+        note: "Requested removal. Confirm with download_list.",
       };
     }
-    case "download.list": {
+    case "download_list": {
       const input: Parameters<DownloadProvider["list"]>[0] = {
         filter: filter(args.filter),
         category: optionalString(args.category),
-        limit: integer(args.limit),
+        limit: integerOptional(args.limit),
         engine: optionalString(args.engine),
       };
       const provider = providers.downloads!;
@@ -360,40 +367,40 @@ async function run(
         ? { downloads, unreachable }
         : { downloads };
     }
-    case "download.status":
+    case "download_status":
       return (
         (await providers.downloads!.get(requiredString(args.hash, "hash"))) ??
         null
       );
-    case "files.list":
+    case "files_list":
       return providers.files!.list({
         path: requiredString(args.path, "path"),
-        page: integer(args.page),
-        perPage: integer(args.perPage),
+        page: integerOptional(args.page),
+        perPage: integerOptional(args.perPage),
       });
-    case "files.mkdir":
+    case "files_mkdir":
       await providers.files!.mkdir(requiredString(args.path, "path"));
       return { created: true };
-    case "files.copy":
+    case "files_copy":
       return {
         ...(await providers.files!.copy(transfer(args))),
-        note: "Asynchronous. Verify with files.list.",
+        note: "Asynchronous. Verify with files_list.",
       };
-    case "files.move":
+    case "files_move":
       return {
         ...(await providers.files!.move(transfer(args))),
-        note: "Asynchronous. Verify with files.list.",
+        note: "Asynchronous. Verify with files_list.",
       };
-    case "files.offline_download":
+    case "files_offline_download":
       return {
         ...(await providers.files!.offlineDownload({
           urls: stringArray(args.urls, "urls"),
           destinationDir: requiredString(args.destinationDir, "destinationDir"),
           tool: optionalString(args.tool),
         })),
-        note: "Asynchronous. Verify with files.list.",
+        note: "Asynchronous. Verify with files_list.",
       };
-    case "library.scan": {
+    case "library_scan": {
       const provider = pickLibrary(providers, args.provider);
       await provider.scan();
       return {
@@ -402,7 +409,7 @@ async function run(
         note: "Scan is asynchronous. Verify with the media search tool.",
       };
     }
-    case "library.refresh_item": {
+    case "library_refresh_item": {
       const provider = pickLibrary(providers, args.provider);
       await provider.refreshItem({
         id: requiredString(args.id, "id"),
@@ -452,34 +459,6 @@ function filter(value: unknown) {
     : undefined;
 }
 
-function textResult(result: unknown): {
-  content: [{ type: "text"; text: string }];
-  details: Record<string, never>;
-} {
-  return {
-    content: [{ type: "text", text: JSON.stringify(result ?? null) }],
-    details: {},
-  };
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function optionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-function requiredString(value: unknown, name: string): string {
-  const parsed = optionalString(value);
-  if (!parsed) throw new Error(`${name} is required`);
-  return parsed;
-}
-
 function stringArray(value: unknown, name: string): string[] {
   if (!Array.isArray(value)) throw new Error(`${name} must be a list`);
   const items = value.flatMap((item) =>
@@ -487,10 +466,4 @@ function stringArray(value: unknown, name: string): string[] {
   );
   if (items.length === 0) throw new Error(`${name} must not be empty`);
   return items.slice(0, 20);
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.trunc(value)
-    : undefined;
 }

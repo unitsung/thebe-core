@@ -36,68 +36,177 @@ async function json(res: Response): Promise<Record<string, unknown>> {
 describe("skills / MCP / resources / permission-mode product HTTP", () => {
   it("imports disabled skills, preserves them across recreation, and refuses traversal or replacement", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-skill-import-"));
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
-    const content = "---\nname: nas-check\ndescription: Read-only NAS inspection\n---\nInspect status without making changes.\n";
-    const post = (text: string) => app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: text }),
-    }));
-    expect(await json(await post(content))).toMatchObject({ name: "nas-check", enabled: false, scope: "project" });
-    expect((await post(content.replace("Read-only NAS inspection", "Changed"))).status).toBe(400);
-    expect((await post(content.replace("nas-check", "../escape"))).status).toBe(400);
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: dir,
+    });
+    const content =
+      "---\nname: nas-check\ndescription: Read-only NAS inspection\n---\nInspect status without making changes.\n";
+    const post = (text: string) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/skills", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ content: text }),
+        })
+      );
+    expect(await json(await post(content))).toMatchObject({
+      name: "nas-check",
+      enabled: false,
+      scope: "project",
+    });
+    expect(
+      (await post(content.replace("Read-only NAS inspection", "Changed")))
+        .status
+    ).toBe(400);
+    expect((await post(content.replace("nas-check", "../escape"))).status).toBe(
+      400
+    );
     expect((await post("x".repeat(1_048_577))).status).toBe(400);
-    expect(await readFile(join(dir, ".thebe", "skills", "nas-check.md"), "utf8")).toBe(content);
-    const recreated = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
-    expect(await recreated.agent.getSkill("nas-check")).toMatchObject({ name: "nas-check", enabled: false, content });
+    expect(
+      await readFile(join(dir, ".thebe", "skills", "nas-check.md"), "utf8")
+    ).toBe(content);
+    const recreated = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: dir,
+    });
+    expect(await recreated.agent.getSkill("nas-check")).toMatchObject({
+      name: "nas-check",
+      enabled: false,
+      content,
+    });
     await app.agent.quiesce();
-    expect((await post(content.replace("nas-check", "another"))).status).toBe(503);
-    app.agent.closeMcp(); recreated.agent.closeMcp();
+    expect((await post(content.replace("nas-check", "another"))).status).toBe(
+      503
+    );
+    app.agent.closeMcp();
+    recreated.agent.closeMcp();
   });
 
   it("adds durable disabled MCP servers without leaking credentials or replacing existing configuration", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-add-"));
     await mkdir(join(dir, ".thebe"));
-    await writeFile(join(dir, ".thebe", "mcp.json"), JSON.stringify({ note: "preserved", mcpServers: { existing: { url: "http://127.0.0.1:1/mcp", disabled: true } } }));
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
-    const post = (body: unknown) => app.handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers", {
-      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
-    }));
-    const response = await post({ name: "notes", url: "http://127.0.0.1:2/mcp", headers: { Authorization: "Bearer fixture-secret" } });
+    await writeFile(
+      join(dir, ".thebe", "mcp.json"),
+      JSON.stringify({
+        note: "preserved",
+        mcpServers: {
+          existing: { url: "http://127.0.0.1:1/mcp", disabled: true },
+        },
+      })
+    );
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: dir,
+    });
+    const post = (body: unknown) =>
+      app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      );
+    const response = await post({
+      name: "notes",
+      url: "http://127.0.0.1:2/mcp",
+      headers: { Authorization: "Bearer fixture-secret" },
+    });
     expect(response.status).toBe(201);
     const result = await json(response);
-    expect(result).toMatchObject({ name: "notes", status: "disabled", disabled: true });
+    expect(result).toMatchObject({
+      name: "notes",
+      status: "disabled",
+      disabled: true,
+    });
     expect(JSON.stringify(result)).not.toContain("fixture-secret");
-    expect(JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))).toMatchObject({ note: "preserved", mcpServers: { existing: { disabled: true }, notes: { disabled: true } } });
+    expect(
+      JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))
+    ).toMatchObject({
+      note: "preserved",
+      mcpServers: { existing: { disabled: true }, notes: { disabled: true } },
+    });
     expect((await post({ name: "notes", command: "unused" })).status).toBe(400);
-    expect((await post({ name: "../escape", command: "unused" })).status).toBe(400);
-    expect((await post({ name: "invalid", url: "file:///tmp/test" })).status).toBe(400);
-    expect((await post({ name: "invalid", command: "unused", args: [42] })).status).toBe(400);
-    const recreated = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
-    expect(await recreated.agent.listMcpServers()).toEqual(expect.arrayContaining([expect.objectContaining({ name: "notes", disabled: true })]));
-    app.agent.closeMcp(); recreated.agent.closeMcp();
+    expect((await post({ name: "../escape", command: "unused" })).status).toBe(
+      400
+    );
+    expect(
+      (await post({ name: "invalid", url: "file:///tmp/test" })).status
+    ).toBe(400);
+    expect(
+      (await post({ name: "invalid", command: "unused", args: [42] })).status
+    ).toBe(400);
+    const recreated = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: dir,
+    });
+    expect(await recreated.agent.listMcpServers()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "notes", disabled: true }),
+      ])
+    );
+    app.agent.closeMcp();
+    recreated.agent.closeMcp();
   });
   it("removes a Thebe-registered MCP server durably and refuses ones it does not own", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-remove-"));
     await mkdir(join(dir, ".thebe"));
-    await writeFile(join(dir, ".thebe", "mcp.json"), JSON.stringify({ note: "preserved", mcpServers: {
-      notes: { url: "http://127.0.0.1:2/mcp", disabled: true }, keep: { url: "http://127.0.0.1:3/mcp", disabled: true },
-    } }));
-    await writeFile(join(dir, ".mcp.json"), JSON.stringify({ mcpServers: { external: { url: "http://127.0.0.1:4/mcp", disabled: true } } }));
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider(), workspacePath: dir });
-    const remove = (name: string) => app.handler.handle(new Request(`http://127.0.0.1:8787/v1/extensions/mcp/servers/${name}`, { method: "DELETE" }));
+    await writeFile(
+      join(dir, ".thebe", "mcp.json"),
+      JSON.stringify({
+        note: "preserved",
+        mcpServers: {
+          notes: { url: "http://127.0.0.1:2/mcp", disabled: true },
+          keep: { url: "http://127.0.0.1:3/mcp", disabled: true },
+        },
+      })
+    );
+    await writeFile(
+      join(dir, ".mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          external: { url: "http://127.0.0.1:4/mcp", disabled: true },
+        },
+      })
+    );
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      workspacePath: dir,
+    });
+    const remove = (name: string) =>
+      app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/extensions/mcp/servers/${name}`, {
+          method: "DELETE",
+        })
+      );
 
     expect(await json(await remove("notes"))).toEqual({ ok: true });
-    expect(JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))).toEqual({
-      note: "preserved", mcpServers: { keep: { url: "http://127.0.0.1:3/mcp", disabled: true } },
+    expect(
+      JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))
+    ).toEqual({
+      note: "preserved",
+      mcpServers: { keep: { url: "http://127.0.0.1:3/mcp", disabled: true } },
     });
-    const names = (await app.agent.listMcpServers()).map((server) => server.name);
+    const names = (await app.agent.listMcpServers()).map(
+      (server) => server.name
+    );
     expect(names).toContain("keep");
     expect(names).not.toContain("notes");
     expect((await remove("notes")).status).toBe(404);
 
     const refused = await remove("external");
     expect(refused.status).toBe(409);
-    expect(await json(refused)).toMatchObject({ code: "mcp_server_not_removable" });
-    expect(JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")).mcpServers).toHaveProperty("external");
+    expect(await json(refused)).toMatchObject({
+      code: "mcp_server_not_removable",
+    });
+    expect(
+      JSON.parse(await readFile(join(dir, ".mcp.json"), "utf8")).mcpServers
+    ).toHaveProperty("external");
 
     await app.agent.quiesce();
     expect((await remove("keep")).status).toBe(503);
@@ -105,10 +214,12 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
   });
   it("lists, gets, and patches skills without exposing file editing", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-skills-http-"));
-    await mkdir(join(dir, ".thebe", "skills", "demo-skill"), { recursive: true });
+    await mkdir(join(dir, ".thebe", "skills", "demo-skill"), {
+      recursive: true,
+    });
     await writeFile(
       join(dir, ".thebe", "skills", "demo-skill", "SKILL.md"),
-      "---\nname: demo-skill\ndescription: Demo skill\n---\nsecret skill body\n",
+      "---\nname: demo-skill\ndescription: Demo skill\n---\nsecret skill body\n"
     );
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -116,7 +227,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       workspacePath: dir,
     });
     const listed = await json(
-      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills")),
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills"))
     );
     const skills = listed.skills as Array<Record<string, unknown>>;
     expect(skills).toEqual(
@@ -126,32 +237,43 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
           description: "Demo skill",
           enabled: false,
         }),
-      ]),
+      ])
     );
     expect(JSON.stringify(listed)).not.toContain("secret skill body");
 
     const got = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/skills/demo-skill"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/skills/demo-skill")
+      )
     );
     expect(got.name).toBe("demo-skill");
     expect(got).not.toHaveProperty("content");
     expect(JSON.stringify(got)).not.toContain("secret skill body");
-    const content = await json(await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/skills/demo-skill/content"),
-    ));
-    expect(content).toMatchObject({ name: "demo-skill", content: expect.stringContaining("secret skill body") });
+    const content = await json(
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/skills/demo-skill/content")
+      )
+    );
+    expect(content).toMatchObject({
+      name: "demo-skill",
+      content: expect.stringContaining("secret skill body"),
+    });
     expect(content.contentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(content).not.toHaveProperty("filePath");
-    expect((await app.handler.handle(new Request("http://127.0.0.1:8787/v1/skills/unknown/content"))).status).toBe(404);
+    expect(
+      (
+        await app.handler.handle(
+          new Request("http://127.0.0.1:8787/v1/skills/unknown/content")
+        )
+      ).status
+    ).toBe(404);
 
     const patched = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/skills/demo-skill", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: true }),
-      }),
+      })
     );
     expect(patched.status).toBe(200);
     const after = await json(patched);
@@ -178,7 +300,11 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         return [{ name: "notes", command: "notes-mcp" }];
       },
       async setServerEnabled(name: string, enabled: boolean) {
-        return { name, status: enabled ? "configured" : "disabled", disabled: !enabled };
+        return {
+          name,
+          status: enabled ? "configured" : "disabled",
+          disabled: !enabled,
+        };
       },
       async invokeTool() {
         return "ok";
@@ -193,16 +319,16 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     const handler = createThebeHttpHandler({ version: "0.1.0", agent });
     const servers = await json(
       await handler.handle(
-        new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers")
+      )
     );
     expect(servers.servers).toEqual([
       expect.objectContaining({ name: "notes", command: "notes-mcp" }),
     ]);
     const tools = await json(
       await handler.handle(
-        new Request("http://127.0.0.1:8787/v1/extensions/mcp/tools"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/extensions/mcp/tools")
+      )
     );
     const listed = tools.tools as Array<Record<string, unknown>>;
     expect(listed).toEqual([
@@ -212,23 +338,33 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         serverName: "notes",
       }),
     ]);
-    expect(listed.some((item) => item.id === "container.list")).toBe(false);
+    expect(listed.some((item) => item.id === "container_list")).toBe(false);
   });
 
   it("PATCHes an MCP server enabled state and persists the product setting", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-mcp-toggle-http-"));
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
     const calls: Array<{ name: string; enabled: boolean }> = [];
     const mcp = {
-      async listTools() { return []; },
+      async listTools() {
+        return [];
+      },
       async listServers() {
         return [{ name: "notes", status: "ready", disabled: false }];
       },
       async setServerEnabled(name: string, enabled: boolean) {
         calls.push({ name, enabled });
-        return { name, status: enabled ? "configured" : "disabled", disabled: !enabled };
+        return {
+          name,
+          status: enabled ? "configured" : "disabled",
+          disabled: !enabled,
+        };
       },
-      async invokeTool() { return "ok"; },
+      async invokeTool() {
+        return "ok";
+      },
       close() {},
     };
     const agent = createThebeAgent({
@@ -244,12 +380,12 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: false }),
-      }),
+      })
     );
 
     expect(response.status).toBe(200);
     expect(await json(response)).toEqual(
-      expect.objectContaining({ name: "notes", disabled: true }),
+      expect.objectContaining({ name: "notes", disabled: true })
     );
     expect(calls).toEqual([{ name: "notes", enabled: false }]);
     expect(settingsStore.load().mcpServerStates).toEqual([
@@ -264,8 +400,8 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     });
     const empty = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/resources/enabled"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/resources/enabled")
+      )
     );
     expect(empty.resources).toEqual([]);
 
@@ -278,7 +414,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
           version: "1.0.0",
           source: "thebe://skills/demo-skill",
         }),
-      }),
+      })
     );
     expect(put.status).toBe(200);
     const stored = await json(put);
@@ -288,13 +424,13 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         kind: "skill",
         version: "1.0.0",
         source: "thebe://skills/demo-skill",
-      }),
+      })
     );
 
     const listed = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/resources/enabled"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/resources/enabled")
+      )
     );
     expect(listed.resources).toEqual([
       expect.objectContaining({ identity: "demo-skill" }),
@@ -303,20 +439,22 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     const deleted = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/resources/enabled/demo-skill", {
         method: "DELETE",
-      }),
+      })
     );
     expect(deleted.status).toBe(200);
     const after = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/resources/enabled"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/resources/enabled")
+      )
     );
     expect(after.resources).toEqual([]);
   });
 
   it("restores enabled resources after the HTTP App is recreated", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-resources-http-config-"));
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
     const first = createThebeApp({
       runtime: createFakeRuntime().runtime,
       provider: provider(),
@@ -332,7 +470,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
           version: "1.0.0",
           source: "thebe://skills/demo-skill",
         }),
-      }),
+      })
     );
     expect(put.status).toBe(200);
 
@@ -343,8 +481,8 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     });
     const listed = await json(
       await second.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/resources/enabled"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/resources/enabled")
+      )
     );
 
     expect(listed.resources).toEqual([
@@ -357,7 +495,9 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
 
   it("captures enabled resources as a durable resource-list Artifact", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-resource-artifact-http-"));
-    const settingsStore = createJsonAgentSettingsStore(join(dir, "config.json"));
+    const settingsStore = createJsonAgentSettingsStore(
+      join(dir, "config.json")
+    );
     const first = createThebeApp({
       runtime: createFakeRuntime().runtime,
       provider: provider(),
@@ -374,14 +514,14 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
           version: "1.0.0",
           source: "thebe://skills/demo-skill",
         }),
-      }),
+      })
     );
     expect(put.status).toBe(200);
 
     const captured = await first.handler.handle(
       new Request("http://127.0.0.1:8787/v1/resources/enabled/artifact", {
         method: "POST",
-      }),
+      })
     );
     expect(captured.status).toBe(200);
     const artifact = await json(captured);
@@ -390,14 +530,14 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         kind: "resource_list",
         title: "Enabled resources",
         contentType: "application/json",
-      }),
+      })
     );
 
     const artifactId = artifact.artifactId as string;
     const content = await json(
       await first.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`)
+      )
     );
     expect(JSON.parse(content.content as string)).toEqual({
       resources: [
@@ -414,7 +554,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     const blocked = await first.handler.handle(
       new Request("http://127.0.0.1:8787/v1/resources/enabled/artifact", {
         method: "POST",
-      }),
+      })
     );
     expect(blocked.status).toBe(503);
     await first.agent.unquiesce();
@@ -427,8 +567,8 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     });
     const listed = await json(
       await second.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/artifacts?kind=resource_list"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/artifacts?kind=resource_list")
+      )
     );
     expect(listed.artifacts).toEqual([
       expect.objectContaining({ artifactId, kind: "resource_list" }),
@@ -442,8 +582,8 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     });
     const got = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/settings/permissions"),
-      ),
+        new Request("http://127.0.0.1:8787/v1/settings/permissions")
+      )
     );
     expect(got.mode).toBe("manual");
     const patched = await app.handler.handle(
@@ -451,7 +591,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ mode: "plan" }),
-      }),
+      })
     );
     expect(patched.status).toBe(200);
     expect((await json(patched)).mode).toBe("plan");
@@ -460,7 +600,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
 
   it("OpenAPI names the new product paths and schemas", async () => {
     const spec = await createThebeHttpHandler({ version: "0.1.0" }).handle(
-      new Request("http://127.0.0.1:8787/openapi.json"),
+      new Request("http://127.0.0.1:8787/openapi.json")
     );
     const body = (await spec.json()) as OpenApiDocument;
     const paths = [
@@ -517,27 +657,39 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       };
     };
     expect(capabilityRun.properties?.status?.enum).toContain("interrupted");
-    expect(capabilityRun.properties?.recovery?.enum).toEqual(["restored", "interrupted"]);
+    expect(capabilityRun.properties?.recovery?.enum).toEqual([
+      "restored",
+      "interrupted",
+    ]);
     const invokePost = body.paths["/v1/capabilities/{id}/invoke"]?.post as {
-      responses?: Record<string, { content?: { "application/json"?: { schema?: unknown } } }>;
+      responses?: Record<
+        string,
+        { content?: { "application/json"?: { schema?: unknown } } }
+      >;
     };
-    expect(JSON.stringify(invokePost.responses?.["200"])).toContain("CapabilityInvokeResult");
+    expect(JSON.stringify(invokePost.responses?.["200"])).toContain(
+      "CapabilityInvokeResult"
+    );
     const invokeResult = schemas.CapabilityInvokeResult as {
       properties?: { artifactId?: { type?: string } };
     };
     expect(invokeResult.properties?.artifactId).toEqual(
-      expect.objectContaining({ type: "string" }),
+      expect.objectContaining({ type: "string" })
     );
-    expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.patch).toBeDefined();
-    expect(body.paths["/v1/extensions/mcp/servers/{name}"]?.delete).toBeDefined();
+    expect(
+      body.paths["/v1/extensions/mcp/servers/{name}"]?.patch
+    ).toBeDefined();
+    expect(
+      body.paths["/v1/extensions/mcp/servers/{name}"]?.delete
+    ).toBeDefined();
     expect(schemas.McpServerPatch).toEqual(
-      expect.objectContaining({ required: ["enabled"] }),
+      expect.objectContaining({ required: ["enabled"] })
     );
   });
 
   it("advertises product capability categories for infrastructure and photos", async () => {
     const spec = await createThebeHttpHandler({ version: "0.1.0" }).handle(
-      new Request("http://127.0.0.1:8787/openapi.json"),
+      new Request("http://127.0.0.1:8787/openapi.json")
     );
     const body = (await spec.json()) as OpenApiDocument;
     const capability = body.components.schemas.HomelabCapability as {
@@ -545,30 +697,54 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     };
 
     expect(capability.properties?.category?.enum).toEqual(
-      expect.arrayContaining(["compute", "storage", "network", "photos"]),
+      expect.arrayContaining(["compute", "storage", "network", "photos"])
     );
   });
 
   it("never returns MCP credentials or a probe result in the server list", async () => {
     const mcp = {
-      async listTools() { return []; },
-      async listServers() {
-        return [{
-          name: "notes", command: "notes-mcp", env: { API_KEY: "must-not-leak" },
-          headers: { authorization: "Bearer must-not-leak" }, status: "configured",
-        } as never];
+      async listTools() {
+        return [];
       },
-      async setServerEnabled() { return undefined; },
-      async invokeTool() { return "ok"; },
+      async listServers() {
+        return [
+          {
+            name: "notes",
+            command: "notes-mcp",
+            env: { API_KEY: "must-not-leak" },
+            headers: { authorization: "Bearer must-not-leak" },
+            status: "configured",
+          } as never,
+        ];
+      },
+      async setServerEnabled() {
+        return undefined;
+      },
+      async invokeTool() {
+        return "ok";
+      },
       close() {},
     };
-    const agent = createThebeAgent({ runtime: createFakeRuntime().runtime, provider: provider(), mcp });
+    const agent = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+      mcp,
+    });
     const handler = createThebeHttpHandler({ version: "0.1.0", agent });
-    const response = await handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers"));
+    const response = await handler.handle(
+      new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers")
+    );
     const body = await response.text();
-    expect(JSON.parse(body)).toEqual({ servers: [{ name: "notes", command: "notes-mcp", status: "configured" }] });
+    expect(JSON.parse(body)).toEqual({
+      servers: [{ name: "notes", command: "notes-mcp", status: "configured" }],
+    });
     expect(body).not.toContain("must-not-leak");
-    const check = await handler.handle(new Request("http://127.0.0.1:8787/v1/extensions/mcp/servers/notes/check", { method: "POST" }));
+    const check = await handler.handle(
+      new Request(
+        "http://127.0.0.1:8787/v1/extensions/mcp/servers/notes/check",
+        { method: "POST" }
+      )
+    );
     expect(check.status).toBe(404);
   });
 });

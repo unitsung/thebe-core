@@ -35,8 +35,8 @@ function receipt(
     [
       {
         id: `r-${status}`,
-        kind: "container.restart",
-        actionId: "container.restart",
+        kind: "container_restart",
+        actionId: "container_restart",
         resource: { kind: "container", id: "c", provider: "arcane" },
         status,
         group: "recent",
@@ -60,8 +60,8 @@ describe("activityStage", () => {
       [
         {
           id: "a",
-          kind: "container.restart",
-          actionId: "container.restart",
+          kind: "container_restart",
+          actionId: "container_restart",
           resource: { kind: "container", id: "c", provider: "arcane" },
           status: "pending",
           group: "needs_approval",

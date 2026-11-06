@@ -479,13 +479,12 @@ export interface ThebeAgent {
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
   /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
-  getPolicy(): Promise<Policy & { autoContainers: string[] }>;
+  getPolicy(): Promise<Policy & { modes: string[] }>;
   setPolicy(input: {
     rules?: unknown;
     acceptMode?: unknown;
     model?: unknown;
-    autoContainers?: unknown;
-  }): Promise<Policy & { autoContainers: string[] }>;
+  }): Promise<Policy & { modes: string[] }>;
   /** What Eval decided, newest first. In observe, `wouldAccept` marks what Core would have taken on. */
   listDecisions(query?: {
     thread?: string;

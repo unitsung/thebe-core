@@ -82,7 +82,7 @@ describe("a Ticket for work Eval took on", () => {
     requester: "container-health",
     policyVersion: "v1",
     matchedRuleIds: ["r1"],
-    scope: ["container.restart:emby"],
+    scope: ["container_restart:emby"],
     receiptIds: ["receipt-1"],
   };
 
@@ -96,7 +96,7 @@ describe("a Ticket for work Eval took on", () => {
       requester: "container-health",
       policyVersion: "v1",
       matchedRuleIds: ["r1"],
-      scope: ["container.restart:emby"],
+      scope: ["container_restart:emby"],
     });
     expect(ticket.links).toEqual({
       decisionId: accepted.decisionId,

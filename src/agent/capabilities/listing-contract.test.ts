@@ -28,7 +28,7 @@ describe("Listing result contract", () => {
   it("keeps the examples identical to what the tools emit", async () => {
     const policy = createPolicyEngine({
       now: () => new Date(),
-      allowedToolNames: ["container.list", "download.list", "files.list"],
+      allowedToolNames: ["container_list", "download_list", "files_list"],
     });
     const containers = createContainerTools(
       {
@@ -56,13 +56,13 @@ describe("Listing result contract", () => {
           .content[0].text
       );
 
-    expect(await call(containers, "container.list", {})).toEqual(
+    expect(await call(containers, "container_list", {})).toEqual(
       CONTAINER_LIST_EXAMPLE
     );
-    expect(await call(pipeline, "download.list", {})).toEqual(
+    expect(await call(pipeline, "download_list", {})).toEqual(
       DOWNLOAD_LIST_EXAMPLE
     );
-    expect(await call(pipeline, "files.list", { path: "/media" })).toEqual(
+    expect(await call(pipeline, "files_list", { path: "/media" })).toEqual(
       FILES_LIST_EXAMPLE
     );
   });

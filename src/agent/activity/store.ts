@@ -282,13 +282,13 @@ async function readFileSafe(path: string): Promise<ActivityRecord | undefined> {
     if (typeof parsed.id !== "string" || !ID_RE.test(parsed.id))
       return undefined;
     if (
-      parsed.kind !== "container.restart" &&
-      parsed.kind !== "container.diagnose"
+      parsed.kind !== "container_restart" &&
+      parsed.kind !== "container_diagnose"
     ) {
       return undefined;
     }
     if (
-      parsed.kind === "container.restart" &&
+      parsed.kind === "container_restart" &&
       parsed.status !== "pending" &&
       typeof parsed.receiptId !== "string"
     ) {

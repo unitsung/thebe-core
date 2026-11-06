@@ -53,6 +53,7 @@ export function createGoalApi(
     error: run.error,
     ...(run.blocked ? { blocked: true } : {}),
     ...(run.observe ? { observe: true } : {}),
+    ...(run.executor ? { executor: run.executor } : {}),
     ...(run.report ? { report: { ...run.report } } : {}),
     ...(run.attention ? { attention: { ...run.attention } } : {}),
     ...(run.allowAsk ? { allowAsk: true } : {}),
@@ -209,6 +210,7 @@ export function createGoalApi(
       criteria: persisted.criteria,
       maxIterations: persisted.maxIterations,
       observe: persisted.observe,
+      executor: persisted.executor,
       allowAsk: persisted.allowAsk,
       reviewBeforeDone: persisted.reviewBeforeDone,
     });
@@ -317,6 +319,7 @@ export function createGoalApi(
     criteria?: string[];
     maxIterations: number;
     observe?: boolean;
+    executor?: "ticket";
     allowAsk?: boolean;
     reviewBeforeDone?: boolean;
   }): ManagedGoal {
@@ -328,6 +331,7 @@ export function createGoalApi(
       criteria: input.criteria?.filter(Boolean),
       maxIterations: input.maxIterations,
       ...(input.observe ? { observe: true } : {}),
+      ...(input.executor ? { executor: input.executor } : {}),
       ...(input.allowAsk ? { allowAsk: true } : {}),
       ...(input.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
       iteration: 0,
@@ -380,6 +384,7 @@ export function createGoalApi(
       criteria?: string[];
       maxIterations?: number;
       observe?: boolean;
+      executor?: "ticket";
       allowAsk?: boolean;
       reviewBeforeDone?: boolean;
     }): Promise<GoalRun> {
@@ -403,6 +408,7 @@ export function createGoalApi(
         criteria: input.criteria,
         maxIterations: clampIterations(input.maxIterations),
         observe: input.observe,
+        executor: input.executor,
         allowAsk: input.allowAsk,
         reviewBeforeDone: input.reviewBeforeDone,
       });

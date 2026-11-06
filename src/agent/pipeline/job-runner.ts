@@ -250,7 +250,7 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
           fail(
             job,
             "the transfer finished but its content name is unknown",
-            "Copy the result into the library with files.copy, then scan the library, or re-import with the expected folder name.",
+            "Copy the result into the library with files_copy, then scan the library, or re-import with the expected folder name.",
             now()
           );
           return;
@@ -400,7 +400,7 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
       fail(
         job,
         "the media server did not pick the item up after repeated scans",
-        "Check the folder name (Title (Year)) and file names, then use library.refresh_item or rename and run acquire again.",
+        "Check the folder name (Title (Year)) and file names, then use library_refresh_item or rename and run acquire again.",
         now()
       );
       return;

@@ -1,4 +1,4 @@
-export const DIAGNOSIS_ACTION_ID = "container.diagnose" as const;
+export const DIAGNOSIS_ACTION_ID = "container_diagnose" as const;
 
 export type ResourceKind = "container";
 

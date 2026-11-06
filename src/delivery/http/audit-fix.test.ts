@@ -39,7 +39,9 @@ describe("audit remediation", () => {
   });
 
   it("rejects path-traversal session ids", () => {
-    expect(() => assertValidSessionId("../etc/passwd")).toThrow(/invalid session id/);
+    expect(() => assertValidSessionId("../etc/passwd")).toThrow(
+      /invalid session id/
+    );
     expect(() => assertValidSessionId("ok-id_1")).not.toThrow();
   });
 
@@ -50,7 +52,7 @@ describe("audit remediation", () => {
         thebeSessionId: "../escape",
         runtimeId: "pi-coding-agent",
         runtimeSessionId: "r1",
-      }),
+      })
     ).rejects.toThrow(/invalid session id/);
   });
 
@@ -94,7 +96,7 @@ describe("audit remediation", () => {
           text: "run",
           sessionId: session.thebeSessionId,
         }),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; text: string };
@@ -123,7 +125,7 @@ describe("audit remediation", () => {
           text: "hi",
           sessionId: session.thebeSessionId,
         }),
-      }),
+      })
     );
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const text = await res.text();
@@ -134,7 +136,10 @@ describe("audit remediation", () => {
   it("remember deny for bash is scoped to the command hash", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
-      { kind: "tools", calls: [{ name: "bash", args: { command: "docker volume prune -f" } }] },
+      {
+        kind: "tools",
+        calls: [{ name: "bash", args: { command: "docker volume prune -f" } }],
+      },
       { kind: "text", text: "after-deny" },
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
       { kind: "text", text: "after-ls" },
@@ -157,8 +162,8 @@ describe("audit remediation", () => {
     expect(meta.rememberedPermissions?.bash).toBeUndefined();
     expect(
       Object.keys(meta.rememberedPermissions ?? {}).some((key) =>
-        key.startsWith("bash:"),
-      ),
+        key.startsWith("bash:")
+      )
     ).toBe(true);
 
     const second = agent.prompt("safe", { thebeSessionId: sessionId });
@@ -175,7 +180,10 @@ describe("audit remediation", () => {
   it("policy-denies critical commands without creating an approval", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
-      { kind: "tools", calls: [{ name: "bash", args: { command: "zpool destroy tank" } }] },
+      {
+        kind: "tools",
+        calls: [{ name: "bash", args: { command: "zpool destroy tank" } }],
+      },
       { kind: "text", text: "after-denial" },
     ]);
     const agent = createThebeAgent({
@@ -218,12 +226,15 @@ describe("audit remediation", () => {
     });
     const session = await app.agent.createSession();
     await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/system/quiesce", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/system/quiesce", { method: "POST" })
     );
     const del = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/session/${session.thebeSessionId}`, {
-        method: "DELETE",
-      }),
+      new Request(
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}`,
+        {
+          method: "DELETE",
+        }
+      )
     );
     expect(del.status).toBe(503);
   });
@@ -239,11 +250,13 @@ describe("audit remediation", () => {
     const session = await app.agent.createSession();
     await app.agent.send("ping", session.thebeSessionId);
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/event"),
+      new Request("http://127.0.0.1:8787/v1/event")
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { events: Array<{ type: string }> };
-    expect(body.events.some((event) => event.type === "session_end")).toBe(true);
+    expect(body.events.some((event) => event.type === "session_end")).toBe(
+      true
+    );
   });
 
   it("GET message by id and Last-Event-ID reconnect work", async () => {
@@ -261,16 +274,16 @@ describe("audit remediation", () => {
     expect(user).toBeDefined();
     const one = await app.handler.handle(
       new Request(
-        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message/${user!.id}`,
-      ),
+        `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message/${user!.id}`
+      )
     );
     expect(one.status).toBe(200);
 
     const replay = await app.handler.handle(
       new Request(
         `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/log?follow=true`,
-        { headers: { "last-event-id": "1" } },
-      ),
+        { headers: { "last-event-id": "1" } }
+      )
     );
     const stream = replay.body!.getReader();
     const first = await stream.read();
@@ -301,11 +314,9 @@ describe("audit remediation", () => {
           },
         ],
       },
-      { thebeSessionId: session.thebeSessionId },
+      { thebeSessionId: session.thebeSessionId }
     );
-    const user = agent
-      .messages()
-      .find((row) => row.role === "user");
+    const user = agent.messages().find((row) => row.role === "user");
     expect(user?.text).toContain("beta");
     expect(user?.text).toContain("gamma");
     expect(user?.text).not.toContain("alpha");
@@ -319,7 +330,7 @@ describe("audit remediation", () => {
       version: "0.1.0",
     });
     const res = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/provider/google/oauth/login"),
+      new Request("http://127.0.0.1:8787/v1/provider/google/oauth/login")
     );
     expect(res.headers.get("content-type")).toContain("text/event-stream");
     const text = await res.text();
@@ -331,7 +342,10 @@ describe("audit remediation", () => {
     fake.queueTurns([
       { kind: "tools", calls: [{ name: "bash", args: { command: "ls" } }] },
       { kind: "text", text: "after-ls" },
-      { kind: "tools", calls: [{ name: "bash", args: { command: "docker volume prune -f" } }] },
+      {
+        kind: "tools",
+        calls: [{ name: "bash", args: { command: "docker volume prune -f" } }],
+      },
       { kind: "text", text: "after-prune" },
     ]);
     const agent = createThebeAgent({
@@ -351,9 +365,7 @@ describe("audit remediation", () => {
     const meta = await agent.getSession(sessionId);
     expect(meta.rememberedPermissions?.bash).toBeUndefined();
     expect(
-      meta.rememberedPermissions?.[
-        `bash:${hashParameters({ command: "ls" })}`
-      ],
+      meta.rememberedPermissions?.[`bash:${hashParameters({ command: "ls" })}`]
     ).toBe("allow");
 
     const second = agent.prompt("prune", { thebeSessionId: sessionId });
@@ -383,7 +395,7 @@ describe("audit remediation", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({}),
-      }),
+      })
     );
     expect(res.status).toBe(403);
   });
@@ -405,7 +417,7 @@ describe("audit remediation", () => {
           "content-type": "application/json",
         },
         body: JSON.stringify({}),
-      }),
+      })
     );
     expect(res.status).toBe(403);
   });
@@ -422,14 +434,14 @@ describe("audit remediation", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ apiKey: "k" }),
-      }),
+      })
     );
     const res = await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/provider/fake/test", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const body = (await res.json()) as { ok: boolean; message?: string };
@@ -467,11 +479,7 @@ describe("audit remediation", () => {
       label: "Slow",
       description: "hangs until aborted",
       parameters: { type: "object", properties: {} },
-      execute: async (
-        _id: string,
-        _params: unknown,
-        signal?: AbortSignal,
-      ) => {
+      execute: async (_id: string, _params: unknown, signal?: AbortSignal) => {
         await new Promise<void>((_resolve, reject) => {
           const onAbort = () => {
             aborted = true;
@@ -483,7 +491,10 @@ describe("audit remediation", () => {
           }
           signal?.addEventListener("abort", onAbort, { once: true });
         });
-        return { content: [{ type: "text" as const, text: "done" }], details: {} };
+        return {
+          content: [{ type: "text" as const, text: "done" }],
+          details: {},
+        };
       },
     };
     const fake = createFakeRuntime();
@@ -514,7 +525,7 @@ describe("audit remediation", () => {
     };
     const tools = wrapCustomTools(
       createContainerTools(mockProvider(), { policy, callerId: "test" }),
-      { policy, audit: audit as never },
+      { policy, audit: audit as never }
     );
     await tools[0]!.execute("c1", {});
     expect(records).toHaveLength(1);
@@ -561,10 +572,10 @@ describe("audit remediation", () => {
       version: "0.1.0",
     });
     await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/system/quiesce", { method: "POST" }),
+      new Request("http://127.0.0.1:8787/v1/system/quiesce", { method: "POST" })
     );
     const del = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/auth/fake", { method: "DELETE" }),
+      new Request("http://127.0.0.1:8787/v1/auth/fake", { method: "DELETE" })
     );
     expect(del.status).toBe(503);
     const key = await app.handler.handle(
@@ -572,7 +583,7 @@ describe("audit remediation", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ apiKey: "x" }),
-      }),
+      })
     );
     expect(key.status).toBe(503);
     const mcp = await app.handler.handle(
@@ -583,9 +594,9 @@ describe("audit remediation", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "container.list", arguments: {} },
+          params: { name: "container_list", arguments: {} },
         }),
-      }),
+      })
     );
     expect(mcp.status).toBe(503);
   });

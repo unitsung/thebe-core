@@ -13,7 +13,7 @@ import {
  */
 export const NAVIDROME_CONTRACT_PATH = "contracts/navidrome-capabilities.json";
 
-/** A queue as a client receives it from `navidrome.queue`, with a real two-item shape. */
+/** A queue as a client receives it from `navidrome_queue`, with a real two-item shape. */
 export const NAVIDROME_QUEUE_EXAMPLE = {
   items: [
     {
@@ -68,8 +68,8 @@ export function buildNavidromeContract() {
       ])
     ),
     examples: {
-      "navidrome.queue": NAVIDROME_QUEUE_EXAMPLE,
-      "navidrome.lyrics": NAVIDROME_LYRICS_EXAMPLE,
+      navidrome_queue: NAVIDROME_QUEUE_EXAMPLE,
+      navidrome_lyrics: NAVIDROME_LYRICS_EXAMPLE,
     },
   };
 }

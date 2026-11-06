@@ -18,10 +18,13 @@ export type TicketMandate = {
   /** Eval only: the rules that matched. */
   matchedRuleIds?: string[];
   /**
-   * Eval only: what the Ticket is allowed to touch, as `action:target` (for example `container.restart:emby`).
-   * It is the person's own list, narrowed to this one container. Anything outside it is not authorised.
+   * Eval only: what the Ticket is allowed to touch, as `service:write` (for example `docker:write`): the
+   * services that look after what the event is about. Anything outside it, and anything irreversible, is
+   * not authorised.
    */
   scope?: string[];
+  /** Eval only: what the work is, in the assessment's own one sentence. */
+  intent?: string;
 };
 
 export type TicketLinks = {

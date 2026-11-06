@@ -8,7 +8,10 @@ import {
 import { createThebeAgent } from "../create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 import { createActionApi } from "./service.ts";
-import { decide, createPolicyRunState } from "../security/policy/policy-engine.ts";
+import {
+  decide,
+  createPolicyRunState,
+} from "../security/policy/policy-engine.ts";
 
 function embyDetail(state: string): ContainerDetail {
   return {
@@ -58,7 +61,7 @@ const resource = {
   provider: "arcane" as const,
 };
 
-describe("container.restart policy metadata", () => {
+describe("container_restart policy metadata", () => {
   it("is write, disruptive, and approval-required from code", () => {
     expect(CONTAINER_RESTART_METADATA).toEqual({
       effect: "write",
@@ -67,7 +70,7 @@ describe("container.restart policy metadata", () => {
       permission: "confirm",
     });
     const decision = decide({
-      toolName: "container.restart",
+      toolName: "container_restart",
       runState: createPolicyRunState(),
       maxToolCalls: 50,
       maxBlocks: 3,
@@ -82,9 +85,12 @@ describe("container.restart policy metadata", () => {
 describe("approved restart action", () => {
   it("rejects execution without on-device approval", async () => {
     const boxes = provider({});
-    const api = createActionApi({ now: () => new Date("2026-09-17T00:00:00Z"), provider: boxes });
+    const api = createActionApi({
+      now: () => new Date("2026-09-17T00:00:00Z"),
+      provider: boxes,
+    });
     const receipt = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: false },
       idempotencyKey: "deny-1",
@@ -98,7 +104,9 @@ describe("approved restart action", () => {
 
   it("writes an activity record for rejected and successful outcomes", async () => {
     const { createActivityStore } = await import("../activity/store.ts");
-    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const store = createActivityStore({
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
     const boxes = provider({});
     const api = createActionApi({
       now: () => new Date("2026-09-17T00:00:00Z"),
@@ -106,19 +114,22 @@ describe("approved restart action", () => {
       activityStore: store,
     });
     await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: false },
       idempotencyKey: "deny-activity",
     });
     await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: true },
       idempotencyKey: "ok-activity",
     });
     const listed = await api.listActivity();
-    expect(listed.map((item) => item.status).sort()).toEqual(["rejected", "succeeded"]);
+    expect(listed.map((item) => item.status).sort()).toEqual([
+      "rejected",
+      "succeeded",
+    ]);
   });
 
   it("restarts, verifies running, and probes Emby when available", async () => {
@@ -132,9 +143,13 @@ describe("approved restart action", () => {
       },
     });
     const receipt = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
-      approval: { approved: true, approvedAt: "2026-09-17T00:00:00Z", client: "ios" },
+      approval: {
+        approved: true,
+        approvedAt: "2026-09-17T00:00:00Z",
+        client: "ios",
+      },
       idempotencyKey: "ok-1",
     });
     expect(boxes.restarts).toBe(1);
@@ -142,9 +157,13 @@ describe("approved restart action", () => {
     expect(receipt.verification.status).toBe("passed");
     expect(receipt.verification.checks).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ id: "container.state", ok: true, actual: "running" }),
-        expect.objectContaining({ id: "emby.health", ok: true }),
-      ]),
+        expect.objectContaining({
+          id: "container.state",
+          ok: true,
+          actual: "running",
+        }),
+        expect.objectContaining({ id: "emby_health", ok: true }),
+      ])
     );
     expect(receipt.tokenUsed).toBe(false);
   });
@@ -155,7 +174,7 @@ describe("approved restart action", () => {
     });
     const api = createActionApi({ now: () => new Date(), provider: boxes });
     const receipt = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: true },
       idempotencyKey: "verify-fail",
@@ -163,7 +182,11 @@ describe("approved restart action", () => {
     expect(receipt.action.status).toBe("succeeded");
     expect(receipt.verification.status).toBe("failed");
     expect(receipt.verification.checks[0]).toEqual(
-      expect.objectContaining({ id: "container.state", ok: false, actual: "exited" }),
+      expect.objectContaining({
+        id: "container.state",
+        ok: false,
+        actual: "exited",
+      })
     );
   });
 
@@ -175,7 +198,7 @@ describe("approved restart action", () => {
     });
     const api = createActionApi({ now: () => new Date(), provider: boxes });
     const receipt = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: true },
       idempotencyKey: "down-1",
@@ -188,13 +211,13 @@ describe("approved restart action", () => {
     const boxes = provider({});
     const api = createActionApi({ now: () => new Date(), provider: boxes });
     const first = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: true },
       idempotencyKey: "same",
     });
     const second = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource,
       approval: { approved: true },
       idempotencyKey: "same",
@@ -205,13 +228,13 @@ describe("approved restart action", () => {
 });
 
 describe("agent invokeTool cannot bypass approval", () => {
-  it("refuses container.restart on the MCP/tool path", async () => {
+  it("refuses container_restart on the MCP/tool path", async () => {
     const agent = createThebeAgent({
       runtime: createFakeRuntime().runtime,
       provider: provider({}),
     });
-    await expect(agent.invokeTool("container.restart", { id: "ctr-emby" })).rejects.toThrow(
-      /approval/,
-    );
+    await expect(
+      agent.invokeTool("container_restart", { id: "ctr-emby" })
+    ).rejects.toThrow(/approval/);
   });
 });

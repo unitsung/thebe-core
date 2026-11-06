@@ -20,6 +20,7 @@ import {
   renderLinesSnippet,
 } from "../../../agent/runtime/prompt-files.ts";
 import { mapPiEvent, mapPiMessages } from "./map-events.ts";
+import { createToolNameMap } from "./tool-names.ts";
 import { exportPiSession } from "./pi-export.ts";
 import type { PiSession } from "./pi-session.ts";
 import { lastAssistantText } from "./pi-tools.ts";
@@ -60,6 +61,10 @@ export function wrapSession(
 ): RuntimeSession {
   const listeners =
     existingListeners ?? new Set<(event: NormalizedEvent) => void>();
+  // The model sees provider-safe tool names; what Core hears is its own.
+  const fromWire = createToolNameMap(
+    create.customTools.map((tool) => tool.name)
+  ).fromWire;
   let revertedLeaf: string | undefined;
   let lastCompactedAt: string | undefined;
   function terminalModelError(): string | undefined {
@@ -82,7 +87,10 @@ export function wrapSession(
     // Pi's agent_end is a turn boundary; automatic retries can follow it.
     // Only agent_settled marks the completed request in the current SDK.
     if ((event as { type?: string }).type === "agent_end") return;
-    const mapped = mapPiEvent(event as Parameters<typeof mapPiEvent>[0]);
+    const mapped = mapPiEvent(
+      event as Parameters<typeof mapPiEvent>[0],
+      fromWire
+    );
     if (!mapped) {
       return;
     }
@@ -193,7 +201,7 @@ export function wrapSession(
     },
     lastAssistantText: () => lastAssistantText(session),
     toolNames: () =>
-      session.getActiveToolNames?.() ?? [
+      session.getActiveToolNames?.().map(fromWire) ?? [
         ...(create.builtinTools ?? PI_BUILTIN_TOOLS),
         ...create.customTools.map((tool) => tool.name),
       ],
@@ -201,7 +209,7 @@ export function wrapSession(
       await session.compact(customInstructions);
     },
     exportSession: () => exportPiSession(session as never),
-    messages: () => mapPiMessages(session.messages),
+    messages: () => mapPiMessages(session.messages, fromWire),
     currentModel: () =>
       session.model
         ? { providerId: session.model.provider, modelId: session.model.id }
@@ -242,7 +250,7 @@ export function wrapSession(
       if (typeof forking.getUserMessagesForForking === "function") {
         return forking.getUserMessagesForForking();
       }
-      return mapPiMessages(session.messages)
+      return mapPiMessages(session.messages, fromWire)
         .filter((m) => m.role === "user" && m.text)
         .map((m) => ({ entryId: m.id, text: m.text ?? "" }));
     },
@@ -267,7 +275,7 @@ export function wrapSession(
       const maxTokens = raw?.contextWindow ?? fallbackWindow;
       let usedTokens = raw?.tokens ?? 0;
       if (usedTokens === null || usedTokens === 0) {
-        const msgs = mapPiMessages(session.messages);
+        const msgs = mapPiMessages(session.messages, fromWire);
         const chars = msgs.reduce((acc, m) => acc + (m.text?.length ?? 0), 0);
         usedTokens = Math.ceil(chars / 4);
       }
@@ -349,7 +357,10 @@ export function wrapSession(
         resolved = resolveModelRef(model.providerId, model.modelId);
       }
       if (!resolved) {
-        throw httpError(404, `unknown model: ${model.providerId}/${model.modelId}`);
+        throw httpError(
+          404,
+          `unknown model: ${model.providerId}/${model.modelId}`
+        );
       }
       await session.setModel(resolved);
     },

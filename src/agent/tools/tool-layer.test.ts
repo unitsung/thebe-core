@@ -37,7 +37,7 @@ function fakeProvider(opts: {
 }
 
 describe("Tool Layer", () => {
-  it("container.list returns container summaries from ContainerInfoProvider", async () => {
+  it("container_list returns container summaries from ContainerInfoProvider", async () => {
     const tools = createToolLayer(
       fakeProvider({
         list: [
@@ -50,9 +50,9 @@ describe("Tool Layer", () => {
             created: 1_700_000_000,
           },
         ],
-      }),
+      })
     );
-    await expect(tools.invoke("container.list")).resolves.toEqual([
+    await expect(tools.invoke("container_list")).resolves.toEqual([
       {
         id: "abc123",
         name: "nginx",
@@ -64,7 +64,7 @@ describe("Tool Layer", () => {
     ]);
   });
 
-  it("container.inspect redacts SECRET TOKEN KEY PASSWORD PASS CREDENTIAL PRIVATE keys", async () => {
+  it("container_inspect redacts SECRET TOKEN KEY PASSWORD PASS CREDENTIAL PRIVATE keys", async () => {
     const tools = createToolLayer(
       fakeProvider({
         inspect: {
@@ -85,9 +85,9 @@ describe("Tool Layer", () => {
             ],
           },
         },
-      }),
+      })
     );
-    const result = (await tools.invoke("container.inspect", {
+    const result = (await tools.invoke("container_inspect", {
       id: "abc123",
     })) as { config: { env?: string[] } };
     expect(result.config.env).toEqual([
@@ -102,7 +102,7 @@ describe("Tool Layer", () => {
     ]);
   });
 
-  it("container.inspect redacts secret env before returning detail", async () => {
+  it("container_inspect redacts secret env before returning detail", async () => {
     const tools = createToolLayer(
       fakeProvider({
         inspect: {
@@ -115,10 +115,10 @@ describe("Tool Layer", () => {
             cmd: ["nginx"],
           },
         },
-      }),
+      })
     );
     await expect(
-      tools.invoke("container.inspect", { id: "abc123" }),
+      tools.invoke("container_inspect", { id: "abc123" })
     ).resolves.toEqual({
       id: "abc123",
       name: "nginx",
@@ -131,14 +131,14 @@ describe("Tool Layer", () => {
     });
   });
 
-  it("container.logs redacts tokens and truncates to 200 lines", async () => {
+  it("container_logs redacts tokens and truncates to 200 lines", async () => {
     const hex = "a".repeat(40);
     const lines = [
       ...Array.from({ length: 201 }, (_, i) => `L${i}`),
       `token=sk-live-abc123 hex=${hex}`,
     ];
     const tools = createToolLayer(fakeProvider({ logs: lines.join("\n") }));
-    const result = await tools.invoke("container.logs", { id: "abc123" });
+    const result = await tools.invoke("container_logs", { id: "abc123" });
     expect(typeof result).toBe("string");
     const text = result as string;
     expect(text.startsWith("[... truncated ...]\n")).toBe(true);
@@ -148,11 +148,11 @@ describe("Tool Layer", () => {
     expect(text.split("\n")).toHaveLength(201);
   });
 
-  it("container.logs never expands beyond the 200-line safety limit", async () => {
+  it("container_logs never expands beyond the 200-line safety limit", async () => {
     const lines = Array.from({ length: 250 }, (_, i) => `L${i}`);
     const tools = createToolLayer(fakeProvider({ logs: lines.join("\n") }));
 
-    const result = (await tools.invoke("container.logs", {
+    const result = (await tools.invoke("container_logs", {
       id: "abc123",
       tail: 999,
     })) as string;
@@ -164,7 +164,7 @@ describe("Tool Layer", () => {
     expect(result.split("\n")).toHaveLength(201);
   });
 
-  it("container.status_summary returns host counts from ContainerInfoProvider", async () => {
+  it("container_status_summary returns host counts from ContainerInfoProvider", async () => {
     const tools = createToolLayer(
       fakeProvider({
         summary: {
@@ -174,9 +174,9 @@ describe("Tool Layer", () => {
           exitedContainers: 1,
           lastUpdated: 1_700_000_100,
         },
-      }),
+      })
     );
-    await expect(tools.invoke("container.status_summary")).resolves.toEqual({
+    await expect(tools.invoke("container_status_summary")).resolves.toEqual({
       totalContainers: 4,
       runningContainers: 2,
       pausedContainers: 1,
@@ -187,8 +187,8 @@ describe("Tool Layer", () => {
 
   it("rejects a method name that is not one of the four container tools", async () => {
     const tools = createToolLayer(fakeProvider({}));
-    await expect(tools.invoke("container.start")).rejects.toThrow(
-      "unknown tool: container.start",
+    await expect(tools.invoke("container_start")).rejects.toThrow(
+      "unknown tool: container_start"
     );
   });
 });

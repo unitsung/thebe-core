@@ -10,8 +10,10 @@ import { createTriggerStore } from "./sources/store.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
 import type { Policy } from "./eval/types.ts";
-import { createAutoRestart } from "./eval/auto-restart.ts";
-import { createEvalService } from "./eval/service.ts";
+import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
+import { executorTask } from "./eval/executor-task.ts";
+import { ticketIdFor } from "./tickets/ids.ts";
+import { inferScope } from "./tickets/mandate.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
@@ -103,40 +105,84 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     activityStore,
     artifactStore,
   });
+  // A Ticket's executor writes under its Mandate, found from the Goal session it runs in, and a restart it
+  // makes goes through the same approved-action path a person's approval reaches.
+  ctx.setMandateLookup(
+    async (thebeSessionId) =>
+      (await ticketStore.getByGoal(thebeSessionId))?.mandate
+  );
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,
     sources: options.sources?.containerHealth ? "container-health" : "",
     maxPerHour: options.evalMaxPerHour,
-    act: createAutoRestart({
-      provider: options.provider,
-      actions,
-      activity: activityStore,
-      diagnose: diagnosis.diagnose,
-      now: ctx.now,
-    }),
-    onAccepted: async (decision) => {
-      const action = decision.action;
-      if (!action) return;
-      const container = action.container ?? decision.thread;
-      await ticketStore.recordAccepted({
-        evalId: decision.evalId,
-        decisionId: decision.id,
-        thread: decision.thread,
-        at: decision.at,
-        title:
-          action.kind === "restart"
-            ? `Restart ${container}`
-            : `Look at ${container}`,
-        requester: "container-health",
-        policyVersion: decision.policyVersion,
-        matchedRuleIds: decision.matchedRuleIds,
-        // The authority is the person's list, narrowed to this container. A Ticket that only handed the
-        // container to the person authorises nothing to be done without them.
-        scope:
-          action.kind === "restart" ? [`container.restart:${container}`] : [],
-        receiptIds: action.receiptId ? [action.receiptId] : undefined,
+    threadTickets: async (thread) => {
+      // The work taken on for this thread that the Eval could still be looking at: nothing older than the
+      // oldest event it weighs.
+      const since = ctx.now().getTime() - DEFAULT_BACKLOG_AGE_MS;
+      const rows = (await ticketStore.list()).filter(
+        (ticket) =>
+          ticket.subscriptions.includes(thread) &&
+          Date.parse(ticket.createdAt) >= since
+      );
+      return rows.map((ticket) => ({
+        title: ticket.title,
+        at: ticket.createdAt,
+        state:
+          (ticket.links.legacyGoalId
+            ? goals.getGoal(ticket.links.legacyGoalId)?.status
+            : undefined) ?? "unknown",
+      }));
+    },
+    accept: async (input) => {
+      const ticketId = ticketIdFor(input.evalId);
+      // Made again after a crash: the same Eval is the same Ticket, and its Goal already started.
+      const existing = await ticketStore.get(ticketId);
+      if (existing?.links.legacyGoalId) {
+        return { ticketId, goalId: existing.links.legacyGoalId };
+      }
+      const intent = input.assessment.intent ?? `Handle ${input.thread}`;
+      const scope = inferScope(input.triggers, (kind) =>
+        (options.serviceAPIProviders ?? [])
+          .filter((service) => service.resourceKinds?.includes(kind))
+          .map((service) => service.id)
+      );
+      // The Goal's session exists first and the Ticket is made before the executor runs: the executor's
+      // writes are judged by the Ticket's Mandate, found from this session.
+      const session = await sessions.createSession({
+        title: intent,
+        labels: { kind: "goal", ticketId },
       });
+      await ticketStore.recordAccepted({
+        evalId: input.evalId,
+        decisionId: input.decisionId,
+        thread: input.thread,
+        at: input.at,
+        title: intent,
+        // Whoever saw the event is who asked.
+        requester: input.triggers[0]?.source ?? input.thread,
+        policyVersion: input.policyVersion,
+        matchedRuleIds: input.assessment.matchedRuleIds,
+        scope,
+        intent,
+        goalId: session.thebeSessionId,
+      });
+      await goals.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: executorTask({
+          intent,
+          rules: input.policy.rules.filter((rule) =>
+            input.assessment.matchedRuleIds.includes(rule.id)
+          ),
+          triggers: input.triggers,
+          scope,
+        }),
+        criteria: [
+          "The situation the event describes is resolved, checked with the read tools after any action; or you reported why it cannot be (blocked), or that nothing needed doing (dropped).",
+        ],
+        executor: "ticket",
+      });
+      return { ticketId, goalId: session.thebeSessionId };
     },
     now: ctx.now,
     onError: () => {
@@ -209,10 +255,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       executeAction: actions.executeApprovedAction,
     }),
     async getPolicy() {
-      return withAutoList(await policyStore.get());
+      return withModes(await policyStore.get());
     },
     async setPolicy(input) {
-      return withAutoList(await policyStore.set(input));
+      return withModes(await policyStore.set(input));
     },
     async listDecisions(query) {
       return decisionStore.list(query);
@@ -281,9 +327,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
 }
 
 /**
- * A Core that has the `auto` mode always says which containers it may restart, empty or not. A client
- * learns from that list being there that the mode exists: an older Core never sends it.
+ * What a Core says about its policy always includes the modes it has, so a client offers `auto` only where it
+ * exists: an older Core does not send this.
  */
-function withAutoList(policy: Policy): Policy & { autoContainers: string[] } {
-  return { ...policy, autoContainers: policy.autoContainers ?? [] };
+function withModes(policy: Policy): Policy & { modes: string[] } {
+  return { ...policy, modes: ["off", "observe", "auto"] };
 }

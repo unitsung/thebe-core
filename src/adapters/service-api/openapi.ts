@@ -9,6 +9,8 @@ type ObjectValue = Record<string, unknown>;
 export type OpenAPIConnection = {
   id: string;
   baseURL: string;
+  /** What this service looks after, e.g. `["container"]`; see `ServiceAPIProvider.resourceKinds`. */
+  resourceKinds?: string[];
   /** Relative JSON schema path; omit to probe common OpenAPI locations. */
   openapiPath?: string;
   /** Absolute JSON schema URL, when the spec is not served by the API host. */
@@ -59,8 +61,18 @@ const SPEC_TTL = 5 * 60_000;
 const SECRET_TTL = 10 * 60_000;
 
 /** No service names, endpoint catalog or per-operation tool implementations. */
+/** The service serves no API description we can read. It can still be called; it just cannot be browsed. */
+class NoDescriptionError extends Error {
+  constructor() {
+    super(
+      "No JSON OpenAPI description was found for this service. Calls are still possible with service_write (a method and path from the service's own documentation; it needs approval unless the Ticket you work for covers it), and service_read for methods the operator marked read-only."
+    );
+  }
+}
+
 export class OpenAPIService implements ServiceAPIProvider {
   readonly id: string;
+  readonly resourceKinds?: readonly string[];
   private readonly baseURL: string;
   private readonly readMethods: Set<string>;
   private readonly trustAnnotations: boolean;
@@ -82,6 +94,7 @@ export class OpenAPIService implements ServiceAPIProvider {
     if (!/^[a-zA-Z0-9_.-]{1,80}$/.test(connection.id))
       throw new Error("Invalid service connection ID");
     this.id = connection.id;
+    this.resourceKinds = connection.resourceKinds;
     const url = new URL(connection.baseURL);
     if (
       !["http:", "https:"].includes(url.protocol) ||
@@ -110,7 +123,19 @@ export class OpenAPIService implements ServiceAPIProvider {
   async catalog(
     input: Parameters<ServiceAPIProvider["catalog"]>[0] = {}
   ): Promise<unknown> {
-    const schema = await this.loadSchema(input.refresh === true, input.signal);
+    let schema: Awaited<ReturnType<OpenAPIService["loadSchema"]>>;
+    try {
+      schema = await this.loadSchema(input.refresh === true, input.signal);
+    } catch (error) {
+      // Not an error: a service without a description is still a service. Say so, with what to do.
+      if (!(error instanceof NoDescriptionError)) throw error;
+      return {
+        total: 0,
+        operations: [],
+        described: false,
+        notes: error.message,
+      };
+    }
     // Every word of the query must appear somewhere in the operation, in any order, so
     // "list containers" finds `GET /containers` instead of needing the exact phrase.
     const words = (input.query ?? "")
@@ -190,7 +215,19 @@ export class OpenAPIService implements ServiceAPIProvider {
       this.connection.excludeOperations?.length ||
       this.connection.excludeTags?.length
     );
-    if (input.readOnly || denies) {
+    // Without a description there is nothing to check a read against: the operator's own list of
+    // read-only methods is then the whole rule, and with no such list the call is a write.
+    const undescribedRead =
+      input.readOnly && !denies && this.readMethods.has(input.method)
+        ? await this.loadSchema(false, input.signal).then(
+            () => false,
+            (error) => {
+              if (error instanceof NoDescriptionError) return true;
+              throw error;
+            }
+          )
+        : false;
+    if ((input.readOnly || denies) && !undescribedRead) {
       const schema = await this.loadSchema(false, input.signal);
       const pathname = path.split("?")[0]!;
       const op =
@@ -211,7 +248,7 @@ export class OpenAPIService implements ServiceAPIProvider {
         throw new Error("This operation is excluded by the operator");
       if (input.readOnly && (!op || !this.readable(op)))
         throw new Error(
-          "Use service_api_write and runtime approval for this operation"
+          "Use service_write and runtime approval for this operation"
         );
     }
     const hydrated = this.hydrate(input.body);
@@ -489,9 +526,7 @@ export class OpenAPIService implements ServiceAPIProvider {
         this.schema = { document, operations, source, fetchedAt: Date.now() };
         return this.schema;
       }
-      throw new Error(
-        "No JSON OpenAPI found. Configure openapiPath or openapiURL, or use Core coding/MCP tools to inspect service documentation; no new tool implementation is needed."
-      );
+      throw new NoDescriptionError();
     })();
     try {
       return await this.loading;
@@ -684,6 +719,11 @@ export function openAPIConnectionsFromEnv(
     return new OpenAPIService({
       id: entry.id,
       baseURL: entry.baseURL,
+      resourceKinds: Array.isArray(entry.resourceKinds)
+        ? entry.resourceKinds.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : undefined,
       openapiPath:
         typeof entry.openapiPath === "string" ? entry.openapiPath : undefined,
       openapiURL:

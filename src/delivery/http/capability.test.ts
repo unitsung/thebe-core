@@ -72,7 +72,7 @@ afterEach(() => {
 });
 
 describe("capability product HTTP", () => {
-  it("exposes and invokes a provider-backed strm.repair capability", async () => {
+  it("exposes and invokes a provider-backed strm_repair capability", async () => {
     const calls: unknown[] = [];
     const strmRepairProvider: StrmRepairProvider = {
       service: "openlist",
@@ -100,7 +100,7 @@ describe("capability product HTTP", () => {
     expect(capabilities.capabilities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "strm.repair",
+          id: "strm_repair",
           service: "openlist",
           category: "media",
           effect: "write",
@@ -115,7 +115,7 @@ describe("capability product HTTP", () => {
     );
 
     const response = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -168,7 +168,7 @@ describe("capability product HTTP", () => {
     expect(JSON.parse(content.content as string)).toEqual(
       expect.objectContaining({
         version: 1,
-        capabilityId: "strm.repair",
+        capabilityId: "strm_repair",
         result: {
           status: "repaired",
           summary: "STRM path repaired and verified.",
@@ -202,7 +202,7 @@ describe("capability product HTTP", () => {
     });
 
     const response = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -220,7 +220,7 @@ describe("capability product HTTP", () => {
     });
   });
 
-  it("runs provider-backed strm.repair in the background with its resource", async () => {
+  it("runs provider-backed strm_repair in the background with its resource", async () => {
     const calls: unknown[] = [];
     const created = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -238,7 +238,7 @@ describe("capability product HTTP", () => {
     });
 
     const response = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -253,7 +253,7 @@ describe("capability product HTTP", () => {
     const run = await fetchRun(created.handler, String(started.runId));
     expect(run).toEqual(
       expect.objectContaining({
-        capabilityId: "strm.repair",
+        capabilityId: "strm_repair",
         status: "succeeded",
         resource: { kind: "strm", id: "strm-1", provider: "openlist" },
         result: { status: "repaired", summary: "background repair complete" },
@@ -267,7 +267,7 @@ describe("capability product HTTP", () => {
     ]);
   });
 
-  it("rejects strm.repair for a non-STRM resource before calling the provider", async () => {
+  it("rejects strm_repair for a non-STRM resource before calling the provider", async () => {
     let called = false;
     const created = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -282,7 +282,7 @@ describe("capability product HTTP", () => {
     });
 
     const response = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -301,7 +301,7 @@ describe("capability product HTTP", () => {
     expect(called).toBe(false);
   });
 
-  it("rejects strm.repair when the resource provider differs from the configured provider", async () => {
+  it("rejects strm_repair when the resource provider differs from the configured provider", async () => {
     let called = false;
     const created = createThebeApp({
       runtime: createFakeRuntime().runtime,
@@ -316,7 +316,7 @@ describe("capability product HTTP", () => {
     });
 
     const response = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -350,7 +350,7 @@ describe("capability product HTTP", () => {
     expect(capabilities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "container.list",
+          id: "container_list",
           category: "containers",
           permission: "read",
           source: "core",
@@ -360,7 +360,7 @@ describe("capability product HTTP", () => {
           background: false,
         }),
         expect.objectContaining({
-          id: "container.restart",
+          id: "container_restart",
           category: "containers",
           permission: "confirm",
           approval: "required",
@@ -371,7 +371,7 @@ describe("capability product HTTP", () => {
           destructive: true,
         }),
         expect.objectContaining({
-          id: "emby.libraries",
+          id: "emby_libraries",
           category: "media",
           source: "core",
           service: "emby",
@@ -380,7 +380,7 @@ describe("capability product HTTP", () => {
           background: false,
         }),
         expect.objectContaining({
-          id: "immich.assets",
+          id: "immich_assets",
           category: "media",
           source: "core",
           service: "immich",
@@ -400,7 +400,7 @@ describe("capability product HTTP", () => {
     const created = app();
     const res = await created.handler.handle(
       new Request(
-        "http://127.0.0.1:8787/v1/capabilities/container.list/invoke",
+        "http://127.0.0.1:8787/v1/capabilities/container_list/invoke",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -429,13 +429,13 @@ describe("capability product HTTP", () => {
       expect.objectContaining({
         artifactId,
         kind: "report",
-        title: "Capability report: container.list",
+        title: "Capability report: container_list",
         contentType: "application/json",
       })
     );
   });
 
-  it("rejects unapproved container.restart invoke and does not restart", async () => {
+  it("rejects unapproved container_restart invoke and does not restart", async () => {
     let restarts = 0;
     const restarting: ContainerInfoProvider = {
       ...provider(),
@@ -449,7 +449,7 @@ describe("capability product HTTP", () => {
     });
     const res = await created.handler.handle(
       new Request(
-        "http://127.0.0.1:8787/v1/capabilities/container.restart/invoke",
+        "http://127.0.0.1:8787/v1/capabilities/container_restart/invoke",
         {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -515,7 +515,7 @@ describe("capability product HTTP", () => {
       },
     });
     const started = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -598,7 +598,7 @@ describe("capability product HTTP", () => {
       },
     });
     const started = await created.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/capabilities/strm.repair/invoke", {
+      new Request("http://127.0.0.1:8787/v1/capabilities/strm_repair/invoke", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -640,7 +640,7 @@ describe("capability product HTTP", () => {
     expect(JSON.parse(content.content as string)).toEqual({
       version: 1,
       runId: run.runId,
-      capabilityId: "strm.repair",
+      capabilityId: "strm_repair",
       status: "failed",
       error: "provider failed: TOKEN=***REDACTED***",
     });

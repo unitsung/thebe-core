@@ -11,6 +11,12 @@ import {
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import { navidromeModelResult } from "./navidrome-model-result.ts";
+import {
+  asObject,
+  integerOptional,
+  optionalString,
+  requiredString,
+} from "./tool-args.ts";
 
 type Policy = ReturnType<typeof createPolicyEngine>;
 
@@ -20,9 +26,10 @@ export function createNavidromeTools(
     policy: Policy;
     callerId: string;
     modelResults?: boolean;
-  },
+  }
 ): CustomToolDefinition[] {
-  const run = (name: NavidromeToolName) =>
+  const run =
+    (name: NavidromeToolName) =>
     async (_toolCallId: string, params: unknown) => {
       const decision = options.policy.allow(name, options.callerId);
       if (!decision.ok) {
@@ -32,32 +39,32 @@ export function createNavidromeTools(
       let result: unknown;
 
       switch (name) {
-        case "navidrome.library":
+        case "navidrome_library":
           result = await provider.listLibrary({
             mode: libraryMode(args.mode),
             limit: integer(args.limit, 30),
             offset: integer(args.offset, 0),
           });
           break;
-        case "navidrome.search":
+        case "navidrome_search":
           result = await provider.search(
             requiredString(args.query, "query"),
-            integer(args.limit, 10),
+            integer(args.limit, 10)
           );
           break;
-        case "navidrome.artist":
+        case "navidrome_artist":
           result =
             (await provider.getArtist(
               requiredString(args.id, "id"),
-              integer(args.limit, 12),
+              integer(args.limit, 12)
             )) ?? null;
           break;
-        case "navidrome.lyrics":
+        case "navidrome_lyrics":
           result =
             (await provider.getLyrics(requiredString(args.songId, "songId"))) ??
             null;
           break;
-        case "navidrome.queue":
+        case "navidrome_queue":
           result = await provider.getPlaybackQueue({
             songIds: stringArray(args.songIds),
             albumId: optionalString(args.albumId),
@@ -72,14 +79,14 @@ export function createNavidromeTools(
                 : false,
           });
           break;
-        case "navidrome.playlist.create":
+        case "navidrome_playlist_create":
           result =
             (await provider.createPlaylist({
               name: requiredString(args.name, "name"),
               songIds: stringArray(args.songIds),
             })) ?? null;
           break;
-        case "navidrome.playlist.update":
+        case "navidrome_playlist_update":
           await provider.updatePlaylist({
             playlistId: requiredString(args.playlistId, "playlistId"),
             name: optionalString(args.name),
@@ -94,9 +101,9 @@ export function createNavidromeTools(
             updated: true,
           };
           break;
-        case "navidrome.playlist.delete":
+        case "navidrome_playlist_delete":
           await provider.deletePlaylist(
-            requiredString(args.playlistId, "playlistId"),
+            requiredString(args.playlistId, "playlistId")
           );
           result = {
             playlistId: requiredString(args.playlistId, "playlistId"),
@@ -109,7 +116,11 @@ export function createNavidromeTools(
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(options.modelResults ? navidromeModelResult(name, result, args) : result ?? null),
+            text: JSON.stringify(
+              options.modelResults
+                ? navidromeModelResult(name, result, args)
+                : (result ?? null)
+            ),
           },
         ],
         details: {},
@@ -127,41 +138,23 @@ export function createNavidromeTools(
 
 function navidromeLabel(name: NavidromeToolName): string {
   switch (name) {
-    case "navidrome.library":
+    case "navidrome_library":
       return "Browse Navidrome";
-    case "navidrome.search":
+    case "navidrome_search":
       return "Search Navidrome";
-    case "navidrome.artist":
+    case "navidrome_artist":
       return "Navidrome artist";
-    case "navidrome.lyrics":
+    case "navidrome_lyrics":
       return "Navidrome lyrics";
-    case "navidrome.queue":
+    case "navidrome_queue":
       return "Build Navidrome queue";
-    case "navidrome.playlist.create":
+    case "navidrome_playlist_create":
       return "Create Navidrome playlist";
-    case "navidrome.playlist.update":
+    case "navidrome_playlist_update":
       return "Update Navidrome playlist";
-    case "navidrome.playlist.delete":
+    case "navidrome_playlist_delete":
       return "Delete Navidrome playlist";
   }
-}
-
-function asObject(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-}
-
-function requiredString(value: unknown, name: string): string {
-  const parsed = optionalString(value);
-  if (!parsed) throw new Error(`${name} is required`);
-  return parsed;
-}
-
-function optionalString(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : undefined;
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -185,12 +178,6 @@ function integer(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value)
     ? Math.trunc(value)
     : fallback;
-}
-
-function integerOptional(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.trunc(value)
-    : undefined;
 }
 
 function libraryMode(value: unknown): NavidromeLibraryMode {

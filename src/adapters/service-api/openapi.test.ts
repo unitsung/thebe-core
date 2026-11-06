@@ -295,6 +295,51 @@ describe("dynamic OpenAPI service capability", () => {
       }),
     });
   });
+  it("reads a service that has no description only by the methods the operator named read-only", async () => {
+    const transport = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url) =>
+        String(url).endsWith("/containers/json")
+          ? new Response("[]", { status: 200 })
+          : new Response("{}", { status: 404 })
+      );
+    const open = new OpenAPIService(
+      {
+        id: "docker",
+        baseURL: "https://service.invalid",
+        readMethods: ["GET"],
+      },
+      transport
+    );
+    expect(
+      await open.request({
+        method: "GET",
+        path: "/containers/json",
+        readOnly: true,
+      })
+    ).toMatchObject({ ok: true, status: 200 });
+    // A write is never a read, described or not.
+    await expect(
+      open.request({
+        method: "POST",
+        path: "/containers/emby/restart",
+        readOnly: true,
+      })
+    ).rejects.toThrow();
+    // Without the operator's list there is nothing to call a read.
+    const closed = new OpenAPIService(
+      { id: "docker", baseURL: "https://service.invalid" },
+      transport
+    );
+    await expect(
+      closed.request({
+        method: "GET",
+        path: "/containers/json",
+        readOnly: true,
+      })
+    ).rejects.toThrow("service_write");
+  });
+
   it("permits approved requests when a service has no schema and exposes a non-success HTTP response as failed", async () => {
     const transport = vi
       .fn<typeof fetch>()
@@ -306,7 +351,12 @@ describe("dynamic OpenAPI service capability", () => {
       { id: "anything", baseURL: "https://service.invalid" },
       transport
     );
-    await expect(provider.catalog()).rejects.toThrow("No JSON OpenAPI");
+    // Browsing says there is nothing to browse and what to do instead; it is not a failure.
+    await expect(provider.catalog()).resolves.toMatchObject({
+      described: false,
+      operations: [],
+      notes: expect.stringContaining("service_write"),
+    });
     expect(
       await provider.request({
         method: "POST",

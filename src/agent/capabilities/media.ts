@@ -79,7 +79,10 @@ export interface PhotoLibraryProvider {
   listAlbums(): Promise<PhotoAlbum[]>;
   getStatistics(): Promise<PhotoStatistics>;
   /** Machine-learning match. Failures stay visible; this is not filename search. */
-  searchSemantic(query: string, options?: { size?: number; page?: number }): Promise<PhotoAsset[]>;
+  searchSemantic(
+    query: string,
+    options?: { size?: number; page?: number }
+  ): Promise<PhotoAsset[]>;
 }
 
 export const MEDIA_PROVIDER_IDS = {
@@ -89,29 +92,33 @@ export const MEDIA_PROVIDER_IDS = {
 } as const;
 
 export const EMBY_TOOL_NAMES = [
-  "emby.libraries",
-  "emby.recent",
-  "emby.sessions",
+  "emby_libraries",
+  "emby_recent",
+  "emby_sessions",
 ] as const;
 
 export const JELLYFIN_TOOL_NAMES = [
-  "jellyfin.libraries",
-  "jellyfin.recent",
-  "jellyfin.sessions",
+  "jellyfin_libraries",
+  "jellyfin_recent",
+  "jellyfin_sessions",
 ] as const;
 
 export const IMMICH_TOOL_NAMES = [
-  "immich.assets",
-  "immich.albums",
-  "immich.statistics",
+  "immich_assets",
+  "immich_albums",
+  "immich_statistics",
 ] as const;
 
-export const EMBY_LOOKUP_TOOL_NAMES = ["emby.search", "emby.item"] as const;
-export const JELLYFIN_LOOKUP_TOOL_NAMES = ["jellyfin.search", "jellyfin.item"] as const;
-export const IMMICH_SEARCH_TOOL_NAMES = ["immich.search"] as const;
+export const EMBY_LOOKUP_TOOL_NAMES = ["emby_search", "emby_item"] as const;
+export const JELLYFIN_LOOKUP_TOOL_NAMES = [
+  "jellyfin_search",
+  "jellyfin_item",
+] as const;
+export const IMMICH_SEARCH_TOOL_NAMES = ["immich_search"] as const;
 
 export type EmbyLookupToolName = (typeof EMBY_LOOKUP_TOOL_NAMES)[number];
-export type JellyfinLookupToolName = (typeof JELLYFIN_LOOKUP_TOOL_NAMES)[number];
+export type JellyfinLookupToolName =
+  (typeof JELLYFIN_LOOKUP_TOOL_NAMES)[number];
 export type ImmichSearchToolName = (typeof IMMICH_SEARCH_TOOL_NAMES)[number];
 export type MediaLookupToolName =
   | EmbyLookupToolName
@@ -147,27 +154,38 @@ export const MEDIA_LIBRARY_ITEM_SCHEMA = {
 export const IMMICH_SEARCH_SCHEMA = {
   type: "object",
   properties: {
-    query: { type: "string", description: "What is visible in the photo or video" },
+    query: {
+      type: "string",
+      description: "What is visible in the photo or video",
+    },
     size: { type: "integer", description: "1-40, default 20" },
     page: { type: "integer", description: "Page number, default 1" },
   },
   required: ["query"],
 } as const;
 
-export const MEDIA_LOOKUP_SCHEMAS: Record<MediaLookupToolName, Record<string, unknown>> = {
-  "emby.search": MEDIA_LIBRARY_SEARCH_SCHEMA,
-  "emby.item": MEDIA_LIBRARY_ITEM_SCHEMA,
-  "jellyfin.search": MEDIA_LIBRARY_SEARCH_SCHEMA,
-  "jellyfin.item": MEDIA_LIBRARY_ITEM_SCHEMA,
-  "immich.search": IMMICH_SEARCH_SCHEMA,
+export const MEDIA_LOOKUP_SCHEMAS: Record<
+  MediaLookupToolName,
+  Record<string, unknown>
+> = {
+  emby_search: MEDIA_LIBRARY_SEARCH_SCHEMA,
+  emby_item: MEDIA_LIBRARY_ITEM_SCHEMA,
+  jellyfin_search: MEDIA_LIBRARY_SEARCH_SCHEMA,
+  jellyfin_item: MEDIA_LIBRARY_ITEM_SCHEMA,
+  immich_search: IMMICH_SEARCH_SCHEMA,
 };
 
 export const MEDIA_LOOKUP_DESCRIPTIONS: Record<MediaLookupToolName, string> = {
-  "emby.search": "Search the configured Emby library by title, person, or year. Returns verified item ids.",
-  "emby.item": "Read one Emby item: overview, year, genres, people, and the server community rating.",
-  "jellyfin.search": "Search the configured Jellyfin library by title, person, or year. Returns verified item ids.",
-  "jellyfin.item": "Read one Jellyfin item: overview, year, genres, people, and the server community rating.",
-  "immich.search": "Semantic Immich search. Matches image content with the server machine-learning index. Not a filename search. A failure stays visible.",
+  emby_search:
+    "Search the configured Emby library by title, person, or year. Returns verified item ids.",
+  emby_item:
+    "Read one Emby item: overview, year, genres, people, and the server community rating.",
+  jellyfin_search:
+    "Search the configured Jellyfin library by title, person, or year. Returns verified item ids.",
+  jellyfin_item:
+    "Read one Jellyfin item: overview, year, genres, people, and the server community rating.",
+  immich_search:
+    "Semantic Immich search. Matches image content with the server machine-learning index. Not a filename search. A failure stays visible.",
 };
 
 export const MEDIA_READ_TOOL_NAMES = [
@@ -176,7 +194,10 @@ export const MEDIA_READ_TOOL_NAMES = [
   ...IMMICH_TOOL_NAMES,
 ] as const;
 
-export function clampMediaLimit(value: number | undefined, fallback = 20): number {
+export function clampMediaLimit(
+  value: number | undefined,
+  fallback = 20
+): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.min(40, Math.max(1, Math.trunc(value)));
 }
@@ -217,7 +238,7 @@ const SEARCH_PARAM_NAMES = {
 /** Query string for Emby (PascalCase) or Jellyfin (OpenAPI camelCase) item search. */
 export function mediaLibrarySearchQuery(
   query: MediaSearchQuery,
-  service: "emby" | "jellyfin",
+  service: "emby" | "jellyfin"
 ): string {
   const names = SEARCH_PARAM_NAMES[service];
   const params = new URLSearchParams();
@@ -251,7 +272,7 @@ export function mediaItemPathSegment(id: string): string {
 
 function normalizeItemTypes(values: string[] | undefined): string {
   const picked = (values ?? []).filter((value) =>
-    (MEDIA_ITEM_TYPES as readonly string[]).includes(value),
+    (MEDIA_ITEM_TYPES as readonly string[]).includes(value)
   );
   return picked.length > 0 ? picked.join(",") : "Movie,Series";
 }
@@ -260,22 +281,28 @@ export const MEDIA_READ_SCHEMAS: Record<
   (typeof MEDIA_READ_TOOL_NAMES)[number],
   Record<string, unknown>
 > = Object.fromEntries(
-  MEDIA_READ_TOOL_NAMES.map((name) => [name, { type: "object", properties: {} }]),
-) as unknown as Record<(typeof MEDIA_READ_TOOL_NAMES)[number], Record<string, unknown>>;
+  MEDIA_READ_TOOL_NAMES.map((name) => [
+    name,
+    { type: "object", properties: {} },
+  ])
+) as unknown as Record<
+  (typeof MEDIA_READ_TOOL_NAMES)[number],
+  Record<string, unknown>
+>;
 
 export const MEDIA_READ_DESCRIPTIONS: Record<
   (typeof MEDIA_READ_TOOL_NAMES)[number],
   string
 > = {
-  "emby.libraries": "List Emby media libraries (user views)",
-  "emby.recent": "List recently added Emby items",
-  "emby.sessions": "List Emby sessions (now playing)",
-  "jellyfin.libraries": "List Jellyfin media libraries (user views)",
-  "jellyfin.recent": "List recently added Jellyfin items",
-  "jellyfin.sessions": "List Jellyfin sessions (now playing)",
-  "immich.assets": "List Immich photo and video assets",
-  "immich.albums": "List Immich albums",
-  "immich.statistics": "Immich asset counts (images, videos, total)",
+  emby_libraries: "List Emby media libraries (user views)",
+  emby_recent: "List recently added Emby items",
+  emby_sessions: "List Emby sessions (now playing)",
+  jellyfin_libraries: "List Jellyfin media libraries (user views)",
+  jellyfin_recent: "List recently added Jellyfin items",
+  jellyfin_sessions: "List Jellyfin sessions (now playing)",
+  immich_assets: "List Immich photo and video assets",
+  immich_albums: "List Immich albums",
+  immich_statistics: "Immich asset counts (images, videos, total)",
 };
 
 type Json = Record<string, unknown>;
@@ -297,17 +324,22 @@ function stringField(object: Json, key: string): string {
 
 function numberField(object: Json, key: string): number | undefined {
   const value = object[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function stringList(value: unknown): string[] {
-  return asArray(value).filter((item): item is string => typeof item === "string" && item.length > 0);
+  return asArray(value).filter(
+    (item): item is string => typeof item === "string" && item.length > 0
+  );
 }
 
 function stringRecord(value: unknown): Record<string, string> | undefined {
   const object = asObject(value);
   const entries = Object.entries(object).filter(
-    (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
+    (entry): entry is [string, string] =>
+      typeof entry[1] === "string" && entry[1].length > 0
   );
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
@@ -317,27 +349,35 @@ function mapPeople(value: unknown): MediaPerson[] {
     const person = asObject(row);
     const name = stringField(person, "Name");
     if (!name) return [];
-    return [{
-      id: stringField(person, "Id") || undefined,
-      name,
-      role: stringField(person, "Role") || undefined,
-      type: stringField(person, "Type") || undefined,
-    }];
+    return [
+      {
+        id: stringField(person, "Id") || undefined,
+        name,
+        role: stringField(person, "Role") || undefined,
+        type: stringField(person, "Type") || undefined,
+      },
+    ];
   });
 }
 
 /** Map Emby/Jellyfin QueryResult.Items or a raw item array. */
 export function mapMediaLibraries(payload: unknown): MediaLibrary[] {
   const root = asObject(payload);
-  const rows = asArray(root.Items).length > 0 ? asArray(root.Items) : asArray(payload);
-  return rows.map((row) => {
-    const item = asObject(row);
-    return {
-      id: stringField(item, "Id"),
-      title: stringField(item, "Name"),
-      kind: stringField(item, "CollectionType") || stringField(item, "Type") || undefined,
-    };
-  }).filter((item) => item.id && item.title);
+  const rows =
+    asArray(root.Items).length > 0 ? asArray(root.Items) : asArray(payload);
+  return rows
+    .map((row) => {
+      const item = asObject(row);
+      return {
+        id: stringField(item, "Id"),
+        title: stringField(item, "Name"),
+        kind:
+          stringField(item, "CollectionType") ||
+          stringField(item, "Type") ||
+          undefined,
+      };
+    })
+    .filter((item) => item.id && item.title);
 }
 
 export function mapMediaItems(payload: unknown): MediaItem[] {
@@ -349,7 +389,9 @@ export function mapMediaItems(payload: unknown): MediaItem[] {
   }));
 }
 
-export function mapMediaItemDetail(payload: unknown): MediaItemDetail | undefined {
+export function mapMediaItemDetail(
+  payload: unknown
+): MediaItemDetail | undefined {
   const item = asObject(payload);
   const id = stringField(item, "Id");
   const title = stringField(item, "Name");
@@ -372,7 +414,8 @@ export function mapMediaItemDetail(payload: unknown): MediaItemDetail | undefine
 
 export function mapMediaSearch(payload: unknown): MediaSearchPage {
   const root = asObject(payload);
-  const rows = asArray(root.Items).length > 0 ? asArray(root.Items) : asArray(payload);
+  const rows =
+    asArray(root.Items).length > 0 ? asArray(root.Items) : asArray(payload);
   return {
     items: rows
       .map((row) => mapMediaItemDetail(row))
@@ -383,20 +426,22 @@ export function mapMediaSearch(payload: unknown): MediaSearchPage {
 
 export function mapMediaSessions(payload: unknown): MediaSession[] {
   const rows = asArray(payload);
-  return rows.map((row) => {
-    const session = asObject(row);
-    const playing = asObject(session.NowPlayingItem);
-    const title =
-      stringField(playing, "Name") ||
-      stringField(session, "Client") ||
-      stringField(session, "DeviceName");
-    return {
-      id: stringField(session, "Id"),
-      title,
-      client: stringField(session, "Client") || undefined,
-      userName: stringField(session, "UserName") || undefined,
-    };
-  }).filter((item) => item.id);
+  return rows
+    .map((row) => {
+      const session = asObject(row);
+      const playing = asObject(session.NowPlayingItem);
+      const title =
+        stringField(playing, "Name") ||
+        stringField(session, "Client") ||
+        stringField(session, "DeviceName");
+      return {
+        id: stringField(session, "Id"),
+        title,
+        client: stringField(session, "Client") || undefined,
+        userName: stringField(session, "UserName") || undefined,
+      };
+    })
+    .filter((item) => item.id);
 }
 
 export function mapPhotoAssets(payload: unknown): PhotoAsset[] {
@@ -408,26 +453,30 @@ export function mapPhotoAssets(payload: unknown): PhotoAsset[] {
       : asArray(root.items).length > 0
         ? asArray(root.items)
         : asArray(payload);
-  return rows.map((row) => {
-    const item = asObject(row);
-    return {
-      id: stringField(item, "id"),
-      title: stringField(item, "originalFileName"),
-      type: stringField(item, "type") || undefined,
-    };
-  }).filter((item) => item.id && item.title);
+  return rows
+    .map((row) => {
+      const item = asObject(row);
+      return {
+        id: stringField(item, "id"),
+        title: stringField(item, "originalFileName"),
+        type: stringField(item, "type") || undefined,
+      };
+    })
+    .filter((item) => item.id && item.title);
 }
 
 export function mapPhotoAlbums(payload: unknown): PhotoAlbum[] {
   const rows = asArray(payload);
-  return rows.map((row) => {
-    const album = asObject(row);
-    return {
-      id: stringField(album, "id"),
-      title: stringField(album, "albumName"),
-      assetCount: numberField(album, "assetCount"),
-    };
-  }).filter((item) => item.id && item.title);
+  return rows
+    .map((row) => {
+      const album = asObject(row);
+      return {
+        id: stringField(album, "id"),
+        title: stringField(album, "albumName"),
+        assetCount: numberField(album, "assetCount"),
+      };
+    })
+    .filter((item) => item.id && item.title);
 }
 
 export function mapPhotoStatistics(payload: unknown): PhotoStatistics {

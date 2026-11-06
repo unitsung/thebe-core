@@ -46,7 +46,7 @@ async function postAction(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        actionId: "container.restart",
+        actionId: "container_restart",
         resource: {
           kind: "container",
           id: "ctr-emby",
@@ -771,7 +771,7 @@ describe("GET /v1/activity", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
+          actionId: "container_restart",
           resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
           idempotencyKey: "deny",
         }),
@@ -1060,7 +1060,7 @@ describe("GET /v1/activity", () => {
         group: "recent",
         diagnosis: expect.objectContaining({
           id: diagnosed.runId,
-          kind: "container.diagnose",
+          kind: "container_diagnose",
           status: "completed",
         }),
       }),

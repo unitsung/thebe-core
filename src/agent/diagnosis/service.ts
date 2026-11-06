@@ -105,14 +105,14 @@ export function createDiagnosisApi(options: {
       policy: options.policy,
       audit: options.audit,
     });
-    const inspect = await invokeNamed(tools, "container.inspect", {
+    const inspect = await invokeNamed(tools, "container_inspect", {
       id: resource.id,
     });
-    const logs = await invokeNamed(tools, "container.logs", {
+    const logs = await invokeNamed(tools, "container_logs", {
       id: resource.id,
       tail: DIAGNOSIS_LOG_TAIL,
     });
-    const summary = await invokeNamed(tools, "container.status_summary", {});
+    const summary = await invokeNamed(tools, "container_status_summary", {});
     const unreachable =
       !inspect.ok &&
       !logs.ok &&

@@ -1,7 +1,7 @@
 {
   "version": 1,
   "examples": {
-    "container.list": [
+    "container_list": [
       {
         "id": "c1",
         "name": "emby",
@@ -19,7 +19,7 @@
         "created": 1760000100
       }
     ],
-    "download.list": {
+    "download_list": {
       "downloads": [
         {
           "hash": "0123456789abcdef0123456789abcdef01234567",
@@ -60,7 +60,7 @@
         }
       ]
     },
-    "files.list": {
+    "files_list": {
       "entries": [
         {
           "name": "Movies",

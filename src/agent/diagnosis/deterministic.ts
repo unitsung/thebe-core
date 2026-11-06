@@ -42,7 +42,14 @@ export function deterministicDiagnosis(input: {
   const mediaHint = isMediaServerName(name);
 
   if (/\bdead\b/.test(blob)) {
-    return finish("container_dead", "Container is dead", `Observed state for ${name} is dead.`, "high", observations, mediaHint);
+    return finish(
+      "container_dead",
+      "Container is dead",
+      `Observed state for ${name} is dead.`,
+      "high",
+      observations,
+      mediaHint
+    );
   }
   if (/\brestarting\b/.test(blob)) {
     return finish(
@@ -51,7 +58,7 @@ export function deterministicDiagnosis(input: {
       `Observed state for ${name} is restarting.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (/\bexited\b/.test(blob)) {
@@ -61,7 +68,7 @@ export function deterministicDiagnosis(input: {
       `Observed state for ${name} is exited.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (/\boom|out of memory|killed\b/.test(blob)) {
@@ -71,7 +78,7 @@ export function deterministicDiagnosis(input: {
       `Logs for ${name} mention OOM or process kill.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (/no space|disk.*(full|space)/.test(blob)) {
@@ -81,7 +88,7 @@ export function deterministicDiagnosis(input: {
       `Logs for ${name} mention disk space exhaustion.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (/\bunhealthy\b/.test(blob)) {
@@ -91,7 +98,7 @@ export function deterministicDiagnosis(input: {
       `Observed health for ${name} is unhealthy.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (/\bpaused\b/.test(blob)) {
@@ -101,7 +108,7 @@ export function deterministicDiagnosis(input: {
       `Observed state for ${name} is paused.`,
       "high",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (logFact && logFact.severity === "error") {
@@ -111,7 +118,7 @@ export function deterministicDiagnosis(input: {
       `Container ${name} produced error-like log lines.`,
       "medium",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   if (stateFact && /\brunning\b/.test(stateFact.fact.toLowerCase())) {
@@ -121,7 +128,7 @@ export function deterministicDiagnosis(input: {
       `Observed state for ${name} is running. No high-confidence failure pattern was extracted.`,
       "medium",
       observations,
-      mediaHint,
+      mediaHint
     );
   }
   return finish(
@@ -130,7 +137,7 @@ export function deterministicDiagnosis(input: {
     `Facts were collected for ${name}, but no single high-confidence failure code matched.`,
     "low",
     observations,
-    mediaHint,
+    mediaHint
   );
 }
 
@@ -140,7 +147,7 @@ function finish(
   summary: string,
   confidence: DiagnosisFinding["confidence"],
   observations: Observation[],
-  mediaHint: boolean,
+  mediaHint: boolean
 ): { diagnosis: DiagnosisFinding; recommendations: Recommendation[] } {
   return {
     diagnosis: {
@@ -158,7 +165,10 @@ function finish(
   };
 }
 
-function recommendationsFor(code: string, mediaHint: boolean): Recommendation[] {
+function recommendationsFor(
+  code: string,
+  mediaHint: boolean
+): Recommendation[] {
   const recs: Recommendation[] = [
     {
       id: "rec-review-logs",
@@ -168,7 +178,11 @@ function recommendationsFor(code: string, mediaHint: boolean): Recommendation[] 
       requiresApproval: false,
     },
   ];
-  if (code === "container_exited" || code === "container_dead" || code === "container_unhealthy") {
+  if (
+    code === "container_exited" ||
+    code === "container_dead" ||
+    code === "container_unhealthy"
+  ) {
     recs.push(restartWriteRecommendation());
   }
   if (mediaHint) {
@@ -192,7 +206,7 @@ export function restartWriteRecommendation(): Recommendation {
       "Write action. Requires on-device approval. Thebe will not restart until you confirm.",
     kind: "write",
     requiresApproval: true,
-    actionId: "container.restart",
+    actionId: "container_restart",
   };
 }
 

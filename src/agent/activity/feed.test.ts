@@ -6,16 +6,21 @@ import type { ActivityRecord } from "./types.ts";
 function approval(): ActivityRecord {
   return {
     id: "appr-1",
-    kind: "container.restart",
-    actionId: "container.restart",
-    resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+    kind: "container_restart",
+    actionId: "container_restart",
+    resource: {
+      kind: "container",
+      id: "ctr-emby",
+      name: "emby",
+      provider: "arcane",
+    },
     status: "pending",
     group: "needs_approval",
     summary: "Restart emby",
     createdAt: "2026-09-17T00:00:00Z",
     updatedAt: "2026-09-17T00:00:00Z",
     diagnosisRunId: "run-1",
-    idempotencyKey: "approve:container.restart:ctr-emby:run-1",
+    idempotencyKey: "approve:container_restart:ctr-emby:run-1",
   };
 }
 
@@ -46,8 +51,8 @@ describe("toActivityFeed", () => {
   it("includes completed diagnosis rows without a write recommendation", () => {
     const diagnose: ActivityRecord = {
       id: "run-ok",
-      kind: "container.diagnose",
-      actionId: "container.diagnose",
+      kind: "container_diagnose",
+      actionId: "container_diagnose",
       resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
       status: "completed",
       group: "recent",

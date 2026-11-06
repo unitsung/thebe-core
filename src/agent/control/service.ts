@@ -4,6 +4,7 @@ import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import {
   SERVICE_API_CONFIRM_TOOL_NAME,
   SERVICE_API_OPERATION_PREFIX,
+  SERVICE_API_OPERATION_SEPARATOR,
   SERVICE_API_TOOL_NAMES,
   SERVICE_API_WRITE_TOOL_NAME,
   serviceOperationExposable,
@@ -233,7 +234,7 @@ export function createControlApi(
         if (input.resource.kind !== "strm") {
           throw httpError(
             400,
-            "strm.repair requires resource.kind=strm",
+            "strm_repair requires resource.kind=strm",
             "invalid_body"
           );
         }
@@ -245,7 +246,7 @@ export function createControlApi(
         ) {
           throw httpError(
             400,
-            `strm.repair requires resource.provider=${options.strmRepairProvider.service}`,
+            `strm_repair requires resource.provider=${options.strmRepairProvider.service}`,
             "invalid_body"
           );
         }
@@ -326,7 +327,7 @@ export function createControlApi(
       const tool = (await mcp.listTools()).find((item) => item.name === name);
       return !tool || tool.permission !== "read";
     }
-    // Any other Core capability (`strm.repair`, `sqmusic_download`, ...) by what it declares, the same
+    // Any other Core capability (`strm_repair`, `sqmusic_download`, ...) by what it declares, the same
     // rule that sets its `readOnlyHint`, so a write cannot slip past because no name list mentions it.
     const core = coreCapabilities().find((item) => item.name === name);
     return core ? capabilityChangesThings(core) : false;
@@ -508,7 +509,7 @@ export function createControlApi(
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
-  // single-use confirm token, and only service_api.confirm executes it. Read
+  // single-use confirm token, and only service_confirm executes it. Read
   // tools run directly. Writes and confirmations are audited.
   const CONFIRM_TTL_MS = 5 * 60_000;
   const MAX_PENDING_WRITES = 64;
@@ -529,8 +530,8 @@ export function createControlApi(
     name: string
   ): Promise<{ provider: ServiceAPIProvider; operation: ServiceAPIOperation }> {
     const rest = name.slice(SERVICE_API_OPERATION_PREFIX.length);
-    const dot = rest.indexOf(".");
-    const serviceId = dot > 0 ? rest.slice(0, dot) : "";
+    const separator = rest.indexOf(SERVICE_API_OPERATION_SEPARATOR);
+    const serviceId = separator > 0 ? rest.slice(0, separator) : "";
     const provider = (options.serviceAPIProviders ?? []).find(
       (candidate) => candidate.id === serviceId
     );
@@ -583,7 +584,7 @@ export function createControlApi(
       expires: Date.now() + CONFIRM_TTL_MS,
     });
     await audit?.append({
-      method: "service_api.write.preview",
+      method: "service__write__preview",
       parameterHash: hashParameters({
         service: provider.id,
         operation: operation.id,
@@ -626,7 +627,7 @@ export function createControlApi(
       readOnly: false,
     });
     await audit?.append({
-      method: "service_api.write",
+      method: SERVICE_API_WRITE_TOOL_NAME,
       parameterHash: hashParameters({
         service: entry.service,
         operation: entry.operationId,
@@ -822,7 +823,7 @@ export function createControlApi(
       ) {
         throw httpError(
           400,
-          "strm.repair requires resource.kind=strm",
+          "strm_repair requires resource.kind=strm",
           "invalid_body"
         );
       }
@@ -835,7 +836,7 @@ export function createControlApi(
         ) {
           throw httpError(
             400,
-            `strm.repair requires resource.provider=${capability.service}`,
+            `strm_repair requires resource.provider=${capability.service}`,
             "invalid_body"
           );
         }
@@ -943,7 +944,7 @@ export function createControlApi(
       const text = await invokeTool(capability.id, invocationArgs);
       const result = parseCapabilityResult(text);
       const artifactResult =
-        capability.id === "navidrome.queue"
+        capability.id === "navidrome_queue"
           ? redactNavidromeQueueForStorage(result)
           : result;
       const artifact = artifactStore
@@ -1255,7 +1256,9 @@ function syntheticServiceOperation(id: string): HomelabCapability {
   const service =
     id === SERVICE_API_CONFIRM_TOOL_NAME
       ? undefined
-      : id.slice(SERVICE_API_OPERATION_PREFIX.length).split(".")[0];
+      : id
+          .slice(SERVICE_API_OPERATION_PREFIX.length)
+          .split(SERVICE_API_OPERATION_SEPARATOR)[0];
   return {
     id,
     name: id,

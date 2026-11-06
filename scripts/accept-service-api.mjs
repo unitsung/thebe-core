@@ -6,23 +6,23 @@
  * Spawns `dist/serve.js` with a throwaway data dir, then walks the product API
  * the way a client or an MCP client would:
  *   - the per-operation tools appear under GET /v1/capabilities
- *   - service_api_discover lists the service's operations
+ *   - service_discover lists the service's operations
  *   - a configured read operation is invoked and returns real data
  *   - `--confirm` proves the two-phase write contract end to end: the write
- *     makes no change and returns a confirmToken, `service_api.confirm` executes
+ *     makes no change and returns a confirmToken, `service_confirm` executes
  *     exactly that request, the token cannot be replayed, and (with --verify /
  *     --expect) the side effect is observable through a read
  *
  * Usage (spawn a throwaway Core):
  *   THEBE_SERVICE_APIS='[{"id":"petstore","baseURL":"https://petstore3.swagger.io/api/v3","openapiPath":"/openapi.json","readOperations":["findPetsByStatus"]}]' \
- *     node scripts/accept-service-api.mjs --operation service_api.petstore.findPetsByStatus --arguments '{"status":"available"}'
+ *     node scripts/accept-service-api.mjs --operation service__petstore__findPetsByStatus --arguments '{"status":"available"}'
  *
  * Point it at a running deployment instead:
- *   node scripts/accept-service-api.mjs --base-url https://thebe.example.ts.net --token "$THEBE_TOKEN" --operation service_api.radarr.getMovie --arguments '{"id":1}'
+ *   node scripts/accept-service-api.mjs --base-url https://thebe.example.ts.net --token "$THEBE_TOKEN" --operation service__radarr__getMovie --arguments '{"id":1}'
  *
  * Radarr example (spec served elsewhere than the API host):
  *   THEBE_SERVICE_APIS='[{"id":"radarr","baseURL":"http://radarr.local:7878","openapiURL":"https://raw.githubusercontent.com/Radarr/Radarr/develop/src/Radarr.Api.V3/openapi.json","headersEnv":{"X-Api-Key":"RADARR_API_KEY"},"readOperations":["getMovieById"]}]' \
- *     RADARR_API_KEY=... node scripts/accept-service-api.mjs --query movie --operation service_api.radarr.getMovieById --arguments '{"id":1}'
+ *     RADARR_API_KEY=... node scripts/accept-service-api.mjs --query movie --operation service__radarr__getMovieById --arguments '{"id":1}'
  *
  * It speaks HTTP on purpose and never imports src/, so it checks the deployed
  * process the way a client sees it.
@@ -256,7 +256,7 @@ export async function main(argv = process.argv.slice(2)) {
     const discover = await invoke(
       baseUrl,
       token,
-      "service_api_discover",
+      "service_discover",
       options.query ? { query: options.query } : {}
     );
     const results = Array.isArray(discover) ? discover : [discover];
@@ -337,13 +337,13 @@ export async function main(argv = process.argv.slice(2)) {
         );
       }
 
-      const confirmed = await invoke(baseUrl, token, "service_api.confirm", {
+      const confirmed = await invoke(baseUrl, token, "service_confirm", {
         token: preview.confirmToken,
       });
-      console.log("\nservice_api.confirm ->");
+      console.log("\nservice_confirm ->");
       console.log("  " + JSON.stringify(confirmed).slice(0, 600));
 
-      const replay = await invokeRaw(baseUrl, token, "service_api.confirm", {
+      const replay = await invokeRaw(baseUrl, token, "service_confirm", {
         token: preview.confirmToken,
       });
       assert(
@@ -380,7 +380,7 @@ export async function main(argv = process.argv.slice(2)) {
           // A cleanup write is two-phase too, so confirm it before calling it done.
           const cleaned =
             typeof previewed?.confirmToken === "string"
-              ? await invoke(baseUrl, token, "service_api.confirm", {
+              ? await invoke(baseUrl, token, "service_confirm", {
                   token: previewed.confirmToken,
                 })
               : previewed;

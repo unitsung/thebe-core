@@ -633,7 +633,7 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/action",
-    summary: "Execute an approved container.restart",
+    summary: "Execute an approved container_restart",
     tag: "action",
     requestBody: { required: true },
     requestSchema: "ActionRequest",
@@ -720,7 +720,7 @@ const operations: Operation[] = [
     method: "put",
     path: "/v1/policy",
     summary:
-      "Change the rules, accept mode (off, observe or auto), the containers auto may restart, or the model",
+      "Change the rules, the accept mode (off, observe or auto) or the model",
     tag: "ticket",
     requestBody: { required: true },
     requestSchema: "PolicyInput",
@@ -1387,7 +1387,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "action",
         description:
-          "Approved write actions (container.restart) with deterministic verification receipts",
+          "Approved write actions (container_restart) with deterministic verification receipts",
       },
       {
         name: "activity",
@@ -1673,7 +1673,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             runId: { type: "string" },
             artifactId: { type: "string" },
-            actionId: { type: "string", enum: ["container.diagnose"] },
+            actionId: { type: "string", enum: ["container_diagnose"] },
             status: {
               type: "string",
               enum: [
@@ -1703,7 +1703,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["actionId", "resource"],
           properties: {
-            actionId: { type: "string", enum: ["container.restart"] },
+            actionId: { type: "string", enum: ["container_restart"] },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             diagnosisRunId: { type: "string" },
             idempotencyKey: { type: "string" },
@@ -1733,7 +1733,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             receiptId: { type: "string" },
             artifactId: { type: "string" },
-            actionId: { type: "string", enum: ["container.restart"] },
+            actionId: { type: "string", enum: ["container_restart"] },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             diagnosisRunId: { type: "string" },
             approval: { type: "object", additionalProperties: true },
@@ -1783,11 +1783,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             kind: {
               type: "string",
-              enum: ["container.restart", "container.diagnose"],
+              enum: ["container_restart", "container_diagnose"],
             },
             actionId: {
               type: "string",
-              enum: ["container.restart", "container.diagnose"],
+              enum: ["container_restart", "container_diagnose"],
             },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             status: {
@@ -2774,13 +2774,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "string",
               enum: ["off", "observe", "auto"],
               description:
-                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: act on a positive assessment. A stopped container on autoContainers is restarted by Core (at most 3 an hour per container; the next goes to the person); any other is only diagnosed, which asks the person. Nothing acts until the person picks auto; the default is observe. Taking something on gives it a Ticket.",
+                "off: record events, weigh none. observe (the default): weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: a positive assessment is taken on as a Ticket, which an executor carries out within its Mandate. The rules are the authority; nothing acts until the person picks auto.",
             },
-            autoContainers: {
+            modes: {
               type: "array",
               items: { type: "string" },
               description:
-                "Container names auto may restart without asking. A hard cap the model cannot widen. Empty: no direct restart. Always present on a Core that has the auto mode, so a client can tell.",
+                "The accept modes this Core has, so a client offers auto only where it exists. Sent in responses; an older Core does not send it.",
             },
             model: {
               type: "object",
@@ -2802,12 +2802,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             rules: { type: "array", items: { type: "string" } },
             acceptMode: { type: "string", enum: ["off", "observe", "auto"] },
-            autoContainers: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "At most 20 container names. A list replaces the old one; [] clears it.",
-            },
             model: {
               type: "object",
               nullable: true,
@@ -2831,7 +2825,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         Decision: {
           type: "object",
           description:
-            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. In auto, outcome accept means it was acted on (see action). unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
+            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. In auto, outcome accept means it was taken on as a Ticket (ticketId, goalId); a positive assessment that was not taken on stays ignore with wouldAccept and notTakenOn. unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
           required: [
             "id",
             "evalId",
@@ -2866,18 +2860,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "The deterministic Gate stopped it before any model was asked.",
             },
-            action: {
-              type: "object",
+            ticketId: {
+              type: "string",
               description:
-                "auto only: what was done about a positive assessment. kind restart (a stopped container was restarted; status is the receipt's, receiptId reads it), diagnose (handed to the person: awaiting_approval or no_restart_advised) or none (nothing done; status says why: stale, not_down_event, already_up, container_not_found, container_ambiguous, quiesced, auto_disabled, act_failed...).",
-              required: ["kind", "status", "note"],
-              properties: {
-                kind: { type: "string", enum: ["restart", "diagnose", "none"] },
-                status: { type: "string" },
-                note: { type: "string" },
-                container: { type: "string" },
-                receiptId: { type: "string" },
-              },
+                "auto, accepted: the Ticket that was made. Its Mandate says what the work may touch.",
+            },
+            goalId: {
+              type: "string",
+              description:
+                "auto, accepted: the Goal that carries the Ticket out.",
+            },
+            notTakenOn: {
+              type: "string",
+              description:
+                "auto, a positive assessment that was not taken on, and why: thread_limit (one thread is taken on only so often in an hour), quiesced, no_executor or accept_failed.",
             },
             policyVersion: { type: "string" },
             decidedAt: { type: "string", format: "date-time" },
@@ -2929,7 +2925,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   type: "array",
                   items: { type: "string" },
                   description:
-                    "Eval only: what the Ticket may touch, as action:target (container.restart:emby). Empty authorises nothing to be done without the person.",
+                    "Eval only: what the Ticket may touch, as service:write (container:write): writes on that service that are not irreversible. Inferred from what the event is about, never from what the model said. Empty authorises nothing to be done without the person.",
                 },
               },
             },

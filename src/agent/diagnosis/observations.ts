@@ -1,5 +1,8 @@
 import { REDACTED, redactToolOutput } from "../security/redaction.ts";
-import type { ContainerDetail, HostStatusSummary } from "../capabilities/containers.ts";
+import type {
+  ContainerDetail,
+  HostStatusSummary,
+} from "../capabilities/containers.ts";
 import type {
   Observation,
   ResourceRef,
@@ -16,7 +19,9 @@ export const DIAGNOSIS_LOG_TAIL = 80;
 const SECRET_MARKERS = [REDACTED, "sk-", "password=", "token="];
 
 export function unwrapToolOutput(raw: string): string {
-  const match = raw.match(/<tool_output tool="[^"]*">\n?([\s\S]*?)\n?<\/tool_output>/);
+  const match = raw.match(
+    /<tool_output tool="[^"]*">\n?([\s\S]*?)\n?<\/tool_output>/
+  );
   return match?.[1]?.trim() ?? raw.trim();
 }
 
@@ -30,14 +35,17 @@ export function parseToolPayload(raw: string): unknown {
 }
 
 export function asContainerDetail(value: unknown): ContainerDetail | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const row = value as Record<string, unknown>;
-  if (typeof row.id !== "string" || typeof row.name !== "string") return undefined;
+  if (typeof row.id !== "string" || typeof row.name !== "string")
+    return undefined;
   return value as ContainerDetail;
 }
 
 export function asHostSummary(value: unknown): HostStatusSummary | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
   const row = value as Record<string, unknown>;
   if (typeof row.totalContainers !== "number") return undefined;
   return value as HostStatusSummary;
@@ -82,14 +90,14 @@ export function extractObservations(input: {
 
   if (input.inspectError) {
     toolTranscript.push({
-      tool: "container.inspect",
+      tool: "container_inspect",
       summary: clip(`failed: ${input.inspectError}`, 240),
       observedAt: input.observedAt,
     });
     push({
       kind: "error",
-      fact: clip(`container.inspect failed: ${input.inspectError}`, 280),
-      source: "container.inspect",
+      fact: clip(`container_inspect failed: ${input.inspectError}`, 280),
+      source: "container_inspect",
       observedAt: input.observedAt,
       resource,
       severity: "error",
@@ -97,14 +105,14 @@ export function extractObservations(input: {
   } else if (input.inspect) {
     const detail = input.inspect;
     toolTranscript.push({
-      tool: "container.inspect",
+      tool: "container_inspect",
       summary: `${detail.name} state=${detail.state} image=${detail.image}`,
       observedAt: input.observedAt,
     });
     push({
       kind: "state",
       fact: `Container ${detail.name} is ${detail.state}.`,
-      source: "container.inspect",
+      source: "container_inspect",
       observedAt: input.observedAt,
       resource,
       severity: stateSeverity(detail.state),
@@ -113,7 +121,7 @@ export function extractObservations(input: {
       push({
         kind: "image",
         fact: `Image is ${detail.image}.`,
-        source: "container.inspect",
+        source: "container_inspect",
         observedAt: input.observedAt,
         resource,
         severity: "info",
@@ -124,7 +132,7 @@ export function extractObservations(input: {
       push({
         kind: "health",
         fact: health.fact,
-        source: "container.inspect",
+        source: "container_inspect",
         observedAt: input.observedAt,
         resource,
         severity: health.severity,
@@ -135,7 +143,7 @@ export function extractObservations(input: {
       push({
         kind: "config",
         fact: `Command: ${clip(cmd, 200)}.`,
-        source: "container.inspect",
+        source: "container_inspect",
         observedAt: input.observedAt,
         resource,
         severity: "info",
@@ -147,7 +155,7 @@ export function extractObservations(input: {
       push({
         kind: "config",
         fact: `Environment has ${env.length} entries; ${redactedCount} secret values redacted.`,
-        source: "container.inspect",
+        source: "container_inspect",
         observedAt: input.observedAt,
         resource,
         severity: "info",
@@ -158,14 +166,14 @@ export function extractObservations(input: {
       push({
         kind: "network",
         fact: ports,
-        source: "container.inspect",
+        source: "container_inspect",
         observedAt: input.observedAt,
         resource,
         severity: "info",
       });
     }
     evidence.push({
-      source: "container.inspect",
+      source: "container_inspect",
       excerpt: clip(inspectExcerpt(detail), MAX_EVIDENCE_CHARS),
       observedAt: input.observedAt,
     });
@@ -173,14 +181,14 @@ export function extractObservations(input: {
 
   if (input.logsError) {
     toolTranscript.push({
-      tool: "container.logs",
+      tool: "container_logs",
       summary: clip(`failed: ${input.logsError}`, 240),
       observedAt: input.observedAt,
     });
     push({
       kind: "error",
-      fact: clip(`container.logs failed: ${input.logsError}`, 280),
-      source: "container.logs",
+      fact: clip(`container_logs failed: ${input.logsError}`, 280),
+      source: "container_logs",
       observedAt: input.observedAt,
       resource,
       severity: "warning",
@@ -188,7 +196,7 @@ export function extractObservations(input: {
   } else if (input.logs !== undefined) {
     const sampled = sampleLogLines(input.logs);
     toolTranscript.push({
-      tool: "container.logs",
+      tool: "container_logs",
       summary: sampled.summary,
       observedAt: input.observedAt,
     });
@@ -196,7 +204,7 @@ export function extractObservations(input: {
       push({
         kind: "logs",
         fact: sampled.fact,
-        source: "container.logs",
+        source: "container_logs",
         observedAt: input.observedAt,
         resource,
         severity: sampled.severity,
@@ -204,7 +212,7 @@ export function extractObservations(input: {
     }
     if (sampled.excerpt) {
       evidence.push({
-        source: "container.logs",
+        source: "container_logs",
         excerpt: clip(sampled.excerpt, MAX_EVIDENCE_CHARS),
         observedAt: input.observedAt,
       });
@@ -213,21 +221,21 @@ export function extractObservations(input: {
 
   if (input.summaryError) {
     toolTranscript.push({
-      tool: "container.status_summary",
+      tool: "container_status_summary",
       summary: clip(`failed: ${input.summaryError}`, 240),
       observedAt: input.observedAt,
     });
   } else if (input.summary) {
     const summary = input.summary;
     toolTranscript.push({
-      tool: "container.status_summary",
+      tool: "container_status_summary",
       summary: `${summary.runningContainers}/${summary.totalContainers} running`,
       observedAt: input.observedAt,
     });
     push({
       kind: "host",
       fact: `Host has ${summary.totalContainers} containers (${summary.runningContainers} running, ${summary.exitedContainers} exited, ${summary.pausedContainers} paused).`,
-      source: "container.status_summary",
+      source: "container_status_summary",
       observedAt: input.observedAt,
       resource,
       severity: "info",
@@ -252,15 +260,15 @@ function stateSeverity(state: string): Observation["severity"] {
   return "info";
 }
 
-function healthFromDetail(detail: ContainerDetail): {
-  fact: string;
-  severity: Observation["severity"];
-} | undefined {
+function healthFromDetail(detail: ContainerDetail):
+  | {
+      fact: string;
+      severity: Observation["severity"];
+    }
+  | undefined {
   const labels = detail.config.labels ?? {};
   const healthLabel =
-    labels["health"] ??
-    labels["com.docker.compose.service"] ??
-    undefined;
+    labels["health"] ?? labels["com.docker.compose.service"] ?? undefined;
   const state = detail.state.toLowerCase();
   if (state.includes("unhealthy")) {
     return {
@@ -293,7 +301,9 @@ function summarizePorts(detail: ContainerDetail): string | undefined {
 }
 
 function inspectExcerpt(detail: ContainerDetail): string {
-  const envKeys = (detail.config.env ?? []).map((line) => line.split("=")[0] ?? line);
+  const envKeys = (detail.config.env ?? []).map(
+    (line) => line.split("=")[0] ?? line
+  );
   return JSON.stringify({
     id: detail.id,
     name: detail.name,
@@ -305,7 +315,9 @@ function inspectExcerpt(detail: ContainerDetail): string {
   });
 }
 
-function pickSafeLabels(labels?: Record<string, string>): Record<string, string> {
+function pickSafeLabels(
+  labels?: Record<string, string>
+): Record<string, string> {
   if (!labels) return {};
   const keep = [
     "com.docker.compose.project",
@@ -332,10 +344,12 @@ function sampleLogLines(raw: string): {
     .filter((line) => line.length > 0 && line !== "[... truncated ...]");
   const interesting = lines.filter((line) =>
     /error|fatal|panic|oom|killed|unhealthy|econnrefused|no space|permission denied|traceback/i.test(
-      line,
-    ),
+      line
+    )
   );
-  const sampled = (interesting.length > 0 ? interesting : lines).slice(-MAX_LOG_SAMPLE_LINES);
+  const sampled = (interesting.length > 0 ? interesting : lines).slice(
+    -MAX_LOG_SAMPLE_LINES
+  );
   const excerpt = sampled.join("\n");
   const severity = interesting.length > 0 ? "error" : "info";
   const fact =
@@ -344,11 +358,11 @@ function sampleLogLines(raw: string): {
       : interesting.length > 0
         ? clip(
             `Recent logs contain ${interesting.length} error-like lines. Last: ${sampled[sampled.length - 1]}`,
-            MAX_LOG_FACT_CHARS,
+            MAX_LOG_FACT_CHARS
           )
         : clip(
             `Recent logs (${sampled.length} sampled lines) show no error pattern. Last: ${sampled[sampled.length - 1]}`,
-            MAX_LOG_FACT_CHARS,
+            MAX_LOG_FACT_CHARS
           );
   return {
     fact,

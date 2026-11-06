@@ -20,7 +20,10 @@ type AgentSessionEvent = {
   level?: string;
 };
 
-export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefined {
+export function mapPiEvent(
+  event: AgentSessionEvent,
+  fromWire: (name: string) => string = (name) => name
+): NormalizedEvent | undefined {
   switch (event.type) {
     case "message_update": {
       const inner = event.assistantMessageEvent as {
@@ -38,14 +41,14 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
     case "tool_execution_start":
       return {
         type: "tool_start",
-        toolName: event.toolName ?? "",
+        toolName: fromWire(event.toolName ?? ""),
         toolCallId: event.toolCallId ?? "",
         args: redactedArgs(event.args),
       };
     case "tool_execution_update":
       return {
         type: "tool_update",
-        toolName: event.toolName ?? "",
+        toolName: fromWire(event.toolName ?? ""),
         toolCallId: event.toolCallId ?? "",
         text: toolText(event.partialResult ?? event),
         args: redactedArgs(event.args),
@@ -53,7 +56,7 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
     case "tool_execution_end":
       return {
         type: "tool_end",
-        toolName: event.toolName ?? "",
+        toolName: fromWire(event.toolName ?? ""),
         toolCallId: event.toolCallId ?? "",
         isError: Boolean(event.isError),
         text: toolText(event.result),
@@ -114,7 +117,10 @@ export function mapPiEvent(event: AgentSessionEvent): NormalizedEvent | undefine
   }
 }
 
-export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
+export function mapPiMessages(
+  messages: unknown[],
+  fromWire: (name: string) => string = (name) => name
+): RuntimeMessage[] {
   const out: RuntimeMessage[] = [];
   let index = 0;
 
@@ -124,7 +130,11 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
     if (m?.role === "assistant" && Array.isArray(m.content)) {
       for (const block of m.content) {
         if (block && typeof block === "object") {
-          const b = block as { type?: string; id?: string; arguments?: unknown };
+          const b = block as {
+            type?: string;
+            id?: string;
+            arguments?: unknown;
+          };
           if (b.type === "toolCall" && b.id) {
             toolCallArgs.set(b.id, b.arguments);
           }
@@ -170,13 +180,15 @@ export function mapPiMessages(messages: unknown[]): RuntimeMessage[] {
     }
     if (message.role === "toolResult" || message.role === "tool") {
       const args = message.toolCallId
-        ? toolCallArgs.get(message.toolCallId) ?? message.args
+        ? (toolCallArgs.get(message.toolCallId) ?? message.args)
         : message.args;
       out.push({
         id,
         role: "tool",
         text: contentToText(message.content),
-        toolName: message.toolName,
+        toolName: message.toolName
+          ? fromWire(message.toolName)
+          : message.toolName,
         toolCallId: message.toolCallId,
         isError: message.isError,
         args: redactedArgs(args),
@@ -193,7 +205,11 @@ function contentThinking(content: unknown): string | undefined {
   for (const block of content) {
     if (block && typeof block === "object") {
       const b = block as { type?: string; thinking?: string };
-      if (b.type === "thinking" && typeof b.thinking === "string" && b.thinking.trim()) {
+      if (
+        b.type === "thinking" &&
+        typeof b.thinking === "string" &&
+        b.thinking.trim()
+      ) {
         parts.push(b.thinking.trim());
       }
     }
@@ -202,7 +218,7 @@ function contentThinking(content: unknown): string | undefined {
 }
 
 function contentAttachments(
-  content: unknown,
+  content: unknown
 ): Array<{ mediaType?: string }> | undefined {
   if (!Array.isArray(content)) {
     return undefined;
@@ -222,18 +238,18 @@ function contentAttachments(
     const mediaType =
       typeof row.mediaType === "string"
         ? row.mediaType
-        : typeof row.mimeType === "string" ? row.mimeType
-        : typeof row.source === "object" && row.source !== null
-          ? (row.source as { mediaType?: unknown }).mediaType
-          : undefined;
+        : typeof row.mimeType === "string"
+          ? row.mimeType
+          : typeof row.source === "object" && row.source !== null
+            ? (row.source as { mediaType?: unknown }).mediaType
+            : undefined;
     if (
-      (typeof row.type === "string" && row.type.toLowerCase().includes("image")) ||
+      (typeof row.type === "string" &&
+        row.type.toLowerCase().includes("image")) ||
       row.image_url !== undefined ||
       (typeof mediaType === "string" && mediaType.startsWith("image/"))
     ) {
-      found.push(
-        typeof mediaType === "string" ? { mediaType } : {},
-      );
+      found.push(typeof mediaType === "string" ? { mediaType } : {});
     }
   }
   return found.length > 0 ? found : undefined;

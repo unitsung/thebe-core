@@ -51,11 +51,11 @@ describe("container diagnosis service", () => {
         environmentId: "0",
       },
     });
-    expect(result.actionId).toBe("container.diagnose");
+    expect(result.actionId).toBe("container_diagnose");
     expect(result.status).toBe("completed");
     expect(result.resource.id).toBe("ctr-emby");
     expect(
-      result.observations.some((item) => item.source === "container.inspect")
+      result.observations.some((item) => item.source === "container_inspect")
     ).toBe(true);
     expect(
       result.observations.every((item) => item.observedAt.length > 0)
@@ -120,7 +120,7 @@ describe("container diagnosis service", () => {
     expect(result.diagnosis.tokenUsed).toBe(false);
     expect(result.diagnosis.code).not.toBe("invented");
     expect(
-      result.observations.every((item) => item.source.startsWith("container."))
+      result.observations.every((item) => item.source.startsWith("container_"))
     ).toBe(true);
   });
 

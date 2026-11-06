@@ -265,7 +265,7 @@ describe("Docker Engine container provider", () => {
       probe: async () => ({ ok: true, status: 200 }),
     });
     const receipt = await api.executeApprovedAction({
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource: {
         kind: "container",
         id: "emby",

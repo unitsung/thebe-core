@@ -49,12 +49,17 @@ describe("Artifact product HTTP", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
-          resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          actionId: "container_restart",
+          resource: {
+            kind: "container",
+            id: "ctr-emby",
+            name: "emby",
+            provider: "arcane",
+          },
           approval: { approved: true, client: "ios" },
           idempotencyKey: "artifact-action-1",
         }),
-      }),
+      })
     );
     const receipt = await json(response);
 
@@ -62,27 +67,29 @@ describe("Artifact product HTTP", () => {
     const artifactId = receipt.artifactId as string;
     const metadata = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}`)
+      )
     );
-    expect(metadata).toEqual(expect.objectContaining({
-      artifactId,
-      kind: "operation_receipt",
-      runId: receipt.receiptId,
-      contentType: "application/json",
-    }));
+    expect(metadata).toEqual(
+      expect.objectContaining({
+        artifactId,
+        kind: "operation_receipt",
+        runId: receipt.receiptId,
+        contentType: "application/json",
+      })
+    );
 
     const content = await json(
       await app.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/artifacts/${artifactId}/content`)
+      )
     );
     expect(content.artifact).toEqual(expect.objectContaining({ artifactId }));
     expect(JSON.parse(content.content as string)).toEqual(
       expect.objectContaining({
         receiptId: receipt.receiptId,
-        actionId: "container.restart",
-      }),
+        actionId: "container_restart",
+      })
     );
   });
 
@@ -98,12 +105,12 @@ describe("Artifact product HTTP", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
+          actionId: "container_restart",
           resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
           approval: { approved: true },
           idempotencyKey: "artifact-restart-1",
         }),
-      }),
+      })
     );
     const receipt = await json(response);
     const restarted = createThebeApp({
@@ -115,9 +122,9 @@ describe("Artifact product HTTP", () => {
     const listed = await json(
       await restarted.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/artifacts?kind=operation_receipt&runId=${receipt.receiptId}`,
-        ),
-      ),
+          `http://127.0.0.1:8787/v1/artifacts?kind=operation_receipt&runId=${receipt.receiptId}`
+        )
+      )
     );
     expect(listed.artifacts).toEqual([
       expect.objectContaining({
@@ -128,18 +135,20 @@ describe("Artifact product HTTP", () => {
 
     const restoredReceipt = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/action/${receipt.receiptId}`),
-      ),
+        new Request(`http://127.0.0.1:8787/v1/action/${receipt.receiptId}`)
+      )
     );
     expect(restoredReceipt.artifactId).toBe(receipt.artifactId);
 
     const content = await json(
       await restarted.handler.handle(
-        new Request(`http://127.0.0.1:8787/v1/artifacts/${receipt.artifactId}/content`),
-      ),
+        new Request(
+          `http://127.0.0.1:8787/v1/artifacts/${receipt.artifactId}/content`
+        )
+      )
     );
     expect(JSON.parse(content.content as string)).toEqual(
-      expect.objectContaining({ receiptId: receipt.receiptId }),
+      expect.objectContaining({ receiptId: receipt.receiptId })
     );
   });
 
@@ -147,21 +156,29 @@ describe("Artifact product HTTP", () => {
     const { createThebeHttpHandler } = await import("./handler.ts");
     const document = await json(
       await createThebeHttpHandler({ version: "0.1.0" }).handle(
-        new Request("http://127.0.0.1:8787/openapi.json"),
-      ),
+        new Request("http://127.0.0.1:8787/openapi.json")
+      )
     );
-    expect(document.paths).toEqual(expect.objectContaining({
-      "/v1/artifacts": expect.objectContaining({ get: expect.any(Object) }),
-      "/v1/artifacts/{id}": expect.objectContaining({ get: expect.any(Object) }),
-      "/v1/artifacts/{id}/content": expect.objectContaining({ get: expect.any(Object) }),
-    }));
-    expect(document.components).toEqual(expect.objectContaining({
-      schemas: expect.objectContaining({
-        AgentArtifact: expect.any(Object),
-        ArtifactList: expect.any(Object),
-        ArtifactContent: expect.any(Object),
-      }),
-    }));
+    expect(document.paths).toEqual(
+      expect.objectContaining({
+        "/v1/artifacts": expect.objectContaining({ get: expect.any(Object) }),
+        "/v1/artifacts/{id}": expect.objectContaining({
+          get: expect.any(Object),
+        }),
+        "/v1/artifacts/{id}/content": expect.objectContaining({
+          get: expect.any(Object),
+        }),
+      })
+    );
+    expect(document.components).toEqual(
+      expect.objectContaining({
+        schemas: expect.objectContaining({
+          AgentArtifact: expect.any(Object),
+          ArtifactList: expect.any(Object),
+          ArtifactContent: expect.any(Object),
+        }),
+      })
+    );
   });
 
   it("returns stable errors for missing Artifacts and invalid filters", async () => {
@@ -170,18 +187,22 @@ describe("Artifact product HTTP", () => {
       provider: provider(),
     });
     const missing = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/artifacts/missing"),
+      new Request("http://127.0.0.1:8787/v1/artifacts/missing")
     );
     expect(missing.status).toBe(404);
-    expect(await json(missing)).toEqual({ ok: false, error: "artifact not found" });
+    expect(await json(missing)).toEqual({
+      ok: false,
+      error: "artifact not found",
+    });
 
     const invalid = await app.handler.handle(
-      new Request("http://127.0.0.1:8787/v1/artifacts?kind=secret"),
+      new Request("http://127.0.0.1:8787/v1/artifacts?kind=secret")
     );
     expect(invalid.status).toBe(400);
     expect(await json(invalid)).toEqual({
       ok: false,
-      error: "kind must be diagnosis, report, resource_list, operation_receipt, task_output",
+      error:
+        "kind must be diagnosis, report, resource_list, operation_receipt, task_output",
       code: "invalid_body",
     });
   });
