@@ -63,6 +63,7 @@ import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
 import type { Ticket } from "./tickets/types.ts";
 import type { Trigger } from "./sources/types.ts";
+import type { Decision, Policy } from "./eval/types.ts";
 import type {
   AgentArtifact,
   ArtifactContent,
@@ -472,6 +473,19 @@ export interface ThebeAgent {
   listTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
+  /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
+  getPolicy(): Promise<Policy>;
+  setPolicy(input: {
+    rules?: unknown;
+    acceptMode?: unknown;
+    model?: unknown;
+  }): Promise<Policy>;
+  /** What Eval decided, newest first. In observe, `wouldAccept` marks what Core would have taken on. */
+  listDecisions(query?: {
+    thread?: string;
+    limit?: number;
+  }): Promise<Decision[]>;
+  getDecision(id: string): Promise<Decision | undefined>;
   /** Events the enabled Sources observed, newest first. Recorded for audit; nothing acts on them yet. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   /** Records the Ticket for a Goal the person asked for. Idempotent. */

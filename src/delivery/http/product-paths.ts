@@ -12,6 +12,8 @@ export const PRODUCT_HTTP_PATH = {
   enabledResources: "/v1/resources/enabled",
   artifacts: "/v1/artifacts",
   tickets: "/v1/tickets",
+  policy: "/v1/policy",
+  decisions: "/v1/decisions",
   permissionSettings: "/v1/settings/permissions",
   fullAccessSettings: "/v1/settings/full-access",
 } as const;

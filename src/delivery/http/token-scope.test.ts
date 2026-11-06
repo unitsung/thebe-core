@@ -70,6 +70,9 @@ describe("a token limited to /mcp", () => {
     const attempts: Array<[string, RequestInit]> = [
       ["/v1/health", {}],
       ["/v1/tickets", {}],
+      ["/v1/policy", {}],
+      ["/v1/policy", { method: "PUT", body: "{}" }],
+      ["/v1/decisions", {}],
       ["/v1/session", { method: "POST", body: "{}" }],
       ["/v1/action", { method: "POST", body: "{}" }],
       ["/v1/settings/permissions", { method: "PATCH", body: "{}" }],

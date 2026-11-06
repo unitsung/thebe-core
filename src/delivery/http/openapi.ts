@@ -697,6 +697,38 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: "/v1/policy",
+    summary: "Read the rules and accept mode Eval weighs events by",
+    tag: "ticket",
+    responseSchema: "Policy",
+  },
+  {
+    method: "put",
+    path: "/v1/policy",
+    summary:
+      "Change the rules, accept mode (off or observe) or model; auto is not available yet",
+    tag: "ticket",
+    requestBody: { required: true },
+    requestSchema: "PolicyInput",
+    responseSchema: "Policy",
+  },
+  {
+    method: "get",
+    path: "/v1/decisions",
+    summary: "List Eval decisions, newest first; ?thread= and ?limit= filter",
+    tag: "ticket",
+    responseSchema: "DecisionList",
+  },
+  {
+    method: "get",
+    path: "/v1/decisions/{id}",
+    summary: "Read one Decision",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "Decision",
+  },
+  {
+    method: "get",
     path: "/v1/tickets",
     summary: "List Tickets, newest first (read-only)",
     tag: "ticket",
@@ -2709,6 +2741,107 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: { $ref: "#/components/schemas/GoalSchedule" },
             },
+          },
+        },
+        PolicyRule: {
+          type: "object",
+          required: ["id", "text"],
+          properties: { id: { type: "string" }, text: { type: "string" } },
+        },
+        Policy: {
+          type: "object",
+          required: ["rules", "acceptMode", "revision", "updatedAt"],
+          properties: {
+            rules: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PolicyRule" },
+            },
+            acceptMode: {
+              type: "string",
+              enum: ["off", "observe"],
+              description:
+                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto does not exist yet.",
+            },
+            model: {
+              type: "object",
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+              description:
+                "The model that weighs events; unset means Core's default.",
+            },
+            revision: { type: "integer" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        PolicyInput: {
+          type: "object",
+          description:
+            "Any of these; what is left out stays as it was. rules is a list of plain-language strings (at most 20, 500 characters each). model: null returns to Core's default.",
+          properties: {
+            rules: { type: "array", items: { type: "string" } },
+            acceptMode: { type: "string", enum: ["off", "observe"] },
+            model: {
+              type: "object",
+              nullable: true,
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
+          },
+        },
+        DecisionList: {
+          type: "object",
+          required: ["decisions"],
+          properties: {
+            decisions: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Decision" },
+            },
+          },
+        },
+        Decision: {
+          type: "object",
+          description:
+            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
+          required: [
+            "id",
+            "evalId",
+            "thread",
+            "triggerIds",
+            "at",
+            "outcome",
+            "matchedRuleIds",
+            "reason",
+            "policyVersion",
+            "decidedAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            evalId: { type: "string" },
+            thread: {
+              type: "string",
+              description: "e.g. resource:container:emby",
+            },
+            triggerIds: { type: "array", items: { type: "string" } },
+            at: { type: "string", format: "date-time" },
+            outcome: {
+              type: "string",
+              enum: ["accept", "stop", "ignore", "unavailable"],
+            },
+            wouldAccept: { type: "boolean" },
+            matchedRuleIds: { type: "array", items: { type: "string" } },
+            reason: { type: "string" },
+            unavailableReason: { type: "string" },
+            gate: {
+              type: "boolean",
+              description:
+                "The deterministic Gate stopped it before any model was asked.",
+            },
+            policyVersion: { type: "string" },
+            decidedAt: { type: "string", format: "date-time" },
           },
         },
         TicketList: {
