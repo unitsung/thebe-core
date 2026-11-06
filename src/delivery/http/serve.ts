@@ -6,6 +6,7 @@ import { buildIsolationReport } from "../../agent/security/isolation.ts";
 import { resolveThebeListen } from "./bind.ts";
 import { drainThebeHttpServer } from "./drain.ts";
 import { listenThebeHttp } from "./index.ts";
+import { createMcpOnlyHandler } from "./mcp-only.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 loadEnvLocal(here);
@@ -40,6 +41,15 @@ const { server, url, bind } = await listenThebeHttp(app, {
 });
 console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);
 console.log(`THEBE_DOCS ${url}/docs`);
+const gateway = listen.mcpPort
+  ? await listenThebeHttp(createMcpOnlyHandler(app), {
+      host: listen.mcpHost,
+      port: listen.mcpPort,
+    })
+  : undefined;
+if (gateway) {
+  console.log(`THEBE_MCP_LISTEN ${gateway.url}/mcp bind=${gateway.bind}`);
+}
 if (tokenGenerated) {
   console.log(`THEBE_TOKEN ${token}`);
   if (tokenPath) {
@@ -61,6 +71,7 @@ const shutdown = (signal: string) => {
   force.unref?.();
   void drainThebeHttpServer(server, () => agent.quiesce())
     .catch(() => {})
+    .finally(() => gateway?.server.close())
     .finally(async () => {
       // Requests have drained. Close the OS-sandbox proxies so they do not
       // outlive Core.

@@ -17,7 +17,7 @@ describe("resolveThebeListen", () => {
     expect(config.port).toBe(8787);
     expect(config.token).toBeUndefined();
     expect(config.allowedHosts).toEqual(
-      expect.arrayContaining(["127.0.0.1", "localhost", "::1"]),
+      expect.arrayContaining(["127.0.0.1", "localhost", "::1"])
     );
   });
 
@@ -25,7 +25,7 @@ describe("resolveThebeListen", () => {
     const config = resolveThebeListen({ THEBE_HOST: "0.0.0.0" });
     expect(config.host).toBe("0.0.0.0");
     expect(config.allowedHosts).toEqual(
-      expect.arrayContaining(["127.0.0.1", "localhost", "::1"]),
+      expect.arrayContaining(["127.0.0.1", "localhost", "::1"])
     );
     expect(config.allowedHosts).not.toContain("evil.com");
   });
@@ -36,7 +36,7 @@ describe("resolveThebeListen", () => {
       THEBE_ALLOWED_HOSTS: "thebe.local, 192.168.1.5",
     });
     expect(config.allowedHosts).toEqual(
-      expect.arrayContaining(["127.0.0.1", "thebe.local", "192.168.1.5"]),
+      expect.arrayContaining(["127.0.0.1", "thebe.local", "192.168.1.5"])
     );
   });
 });
@@ -44,7 +44,7 @@ describe("resolveThebeListen", () => {
 describe("resolveAllowedHosts", () => {
   it("includes a specific bind host", () => {
     expect(resolveAllowedHosts("10.0.0.2")).toEqual(
-      expect.arrayContaining(["10.0.0.2", "127.0.0.1"]),
+      expect.arrayContaining(["10.0.0.2", "127.0.0.1"])
     );
   });
 
@@ -58,7 +58,9 @@ describe("productionTokenError", () => {
     expect(productionTokenError(undefined, "development")).toBeUndefined();
     expect(productionTokenError("secret", "production")).toBeUndefined();
     expect(productionTokenError("  ", "production")).toMatch(/THEBE_TOKEN/);
-    expect(productionTokenError(undefined, "production")).toMatch(/THEBE_TOKEN/);
+    expect(productionTokenError(undefined, "production")).toMatch(
+      /THEBE_TOKEN/
+    );
   });
 });
 
@@ -92,5 +94,28 @@ describe("resolveThebeToken", () => {
   it("generates in memory when there is no config dir", () => {
     const result = resolveThebeToken({ env: {}, generate: () => "memory" });
     expect(result).toEqual({ token: "memory", generated: true });
+  });
+});
+
+describe("the /mcp-only gateway port", () => {
+  it("is off unless THEBE_MCP_PORT names a different valid port", () => {
+    expect(resolveThebeListen({}).mcpPort).toBeUndefined();
+    expect(
+      resolveThebeListen({ THEBE_MCP_PORT: "abc" }).mcpPort
+    ).toBeUndefined();
+    expect(
+      resolveThebeListen({ THEBE_PORT: "8787", THEBE_MCP_PORT: "8787" }).mcpPort
+    ).toBeUndefined();
+    expect(resolveThebeListen({ THEBE_MCP_PORT: "8788" }).mcpPort).toBe(8788);
+  });
+
+  it("binds where THEBE_MCP_HOST says, else where the main port does", () => {
+    expect(resolveThebeListen({ THEBE_HOST: "0.0.0.0" }).mcpHost).toBe(
+      "0.0.0.0"
+    );
+    expect(
+      resolveThebeListen({ THEBE_HOST: "0.0.0.0", THEBE_MCP_HOST: "127.0.0.1" })
+        .mcpHost
+    ).toBe("127.0.0.1");
   });
 });

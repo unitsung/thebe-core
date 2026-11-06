@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createThebeHttpHandler } from "./handler.ts";
-import { createDeviceToken, createTokenVerifier } from "./token-store.ts";
+import {
+  createDeviceToken,
+  createTokenVerifier,
+  describeTokenScopes,
+  tokenMayDeleteIrreversibly,
+  tokenMayWrite,
+} from "./token-store.ts";
 
 const reader = "r".repeat(64);
 const writer = "w".repeat(64);
@@ -88,5 +94,68 @@ describe("a token limited to /mcp", () => {
   it("still answers 401 for an unknown token before it says anything about scopes", async () => {
     const h = await handler();
     expect((await h.handle(call("nope", "/v1/health"))).status).toBe(401);
+  });
+});
+
+describe("scope levels", () => {
+  it("each scope includes the ones below it, and a full token needs none", async () => {
+    const { mkdtemp: make } = await import("node:fs/promises");
+    const configDir = await make(join(tmpdir(), "thebe-levels-"));
+    for (const scope of [
+      "mcp:read",
+      "mcp:write",
+      "mcp:irreversible",
+    ] as const) {
+      createDeviceToken({
+        configDir,
+        name: scope.replace(":", "-"),
+        scope,
+        generate: () => scope.padEnd(64, "x"),
+      });
+    }
+    const verifier = createTokenVerifier({ configDir, env: {} });
+    const caller = (scope: string) => {
+      const found = verifier.verify(scope.padEnd(64, "x"));
+      expect(found, scope).toBeDefined();
+      return found;
+    };
+    expect(tokenMayWrite(caller("mcp:read"))).toBe(false);
+    expect(tokenMayWrite(caller("mcp:write"))).toBe(true);
+    expect(tokenMayDeleteIrreversibly(caller("mcp:write"))).toBe(false);
+    expect(tokenMayWrite(caller("mcp:irreversible"))).toBe(true);
+    expect(tokenMayDeleteIrreversibly(caller("mcp:irreversible"))).toBe(true);
+    expect(tokenMayDeleteIrreversibly({ name: "iPad" })).toBe(true);
+    expect(describeTokenScopes(caller("mcp:irreversible")?.scopes)).toBe(
+      "mcp:irreversible"
+    );
+  });
+});
+
+describe("rate limit on a scoped token", () => {
+  it("refuses at once past the limit with 429, and leaves full-access tokens alone", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-rate-"));
+    createDeviceToken({
+      configDir,
+      name: "Reader",
+      scope: "mcp:read",
+      generate: () => reader,
+    });
+    createDeviceToken({ configDir, name: "iPad", generate: () => full });
+    const h = createThebeHttpHandler({
+      version: "t",
+      token: createTokenVerifier({ configDir, env: {} }),
+      mcpRateLimit: 2,
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 4; i++) {
+      statuses.push((await h.handle(call(reader, "/mcp", ping))).status);
+    }
+    expect(statuses).toEqual([200, 200, 429, 429]);
+    const limited = await h.handle(call(reader, "/mcp", ping));
+    expect(limited.headers.get("retry-after")).toMatch(/^\d+$/);
+    expect(await limited.json()).toMatchObject({ code: "rate_limited" });
+    for (let i = 0; i < 5; i++) {
+      expect((await h.handle(call(full, "/mcp", ping))).status).toBe(200);
+    }
   });
 });

@@ -85,9 +85,14 @@ export function tokenStatus(options: {
 
 /**
  * What a token may do, beyond the full access every token has by default. A token with scopes works
- * only on `/mcp`: `mcp:read` for read tools, `mcp:write` (which includes `mcp:read`) for write tools too.
+ * only on `/mcp`: `mcp:read` for read tools, `mcp:write` (which includes `mcp:read`) for write tools
+ * too, and `mcp:irreversible` (which includes both) for the deletes that cannot be undone.
  */
-export const TOKEN_SCOPES = ["mcp:read", "mcp:write"] as const;
+export const TOKEN_SCOPES = [
+  "mcp:read",
+  "mcp:write",
+  "mcp:irreversible",
+] as const;
 export type TokenScope = (typeof TOKEN_SCOPES)[number];
 
 /** Whose token it is, and what it may do. No `scopes` means full access, as every token had before scopes. */
@@ -95,7 +100,18 @@ export type TokenCaller = { name: string; scopes?: readonly TokenScope[] };
 
 /** Whether this caller may run write tools: a token with no scope list has full access. */
 export function tokenMayWrite(caller: TokenCaller | undefined): boolean {
-  return !caller?.scopes || caller.scopes.includes("mcp:write");
+  return (
+    !caller?.scopes ||
+    caller.scopes.includes("mcp:write") ||
+    caller.scopes.includes("mcp:irreversible")
+  );
+}
+
+/** Whether this caller may run a delete that cannot be undone: only full access or `mcp:irreversible`. */
+export function tokenMayDeleteIrreversibly(
+  caller: TokenCaller | undefined
+): boolean {
+  return !caller?.scopes || caller.scopes.includes("mcp:irreversible");
 }
 
 /** What the HTTP handler asks: whose token is this, if it is one of ours. */
@@ -220,15 +236,15 @@ export function createDeviceToken(options: {
     name,
     hash: hex(token),
     createdAt: (options.now?.() ?? new Date()).toISOString(),
-    ...(options.scope && {
-      scopes:
-        options.scope === "mcp:write"
-          ? ["mcp:read", "mcp:write"]
-          : ["mcp:read"],
-    }),
+    ...(options.scope && { scopes: scopesGranting(options.scope) }),
   });
   writeDeviceTokens(options.configDir, existing);
   return { ok: true, name, token };
+}
+
+/** Each scope includes the ones below it, so the stored list is every scope the token may use. */
+function scopesGranting(scope: TokenScope): TokenScope[] {
+  return TOKEN_SCOPES.slice(0, TOKEN_SCOPES.indexOf(scope) + 1);
 }
 
 /** Removes one device's token; the others keep working. */
@@ -256,6 +272,7 @@ export function describeTokenScopes(stored: unknown): string {
   const scopes = knownScopes(stored);
   if (scopes === undefined) return "full access";
   if (scopes === "unknown") return "unknown scope (refused)";
+  if (scopes.includes("mcp:irreversible")) return "mcp:irreversible";
   return scopes.includes("mcp:write") ? "mcp:write" : "mcp:read";
 }
 

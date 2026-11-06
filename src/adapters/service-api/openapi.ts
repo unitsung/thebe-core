@@ -22,6 +22,10 @@ export type OpenAPIConnection = {
   trustReadOnlyAnnotations?: boolean;
   /** Operator allow-list of operations exposed as preview + confirm write tools. */
   writeOperations?: string[];
+  /** Operator marks: these operations cannot be undone, whatever their HTTP method (`irreversibleOperations`)... */
+  irreversibleOperations?: string[];
+  /** ...or can (`reversibleOperations`), e.g. a DELETE that only removes a record. IDs or `METHOD /path`. */
+  reversibleOperations?: string[];
   /** Operator deny-list: operation IDs or `METHOD /path`. Hidden from discovery and refused on every route. */
   excludeOperations?: string[];
   /** Operator deny-list by OpenAPI tag, same effect as excludeOperations. */
@@ -320,6 +324,7 @@ export class OpenAPIService implements ServiceAPIProvider {
             : {}),
           readOnly: this.readable(op),
           writable: this.isWritable(op),
+          ...this.irreversibleMark(op),
           parameters,
           ...(Object.keys(requestBody).length > 0
             ? {
@@ -347,6 +352,18 @@ export class OpenAPIService implements ServiceAPIProvider {
       !!excludeTags?.length &&
       tags.some((tag) => excludeTags.includes(String(tag)))
     );
+  }
+  /** `{ irreversible: true|false }` when the operator marked this operation, else nothing. */
+  private irreversibleMark(op: Operation): { irreversible?: boolean } {
+    const listed = (names?: string[]) =>
+      names?.includes(op.id) === true ||
+      names?.includes(`${op.method} ${op.path}`) === true;
+    // Both lists naming one operation is a mistake; the safer reading wins.
+    if (listed(this.connection.irreversibleOperations))
+      return { irreversible: true };
+    if (listed(this.connection.reversibleOperations))
+      return { irreversible: false };
+    return {};
   }
   private isWritable(op: Operation): boolean {
     return (
@@ -685,6 +702,16 @@ export function openAPIConnectionsFromEnv(
       trustReadOnlyAnnotations: entry.trustReadOnlyAnnotations === true,
       writeOperations: Array.isArray(entry.writeOperations)
         ? entry.writeOperations.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : undefined,
+      irreversibleOperations: Array.isArray(entry.irreversibleOperations)
+        ? entry.irreversibleOperations.filter(
+            (item): item is string => typeof item === "string"
+          )
+        : undefined,
+      reversibleOperations: Array.isArray(entry.reversibleOperations)
+        ? entry.reversibleOperations.filter(
             (item): item is string => typeof item === "string"
           )
         : undefined,

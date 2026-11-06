@@ -437,8 +437,9 @@ describe("OpenList files", () => {
         names: ["Movie"],
       })
     ).toEqual({ taskIds: ["t1"] });
-    expect(calls[0]?.url).toContain("/api/fs/copy");
-    expect(calls[0]?.body).toMatchObject({
+    expect(calls[0]?.url).toContain("/api/fs/list"); // the destination is read first
+    expect(calls[1]?.url).toContain("/api/fs/copy");
+    expect(calls[1]?.body).toMatchObject({
       src_dir: "/dl",
       dst_dir: "/lib/Movies",
       names: ["Movie"],
@@ -451,6 +452,75 @@ describe("OpenList files", () => {
       })
     ).rejects.toThrow("Invalid name");
     await expect(provider.mkdir("/lib/../etc")).rejects.toThrow("..");
+  });
+
+  it("refuses a copy or move at once when the destination already has that name", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      calls.push(String(input));
+      return Response.json({
+        code: 200,
+        data: {
+          total: 2,
+          content: [
+            { name: "Movie", is_dir: true },
+            { name: "Other", is_dir: false },
+          ],
+        },
+      });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    for (const act of ["copy", "move"] as const) {
+      await expect(
+        provider[act]({
+          sourceDir: "/dl",
+          destinationDir: "/lib",
+          names: ["Movie", "New"],
+        })
+      ).rejects.toThrow(
+        /Movie already exists in \/lib; nothing was copied or moved/
+      );
+    }
+    expect(calls.every((url) => url.includes("/api/fs/list"))).toBe(true);
+  });
+
+  it("looks through every page of a large destination before it copies", async () => {
+    const calls: Array<{ url: string; page?: number }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ url: String(input), page: body.page });
+      if (String(input).includes("/api/fs/list")) {
+        const names =
+          body.page === 1
+            ? Array.from({ length: 200 }, (_, i) => `f${i}`)
+            : ["Movie"];
+        return Response.json({
+          code: 200,
+          data: {
+            total: 201,
+            content: names.map((name) => ({ name, is_dir: false })),
+          },
+        });
+      }
+      return Response.json({ code: 200, data: { tasks: [{ id: "t" }] } });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    await expect(
+      provider.copy({
+        sourceDir: "/dl",
+        destinationDir: "/lib",
+        names: ["Movie"],
+      })
+    ).rejects.toThrow("Movie already exists");
+    expect(calls.map((c) => c.page)).toEqual([1, 2]);
   });
 
   it("surfaces application level errors", async () => {

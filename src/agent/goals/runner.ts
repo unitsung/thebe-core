@@ -7,7 +7,12 @@ import type { SubagentRun } from "../types.ts";
  * a small sequence of verified checkpoints.
  */
 export type GoalEvent =
-  | { type: "goal_started"; goal: string; criteria?: string[]; maxIterations: number }
+  | {
+      type: "goal_started";
+      goal: string;
+      criteria?: string[];
+      maxIterations: number;
+    }
   | { type: "goal_iteration"; iteration: number; maxIterations: number }
   | {
       type: "goal_reviewed";
@@ -43,10 +48,21 @@ export type GoalOptions = {
   /** Explicit, independently checkable conditions that define done. */
   criteria?: string[];
   maxIterations?: number;
+  /** Read-only run: the worker reports what it finds and would do, and changes nothing. */
+  observe?: boolean;
+  /** The worker may ask the person one question through `goal_report`. */
+  allowAsk?: boolean;
+  /** What the person has answered or said in review so far; every later checkpoint is told. */
+  guidance?: string[];
 };
 
 export type GoalReviewResult = {
   complete: boolean;
+  /**
+   * The reviewer (or the worker, for the heuristic review) said the work cannot go on without a
+   * decision or change from outside. More checkpoints cannot fix that, so the loop stops at once.
+   */
+  blocked?: boolean;
   critique: string;
   score: number;
   remainingTasks?: string[];
@@ -55,6 +71,9 @@ export type GoalReviewResult = {
 export type GoalRunResult = {
   status: GoalRunStatus;
   complete: boolean;
+  /** Stopped early because the review reported a blocker; `blocker` is what it needs. */
+  blocked?: boolean;
+  blocker?: string;
   iterations: number;
   summary: string;
   reviews: GoalReviewResult[];
@@ -63,7 +82,7 @@ export type GoalRunResult = {
 export type GoalReviewEvaluator = (
   goal: string,
   criteria: string[] | undefined,
-  latestOutput: string,
+  latestOutput: string
 ) => Promise<GoalReviewResult>;
 
 export type RunGoalLoopOptions = {
@@ -89,7 +108,7 @@ const VERIFICATION_RE = /^VERIFICATION:\s*(.+)$/im;
  */
 export function buildGoalPrompt(
   options: GoalOptions,
-  review?: GoalReviewResult,
+  review?: GoalReviewResult
 ): string {
   const criteria = options.criteria?.filter(Boolean) ?? [];
   return [
@@ -104,6 +123,21 @@ export function buildGoalPrompt(
       ? criteria.map((item, index) => `${index + 1}. ${item}`).join("\n")
       : "Finish only when the objective has a concrete, verifiable end state. Derive the smallest relevant verification command or artifact before declaring completion.",
     "",
+    ...(options.guidance?.length
+      ? [
+          "## What the person told you",
+          "These came from the person who owns this task. Follow them; they outrank your own earlier plan.",
+          ...options.guidance.map((item, index) => `${index + 1}. ${item}`),
+          "",
+        ]
+      : []),
+    ...(options.observe
+      ? [
+          "## Observation only",
+          "You can look but not change anything: you have no edit, write or shell tool. Do the investigation, then report what you found and exactly what you would do about it, so the person can decide. Treat that report as the deliverable.",
+          "",
+        ]
+      : []),
     "## Operating rules",
     "- Inspect relevant code and the current configured workspace state before changing anything. Never search outside the configured workspace.",
     "- Make focused changes, preserve unrelated user work, and use available tools when they provide evidence.",
@@ -116,6 +150,12 @@ export function buildGoalPrompt(
     "- Use Pi's native find for filename searches and Pi's native grep for content searches.",
     "- Do not use bash or rg for ordinary searches.",
     "- Use bash only when the task genuinely requires executing a shell command.",
+    "",
+    "## Report with the goal_report tool",
+    "At the end of every checkpoint call goal_report once: progress, ready (with evidence), blocked (say exactly what you need), or dropped (say why nothing needs doing).",
+    options.allowAsk
+      ? "You may also use state ask to put ONE clear question to the person when you cannot go on without their answer, with options when it is a choice. Never ask what you could find out yourself."
+      : "You cannot ask the person questions in this task; if you need something only they can give, report blocked and say what.",
     "",
     "## Required checkpoint footer",
     "End every response with exactly these four lines:",
@@ -143,7 +183,7 @@ export function buildGoalPrompt(
 /** Prompt used by the fresh, read-only reviewer child. */
 export function buildGoalVerifierPrompt(
   options: GoalOptions,
-  workerReport: string,
+  workerReport: string
 ): string {
   const criteria = options.criteria?.filter(Boolean) ?? [];
   return [
@@ -180,32 +220,48 @@ export function buildGoalVerifierPrompt(
   ].join("\n");
 }
 
+/** What the reviewer or worker listed as still needed on its `REMAINING:` line, unless it says none. */
+function reportedRemaining(output: string): string | undefined {
+  const line = output.match(/^REMAINING:\s*(.+)$/im)?.[1]?.trim();
+  return line && !/^(none|n\/a|-)\.?$/i.test(line) ? line : undefined;
+}
+
 /** Parses only the independent review contract; worker prose cannot complete a goal. */
 export function reviewGoalEvidence(
   goal: string,
   criteria: string[] | undefined,
-  latestOutput: string,
+  latestOutput: string
 ): GoalReviewResult {
-  const verdict = latestOutput.match(/^VERDICT:\s*(pass|fail|blocked)\s*$/im)?.[1]?.toLowerCase();
+  const verdict = latestOutput
+    .match(/^VERDICT:\s*(pass|fail|blocked)\s*$/im)?.[1]
+    ?.toLowerCase();
   const evidence = latestOutput.match(/^EVIDENCE:\s*(.+)$/im)?.[1]?.trim();
   const hasEvidence = Boolean(
-    evidence && !/not (run|verified)|pending|unknown|n\/a|missing/i.test(evidence),
+    evidence &&
+    !/not (run|verified)|pending|unknown|n\/a|missing/i.test(evidence)
   );
   const words = latestOutput.toLowerCase();
   const remainingTasks = (criteria ?? []).filter((criterion) => {
-    const terms = criterion.toLowerCase().split(/\s+/).filter((term) => term.length > 3);
+    const terms = criterion
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 3);
     return terms.length > 0 && !terms.some((term) => words.includes(term));
   });
-  const complete = verdict === "pass" && hasEvidence && remainingTasks.length === 0;
+  const complete =
+    verdict === "pass" && hasEvidence && remainingTasks.length === 0;
   const score = complete
     ? 100
     : criteria?.length
-      ? Math.round(((criteria.length - remainingTasks.length) / criteria.length) * 100)
+      ? Math.round(
+          ((criteria.length - remainingTasks.length) / criteria.length) * 100
+        )
       : verdict === "blocked"
         ? 25
         : 50;
   return {
     complete,
+    ...(verdict === "blocked" && !complete ? { blocked: true } : {}),
     score,
     critique: complete
       ? `Independent evidence review passed for: ${goal}`
@@ -214,9 +270,13 @@ export function reviewGoalEvidence(
         : "The independent reviewer did not verify the completion contract.",
     remainingTasks: complete
       ? []
-      : remainingTasks.length > 0
-        ? remainingTasks
-        : ["Produce and independently verify the objective's stopping condition."],
+      : verdict === "blocked" && reportedRemaining(latestOutput)
+        ? [reportedRemaining(latestOutput)!, ...remainingTasks]
+        : remainingTasks.length > 0
+          ? remainingTasks
+          : [
+              "Produce and independently verify the objective's stopping condition.",
+            ],
   };
 }
 
@@ -224,25 +284,31 @@ export function reviewGoalEvidence(
 export async function defaultHeuristicReview(
   goal: string,
   criteria: string[] | undefined,
-  latestOutput: string,
+  latestOutput: string
 ): Promise<GoalReviewResult> {
   const status = latestOutput.match(STATUS_RE)?.[1]?.toLowerCase();
   const verification = latestOutput.match(VERIFICATION_RE)?.[1]?.trim();
   const hasVerification = Boolean(
-    verification && !/not (run|verified)|pending|unknown|n\/a/i.test(verification),
+    verification &&
+    !/not (run|verified)|pending|unknown|n\/a/i.test(verification)
   );
   const words = latestOutput.toLowerCase();
   const remainingTasks: string[] = [];
   let matched = 0;
 
   for (const criterion of criteria ?? []) {
-    const terms = criterion.toLowerCase().split(/\s+/).filter((term) => term.length > 3);
-    if (terms.length === 0 || terms.some((term) => words.includes(term))) matched += 1;
+    const terms = criterion
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((term) => term.length > 3);
+    if (terms.length === 0 || terms.some((term) => words.includes(term)))
+      matched += 1;
     else remainingTasks.push(criterion);
   }
 
   const criteriaSatisfied = !criteria?.length || remainingTasks.length === 0;
-  const complete = status === "complete" && hasVerification && criteriaSatisfied;
+  const complete =
+    status === "complete" && hasVerification && criteriaSatisfied;
   const score = complete
     ? 100
     : criteria?.length
@@ -250,36 +316,56 @@ export async function defaultHeuristicReview(
       : status === "blocked"
         ? 25
         : 50;
-  const fallback = status === "blocked"
-    ? "The goal is blocked; resolve the reported blocker before resuming."
-    : "Continue with the next verified checkpoint; completion needs the explicit marker and evidence.";
+  const fallback =
+    status === "blocked"
+      ? "The goal is blocked; resolve the reported blocker before resuming."
+      : "Continue with the next verified checkpoint; completion needs the explicit marker and evidence.";
 
   return {
     complete,
+    ...(status === "blocked" && !complete ? { blocked: true } : {}),
     score,
     critique: complete ? `Verified completion of: ${goal}` : fallback,
     remainingTasks: complete
       ? []
-      : remainingTasks.length > 0
-        ? remainingTasks
-        : ["Reach and verify the objective's stopping condition."],
+      : status === "blocked" && reportedRemaining(latestOutput)
+        ? [reportedRemaining(latestOutput)!, ...remainingTasks]
+        : remainingTasks.length > 0
+          ? remainingTasks
+          : ["Reach and verify the objective's stopping condition."],
   };
 }
 
-export async function runGoalLoop(params: RunGoalLoopOptions): Promise<GoalRunResult> {
+export async function runGoalLoop(
+  params: RunGoalLoopOptions
+): Promise<GoalRunResult> {
   const { options, execute, reviewEvaluator, onEvent, shouldStop } = params;
   const maxIterations = clampIterations(options.maxIterations);
   const evaluator = reviewEvaluator ?? defaultHeuristicReview;
   const emit = (event: GoalEvent) => onEvent?.(event);
-  const reviews: GoalReviewResult[] = params.initialReview ? [params.initialReview] : [];
+  const reviews: GoalReviewResult[] = params.initialReview
+    ? [params.initialReview]
+    : [];
   let status: GoalRunStatus = "max_iterations";
-  let iteration = Math.max(0, Math.min(maxIterations, Math.floor(params.initialIteration ?? 0)));
+  let blocker: string | undefined;
+  let iteration = Math.max(
+    0,
+    Math.min(maxIterations, Math.floor(params.initialIteration ?? 0))
+  );
 
-  emit({ type: "goal_started", goal: options.goal, criteria: options.criteria, maxIterations });
+  emit({
+    type: "goal_started",
+    goal: options.goal,
+    criteria: options.criteria,
+    maxIterations,
+  });
   while (iteration < maxIterations && !shouldStop?.()) {
     iteration += 1;
     emit({ type: "goal_iteration", iteration, maxIterations });
-    const output = await execute(buildGoalPrompt(options, reviews.at(-1)), iteration);
+    const output = await execute(
+      buildGoalPrompt(options, reviews.at(-1)),
+      iteration
+    );
     if (shouldStop?.()) {
       status = "cancelled";
       break;
@@ -291,16 +377,31 @@ export async function runGoalLoop(params: RunGoalLoopOptions): Promise<GoalRunRe
       status = "completed";
       break;
     }
+    if (review.blocked) {
+      blocker = review.remainingTasks?.[0] ?? review.critique;
+      break;
+    }
   }
   if (shouldStop?.()) status = "cancelled";
 
-  const summary = status === "completed"
-    ? `Goal completed after ${iteration} verified checkpoint(s).`
-    : status === "cancelled"
-      ? `Goal cancelled after ${iteration} checkpoint(s).`
-      : `Goal reached its ${maxIterations}-checkpoint limit without verified completion.`;
+  const blocked = status === "max_iterations" && blocker !== undefined;
+  const summary =
+    status === "completed"
+      ? `Goal completed after ${iteration} verified checkpoint(s).`
+      : status === "cancelled"
+        ? `Goal cancelled after ${iteration} checkpoint(s).`
+        : blocked
+          ? `Goal blocked at checkpoint ${iteration}: it needs a decision or change from you.`
+          : `Goal reached its ${maxIterations}-checkpoint limit without verified completion.`;
   emit({ type: "goal_completed", status, totalIterations: iteration, summary });
-  return { status, complete: status === "completed", iterations: iteration, summary, reviews };
+  return {
+    status,
+    complete: status === "completed",
+    ...(blocked ? { blocked, blocker } : {}),
+    iterations: iteration,
+    summary,
+    reviews,
+  };
 }
 
 function clampIterations(value: number | undefined): number {

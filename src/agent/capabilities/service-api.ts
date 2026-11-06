@@ -62,6 +62,8 @@ export type ServiceAPIOperation = {
   readOnly: boolean;
   /** Operator allow-listed for a preview + confirm write tool. */
   writable: boolean;
+  /** The operator's word on whether this call cannot be undone; beats the HTTP-method rule. */
+  irreversible?: boolean;
   parameters: ServiceAPIParameter[];
   requestBody?: {
     required: boolean;

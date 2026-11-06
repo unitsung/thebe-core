@@ -11,15 +11,20 @@ import type {
   SubagentUpdate,
 } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
+import { createGoalReportInbox, type GoalReportInbox } from "./report.ts";
 import type { StoredGoalEvent } from "../store.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
+import { httpError } from "../types.ts";
 
 const MAX_GOAL_EVENTS = 50;
+/** Longest answer or review note accepted; it goes into every later checkpoint prompt. */
+const MAX_ANSWER_CHARS = 4000;
 
 export function createGoalApi(
   ctx: AgentContext,
   subagents: GoalSubagentApi,
   artifactStore?: ArtifactStore,
+  reportInbox: GoalReportInbox = createGoalReportInbox(ctx.now)
 ) {
   const runs = new Map<string, ManagedGoal>();
   const persistChains = new Map<string, Promise<void>>();
@@ -34,9 +39,7 @@ export function createGoalApi(
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
     subagentRunIds: run.subagentRunIds.slice(),
-    activeSubagent: run.activeSubagent
-      ? { ...run.activeSubagent }
-      : undefined,
+    activeSubagent: run.activeSubagent ? { ...run.activeSubagent } : undefined,
     lastReview: run.lastReview
       ? {
           ...run.lastReview,
@@ -48,6 +51,13 @@ export function createGoalApi(
     finalReport: run.finalReport,
     artifactId: run.artifactId,
     error: run.error,
+    ...(run.blocked ? { blocked: true } : {}),
+    ...(run.observe ? { observe: true } : {}),
+    ...(run.report ? { report: { ...run.report } } : {}),
+    ...(run.attention ? { attention: { ...run.attention } } : {}),
+    ...(run.allowAsk ? { allowAsk: true } : {}),
+    ...(run.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
+    ...(run.guidance?.length ? { guidance: run.guidance.slice() } : {}),
   });
 
   const RECOVERY_MESSAGE =
@@ -63,7 +73,7 @@ export function createGoalApi(
     void queueGoalPersistence(
       snapshot(run),
       run.thebeSessionId,
-      storedGoalEvents(run.events),
+      storedGoalEvents(run.events)
     );
     for (const listener of run.listeners) listener(event);
   }
@@ -72,7 +82,7 @@ export function createGoalApi(
     run: ManagedGoal,
     status: Exclude<GoalRunStatus, "running" | "pausing">,
     summary?: string,
-    error?: string,
+    error?: string
   ): Promise<GoalRun> {
     run.status = status;
     run.summary = summary;
@@ -110,7 +120,7 @@ export function createGoalApi(
     await queueGoalPersistence(
       result,
       run.thebeSessionId,
-      storedGoalEvents(run.events),
+      storedGoalEvents(run.events)
     );
     run.resolveFinished(result);
     return result;
@@ -144,7 +154,7 @@ export function createGoalApi(
   async function persistGoal(
     run: GoalRun | undefined,
     thebeSessionId: string,
-    events: StoredGoalEvent[] = [],
+    events: StoredGoalEvent[] = []
   ): Promise<void> {
     try {
       const meta = await ctx.lookup(thebeSessionId);
@@ -153,7 +163,7 @@ export function createGoalApi(
           ...meta,
           goalRun: run,
           goalEvents: run ? events.slice(-MAX_GOAL_EVENTS) : undefined,
-        }),
+        })
       );
     } catch {
       // A persistence failure must not turn a completed Goal into a failure.
@@ -163,12 +173,12 @@ export function createGoalApi(
   function queueGoalPersistence(
     run: GoalRun | undefined,
     thebeSessionId: string,
-    events: StoredGoalEvent[] = [],
+    events: StoredGoalEvent[] = []
   ): Promise<void> {
     const previous = persistChains.get(thebeSessionId) ?? Promise.resolve();
     const next = previous.then(
       () => persistGoal(run, thebeSessionId, events),
-      () => persistGoal(run, thebeSessionId, events),
+      () => persistGoal(run, thebeSessionId, events)
     );
     persistChains.set(thebeSessionId, next);
     void next.then(
@@ -181,14 +191,14 @@ export function createGoalApi(
         if (persistChains.get(thebeSessionId) === next) {
           persistChains.delete(thebeSessionId);
         }
-      },
+      }
     );
     return next;
   }
 
   function restoreGoal(
     persisted: GoalRun | undefined,
-    persistedEvents: StoredGoalEvent[] = [],
+    persistedEvents: StoredGoalEvent[] = []
   ): void {
     if (!persisted || runs.has(persisted.thebeSessionId)) return;
     const interrupted =
@@ -198,11 +208,21 @@ export function createGoalApi(
       goal: persisted.goal,
       criteria: persisted.criteria,
       maxIterations: persisted.maxIterations,
+      observe: persisted.observe,
+      allowAsk: persisted.allowAsk,
+      reviewBeforeDone: persisted.reviewBeforeDone,
     });
+    // These would otherwise be lost on restart: what the run was allowed to do, why it stopped, and what
+    // it is waiting on the person for.
+    if (persisted.blocked) run.blocked = true;
+    if (persisted.report) run.report = { ...persisted.report };
+    if (persisted.attention) run.attention = { ...persisted.attention };
+    if (persisted.guidance?.length) run.guidance = persisted.guidance.slice();
     run.iteration = persisted.iteration;
     run.status = interrupted ? "paused" : persisted.status;
     run.createdAt = persisted.createdAt;
-    run.updatedAt = persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
+    run.updatedAt =
+      persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
     run.subagentRunIds = persisted.subagentRunIds.slice();
     run.activeSubagent = persisted.activeSubagent
       ? { ...persisted.activeSubagent }
@@ -248,7 +268,7 @@ export function createGoalApi(
       void queueGoalPersistence(
         snapshot(run),
         run.thebeSessionId,
-        storedGoalEvents(run.events),
+        storedGoalEvents(run.events)
       );
     }
     if (run.status !== "running" && run.status !== "pausing") {
@@ -260,7 +280,7 @@ export function createGoalApi(
     run: ManagedGoal,
     iteration: number,
     role: "worker" | "reviewer",
-    update: SubagentUpdate,
+    update: SubagentUpdate
   ): void {
     run.activeSubagent = update.run;
     broadcast(run, {
@@ -274,7 +294,7 @@ export function createGoalApi(
 
   function runManagedGoal(
     run: ManagedGoal,
-    initialIteration = 0,
+    initialIteration = 0
   ): Promise<void> {
     return executeGoal(
       run,
@@ -283,9 +303,11 @@ export function createGoalApi(
         emitChild,
         onEvent: onGoalEvent,
         setTerminal,
+        reportInbox,
+        now: ctx.now,
       },
       initialIteration,
-      run.lastReviewResult,
+      run.lastReviewResult
     );
   }
 
@@ -294,6 +316,9 @@ export function createGoalApi(
     goal: string;
     criteria?: string[];
     maxIterations: number;
+    observe?: boolean;
+    allowAsk?: boolean;
+    reviewBeforeDone?: boolean;
   }): ManagedGoal {
     let resolveFinished!: (result: GoalRun) => void;
     const createdAt = ctx.now().toISOString();
@@ -302,6 +327,9 @@ export function createGoalApi(
       goal: input.goal,
       criteria: input.criteria?.filter(Boolean),
       maxIterations: input.maxIterations,
+      ...(input.observe ? { observe: true } : {}),
+      ...(input.allowAsk ? { allowAsk: true } : {}),
+      ...(input.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
       iteration: 0,
       status: "running",
       createdAt,
@@ -319,18 +347,50 @@ export function createGoalApi(
     return run;
   }
 
+  /** Starts the next checkpoint of a paused Goal; the one way a paused run goes back to running. */
+  async function continueGoal(run: ManagedGoal): Promise<GoalRun> {
+    run.status = "running";
+    resetFinished(run);
+    run.finishedAt = undefined;
+    run.summary = undefined;
+    run.finalReport = undefined;
+    run.artifactId = undefined;
+    run.error = undefined;
+    run.updatedAt = ctx.now().toISOString();
+    run.pauseRequested = false;
+    run.stopRequested = false;
+    await queueGoalPersistence(
+      snapshot(run),
+      run.thebeSessionId,
+      storedGoalEvents(run.events)
+    );
+    broadcast(run, {
+      type: "goal_status",
+      status: "running",
+      message: "Goal resumed with a fresh isolated worker checkpoint.",
+    });
+    void runManagedGoal(run, run.iteration);
+    return snapshot(run);
+  }
+
   return {
     async startGoal(input: {
       thebeSessionId: string;
       goal: string;
       criteria?: string[];
       maxIterations?: number;
+      observe?: boolean;
+      allowAsk?: boolean;
+      reviewBeforeDone?: boolean;
     }): Promise<GoalRun> {
       ctx.checkNotQuiesced();
       const goal = input.goal.trim();
       if (!goal) throw new Error("goal cannot be empty");
       const existing = runs.get(input.thebeSessionId);
-      if (existing && (existing.status === "running" || existing.status === "pausing")) {
+      if (
+        existing &&
+        (existing.status === "running" || existing.status === "pausing")
+      ) {
         throw new Error("a goal is already running for this session");
       }
       if (existing?.status === "paused") {
@@ -342,12 +402,15 @@ export function createGoalApi(
         goal,
         criteria: input.criteria,
         maxIterations: clampIterations(input.maxIterations),
+        observe: input.observe,
+        allowAsk: input.allowAsk,
+        reviewBeforeDone: input.reviewBeforeDone,
       });
       runs.set(run.thebeSessionId, run);
       await queueGoalPersistence(
         snapshot(run),
         run.thebeSessionId,
-        storedGoalEvents(run.events),
+        storedGoalEvents(run.events)
       );
       void runManagedGoal(run);
       return snapshot(run);
@@ -375,19 +438,25 @@ export function createGoalApi(
           seen.add(meta.thebeSessionId);
         }
       }
-      return out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+      return out.sort((a, b) =>
+        a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
+      );
     },
 
-    goalEvents(thebeSessionId: string): Array<{ event: GoalEvent; at: string }> {
+    goalEvents(
+      thebeSessionId: string
+    ): Array<{ event: GoalEvent; at: string }> {
       const run = runs.get(thebeSessionId);
-      return run ? run.events.map((row) => ({ event: row.event, at: row.at })) : [];
+      return run
+        ? run.events.map((row) => ({ event: row.event, at: row.at }))
+        : [];
     },
 
     restoreGoal,
 
     subscribeGoal(
       thebeSessionId: string,
-      listener: (event: GoalEvent) => void,
+      listener: (event: GoalEvent) => void
     ): () => void {
       const run = runs.get(thebeSessionId);
       if (!run) return () => {};
@@ -429,28 +498,93 @@ export function createGoalApi(
       if (!run) throw new Error("no goal found for this session");
       if (run.status !== "paused") return snapshot(run);
       ctx.checkNotQuiesced();
-      run.status = "running";
-      resetFinished(run);
-      run.finishedAt = undefined;
-      run.summary = undefined;
-      run.finalReport = undefined;
-      run.artifactId = undefined;
-      run.error = undefined;
-      run.updatedAt = ctx.now().toISOString();
-      run.pauseRequested = false;
-      run.stopRequested = false;
-      await queueGoalPersistence(
-        snapshot(run),
-        run.thebeSessionId,
-        storedGoalEvents(run.events),
-      );
-      broadcast(run, {
-        type: "goal_status",
-        status: "running",
-        message: "Goal resumed with a fresh isolated worker checkpoint.",
-      });
-      void runManagedGoal(run, run.iteration);
-      return snapshot(run);
+      if (run.attention) {
+        throw httpError(
+          409,
+          run.attention.kind === "review"
+            ? "this task is waiting for your review; accept it or say what to change with POST /v1/goals/{id}/answer"
+            : "this task is waiting for your answer; give it with POST /v1/goals/{id}/answer",
+          "attention_open"
+        );
+      }
+      return continueGoal(run);
+    },
+
+    /**
+     * Answers the one open question, or accepts / sends back a finished result. A stale `attentionId`
+     * (already answered, or a newer question) is a conflict, never a second answer.
+     */
+    async answerGoal(
+      thebeSessionId: string,
+      input: {
+        attentionId: string;
+        answer?: string;
+        decision?: "accept" | "reject";
+      }
+    ): Promise<GoalRun> {
+      const run = runs.get(thebeSessionId);
+      if (!run) throw new Error("no goal found for this session");
+      ctx.checkNotQuiesced();
+      const attention = run.attention;
+      if (run.status !== "paused" || !attention) {
+        throw httpError(
+          409,
+          "this task is not waiting for an answer",
+          "attention_none"
+        );
+      }
+      if (input.attentionId !== attention.id) {
+        throw httpError(
+          409,
+          "that request is no longer open; reload the task to see the current one",
+          "attention_stale"
+        );
+      }
+      const text = typeof input.answer === "string" ? input.answer.trim() : "";
+      if (text.length > MAX_ANSWER_CHARS) {
+        throw httpError(
+          400,
+          `the answer is longer than ${MAX_ANSWER_CHARS} characters`,
+          "invalid_body"
+        );
+      }
+      if (attention.kind === "review") {
+        if (input.decision !== "accept" && input.decision !== "reject") {
+          throw httpError(
+            400,
+            "decision must be accept or reject",
+            "invalid_body"
+          );
+        }
+        if (input.decision === "accept") {
+          run.attention = undefined;
+          return setTerminal(
+            run,
+            "completed",
+            "Goal accepted by you after review."
+          );
+        }
+        if (!text) {
+          throw httpError(
+            400,
+            "say what to change when sending a result back",
+            "invalid_body"
+          );
+        }
+        (run.guidance ??= []).push(`Review feedback: ${text}`);
+      } else {
+        if (!text) {
+          throw httpError(400, "answer cannot be empty", "invalid_body");
+        }
+        (run.guidance ??= []).push(
+          `Your question was "${attention.question}". The person answered: ${text}`
+        );
+      }
+      run.attention = undefined;
+      // An answer that lands on the last checkpoint needs one more to be used at all.
+      if (run.iteration >= run.maxIterations)
+        run.maxIterations = run.iteration + 1;
+      return continueGoal(run);
     },
 
     async stopGoal(thebeSessionId: string): Promise<GoalRun> {
@@ -490,7 +624,7 @@ export function createGoalApi(
 }
 
 function storedGoalEvents(
-  events: Array<{ event: GoalEvent; at: string }>,
+  events: Array<{ event: GoalEvent; at: string }>
 ): StoredGoalEvent[] {
   return events.slice(-MAX_GOAL_EVENTS).map(toStoredGoalEvent);
 }
@@ -570,7 +704,7 @@ function toStoredGoalEvent(row: {
 
 function restoreEvents(
   events: StoredGoalEvent[],
-  parentSessionId: string,
+  parentSessionId: string
 ): Array<{ event: GoalEvent; at: string }> {
   return events
     .filter(
@@ -578,7 +712,7 @@ function restoreEvents(
         Boolean(row) &&
         typeof row.at === "string" &&
         Boolean(row.event) &&
-        typeof row.event.type === "string",
+        typeof row.event.type === "string"
     )
     .slice(-MAX_GOAL_EVENTS)
     .map((row) => ({
@@ -590,7 +724,7 @@ function restoreEvents(
 function restoreEvent(
   event: StoredGoalEvent["event"],
   parentSessionId: string,
-  at: string,
+  at: string
 ): GoalEvent {
   if (event.type !== "goal_subagent_update") {
     return event;

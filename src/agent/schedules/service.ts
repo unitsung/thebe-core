@@ -139,6 +139,9 @@ export function createScheduleApi(options: {
         goal: row.goal,
         criteria: row.criteria,
         maxIterations: row.maxIterations,
+        ...(row.acceptMode === "observe" ? { observe: true } : {}),
+        ...(row.allowAsk ? { allowAsk: true } : {}),
+        ...(row.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
       });
       await save({ ...reserved, dispatching: false });
     } catch (error) {
@@ -277,6 +280,9 @@ export function createScheduleApi(options: {
           cron: normalized.cron,
           timeZone: normalized.timeZone,
           maxIterations: normalized.maxIterations,
+          acceptMode: normalized.acceptMode,
+          allowAsk: normalized.allowAsk,
+          reviewBeforeDone: normalized.reviewBeforeDone,
           model: normalized.model,
           enabled: row.enabled ? scheduled.enabled : false,
           nextRunAt: row.enabled ? scheduled.nextRunAt : undefined,
@@ -422,6 +428,16 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
       "criteria must contain up to 32 nonempty strings",
       "invalid_body"
     );
+  if (
+    input.acceptMode !== undefined &&
+    input.acceptMode !== "auto" &&
+    input.acceptMode !== "observe"
+  )
+    throw httpError(400, "acceptMode must be auto or observe", "invalid_body");
+  for (const flag of ["allowAsk", "reviewBeforeDone"] as const) {
+    if (input[flag] !== undefined && typeof input[flag] !== "boolean")
+      throw httpError(400, `${flag} must be true or false`, "invalid_body");
+  }
   const model = input.model;
   if (
     model !== undefined &&
@@ -450,6 +466,11 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
         }
       : {}),
     maxIterations: input.maxIterations,
+    ...(input.acceptMode === "observe"
+      ? { acceptMode: "observe" as const }
+      : {}),
+    ...(input.allowAsk === true ? { allowAsk: true } : {}),
+    ...(input.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
     ...(model
       ? {
           model: {

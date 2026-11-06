@@ -20,12 +20,14 @@ import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
+import { handleMetricsRoutes } from "./routes/metrics.ts";
 import {
   createOpenApiDocument,
   swaggerUiAsset,
   swaggerUiHtml,
 } from "./openapi.ts";
 import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
+import { createRateLimiter, mcpRateLimitFromEnv } from "./rate-limit.ts";
 import type { TokenCaller } from "./token-store.ts";
 
 export type ThebeHttpRouterOptions = {
@@ -35,12 +37,17 @@ export type ThebeHttpRouterOptions = {
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: ThebeHttpContext["pushIdentity"];
   workspacePath?: string;
+  /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
+  mcpRateLimit?: number;
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
   const deviceRegistry =
     options.deviceRegistry ??
     createDeviceRegistry({ dir: options.deviceStoreDir });
+  const mcpLimiter = createRateLimiter({
+    limit: options.mcpRateLimit ?? mcpRateLimitFromEnv(),
+  });
   return {
     async handle(request: Request, caller?: TokenCaller): Promise<Response> {
       const context = createThebeHttpContext(request, {
@@ -79,6 +86,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const systemResponse = await handleSystemRoutes(context);
       if (systemResponse) {
         return systemResponse;
+      }
+      const metricsResponse = await handleMetricsRoutes(context);
+      if (metricsResponse) {
+        return metricsResponse;
       }
 
       const diagnosisResponse = await handleDiagnosisRoutes(context);
@@ -153,6 +164,19 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
             },
             405,
             { allow: "POST" }
+          );
+        }
+        // A scoped token is an external agent; the app and the operator's own tokens are not throttled.
+        const wait = caller?.scopes ? mcpLimiter.take(caller.name) : undefined;
+        if (wait !== undefined) {
+          return json(
+            {
+              ok: false,
+              error: `Too many calls over /mcp for ${caller?.name}; try again in ${wait}s (THEBE_MCP_RATE_LIMIT sets the limit)`,
+              code: "rate_limited",
+            },
+            429,
+            { "retry-after": String(wait) }
           );
         }
         return handleMcp(context);

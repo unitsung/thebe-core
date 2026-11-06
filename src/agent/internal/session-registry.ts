@@ -61,6 +61,17 @@ export function createSessionRegistry(input: {
       );
       if (meta.leafId && session.navigateTo)
         await session.navigateTo(meta.leafId);
+      // A session the runtime never wrote (no prompt yet) comes back on the default model; keep the pin.
+      if (meta.model) {
+        const now = session.currentModel?.();
+        if (
+          !now ||
+          now.providerId !== meta.model.providerId ||
+          now.modelId !== meta.model.modelId
+        ) {
+          await session.setModel(meta.model).catch(() => {});
+        }
+      }
       requestStop = () => session.abort();
       const opened = { meta, session };
       setActive(opened);

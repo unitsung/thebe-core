@@ -104,6 +104,52 @@ describe("external MCP client registry", () => {
     }
   });
 
+  it("carries the operator's per-tool irreversible marks, beside the server's own hints", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-irrev-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-irrev-home-"));
+    await mkdir(join(cwd, ".thebe"), { recursive: true });
+    const serverScript = [
+      "const rl = require('node:readline').createInterface({ input: process.stdin });",
+      "rl.on('line', (line) => {",
+      "  const m = JSON.parse(line);",
+      "  if (m.id === undefined) return;",
+      "  let result = {};",
+      "  if (m.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'f', version: '1' } };",
+      "  if (m.method === 'tools/list') result = { tools: [",
+      "    { name: 'wipe', inputSchema: { type: 'object' }, annotations: { destructiveHint: true } },",
+      "    { name: 'tidy', inputSchema: { type: 'object' } },",
+      "    { name: 'other', inputSchema: { type: 'object' } } ] };",
+      "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');",
+      "});",
+    ].join("\n");
+    await writeFile(
+      join(cwd, ".thebe", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          box: {
+            command: process.execPath,
+            args: ["-e", serverScript],
+            irreversible: { wipe: false, tidy: true, bad: "yes" },
+          },
+        },
+      })
+    );
+    const registry = createMcpClientRegistry({ cwd, homeDir });
+    try {
+      const tools = await registry.listTools();
+      const irreversible = Object.fromEntries(
+        tools.map((tool) => [tool.originalName, tool.irreversible])
+      );
+      expect(irreversible).toEqual({
+        wipe: false,
+        tidy: true,
+        other: undefined,
+      });
+    } finally {
+      registry.close();
+    }
+  });
+
   it("supports Streamable HTTP MCP servers with a session id", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-http-cwd-"));
     const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-http-home-"));
@@ -352,12 +398,25 @@ describe("external MCP client registry", () => {
       ).toBe(true);
 
       // Description and exposure survive registration so a search server can be made loadable by tool_search.
-      await registry.addServer({ name: "findable", url, description: "Web search", exposure: "deferred" });
-      expect(registry.runtimeServers().find((entry) => entry.name === "findable")).toMatchObject({
+      await registry.addServer({
+        name: "findable",
+        url,
         description: "Web search",
         exposure: "deferred",
       });
-      await expect(registry.addServer({ name: "bad", url, exposure: "everywhere" as never })).rejects.toThrow("exposure");
+      expect(
+        registry.runtimeServers().find((entry) => entry.name === "findable")
+      ).toMatchObject({
+        description: "Web search",
+        exposure: "deferred",
+      });
+      await expect(
+        registry.addServer({
+          name: "bad",
+          url,
+          exposure: "everywhere" as never,
+        })
+      ).rejects.toThrow("exposure");
       expect((await registry.listTools()).map((tool) => tool.name)).toEqual(
         expect.arrayContaining(["mcp:music/ping", "mcp:extra/ping"])
       );

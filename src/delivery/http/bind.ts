@@ -9,6 +9,9 @@ export const DEFAULT_THEBE_PORT = 8787;
 export type ThebeListenConfig = {
   host: string;
   port: number;
+  /** A second port that serves `/mcp` and nothing else, for exposing to the internet. Off when unset. */
+  mcpPort?: number;
+  mcpHost: string;
   token?: string;
   allowedHosts?: string[];
 };
@@ -29,6 +32,13 @@ export function resolveThebeListen(
     Number.isInteger(parsedPort) && parsedPort > 0
       ? parsedPort
       : DEFAULT_THEBE_PORT;
+  const parsedMcpPort = Number(env.THEBE_MCP_PORT?.trim() || "0");
+  const mcpPort =
+    Number.isInteger(parsedMcpPort) &&
+    parsedMcpPort > 0 &&
+    parsedMcpPort !== port
+      ? parsedMcpPort
+      : undefined;
   const token = env.THEBE_TOKEN?.trim() || undefined;
   const extra = (env.THEBE_ALLOWED_HOSTS ?? "")
     .split(",")
@@ -37,6 +47,8 @@ export function resolveThebeListen(
   return {
     host,
     port,
+    mcpPort,
+    mcpHost: env.THEBE_MCP_HOST?.trim() || host,
     token,
     allowedHosts: resolveAllowedHosts(host, extra),
   };

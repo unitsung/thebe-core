@@ -418,6 +418,39 @@ describe("Thebe agent service (fake runtime)", () => {
     ).toEqual(["goal-worker", "goal-reviewer"]);
   });
 
+  it("runs an observe-mode goal with the read-only observer, never the writing worker", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "Found two stale links; I would repair both." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: listed the two links\nREMAINING: none",
+      },
+    ]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "observe" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Look at the library links",
+      maxIterations: 2,
+      observe: true,
+    });
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      {
+        status: "completed",
+        observe: true,
+      }
+    );
+    expect(
+      (await agent.listSubagents(session.thebeSessionId)).map(
+        (run) => run.profileName
+      )
+    ).toEqual(["goal-observer", "goal-reviewer"]);
+  });
+
   it("restores completed Goal and child results from the saved session metadata", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-resume-"));
     const fake = createFakeRuntime();
@@ -462,6 +495,195 @@ describe("Thebe agent service (fake runtime)", () => {
       "persisted worker result",
       "VERDICT: pass\nEVIDENCE: persisted child evidence\nREMAINING: none",
     ]);
+  });
+
+  it("stops a blocked goal at the first blocker, and keeps that and observe mode across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-blocked-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "I could not reach the share." },
+      {
+        kind: "text",
+        text: "VERDICT: blocked\nEVIDENCE: mount missing\nREMAINING: mount the NAS share at /media",
+      },
+    ]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({ title: "blocked goal" });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 6,
+      observe: true,
+    });
+    const done = await first.waitGoal(session.thebeSessionId);
+    // One worker and one reviewer: it did not burn the other five checkpoints.
+    expect(done).toMatchObject({
+      status: "failed",
+      iteration: 1,
+      blocked: true,
+      error: "mount the NAS share at /media",
+    });
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "failed",
+      blocked: true,
+      observe: true,
+    });
+  });
+
+  describe("structured goal reports", () => {
+    const report = (args: Record<string, unknown>) => ({
+      kind: "tools" as const,
+      calls: [{ name: "goal_report", args }],
+    });
+    async function runGoal(
+      turns: Array<
+        | { kind: "text"; text: string }
+        | { kind: "tools"; calls: Array<{ name: string; args?: unknown }> }
+      >,
+      goal: Record<string, unknown> = {},
+      agentStoreDir?: string
+    ) {
+      const fake = createFakeRuntime();
+      fake.queueTurns(turns);
+      const agent = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir,
+      });
+      const session = await agent.createSession({ title: "report" });
+      await agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Move the library",
+        maxIterations: 4,
+        ...goal,
+      });
+      const done = await agent.waitGoal(session.thebeSessionId);
+      return { agent, fake, session, done };
+    }
+
+    it("stops at once on a reported blocker, without paying for the reviewer", async () => {
+      const { agent, session, done } = await runGoal([
+        report({ state: "blocked", blocker: "mount the NAS share at /media" }),
+      ]);
+      expect(done).toMatchObject({
+        status: "failed",
+        blocked: true,
+        iteration: 1,
+        error: "mount the NAS share at /media",
+        report: { state: "blocked" },
+      });
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+
+    it("ends as completed, with the reason, when the worker reports nothing needs doing", async () => {
+      const { done } = await runGoal([
+        report({ state: "dropped", reason: "the links are all healthy" }),
+      ]);
+      expect(done.status).toBe("completed");
+      expect(done.summary).toContain("the links are all healthy");
+    });
+
+    it("hands a ready report to the independent reviewer, which still decides", async () => {
+      const { agent, session, done } = await runGoal([
+        report({
+          state: "ready",
+          summary: "moved it",
+          evidence: "ls shows 120 files",
+        }),
+        // After a tool call the worker's turn continues with its closing text.
+        { kind: "text", text: "Moved the library." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: ls shows 120 files\nREMAINING: none",
+        },
+      ]);
+      expect(done).toMatchObject({
+        status: "completed",
+        report: { state: "ready" },
+      });
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(2);
+    });
+
+    it("pauses with one open question when the task allows asking", async () => {
+      const { done, agent, session } = await runGoal(
+        [
+          report({
+            state: "ask",
+            question: "Which library?",
+            options: ["Movies", "Shows"],
+          }),
+        ],
+        { allowAsk: true }
+      );
+      expect(done.status).toBe("paused");
+      expect(done.attention).toMatchObject({
+        kind: "answer",
+        question: "Which library?",
+        options: ["Movies", "Shows"],
+      });
+      expect(done.attention?.id).toEqual(expect.any(String));
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+
+    it("turns a question into a blocker when the task did not opt in to being interrupted", async () => {
+      const { done } = await runGoal([
+        report({ state: "ask", question: "Which library?" }),
+      ]);
+      expect(done).toMatchObject({
+        status: "failed",
+        blocked: true,
+        error: "Which library?",
+      });
+      expect(done.attention).toBeUndefined();
+    });
+
+    it("keeps the question across a Core restart", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "thebe-goal-ask-"));
+      const { done, session, fake } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true, reviewBeforeDone: true },
+        dir
+      );
+      const second = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir: dir,
+      });
+      await second.resume(session.thebeSessionId);
+      expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+        status: "paused",
+        allowAsk: true,
+        reviewBeforeDone: true,
+        attention: { id: done.attention?.id, question: "Which library?" },
+        report: { state: "ask" },
+      });
+    });
+
+    it("says what is wrong with a report so the worker can correct it, and falls back to the text", async () => {
+      const { done } = await runGoal([
+        report({ state: "ready", summary: "no evidence given" }),
+        // The tool refuses the report; the worker's turn goes on and closes with text.
+        { kind: "text", text: "Done, but I could not record the report." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: checked\nREMAINING: none",
+        },
+      ]);
+      // An invalid report is not recorded; the text path decides as it always did.
+      expect(done.report).toBeUndefined();
+      expect(done.status).toBe("completed");
+    });
   });
 
   it("pauses and resumes a goal with a fresh child checkpoint", async () => {

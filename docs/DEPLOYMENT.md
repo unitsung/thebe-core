@@ -132,16 +132,17 @@ enable it by default. This never pushes.
 
 ## 3. Production configuration
 
-| Variable                                                                           | Required                 | Meaning                                                                                                                                                                          |
-| ---------------------------------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                          |
-| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                               |
-| `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                |
-| `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                        |
-| `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check) |
-| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                           |
-| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                          |
-| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`                                                                                                                                                                    |
+| Variable                                                                           | Required                 | Meaning                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                                 |
+| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                                      |
+| `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                       |
+| `THEBE_MCP_PORT` / `THEBE_MCP_HOST`                                                | no (off)                 | A second listener that serves `/mcp` only (`/v1`, `/openapi.json`, `/docs` answer `404`). Expose this one, not `THEBE_PORT`, to the internet; `THEBE_MCP_HOST` defaults to `THEBE_HOST` |
+| `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                               |
+| `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check)        |
+| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                                  |
+| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                                 |
+| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`                                                                                                                                                                           |
 
 Request contract (verified by `scripts/smoke.mjs`):
 
@@ -246,6 +247,13 @@ What this costs: the token crosses your network in plaintext, so anyone on it wh
 holds full access. Keep `THEBE_REMOTE_BASH` off and consider `THEBE_MCP_WRITES=off` unless you trust the network, never bind `0.0.0.0`,
 and do not forward the port from your router. Use a TLS path above for anything beyond the home.
 
+### 4.1.1 Gateway port for an agent on the internet
+
+`deploy/docker-compose.yml` already maps host port 8788 (on loopback unless `THEBE_MCP_BIND` says otherwise), but
+nothing listens on it until you set `THEBE_MCP_PORT=8788` in `deploy/.env`. That listener serves `/mcp` and
+nothing else, so a tunnel or reverse proxy pointed at it cannot reach `/v1`, `/openapi.json` or `/docs`. Give each
+external agent its own scoped token (below) and watch `GET /v1/audit?identity=<name>`.
+
 ### 4.2 Managing tokens
 
 Give each device its own token, so a lost phone costs one `revoke`, not a new token on every device:
@@ -261,12 +269,25 @@ An agent that connects over `/mcp` should have its own token, limited to `/mcp`:
 ```bash
 docker compose exec thebe-core node dist/token.js create "Claude Code" --scope mcp:read    # read tools only
 docker compose exec thebe-core node dist/token.js create "Home agent" --scope mcp:write    # read and write tools
+docker compose exec thebe-core node dist/token.js create "Cleaner" --scope mcp:irreversible    # also deletes that cannot be undone
 ```
 
 The agent sends it as `Authorization: Bearer <token>` (or `X-Thebe-Token`). A scoped token is refused
 everywhere except `/mcp` (`403 token_scope`), so it cannot open a session, change settings or run an
 action. A write tool called with a read-only token fails at once and says which scope to grant;
 nothing waits for approval. `mcp:write` still obeys `THEBE_MCP_WRITES=off`.
+
+Every `/mcp` call is audited under the token's name: `GET /v1/audit?identity=Claude%20Code` lists what that agent
+did and what it was refused (`result: "denied"`). A scoped token may make 120 calls a minute; past that a call fails
+at once with `429 rate_limited` (`THEBE_MCP_RATE_LIMIT` changes it, `0` turns it off). To put the gateway on the
+internet, set `THEBE_MCP_PORT=8788` and expose only that port (Tailscale Funnel, a tunnel or a reverse proxy):
+it serves `/mcp` and nothing else, so `/v1`, `/openapi.json` and `/docs` cannot be reached through it.
+
+A delete that cannot be undone needs `mcp:irreversible`, judged per call: `download.delete` with
+`deleteFiles: true`, `navidrome.playlist.delete`, a service API call that sends an HTTP `DELETE` or sets a
+delete-style flag such as `deleteFiles` or `purge`, and a provider tool its server marks destructive. A
+`mcp:write` token is refused these at once (`403 mcp_irreversible_required`) with the command that grants the
+scope. A token made without `--scope` keeps full access.
 
 The shared token Core made on first start (or `THEBE_TOKEN`) keeps working next to the device tokens:
 

@@ -74,6 +74,10 @@ import {
 } from "../background-tasks/product.ts";
 
 import type { McpCaller } from "../interface.ts";
+import {
+  irreversibleReason,
+  irreversibleRefusal,
+} from "../security/irreversible.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL = `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 const RUNTIME_APPROVAL_REQUIRED =
@@ -328,7 +332,110 @@ export function createControlApi(
     return core ? capabilityChangesThings(core) : false;
   }
 
+  /** What Core knows about a write beyond its name and arguments: the HTTP method or the server's hint. */
+  async function irreversibleContext(
+    name: string,
+    params: Record<string, unknown>
+  ): Promise<{
+    httpMethod?: string;
+    destructiveHint?: boolean;
+    operatorMark?: boolean;
+    /** What the call will really send, when its own arguments only name it (a confirm token). */
+    sends?: Record<string, unknown>;
+  }> {
+    if (name === SERVICE_API_CONFIRM_TOOL_NAME) {
+      // The confirm is the call that executes, whoever made the preview: judge the request it will send.
+      const token = typeof params.token === "string" ? params.token : "";
+      const pending = token ? pendingWrites.get(token) : undefined;
+      return pending
+        ? {
+            httpMethod: pending.request.method,
+            operatorMark: pending.irreversible,
+            sends: { body: pending.request.body },
+          }
+        : {};
+    }
+    if (name === SERVICE_API_WRITE_TOOL_NAME) {
+      return typeof params.method === "string"
+        ? { httpMethod: params.method }
+        : {};
+    }
+    if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
+      try {
+        const { operation } = await findServiceOperation(name);
+        return {
+          httpMethod: operation.method,
+          operatorMark: operation.irreversible,
+        };
+      } catch {
+        return {};
+      }
+    }
+    if (name.startsWith("mcp:")) {
+      const tool = (await mcp.listTools()).find((item) => item.name === name);
+      // The operator's override beats what the server says about itself.
+      return {
+        destructiveHint:
+          tool?.irreversible ?? tool?.annotations?.destructiveHint === true,
+      };
+    }
+    return {};
+  }
+
+  /** The refusals of the `/mcp` gate: a call stopped for want of permission, not one that failed. */
+  const MCP_DENIAL_CODES = new Set([
+    "mcp_writes_not_enabled",
+    "mcp_scope_required",
+    "mcp_irreversible_required",
+  ]);
+
+  /**
+   * One audit row per `/mcp` call, with the token's name, so an operator can see what each external
+   * agent did and what it was refused. Core's own tools also write their detailed rows.
+   */
   async function invokeMcpTool(
+    name: string,
+    args: unknown,
+    caller: McpCaller
+  ): Promise<{ text: string; isError: boolean }> {
+    const started = Date.now();
+    const record = async (
+      result: "ok" | "error" | "denied",
+      responseBytes: number
+    ) => {
+      try {
+        await audit?.append({
+          method: name,
+          parameterHash: hashParameters(args),
+          responseBytes,
+          budgetConsumed: 0,
+          redactionFired: false,
+          source: "mcp",
+          identity: caller.name ?? "anonymous",
+          result,
+          durationMs: Date.now() - started,
+        });
+      } catch {
+        // A full disk must not turn a finished call into a failure.
+      }
+    };
+    try {
+      const done = await runMcpTool(name, args, caller);
+      await record(done.isError ? "error" : "ok", Buffer.byteLength(done.text));
+      return done;
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      await record(
+        typeof code === "string" && MCP_DENIAL_CODES.has(code)
+          ? "denied"
+          : "error",
+        0
+      );
+      throw error;
+    }
+  }
+
+  async function runMcpTool(
     name: string,
     args: unknown,
     caller: McpCaller
@@ -349,6 +456,21 @@ export function createControlApi(
       );
     }
     const params = (args ?? {}) as Record<string, unknown>;
+    if (!caller.irreversible) {
+      const { sends, ...context } = await irreversibleContext(name, params);
+      const reason = irreversibleReason({
+        name,
+        args: { ...params, ...sends },
+        ...context,
+      });
+      if (reason) {
+        throw httpError(
+          403,
+          irreversibleRefusal(name, reason),
+          "mcp_irreversible_required"
+        );
+      }
+    }
     if (name === CONTAINER_RESTART_ACTION_ID) {
       if (!deps.executeAction) {
         throw httpError(503, "container actions are not available");
@@ -382,28 +504,7 @@ export function createControlApi(
       return runBaseTool(name, args);
     }
     if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
-    // Core's own tools write their audit record; a provider's tool does not, so Core does.
-    const record = (text: string, result: "ok" | "error") =>
-      audit?.append({
-        method: name,
-        parameterHash: hashParameters(params),
-        responseBytes: Buffer.byteLength(text),
-        budgetConsumed: 0,
-        redactionFired: false,
-        source: "mcp",
-        result,
-      });
-    try {
-      const done = await invokeToolDetailed(name, args);
-      await record(done.text, done.isError ? "error" : "ok");
-      return done;
-    } catch (error) {
-      await record(
-        error instanceof Error ? error.message : String(error),
-        "error"
-      );
-      throw error;
-    }
+    return invokeToolDetailed(name, args);
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
@@ -418,6 +519,8 @@ export function createControlApi(
       request: { method: string; path: string; body?: unknown };
       operationId: string;
       service: string;
+      /** The operator's mark on the operation, kept so the confirm is judged the same way as the preview. */
+      irreversible?: boolean;
       expires: number;
     }
   >();
@@ -476,6 +579,7 @@ export function createControlApi(
       request,
       operationId: operation.id,
       service: provider.id,
+      irreversible: operation.irreversible,
       expires: Date.now() + CONFIRM_TTL_MS,
     });
     await audit?.append({

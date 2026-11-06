@@ -107,7 +107,8 @@ describe("push notifier", () => {
     } & Parameters<typeof pushEventMessage>[0];
     const event: Parameters<typeof pushEventMessage>[0] = rest;
     expect(event.relayDeviceId).toBe("relay-1");
-    expect(JSON.stringify(calls[0]!.body)).not.toContain("t1");
+    // The signature is random base64, so it can contain "t1" by chance; only the readable fields matter.
+    expect(JSON.stringify(rest)).not.toContain("t1");
     expect(
       verify(
         null,

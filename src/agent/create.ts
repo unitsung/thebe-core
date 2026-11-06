@@ -10,6 +10,7 @@ import type { CreateThebeAgentOptions, ThebeAgent } from "./interface.ts";
 import { createExtensionApi } from "./extensions/service.ts";
 import { createSessionApi } from "./sessions/service.ts";
 import { createSubagentApi } from "./subagents/api.ts";
+import { createGoalReportInbox } from "./goals/report.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 
@@ -25,8 +26,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       now: ctx.now,
     });
   const extensions = createExtensionApi(ctx, artifactStore);
-  const subagents = createSubagentApi(ctx, artifactStore);
-  const goals = createGoalApi(ctx, subagents, artifactStore);
+  const reportInbox = createGoalReportInbox(ctx.now);
+  const subagents = createSubagentApi(ctx, artifactStore, reportInbox);
+  const goals = createGoalApi(ctx, subagents, artifactStore, reportInbox);
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
