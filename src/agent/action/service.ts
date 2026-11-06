@@ -9,7 +9,7 @@ import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { DiagnosisResult } from "../diagnosis/types.ts";
 import { verifyRestart, type ProbeHealth } from "./verify.ts";
-import { MCP_CLIENT_APPROVAL } from "./types.ts";
+import { MCP_CLIENT_APPROVAL, POLICY_APPROVAL } from "./types.ts";
 import type { ActivityStore } from "../activity/store.ts";
 import type { ActivityGroup, ActivityRecord } from "../activity/types.ts";
 import { idempotencyIndexKey } from "../activity/types.ts";
@@ -118,7 +118,9 @@ export function createActionApi(options: {
             ? "missing"
             : request.approval.client === MCP_CLIENT_APPROVAL
               ? "mcp_client"
-              : "on_device",
+              : request.approval.client === POLICY_APPROVAL
+                ? "policy"
+                : "on_device",
         capability,
       };
 

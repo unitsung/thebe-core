@@ -1,9 +1,10 @@
 import { key } from "../tickets/ids.ts";
 import type { Trigger } from "../sources/types.ts";
 import { buildAssessmentPrompt, parseAssessment } from "./assess.ts";
+import type { AutoRestart } from "./auto-restart.ts";
 import type { DecisionStore } from "./decision-store.ts";
 import { policyVersion, type PolicyStore } from "./policy-store.ts";
-import type { Decision, Policy } from "./types.ts";
+import type { Decision, DecisionAction, Policy } from "./types.ts";
 
 /** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
@@ -38,6 +39,10 @@ export function createEvalService(options: {
   now: () => Date;
   /** Questions to the model per hour before the rest are recorded as `assessment_limit`. 0 is no limit. */
   maxPerHour?: number;
+  /** Whether the host allows `auto` (`THEBE_EVAL_AUTO`). Without it a policy in `auto` acts like `observe`. */
+  autoAllowed?: boolean;
+  /** What `auto` does with a positive assessment. Without it nothing is done. */
+  act?: AutoRestart;
   backlogAgeMs?: number;
   onError?: (error: unknown) => void;
 }): EvalService {
@@ -180,13 +185,65 @@ export function createEvalService(options: {
       });
       return;
     }
+    const wouldAccept = verdict.decision === "accept";
+    if (policy.acceptMode === "auto" && wouldAccept) {
+      const action = await actOn(base.id, thread, triggers, policy);
+      // Taken on: a restart was done, or the person was asked. Anything else stays a "would have", with why.
+      const takenOn =
+        action.kind === "restart" ||
+        (action.kind === "diagnose" && action.status === "awaiting_approval");
+      await record({
+        outcome: takenOn ? "accept" : "ignore",
+        wouldAccept: true,
+        matchedRuleIds: verdict.matchedRuleIds,
+        reason: verdict.reason,
+        action,
+      });
+      return;
+    }
     // observe: a positive assessment is what Core WOULD have taken on; it takes on nothing.
     await record({
       outcome: "ignore",
-      wouldAccept: verdict.decision === "accept",
+      wouldAccept,
       matchedRuleIds: verdict.matchedRuleIds,
       reason: verdict.reason,
     });
+  }
+
+  /** `auto` acts here, and nowhere else. It never throws: a failure is a recorded action that did nothing. */
+  async function actOn(
+    decisionId: string,
+    thread: string,
+    triggers: Trigger[],
+    policy: Policy
+  ): Promise<DecisionAction> {
+    if (!options.autoAllowed || !options.act) {
+      return {
+        kind: "none",
+        status: "auto_disabled",
+        note: "the host has not allowed auto, so nothing was done",
+      };
+    }
+    // A quiesce that came while the model was thinking still stops the action.
+    if (stopped) {
+      return {
+        kind: "none",
+        status: "quiesced",
+        note: "Core was paused for maintenance, so nothing was done",
+      };
+    }
+    try {
+      return await options.act({ decisionId, thread, triggers, policy });
+    } catch (error) {
+      return {
+        kind: "none",
+        status: "act_failed",
+        note:
+          error instanceof Error
+            ? error.message.slice(0, 200)
+            : "action failed",
+      };
+    }
   }
 
   return {
