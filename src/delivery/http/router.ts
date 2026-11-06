@@ -11,6 +11,7 @@ import { handleAuditRoutes } from "./routes/audit.ts";
 import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
 import { handleGoalRoutes } from "./routes/goal.ts";
+import { handleTicketRoutes } from "./routes/tickets.ts";
 import { handleScheduleRoutes } from "./routes/schedules.ts";
 import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
 import { handlePermissionRoutes } from "./routes/permission.ts";
@@ -144,6 +145,8 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (memoryResponse) {
         return memoryResponse;
       }
+      const ticketResponse = await handleTicketRoutes(context);
+      if (ticketResponse) return ticketResponse;
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {
         return goalResponse;

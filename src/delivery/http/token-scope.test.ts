@@ -69,6 +69,7 @@ describe("a token limited to /mcp", () => {
     const h = await handler();
     const attempts: Array<[string, RequestInit]> = [
       ["/v1/health", {}],
+      ["/v1/tickets", {}],
       ["/v1/session", { method: "POST", body: "{}" }],
       ["/v1/action", { method: "POST", body: "{}" }],
       ["/v1/settings/permissions", { method: "PATCH", body: "{}" }],

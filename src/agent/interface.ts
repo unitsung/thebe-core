@@ -61,6 +61,8 @@ import type {
 import type { DiagnosisRequest, DiagnosisResult } from "./diagnosis/types.ts";
 import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
+import type { Ticket } from "./tickets/types.ts";
+import type { Trigger } from "./sources/types.ts";
 import type {
   AgentArtifact,
   ArtifactContent,
@@ -105,6 +107,14 @@ export type CreateThebeAgentOptions = {
   provider: ContainerInfoProvider;
   auditPath?: string;
   agentStoreDir?: string;
+  /**
+   * Sources Core watches for events (Triggers). Off unless given: a Core that was not asked to watch
+   * anything starts no timers and reads nothing.
+   */
+  sources?: {
+    containerHealth?: boolean;
+    intervalMs?: number;
+  };
   /** Called when an approval starts waiting for a person, for example to send a push notice. */
   onPendingApproval?: (
     record: import("./activity/types.ts").ActivityRecord
@@ -458,6 +468,14 @@ export interface ThebeAgent {
   listArtifacts(query?: ArtifactQuery): Promise<AgentArtifact[]>;
   getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
   getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
+  /** Tickets: the authorised units of work. Read-only to clients; created by decisions, not by callers. */
+  listTickets(): Promise<Ticket[]>;
+  getTicket(id: string): Promise<Ticket | undefined>;
+  getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
+  /** Events the enabled Sources observed, newest first. Recorded for audit; nothing acts on them yet. */
+  listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
+  /** Records the Ticket for a Goal the person asked for. Idempotent. */
+  recordGoalTicket(run: GoalRun): Promise<Ticket>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;

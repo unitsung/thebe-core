@@ -11,6 +11,7 @@ export const PRODUCT_HTTP_PATH = {
   mcpExtensions: "/v1/extensions/mcp",
   enabledResources: "/v1/resources/enabled",
   artifacts: "/v1/artifacts",
+  tickets: "/v1/tickets",
   permissionSettings: "/v1/settings/permissions",
   fullAccessSettings: "/v1/settings/full-access",
 } as const;

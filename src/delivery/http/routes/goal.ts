@@ -1,4 +1,9 @@
-import { toProductGoal, toProductGoalEvent } from "../../../agent/index.ts";
+import {
+  toProductGoal,
+  toProductGoalEvent,
+  type GoalRun,
+  type ProductGoal,
+} from "../../../agent/index.ts";
 import {
   agentUnavailable,
   quiescedWrite,
@@ -27,7 +32,9 @@ export async function handleGoalRoutes(
     if (parsed.kind === "collection") {
       if (request.method === "GET") {
         const goals = await agent.listGoals();
-        return json({ goals: goals.map(toProductGoal) });
+        return json({
+          goals: await Promise.all(goals.map((run) => withTicket(agent, run))),
+        });
       }
       if (request.method === "POST") {
         const blocked = quiescedWrite(context);
@@ -152,7 +159,16 @@ async function createGoal(
     ...(body.allowAsk === true ? { allowAsk: true } : {}),
     ...(body.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
   });
-  return json(toProductGoal(run), existingSessionId ? 200 : 201);
+  // The person asked for this task, so it is authorised directly. A retry maps to the same Ticket.
+  await agent.recordGoalTicket(run);
+  return json(await withTicket(agent, run), existingSessionId ? 200 : 201);
+}
+
+/** The task as clients see it, with the id of the Ticket that authorises it. */
+async function withTicket(agent: Agent, run: GoalRun): Promise<ProductGoal> {
+  const product = toProductGoal(run);
+  const ticket = await agent.getTicketForGoal(run.thebeSessionId);
+  return ticket ? { ...product, ticketId: ticket.id } : product;
 }
 
 async function loadGoal(agent: Agent, sessionId: string) {
@@ -164,7 +180,7 @@ async function loadGoal(agent: Agent, sessionId: string) {
 
 async function getGoal(agent: Agent, sessionId: string): Promise<Response> {
   const run = await loadGoal(agent, sessionId);
-  if (run) return json(toProductGoal(run));
+  if (run) return json(await withTicket(agent, run));
   return json({ ok: false, error: "goal not found" }, 404);
 }
 
@@ -239,7 +255,7 @@ async function answerGoal(
     answer: typeof body.answer === "string" ? body.answer : undefined,
     decision: body.decision as "accept" | "reject" | undefined,
   });
-  return json(toProductGoal(run));
+  return json(await withTicket(agent, run));
 }
 
 async function controlGoal(
@@ -292,7 +308,7 @@ async function controlGoal(
       : action === "resume"
         ? await agent.resumeGoal(sessionId)
         : await agent.stopGoal(sessionId);
-  return json(toProductGoal(run));
+  return json(await withTicket(agent, run));
 }
 
 function parseGoalPath(

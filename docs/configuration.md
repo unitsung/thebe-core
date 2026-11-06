@@ -123,6 +123,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 - `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
+- `THEBE_SOURCES` 是 Core 在后台观察的来源（Source）清单，逗号分隔；**默认不设，即什么都不观察、不起任何定时器。** 目前只有 `container-health`：按 `THEBE_SOURCE_INTERVAL_MS`（默认 30000，不小于 1000）读取容器状态，状态变化时记一条触发（Trigger），线程为 `resource:container:<容器名>`。第一次读取只记基线，不会把已经停着的容器当作新消息；读取位置会保存，重启不重放。目前触发只被记录，没有东西读它们，也不会因此产生工单。容器接口不提供 Docker 自带的 healthcheck，所以「不健康」指状态变了，而不是健康检查失败。
 - `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container.restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 

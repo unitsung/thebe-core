@@ -63,6 +63,8 @@ export type ProductGoal = {
   attention?: GoalAttention;
   /** What the worker last reported through `goal_report`. */
   report?: GoalReport;
+  /** The Ticket that authorises this task, when one was recorded. Added by the HTTP layer. */
+  ticketId?: string;
 };
 
 export type ProductGoalEvent = {

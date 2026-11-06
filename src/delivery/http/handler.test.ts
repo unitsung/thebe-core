@@ -118,7 +118,11 @@ describe("Thebe HTTP handler", () => {
       new Request("http://127.0.0.1:8787/v1/health")
     );
     expect(res.status).toBe(200);
-    await expect(json(res)).resolves.toEqual({ ok: true, version: "0.1.0" });
+    await expect(json(res)).resolves.toEqual({
+      ok: true,
+      version: "0.1.0",
+      capabilities: [],
+    });
   });
 
   it("serves generated OpenAPI JSON and Swagger UI", async () => {
