@@ -18,8 +18,7 @@ import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/open
 import { createFileJobStore } from "../agent/pipeline/job-store.ts";
 import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowlarr-search.ts";
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
-import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
-import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
+import { createMediaBrowserProviderFromEnv } from "../adapters/media-browser/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
 import {
   arcaneEnvironmentIdFromEnv,
@@ -179,8 +178,8 @@ export async function bootstrapThebe(
   const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
   const navidrome = createNavidromeProviderFromEnv();
   const releaseSearch = createProwlarrSearchProviderFromEnv();
-  const emby = createEmbyProviderFromEnv();
-  const jellyfin = createJellyfinProviderFromEnv();
+  const emby = createMediaBrowserProviderFromEnv("emby");
+  const jellyfin = createMediaBrowserProviderFromEnv("jellyfin");
   const immich = createImmichProviderFromEnv();
   const openListBackgroundTaskProvider =
     createOpenListBackgroundTaskProviderFromEnv();

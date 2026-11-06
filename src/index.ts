@@ -72,9 +72,7 @@ export {
   createArtifactStore,
 } from "./agent/index.ts";
 export { createAgentStore } from "./agent/store.ts";
-export {
-  createPiCodingAgentRuntime,
-} from "./adapters/pi/runtime.ts";
+export { createPiCodingAgentRuntime } from "./adapters/pi/runtime.ts";
 export {
   PI_BUILTIN_TOOLS,
   PI_RUNTIME_ID,
@@ -91,12 +89,16 @@ export {
   createArcaneBackgroundTaskProviderFromEnv,
 } from "./adapters/arcane/tasks.ts";
 export type { ArcaneBackgroundTaskProviderOptions } from "./adapters/arcane/tasks.ts";
-export { EmbyAdapter } from "./adapters/emby/adapter.ts";
-export { createEmbyProviderFromEnv, embyOptionsFromEnv } from "./adapters/emby/env.ts";
-export { JellyfinAdapter } from "./adapters/jellyfin/adapter.ts";
-export { createJellyfinProviderFromEnv, jellyfinOptionsFromEnv } from "./adapters/jellyfin/env.ts";
+export { MediaBrowserAdapter } from "./adapters/media-browser/adapter.ts";
+export {
+  createMediaBrowserProviderFromEnv,
+  mediaBrowserOptionsFromEnv,
+} from "./adapters/media-browser/env.ts";
 export { ImmichAdapter } from "./adapters/immich/adapter.ts";
-export { createImmichProviderFromEnv, immichOptionsFromEnv } from "./adapters/immich/env.ts";
+export {
+  createImmichProviderFromEnv,
+  immichOptionsFromEnv,
+} from "./adapters/immich/env.ts";
 export {
   NavidromeAdapter,
   createNavidromeProviderFromEnv,

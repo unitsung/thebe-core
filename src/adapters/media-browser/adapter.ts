@@ -16,7 +16,31 @@ import {
   type MediaSession,
 } from "../../agent/capabilities/media.ts";
 
-export type JellyfinAdapterOptions = {
+/**
+ * Emby and Jellyfin speak the same MediaBrowser REST API: the same Views, Items/Latest, Sessions and Items
+ * calls with the same JSON. They differ only in the path prefix and in how the key is sent, so there is one
+ * adapter and these two rows.
+ */
+export const MEDIA_BROWSER_FLAVORS = {
+  emby: {
+    label: "Emby",
+    /** Official REST: http[s]://host:port/emby/{apipath}. */
+    pathPrefix: "/emby",
+    authHeaders: (apiKey: string) => ({ "X-Emby-Token": apiKey }),
+  },
+  jellyfin: {
+    label: "Jellyfin",
+    /** No /emby prefix (removed in 12.0). */
+    pathPrefix: "",
+    authHeaders: (apiKey: string) => ({
+      Authorization: `MediaBrowser Token="${apiKey}"`,
+    }),
+  },
+} as const;
+
+export type MediaBrowserFlavor = keyof typeof MEDIA_BROWSER_FLAVORS;
+
+export type MediaBrowserAdapterOptions = {
   baseUrl: string;
   apiKey: string;
   userId: string;
@@ -25,6 +49,7 @@ export type JellyfinAdapterOptions = {
 
 type Json = Record<string, unknown>;
 
+/** The server's own address, without a trailing slash or an API suffix someone pasted along with it. */
 function cleanBaseUrl(raw: string): string {
   let value = raw.trim().replace(/\/+$/, "");
   for (const suffix of ["/api/v2.0", "/api/v2", "/api"]) {
@@ -36,15 +61,18 @@ function cleanBaseUrl(raw: string): string {
   return value.replace(/\/+$/, "");
 }
 
-export class JellyfinAdapter implements MediaLibraryProvider {
-  // Official: Authorization: MediaBrowser Token="…". No /emby prefix (removed in 12.0).
-  // Same MediaBrowser JSON as Emby for Views, Items/Latest, Sessions.
+export class MediaBrowserAdapter implements MediaLibraryProvider {
+  private readonly flavor: (typeof MEDIA_BROWSER_FLAVORS)[MediaBrowserFlavor];
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly userId: string;
   private readonly fetchImpl: typeof fetch;
 
-  constructor(options: JellyfinAdapterOptions) {
+  constructor(
+    private readonly flavorId: MediaBrowserFlavor,
+    options: MediaBrowserAdapterOptions
+  ) {
+    this.flavor = MEDIA_BROWSER_FLAVORS[flavorId];
     this.baseUrl = cleanBaseUrl(options.baseUrl);
     this.apiKey = options.apiKey;
     this.userId = options.userId;
@@ -58,7 +86,7 @@ export class JellyfinAdapter implements MediaLibraryProvider {
 
   async listRecent(): Promise<MediaItem[]> {
     const body = await this.requestJson(
-      `/Users/${this.userId}/Items/Latest?Limit=20`,
+      `/Users/${this.userId}/Items/Latest?Limit=20`
     );
     return mapMediaItems(body);
   }
@@ -70,7 +98,7 @@ export class JellyfinAdapter implements MediaLibraryProvider {
 
   async searchItems(query: MediaSearchQuery): Promise<MediaSearchPage> {
     const body = await this.requestJson(
-      `/Users/${this.userId}/Items?${mediaLibrarySearchQuery(query, "jellyfin")}`,
+      `/Users/${this.userId}/Items?${mediaLibrarySearchQuery(query, this.flavorId)}`
     );
     return mapMediaSearch(body);
   }
@@ -78,27 +106,26 @@ export class JellyfinAdapter implements MediaLibraryProvider {
   async getItem(id: string): Promise<MediaItemDetail | undefined> {
     try {
       const body = await this.requestJson(
-        `/Users/${this.userId}/Items/${mediaItemPathSegment(id)}`,
+        `/Users/${this.userId}/Items/${mediaItemPathSegment(id)}`
       );
       return mapMediaItemDetail(body);
     } catch (error) {
-      if (error instanceof ProviderError && error.code === "NOT_FOUND") return undefined;
+      if (error instanceof ProviderError && error.code === "NOT_FOUND")
+        return undefined;
       throw error;
     }
   }
 
   private async requestJson(path: string): Promise<Json | unknown[]> {
+    const { label, pathPrefix, authHeaders } = this.flavor;
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      response = await this.fetchImpl(`${this.baseUrl}${pathPrefix}${path}`, {
         method: "GET",
-        headers: {
-          Accept: "application/json",
-          Authorization: `MediaBrowser Token="${this.apiKey}"`,
-        },
+        headers: { Accept: "application/json", ...authHeaders(this.apiKey) },
       });
     } catch (cause) {
-      throw new ProviderError("UNREACHABLE", "Jellyfin is unreachable", cause);
+      throw new ProviderError("UNREACHABLE", `${label} is unreachable`, cause);
     }
     if (!response.ok) {
       throw new ProviderError(
@@ -107,7 +134,7 @@ export class JellyfinAdapter implements MediaLibraryProvider {
           : response.status === 404
             ? "NOT_FOUND"
             : "UNKNOWN",
-        `Jellyfin HTTP ${response.status}`,
+        `${label} HTTP ${response.status}`
       );
     }
     return (await response.json()) as Json | unknown[];

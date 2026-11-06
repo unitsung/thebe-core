@@ -83,7 +83,6 @@ describe("a Ticket for work Eval took on", () => {
     policyVersion: "v1",
     matchedRuleIds: ["r1"],
     scope: ["container_restart:emby"],
-    receiptIds: ["receipt-1"],
   };
 
   it("is inferred and by Eval, and its Mandate names the policy, the rules and what it may touch", async () => {
@@ -101,7 +100,6 @@ describe("a Ticket for work Eval took on", () => {
     expect(ticket.links).toEqual({
       decisionId: accepted.decisionId,
       sessionIds: [],
-      receiptIds: ["receipt-1"],
     });
     expect(ticket.subscriptions).toEqual(["resource:container:emby"]);
   });
@@ -111,10 +109,11 @@ describe("a Ticket for work Eval took on", () => {
     const first = await createTicketStore({ dir }).recordAccepted(accepted);
     const again = await createTicketStore({ dir }).recordAccepted({
       ...accepted,
-      receiptIds: ["receipt-2"],
+      title: "a different title",
     });
     expect(again.id).toBe(first.id);
-    expect(again.links.receiptIds).toEqual(["receipt-1"]);
+    // The first record stands.
+    expect(again.title).toBe(first.title);
     expect(await createTicketStore({ dir }).list()).toHaveLength(1);
   });
 });

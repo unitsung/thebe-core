@@ -7,12 +7,6 @@ export { CONTAINER_RESTART_ACTION_ID };
 /** `approval.client` of a restart that came in over `/mcp`; the receipt records it as `mcp_client`. */
 export const MCP_CLIENT_APPROVAL = "mcp";
 
-/**
- * `approval.client` of a restart Core itself started under the person's `auto` policy; the receipt records
- * it as `policy`, so it is never mistaken for an approval the person gave on a device.
- */
-export const POLICY_APPROVAL = "policy";
-
 export type ActionApprovalInput = {
   approved: boolean;
   approvedAt?: string;
@@ -35,7 +29,7 @@ export type ApprovalRecord = {
   required: true;
   approved: boolean;
   approvedAt?: string;
-  source: "on_device" | "mcp_client" | "policy" | "missing";
+  source: "on_device" | "mcp_client" | "missing";
   capability: CapabilityPolicy;
 };
 
