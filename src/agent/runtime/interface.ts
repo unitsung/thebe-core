@@ -277,6 +277,8 @@ export type CustomToolDefinition = {
     params: unknown,
     signal?: AbortSignal
   ) => Promise<CustomToolResult>;
+  /** A call asks the person first (a write); the session's approval list is made from the tools that say so. */
+  requiresApproval?: boolean;
   /** `direct`: the model has the tool from its first call. Otherwise it finds it with `tool_search`. */
   exposure?: "direct";
 };

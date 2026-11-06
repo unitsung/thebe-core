@@ -3,6 +3,7 @@ import {
   NAVIDROME_TOOL_DESCRIPTIONS,
   NAVIDROME_TOOL_NAMES,
   NAVIDROME_TOOL_SCHEMAS,
+  NAVIDROME_WRITE_TOOL_NAMES,
   type NavidromeLibraryMode,
   type NavidromePlaybackMode,
   type NavidromeProvider,
@@ -129,6 +130,9 @@ export function createNavidromeTools(
 
   return NAVIDROME_TOOL_NAMES.map((name) => ({
     name,
+    requiresApproval: (
+      NAVIDROME_WRITE_TOOL_NAMES as readonly string[]
+    ).includes(name),
     label: navidromeLabel(name),
     description: NAVIDROME_TOOL_DESCRIPTIONS[name],
     parameters: NAVIDROME_TOOL_SCHEMAS[name],

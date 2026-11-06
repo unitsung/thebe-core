@@ -162,6 +162,11 @@ describe("service API session integration", () => {
       ])
     );
     expect(creates[0]!.toolsRequiringApproval).toContain("service_write");
+    // The list is made from the tools: the ones that change something ask, the reads do not.
+    expect(creates[0]!.toolsRequiringApproval).not.toContain("service_read");
+    expect(creates[0]!.toolsRequiringApproval).not.toContain(
+      "service_discover"
+    );
     expect(await agent.listCapabilities()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

@@ -1,6 +1,7 @@
 import {
   PIPELINE_TOOL_DESCRIPTIONS,
   PIPELINE_TOOL_SCHEMAS,
+  PIPELINE_WRITE_TOOL_NAMES,
   type CloudTransferProvider,
   type DownloadCapability,
   type DownloadProvider,
@@ -195,10 +196,12 @@ export function createPipelineTools(
   const extra: CustomToolDefinition[] = [];
   const define = (
     name: string,
-    run: (args: Record<string, unknown>) => Promise<unknown> | unknown
+    run: (args: Record<string, unknown>) => Promise<unknown> | unknown,
+    requiresApproval = false
   ) =>
     extra.push({
       name,
+      requiresApproval,
       label: name,
       description: JOB_DESCRIPTIONS[name]!,
       parameters: JOB_SCHEMAS[name],
@@ -221,31 +224,35 @@ export function createPipelineTools(
     }));
   }
   if (book) {
-    define("pipeline_acquire", async (args) => {
-      const job = await book.acquire({
-        kind:
-          args.kind === "cloud_transfer"
-            ? "cloud_transfer"
-            : args.kind === "torrent"
-              ? "torrent"
+    define(
+      "pipeline_acquire",
+      async (args) => {
+        const job = await book.acquire({
+          kind:
+            args.kind === "cloud_transfer"
+              ? "cloud_transfer"
+              : args.kind === "torrent"
+                ? "torrent"
+                : undefined,
+          title: requiredString(args.title, "title"),
+          year: integerOptional(args.year),
+          magnet: optionalString(args.magnet),
+          transferSource: optionalString(args.transferSource),
+          transferTool: optionalString(args.transferTool),
+          savePath: optionalString(args.savePath),
+          category: optionalString(args.category),
+          filesSourceDir: requiredString(args.filesSourceDir, "filesSourceDir"),
+          libraryDir: requiredString(args.libraryDir, "libraryDir"),
+          mediaServer:
+            args.mediaServer === "emby" || args.mediaServer === "jellyfin"
+              ? args.mediaServer
               : undefined,
-        title: requiredString(args.title, "title"),
-        year: integerOptional(args.year),
-        magnet: optionalString(args.magnet),
-        transferSource: optionalString(args.transferSource),
-        transferTool: optionalString(args.transferTool),
-        savePath: optionalString(args.savePath),
-        category: optionalString(args.category),
-        filesSourceDir: requiredString(args.filesSourceDir, "filesSourceDir"),
-        libraryDir: requiredString(args.libraryDir, "libraryDir"),
-        mediaServer:
-          args.mediaServer === "emby" || args.mediaServer === "jellyfin"
-            ? args.mediaServer
-            : undefined,
-      });
-      options.onAcquired?.(job.id);
-      return view(job);
-    });
+        });
+        options.onAcquired?.(job.id);
+        return view(job);
+      },
+      true
+    );
     define("pipeline_advance", async (args) =>
       view(await book.advance(requiredString(args.jobId, "jobId")))
     );
@@ -257,6 +264,9 @@ export function createPipelineTools(
     ...extra,
     ...availablePipelineTools(providers).map((name) => ({
       name,
+      requiresApproval: (
+        PIPELINE_WRITE_TOOL_NAMES as readonly string[]
+      ).includes(name),
       label: name,
       description: PIPELINE_TOOL_DESCRIPTIONS[name],
       parameters: PIPELINE_TOOL_SCHEMAS[name],

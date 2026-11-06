@@ -27,7 +27,8 @@ export const MEMORY_TOOL_SCHEMA = {
     target: {
       type: "string",
       enum: [...MEMORY_TARGETS],
-      description: '"user" = who the owner is. "notes" = stable facts about their setup and conventions.',
+      description:
+        '"user" = who the owner is. "notes" = stable facts about their setup and conventions.',
     },
     operations: {
       type: "array",
@@ -36,8 +37,15 @@ export const MEMORY_TOOL_SCHEMA = {
         type: "object",
         properties: {
           action: { type: "string", enum: ["add", "patch", "remove"] },
-          content: { type: "string", description: "The entry (add) or the replacement text (patch)." },
-          old_text: { type: "string", description: "Text from one entry: patch replaces exactly this text, remove deletes the whole entry." },
+          content: {
+            type: "string",
+            description: "The entry (add) or the replacement text (patch).",
+          },
+          old_text: {
+            type: "string",
+            description:
+              "Text from one entry: patch replaces exactly this text, remove deletes the whole entry.",
+          },
         },
         required: ["action"],
       },
@@ -47,7 +55,10 @@ export const MEMORY_TOOL_SCHEMA = {
 } as const;
 
 /** What a client and the model are shown of one store. */
-export type MemoryView = Record<MemoryTarget, { entries: string[]; usedBytes: number; limitBytes: number }>;
+export type MemoryView = Record<
+  MemoryTarget,
+  { entries: string[]; usedBytes: number; limitBytes: number }
+>;
 
 export type MemoryToolHost = {
   apply(
@@ -58,24 +69,35 @@ export type MemoryToolHost = {
 };
 
 /** Reads the model's arguments into operations; an error string says what is wrong with them. */
-export function parseMemoryOperations(input: unknown): { target: MemoryTarget; operations: MemoryOperation[] } | string {
-  if (typeof input !== "object" || input === null) return "arguments must be an object";
+export function parseMemoryOperations(
+  input: unknown
+): { target: MemoryTarget; operations: MemoryOperation[] } | string {
+  if (typeof input !== "object" || input === null)
+    return "arguments must be an object";
   const record = input as Record<string, unknown>;
-  if (!isMemoryTarget(record.target)) return `target must be one of ${MEMORY_TARGETS.join(", ")}`;
+  if (!isMemoryTarget(record.target))
+    return `target must be one of ${MEMORY_TARGETS.join(", ")}`;
   const raw = Array.isArray(record.operations) ? record.operations : undefined;
   if (!raw || raw.length === 0) return "operations must be a non-empty array";
   if (raw.length > 20) return "at most 20 operations in one call";
   const operations: MemoryOperation[] = [];
   for (const item of raw) {
-    if (typeof item !== "object" || item === null) return "each operation must be an object";
+    if (typeof item !== "object" || item === null)
+      return "each operation must be an object";
     const op = item as Record<string, unknown>;
     const content = typeof op.content === "string" ? op.content : undefined;
-    const oldText = typeof op.old_text === "string" ? op.old_text : typeof op.oldText === "string" ? op.oldText : undefined;
+    const oldText =
+      typeof op.old_text === "string"
+        ? op.old_text
+        : typeof op.oldText === "string"
+          ? op.oldText
+          : undefined;
     if (op.action === "add") {
       if (content === undefined) return "add needs content";
       operations.push({ action: "add", content });
     } else if (op.action === "patch") {
-      if (content === undefined || oldText === undefined) return "patch needs old_text and content";
+      if (content === undefined || oldText === undefined)
+        return "patch needs old_text and content";
       operations.push({ action: "patch", oldText, content });
     } else if (op.action === "remove") {
       if (oldText === undefined) return "remove needs old_text";
@@ -87,17 +109,24 @@ export function parseMemoryOperations(input: unknown): { target: MemoryTarget; o
   return { target: record.target, operations };
 }
 
-export function createMemoryTools(host: MemoryToolHost): CustomToolDefinition[] {
+export function createMemoryTools(
+  host: MemoryToolHost
+): CustomToolDefinition[] {
   return [
     {
       name: MEMORY_TOOL_NAME,
+      requiresApproval: true,
       label: "Memory",
       description: MEMORY_TOOL_DESCRIPTION,
       parameters: MEMORY_TOOL_SCHEMA,
       async execute(_toolCallId, input) {
         const parsed = parseMemoryOperations(input);
         if (typeof parsed === "string") throw new Error(parsed);
-        const result = await host.apply(parsed.target, parsed.operations, "tool");
+        const result = await host.apply(
+          parsed.target,
+          parsed.operations,
+          "tool"
+        );
         const store = result.view[parsed.target];
         const body = result.ok
           ? {
@@ -119,7 +148,10 @@ export function createMemoryTools(host: MemoryToolHost): CustomToolDefinition[] 
               usedBytes: store.usedBytes,
               limitBytes: store.limitBytes,
             };
-        return { content: [{ type: "text", text: JSON.stringify(body) }], details: {} };
+        return {
+          content: [{ type: "text", text: JSON.stringify(body) }],
+          details: {},
+        };
       },
     },
   ];
