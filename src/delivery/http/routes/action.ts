@@ -6,7 +6,6 @@ import {
 import { json, readJson } from "../json.ts";
 import type { ResourceRef } from "../../../agent/diagnosis/types.ts";
 import { CONTAINER_RESTART_ACTION_ID } from "../../../agent/capabilities/containers.ts";
-import { POLICY_APPROVAL } from "../../../agent/action/types.ts";
 
 export async function handleActionRoutes(
   context: ThebeHttpContext
@@ -48,12 +47,8 @@ export async function handleActionRoutes(
               typeof approval.approvedAt === "string"
                 ? approval.approvedAt
                 : undefined,
-            // Only Core itself, acting under the person's auto policy, may be recorded as `policy`.
             client:
-              typeof approval.client === "string" &&
-              approval.client !== POLICY_APPROVAL
-                ? approval.client
-                : undefined,
+              typeof approval.client === "string" ? approval.client : undefined,
           }
         : undefined,
     });

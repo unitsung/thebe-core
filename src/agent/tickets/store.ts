@@ -51,7 +51,6 @@ export type TicketStore = {
     intent?: string;
     /** The Goal that carries it out. Its session id: the Ticket's Mandate is looked up from it. */
     goalId?: string;
-    receiptIds?: string[];
   }): Promise<Ticket>;
 };
 
@@ -177,7 +176,6 @@ export function createTicketStore(options: {
           decisionId: input.decisionId,
           ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
           sessionIds: input.goalId ? [input.goalId] : [],
-          ...(input.receiptIds?.length ? { receiptIds: input.receiptIds } : {}),
         },
         createdAt: input.at,
       };

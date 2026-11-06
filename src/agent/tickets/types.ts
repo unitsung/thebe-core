@@ -33,8 +33,6 @@ export type TicketLinks = {
   sessionIds: string[];
   /** The Decision that took the work on. */
   decisionId?: string;
-  /** Receipts of actions taken under this Ticket (a restart), to read what was done and verified. */
-  receiptIds?: string[];
 };
 
 export type Ticket = {

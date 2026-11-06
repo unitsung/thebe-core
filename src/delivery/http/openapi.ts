@@ -2940,11 +2940,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   type: "string",
                   description: "The Decision that took the work on.",
                 },
-                receiptIds: {
-                  type: "array",
-                  items: { type: "string" },
-                  description: "Receipts of actions taken under this Ticket.",
-                },
               },
             },
             createdAt: { type: "string", format: "date-time" },
