@@ -4,7 +4,7 @@ import type {
   ContainerState,
 } from "../capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
-import { parseSources } from "../../app/bootstrap.ts";
+import { parseEvalMaxPerHour, parseSources } from "../../app/bootstrap.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
 function docker(state: ContainerState) {
@@ -111,5 +111,25 @@ describe("THEBE_SOURCES", () => {
         THEBE_SOURCE_INTERVAL_MS: "5",
       })
     ).toEqual({ containerHealth: true });
+  });
+});
+
+describe("THEBE_EVAL_MAX_PER_HOUR", () => {
+  it("keeps the default when unset or unreadable, and 0 turns the limit off", () => {
+    expect(parseEvalMaxPerHour({})).toBeUndefined();
+    expect(
+      parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: " " })
+    ).toBeUndefined();
+    expect(
+      parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: "many" })
+    ).toBeUndefined();
+    expect(
+      parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: "-5" })
+    ).toBeUndefined();
+    expect(
+      parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: "2.5" })
+    ).toBeUndefined();
+    expect(parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: "120" })).toBe(120);
+    expect(parseEvalMaxPerHour({ THEBE_EVAL_MAX_PER_HOUR: "0" })).toBe(0);
   });
 });

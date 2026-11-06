@@ -116,6 +116,11 @@ export type CreateThebeAgentOptions = {
     containerHealth?: boolean;
     intervalMs?: number;
   };
+  /**
+   * How many times an hour Eval may ask the model before the rest are recorded as `unavailable`
+   * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.
+   */
+  evalMaxPerHour?: number;
   /** Called when an approval starts waiting for a person, for example to send a push notice. */
   onPendingApproval?: (
     record: import("./activity/types.ts").ActivityRecord
