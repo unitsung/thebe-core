@@ -720,7 +720,7 @@ const operations: Operation[] = [
     method: "put",
     path: "/v1/policy",
     summary:
-      "Change the rules, accept mode (off, observe or auto), the containers auto may restart, or the model; auto needs the host to allow it",
+      "Change the rules, accept mode (off, observe or auto), the containers auto may restart, or the model",
     tag: "ticket",
     requestBody: { required: true },
     requestSchema: "PolicyInput",
@@ -2774,18 +2774,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "string",
               enum: ["off", "observe", "auto"],
               description:
-                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: act on a positive assessment. A stopped container on autoContainers is restarted by Core (at most 3 an hour per container; the next goes to the person); any other is only diagnosed, which asks the person. Needs the host to allow it (THEBE_EVAL_AUTO).",
+                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: act on a positive assessment. A stopped container on autoContainers is restarted by Core (at most 3 an hour per container; the next goes to the person); any other is only diagnosed, which asks the person. Nothing acts until the person picks auto; the default is observe. Taking something on gives it a Ticket.",
             },
             autoContainers: {
               type: "array",
               items: { type: "string" },
               description:
-                "Container names auto may restart without asking. A hard cap the model cannot widen. Empty or unset: no direct restart.",
-            },
-            autoAvailable: {
-              type: "boolean",
-              description:
-                "Whether the host allows acceptMode auto; PUT of auto is 400 when false.",
+                "Container names auto may restart without asking. A hard cap the model cannot widen. Empty: no direct restart. Always present on a Core that has the auto mode, so a client can tell.",
             },
             model: {
               type: "object",
@@ -2925,6 +2920,17 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 decidedBy: { type: "string", enum: ["direct", "eval"] },
                 evalId: { type: "string" },
                 requester: { type: "string" },
+                policyVersion: {
+                  type: "string",
+                  description: "Eval only: the policy it was taken on under.",
+                },
+                matchedRuleIds: { type: "array", items: { type: "string" } },
+                scope: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Eval only: what the Ticket may touch, as action:target (container.restart:emby). Empty authorises nothing to be done without the person.",
+                },
               },
             },
             subscriptions: { type: "array", items: { type: "string" } },
@@ -2934,6 +2940,15 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               properties: {
                 legacyGoalId: { type: "string" },
                 sessionIds: { type: "array", items: { type: "string" } },
+                decisionId: {
+                  type: "string",
+                  description: "The Decision that took the work on.",
+                },
+                receiptIds: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Receipts of actions taken under this Ticket.",
+                },
               },
             },
             createdAt: { type: "string", format: "date-time" },

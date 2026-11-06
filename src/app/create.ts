@@ -48,8 +48,6 @@ export function createThebeApp(options: {
   sources?: { containerHealth?: boolean; intervalMs?: number };
   /** Eval's hourly limit on questions to the model; see `CreateThebeAgentOptions.evalMaxPerHour`. */
   evalMaxPerHour?: number;
-  /** Whether the accept mode `auto` may be set; see `CreateThebeAgentOptions.evalAutoAllowed`. */
-  evalAutoAllowed?: boolean;
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
   now?: () => Date;
@@ -135,7 +133,6 @@ export function createThebeApp(options: {
     agentStoreDir: options.agentStoreDir,
     sources: options.sources,
     evalMaxPerHour: options.evalMaxPerHour,
-    evalAutoAllowed: options.evalAutoAllowed,
     now: options.now,
     callerId: options.callerId,
     model: options.model,

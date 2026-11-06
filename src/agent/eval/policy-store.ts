@@ -24,8 +24,6 @@ export type PolicyStore = {
 export function createPolicyStore(options: {
   dir?: string;
   now: () => Date;
-  /** Whether the host lets the mode be `auto`. Off by default: setting it is then refused. */
-  autoAllowed?: boolean;
 }): PolicyStore {
   let current: Policy | undefined;
   const file = options.dir ? join(options.dir, "policy.json") : undefined;
@@ -59,7 +57,7 @@ export function createPolicyStore(options: {
         acceptMode:
           input.acceptMode === undefined
             ? before.acceptMode
-            : parseMode(input.acceptMode, options.autoAllowed === true),
+            : parseMode(input.acceptMode),
         ...autoContainersOf(input.autoContainers, before.autoContainers),
         ...(input.model === undefined
           ? before.model
@@ -122,16 +120,8 @@ function parseRules(value: unknown): PolicyRule[] {
   return rules;
 }
 
-function parseMode(value: unknown, autoAllowed: boolean): AcceptMode {
-  if (value === "off" || value === "observe") return value;
-  if (value === "auto") {
-    if (!autoAllowed) {
-      throw new PolicyError(
-        "acceptMode auto is not enabled on this Core: the host has to allow it (THEBE_EVAL_AUTO)"
-      );
-    }
-    return "auto";
-  }
+function parseMode(value: unknown): AcceptMode {
+  if (value === "off" || value === "observe" || value === "auto") return value;
   throw new PolicyError("acceptMode must be off, observe or auto");
 }
 

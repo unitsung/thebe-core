@@ -202,7 +202,6 @@ export async function bootstrapThebe(
     agentStoreDir,
     sources: parseSources(process.env),
     evalMaxPerHour: parseEvalMaxPerHour(process.env),
-    evalAutoAllowed: parseEvalAuto(process.env),
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
@@ -363,14 +362,4 @@ export function parseEvalMaxPerHour(
   if (!raw) return undefined;
   const value = Number(raw);
   return Number.isInteger(value) && value >= 0 ? value : undefined;
-}
-
-/**
- * `THEBE_EVAL_AUTO`: whether the person may put the accept mode in `auto`, where Core restarts a stopped
- * container on their list by itself. Off unless it says `on` (or `1`, `true`): this is a write Core does
- * without asking, so the host opts in, the way it does for remote bash.
- */
-export function parseEvalAuto(env: NodeJS.ProcessEnv): boolean {
-  const raw = env.THEBE_EVAL_AUTO?.trim().toLowerCase();
-  return raw === "on" || raw === "1" || raw === "true";
 }

@@ -9,7 +9,7 @@ export type Policy = {
    * `off`: Core watches and records, and never weighs a Trigger. `observe` (the default): Core weighs each
    * one against the rules and records what it WOULD have taken on, and takes on nothing. `auto` takes it on:
    * a stopped container on `autoContainers` is restarted directly (within a breaker), any other is only
-   * diagnosed, which asks the person. `auto` needs the host to allow it (`THEBE_EVAL_AUTO`).
+   * diagnosed, which asks the person. Nothing acts until the person picks `auto`: the default is `observe`.
    */
   acceptMode: AcceptMode;
   /**
@@ -33,7 +33,7 @@ export type DecisionAction = {
   /**
    * restart: the receipt's status (`succeeded`, `failed`, `provider_unavailable`). diagnose:
    * `awaiting_approval` or `no_restart_advised`. none: why (`stale`, `already_up`, `not_down_event`,
-   * `container_not_found`, `container_ambiguous`, `quiesced`, `auto_disabled`, `act_failed`, ...).
+   * `container_not_found`, `container_ambiguous`, `quiesced`, `no_executor`, `act_failed`, ...).
    */
   status: string;
   note: string;

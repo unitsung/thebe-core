@@ -71,3 +71,50 @@ describe("ticket store", () => {
     expect(await createTicketStore({ dir }).list()).toHaveLength(2);
   });
 });
+
+describe("a Ticket for work Eval took on", () => {
+  const accepted = {
+    evalId: key("eval", "resource:container:emby", "v", "t"),
+    decisionId: key("decision", "e"),
+    thread: "resource:container:emby",
+    at: "2026-11-06T10:00:00.000Z",
+    title: "Restart emby",
+    requester: "container-health",
+    policyVersion: "v1",
+    matchedRuleIds: ["r1"],
+    scope: ["container.restart:emby"],
+    receiptIds: ["receipt-1"],
+  };
+
+  it("is inferred and by Eval, and its Mandate names the policy, the rules and what it may touch", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordAccepted(accepted);
+    expect(ticket.mandate).toEqual({
+      strength: "inferred",
+      decidedBy: "eval",
+      evalId: accepted.evalId,
+      requester: "container-health",
+      policyVersion: "v1",
+      matchedRuleIds: ["r1"],
+      scope: ["container.restart:emby"],
+    });
+    expect(ticket.links).toEqual({
+      decisionId: accepted.decisionId,
+      sessionIds: [],
+      receiptIds: ["receipt-1"],
+    });
+    expect(ticket.subscriptions).toEqual(["resource:container:emby"]);
+  });
+
+  it("is the same Ticket when the same Eval is taken on again, and survives a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-"));
+    const first = await createTicketStore({ dir }).recordAccepted(accepted);
+    const again = await createTicketStore({ dir }).recordAccepted({
+      ...accepted,
+      receiptIds: ["receipt-2"],
+    });
+    expect(again.id).toBe(first.id);
+    expect(again.links.receiptIds).toEqual(["receipt-1"]);
+    expect(await createTicketStore({ dir }).list()).toHaveLength(1);
+  });
+});

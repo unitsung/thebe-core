@@ -9,7 +9,7 @@ import {
   policyVersion,
 } from "./policy-store.ts";
 import { createEvalService } from "./service.ts";
-import type { DecisionAction } from "./types.ts";
+import type { Decision, DecisionAction } from "./types.ts";
 
 const T0 = Date.parse("2026-11-06T10:00:00Z");
 const hex = (n: number) => n.toString(16).padStart(32, "0");
@@ -26,16 +26,16 @@ const down = (n: number): Trigger => ({
 async function setup(
   options: {
     mode?: "observe" | "auto";
-    allowed?: boolean;
     verdict?: "accept" | "ignore";
     act?: AutoRestart;
     withAct?: boolean;
+    onAccepted?: (decision: Decision) => Promise<void>;
     /** Runs while the model "thinks", before it answers. */
     whileAssessing?: () => void;
   } = {}
 ) {
   const now = () => new Date(T0 + 60_000);
-  const policy = createPolicyStore({ now, autoAllowed: true });
+  const policy = createPolicyStore({ now });
   await policy.set({
     rules: ["Restart a media server that stopped"],
     acceptMode: options.mode ?? "auto",
@@ -44,6 +44,7 @@ async function setup(
   const rule = (await policy.get()).rules[0]!;
   const decisions = createDecisionStore({});
   const calls: unknown[] = [];
+  const accepted: Decision[] = [];
   const act: AutoRestart =
     options.act ??
     (async (input) => {
@@ -61,8 +62,12 @@ async function setup(
     decisions,
     sources: "container-health",
     now,
-    autoAllowed: options.allowed ?? true,
     act: options.withAct === false ? undefined : act,
+    onAccepted:
+      options.onAccepted ??
+      (async (decision) => {
+        accepted.push(decision);
+      }),
     assess: async () => {
       options.whileAssessing?.();
       return JSON.stringify({
@@ -72,7 +77,7 @@ async function setup(
       });
     },
   });
-  return { service, decisions, calls };
+  return { service, decisions, calls, accepted };
 }
 
 async function run(s: Awaited<ReturnType<typeof setup>>) {
@@ -119,18 +124,37 @@ describe("auto in Eval", () => {
     });
   });
 
-  it("does nothing unless the host allows auto, and says so", async () => {
-    const s = await setup({ allowed: false });
+  it("does nothing when there is nothing to carry the action out, and says so", async () => {
+    const s = await setup({ withAct: false });
     expect(await run(s)).toMatchObject({
       outcome: "ignore",
       wouldAccept: true,
-      action: { kind: "none", status: "auto_disabled" },
+      action: { kind: "none", status: "no_executor" },
     });
-    expect(s.calls).toEqual([]);
-    const noAct = await setup({ withAct: false });
-    expect(await run(noAct)).toMatchObject({
-      action: { status: "auto_disabled" },
+  });
+
+  it("gives what it took on a Ticket, and what it did not take on none", async () => {
+    const s = await setup();
+    const decision = await run(s);
+    expect(s.accepted.map((row) => row.id)).toEqual([decision.id]);
+    const skipped = await setup({
+      act: async () =>
+        ({ kind: "none", status: "stale", note: "too old" }) as DecisionAction,
     });
+    await run(skipped);
+    expect(skipped.accepted).toEqual([]);
+    const observing = await setup({ mode: "observe" });
+    await run(observing);
+    expect(observing.accepted).toEqual([]);
+  });
+
+  it("keeps the Decision when the Ticket cannot be made", async () => {
+    const s = await setup({
+      onAccepted: async () => {
+        throw new Error("disk full");
+      },
+    });
+    expect(await run(s)).toMatchObject({ outcome: "accept" });
   });
 
   it("never acts in observe, and never when the model says no", async () => {
@@ -177,24 +201,20 @@ describe("auto in Eval", () => {
 describe("the auto policy", () => {
   const now = () => new Date(T0);
 
-  it("is refused unless the host allows it, and the refusal names the switch", async () => {
+  it("takes auto like any other mode, and refuses a mode it does not know", async () => {
     const store = createPolicyStore({ now });
-    await expect(store.set({ acceptMode: "auto" })).rejects.toThrow(
-      /THEBE_EVAL_AUTO/
-    );
-    await expect(store.set({ acceptMode: "auto" })).rejects.toBeInstanceOf(
-      PolicyError
-    );
-    expect((await store.get()).acceptMode).toBe("observe");
-    const allowed = createPolicyStore({ now, autoAllowed: true });
-    expect((await allowed.set({ acceptMode: "auto" })).acceptMode).toBe("auto");
-    await expect(allowed.set({ acceptMode: "nonsense" })).rejects.toThrow(
+    expect((await store.set({ acceptMode: "auto" })).acceptMode).toBe("auto");
+    await expect(store.set({ acceptMode: "nonsense" })).rejects.toThrow(
       /off, observe or auto/
     );
+    await expect(store.set({ acceptMode: "nonsense" })).rejects.toBeInstanceOf(
+      PolicyError
+    );
+    expect((await store.get()).acceptMode).toBe("auto");
   });
 
   it("keeps the list of containers, replaces it, clears it, and checks it", async () => {
-    const store = createPolicyStore({ now, autoAllowed: true });
+    const store = createPolicyStore({ now });
     expect(
       (await store.set({ autoContainers: [" emby ", "emby", "jellyfin"] }))
         .autoContainers
@@ -220,7 +240,7 @@ describe("the auto policy", () => {
   });
 
   it("is part of the version, so Decisions under different lists are different", async () => {
-    const store = createPolicyStore({ now, autoAllowed: true });
+    const store = createPolicyStore({ now });
     const a = await store.set({ rules: ["a"], autoContainers: ["emby"] });
     const b = await store.set({ autoContainers: ["emby", "plex"] });
     expect(policyVersion(a, "s")).not.toBe(policyVersion(b, "s"));

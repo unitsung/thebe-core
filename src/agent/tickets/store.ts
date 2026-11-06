@@ -33,6 +33,23 @@ export type TicketStore = {
     goalId?: string;
     sessionIds?: string[];
   }): Promise<Ticket>;
+  /**
+   * Records the Ticket for work Eval took on under the person's policy. Its id derives from the Eval, so a
+   * Decision made again after a crash gives the same Ticket and not a second one.
+   */
+  recordAccepted(input: {
+    evalId: string;
+    decisionId: string;
+    thread: string;
+    /** When the newest Trigger happened; the Ticket's time, so a retry is the same. */
+    at: string;
+    title: string;
+    requester: string;
+    policyVersion: string;
+    matchedRuleIds: string[];
+    scope: string[];
+    receiptIds?: string[];
+  }): Promise<Ticket>;
 };
 
 export function createTicketStore(options: {
@@ -126,6 +143,36 @@ export function createTicketStore(options: {
         links: {
           ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
           sessionIds: input.sessionIds ?? [],
+        },
+        createdAt: input.at,
+      };
+      memory.set(id, ticket);
+      await persist(ticket);
+      await prune();
+      return ticket;
+    },
+    async recordAccepted(input) {
+      await ensureLoaded();
+      const id = ticketIdFor(input.evalId);
+      const existing = memory.get(id);
+      if (existing) return existing;
+      const ticket: Ticket = {
+        id,
+        title: input.title,
+        mandate: {
+          strength: "inferred",
+          decidedBy: "eval",
+          evalId: input.evalId,
+          requester: input.requester,
+          policyVersion: input.policyVersion,
+          matchedRuleIds: input.matchedRuleIds,
+          scope: input.scope,
+        },
+        subscriptions: [input.thread],
+        links: {
+          decisionId: input.decisionId,
+          sessionIds: [],
+          ...(input.receiptIds?.length ? { receiptIds: input.receiptIds } : {}),
         },
         createdAt: input.at,
       };
