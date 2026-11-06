@@ -15,6 +15,8 @@ export type AuditRecord = {
   timestamp: string;
   method: string;
   parameterHash: string;
+  /** For a call that changes something: its arguments, redacted and shortened, to read what it did. */
+  summary?: string;
   responseBytes: number;
   budgetConsumed: number;
   redactionFired: boolean;
@@ -207,6 +209,7 @@ function parseAuditRecord(raw: string): AuditRecord | undefined {
   for (const key of ["identity", "version", "source", "sessionId"] as const) {
     if (typeof row[key] === "string") record[key] = row[key];
   }
+  if (typeof row.summary === "string") record.summary = row.summary;
   if (typeof row.result === "string") record.result = row.result as AuditResult;
   if (typeof row.durationMs === "number") record.durationMs = row.durationMs;
   return record;

@@ -1468,6 +1468,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             timestamp: { type: "string" },
             method: { type: "string" },
             parameterHash: { type: "string" },
+            summary: {
+              type: "string",
+              description:
+                "For a call that changes something: its arguments, redacted and shortened.",
+            },
             responseBytes: { type: "number" },
             budgetConsumed: { type: "number" },
             redactionFired: { type: "boolean" },

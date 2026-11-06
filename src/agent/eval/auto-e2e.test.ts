@@ -1,3 +1,6 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
   ContainerInfoProvider,
@@ -92,6 +95,7 @@ async function start(
   turns?: Parameters<ReturnType<typeof createFakeRuntime>["queueTurns"]>[0]
 ) {
   vi.useFakeTimers();
+  const auditDir = await mkdtemp(join(tmpdir(), "auto-audit-"));
   const d = docker(["emby", "nightly-backup"]);
   const fake = createFakeRuntime();
   lastFake = fake;
@@ -99,6 +103,7 @@ async function start(
     runtime: fake.runtime,
     provider: d.provider,
     serviceAPIProviders: [d.service],
+    auditPath: join(auditDir, "audit.jsonl"),
     sources: { containerHealth: true, intervalMs: 1000 },
   });
   await vi.advanceTimersByTimeAsync(0); // the Source's baseline
@@ -166,6 +171,13 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     // The executor did the work: one restart, a plain call on the service connection, covered by the
     // Mandate (nobody was there to ask).
     await vi.waitFor(() => expect(d.restarted).toEqual(["emby"]));
+    // The person can read afterwards what it did: there is no restart receipt, so the audit record says it.
+    await vi.waitFor(async () => {
+      const audited = (await app.agent.listAudit({ method: "service_write" }))
+        .entries;
+      expect(audited).toHaveLength(1);
+      expect(audited[0]!.summary).toContain("/containers/emby/restart");
+    });
     await vi.waitFor(() =>
       expect(app.agent.getGoal(decision!.goalId!)?.status).toBe("completed")
     );
