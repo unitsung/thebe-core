@@ -62,14 +62,12 @@ const headerOp: ServiceAPIOperation = {
 describe("service_api per-operation tools", () => {
   it("names a tool from the service and operation id", () => {
     expect(serviceOperationToolName("petstore", "findPetsByStatus")).toBe(
-      "service_api.petstore.findPetsByStatus"
+      "service__petstore__findPetsByStatus"
     );
     expect(serviceOperationToolName("my service", "GET /a/b")).toBe(
-      "service_api.my_service.GET_a_b"
+      "service__my_service__GET_a_b"
     );
-    expect(serviceOperationToolName("svc", "")).toBe(
-      "service_api.svc.operation"
-    );
+    expect(serviceOperationToolName("svc", "")).toBe("service__svc__operation");
   });
 
   it("exposes only allow-listed read operations without required headers", () => {

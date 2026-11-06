@@ -1,5 +1,9 @@
 import type { RuntimeModelRef } from "../runtime/index.ts";
 
+/** The turn budget of a Goal's worker and of its reviewer: one number each, shared by every profile that plays the role. */
+export const GOAL_WORKER_MAX_TURNS = 8;
+export const GOAL_REVIEWER_MAX_TURNS = 5;
+
 /** Control-plane capabilities are never exposed to a one-shot child. */
 export const RESERVED_SUBAGENT_TOOLS = new Set<string>([
   "run_subagent",
@@ -17,9 +21,14 @@ export type BuiltinSubagentProfile = {
   description: string;
   systemPrompt: string;
   model?: RuntimeModelRef;
+  /** Tool names. `*` stands for every custom (home) tool the session has. */
   tools?: string[];
   maxTurns?: number;
   allowWrites?: boolean;
+  /** Takes `*` without the tools that change something (those that ask for approval). */
+  readOnly?: boolean;
+  /** Its tools are in front of the model from the start, so none of its turns go to looking for them. */
+  directTools?: boolean;
 };
 
 const RESPONSE_AND_FILE_OUTPUT_POLICY = [
@@ -42,7 +51,7 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
         "Provide a concise diagnostic report with evidence and likely root causes.",
         RESPONSE_AND_FILE_OUTPUT_POLICY,
       ].join("\n"),
-      tools: ["container.list", "container.inspect", "bash"],
+      tools: ["container_list", "container_inspect", "bash"],
       maxTurns: 6,
     },
     "log-analyzer": {
@@ -54,7 +63,7 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
         "Summarize the error timeline and recommend the smallest safe remediation.",
         RESPONSE_AND_FILE_OUTPUT_POLICY,
       ].join("\n"),
-      tools: ["container.logs", "container.inspect", "bash"],
+      tools: ["container_logs", "container_inspect", "bash"],
       maxTurns: 5,
     },
     "network-prober": {
@@ -94,7 +103,7 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
         "bash",
         "goal_report",
       ],
-      maxTurns: 8,
+      maxTurns: GOAL_WORKER_MAX_TURNS,
       allowWrites: true,
     },
     "goal-observer": {
@@ -110,7 +119,7 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
         RESPONSE_AND_FILE_OUTPUT_POLICY,
       ].join("\n"),
       tools: ["ls", "find", "grep", "read", "goal_report"],
-      maxTurns: 8,
+      maxTurns: GOAL_WORKER_MAX_TURNS,
     },
     "goal-reviewer": {
       name: "goal-reviewer",
@@ -127,6 +136,39 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
         RESPONSE_AND_FILE_OUTPUT_POLICY,
       ].join("\n"),
       tools: ["ls", "find", "grep", "read", "bash"],
-      maxTurns: 5,
+      maxTurns: GOAL_REVIEWER_MAX_TURNS,
+    },
+    "ticket-worker": {
+      name: "ticket-worker",
+      description:
+        "Carry out work the person's own rules asked for on their home server, within the authority of a Ticket.",
+      systemPrompt: [
+        "You look after the person's home server. A change on it matched a rule the person wrote, and you are asked to do what the rule says.",
+        "You receive only the task below; do not assume parent conversation context.",
+        "You plan the work yourself with the home tools you have. Look at the current state before acting, and again afterwards to check the result.",
+        "Your authority is the Mandate in the task. A tool call the system refuses is outside it: stop and report blocked, do not look for another way.",
+        "Never claim something is fixed without having looked at its state after your action.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["ls", "read", "*", "goal_report"],
+      maxTurns: GOAL_WORKER_MAX_TURNS,
+      directTools: true,
+      allowWrites: true,
+    },
+    "ticket-reviewer": {
+      name: "ticket-reviewer",
+      description:
+        "Independently check, from the current state of the home server, that work a Ticket asked for is done.",
+      systemPrompt: [
+        "You are an independent reviewer of work on the person's home server.",
+        "You have no parent transcript and must not trust the worker's claim.",
+        "Look at the current state with the home tools and compare it with the objective. You cannot change anything.",
+        "Return a concise verdict with the evidence you saw, or exactly what remains.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["ls", "read", "*"],
+      readOnly: true,
+      maxTurns: GOAL_REVIEWER_MAX_TURNS,
+      directTools: true,
     },
   };

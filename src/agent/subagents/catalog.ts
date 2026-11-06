@@ -14,6 +14,9 @@ export type SubagentProfile = {
   maxTurns?: number;
   /** Allow this role to request edit/write tools through normal approval. */
   allowWrites?: boolean;
+  /** `*` in `tools` leaves out the tools that change something. */
+  readOnly?: boolean;
+  directTools?: boolean;
   /** Retained for profile compatibility; agent runs never inherit context. */
   inheritContext?: boolean;
   systemPrompt: string;
@@ -79,12 +82,21 @@ export function parseSubagentFrontmatter(content: string): {
     }
   }
 
-  return { name, description, model, tools, maxTurns, allowWrites, inheritContext, body };
+  return {
+    name,
+    description,
+    model,
+    tools,
+    maxTurns,
+    allowWrites,
+    inheritContext,
+    body,
+  };
 }
 
 async function collectProfilesFromDir(
   dir: string,
-  scope: "project" | "global",
+  scope: "project" | "global"
 ): Promise<SubagentProfile[]> {
   const results: SubagentProfile[] = [];
   try {
@@ -98,7 +110,8 @@ async function collectProfilesFromDir(
           const fallbackName = entry.name.replace(/\.md$/, "");
           results.push({
             name: parsed.name || fallbackName,
-            description: parsed.description || `Subagent profile ${fallbackName}`,
+            description:
+              parsed.description || `Subagent profile ${fallbackName}`,
             filePath,
             scope,
             model: parseModelRef(parsed.model),
@@ -139,6 +152,8 @@ export async function discoverSubagentProfiles(options?: {
       tools: profile.tools,
       maxTurns: profile.maxTurns,
       allowWrites: profile.allowWrites,
+      readOnly: profile.readOnly,
+      directTools: profile.directTools,
       inheritContext: false,
       systemPrompt: profile.systemPrompt,
     });
@@ -151,7 +166,7 @@ export async function discoverSubagentProfiles(options?: {
   }
 
   return Array.from(profileMap.values()).sort((a, b) =>
-    a.name.localeCompare(b.name),
+    a.name.localeCompare(b.name)
   );
 }
 

@@ -4,8 +4,8 @@ import { listCoreMcpTools, withProductMetadata } from "./mcp.ts";
 describe("capability product metadata", () => {
   it("defaults STRM capabilities to the STRM resource kind", () => {
     const capability = withProductMetadata({
-      id: "strm.repair",
-      name: "strm.repair",
+      id: "strm_repair",
+      name: "strm_repair",
       description: "Repair one STRM source",
       inputSchema: { type: "object" },
       category: "media",
@@ -28,7 +28,7 @@ describe("capability product metadata", () => {
     expect(enabled).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "navidrome.queue",
+          id: "navidrome_queue",
           service: "navidrome",
           category: "media",
           permission: "read",
@@ -37,7 +37,7 @@ describe("capability product metadata", () => {
           outputKind: "audio_queue",
         }),
         expect.objectContaining({
-          id: "navidrome.playlist.create",
+          id: "navidrome_playlist_create",
           permission: "confirm",
           effect: "write",
           approval: "required",
@@ -45,7 +45,7 @@ describe("capability product metadata", () => {
           destructive: true,
         }),
         expect.objectContaining({
-          id: "navidrome.playlist.delete",
+          id: "navidrome_playlist_delete",
           risk: "disruptive",
           approval: "required",
         }),

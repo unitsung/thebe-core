@@ -39,7 +39,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
 - `THEBE_SESSION_DIR`: where the Pi runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
-- `THEBE_MCP_WRITES`: whether an agent connected over `/mcp` may call write tools: `container.restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. **On by default.** Set `off` (or `deny`/`false`/`0`/`no`) to make `/mcp` read-only; a client cannot change this for itself. Core does not ask anyone first on this path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. A provider MCP server's tool counts as a write unless its permission is `read`, which Core takes from the tool's `readOnlyHint` or from a server-level `permission: "read"` in `.thebe/mcp.json`. A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
+- `THEBE_MCP_WRITES`: whether an agent connected over `/mcp` may call write tools: `container_restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. **On by default.** Set `off` (or `deny`/`false`/`0`/`no`) to make `/mcp` read-only; a client cannot change this for itself. Core does not ask anyone first on this path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. A provider MCP server's tool counts as a write unless its permission is `read`, which Core takes from the tool's `readOnlyHint` or from a server-level `permission: "read"` in `.thebe/mcp.json`. A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
 - `THEBE_AUDIT_PATH`: the append-only audit log (JSON lines: method, parameter hash, result, duration; no arguments or output). Defaults to `audit.jsonl` in the agent store directory. `GET /v1/audit` reads it back.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
@@ -147,8 +147,8 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # proxy root, must be an h
 Core only talks to that proxy root: it never opens `docker.sock`, never accepts a
 host from a request, and refuses redirects. The proxy should expose only the read
 endpoints and `POST /containers/*/restart`; reach it over loopback or Tailscale and
-publish nothing. The reads map to the same `container.*` surface, and the only
-write (`container.restart`) still follows approval → execute → verify → receipt and
+publish nothing. The reads map to the same `container_*` surface, and the only
+write (`container_restart`) still follows approval → execute → verify → receipt and
 is never attached to the model tool loop. `ResourceRef.provider` gains a `docker`
 value. Logs may be a multiplexed stream (non-TTY) or plain text (TTY/proxy); Core
 demultiplexes the framed form and falls back to text.
@@ -161,23 +161,23 @@ export THEBE_OPENLIST_TOKEN=your-openlist-token
 ```
 
 (`OPENLIST_BASE_URL` and `OPENLIST_TOKEN` also work.) This registers the
-`strm.repair` capability and the file tools. It uses OpenList's `/api/fs/get`,
+`strm_repair` capability and the file tools. It uses OpenList's `/api/fs/get`,
 `/api/fs/search`, and `/api/fs/put` to find candidates (regular media plus HLS
 `.m3u8` and DASH `.mpd` playlists), write the STRM back, and read it again to
 verify. The token is used only by the adapter.
 
 With qBittorrent (`THEBE_QBITTORRENT_URL`, `_USERNAME`, `_PASSWORD`), OpenList,
 and an Emby or Jellyfin API key configured, Core exposes the acquisition tools:
-`download.add/list/status/pause/resume/delete`,
-`files.list/mkdir/copy/move/offline_download`, `library.scan`, and
-`library.refresh_item`. With `THEBE_PROWLARR_URL` and `THEBE_PROWLARR_API_KEY` it
-also exposes `resource.search` and `pipeline.acquire/advance/status`: a
+`download_add/list/status/pause/resume/delete`,
+`files_list/mkdir/copy/move/offline_download`, `library_scan`, and
+`library_refresh_item`. With `THEBE_PROWLARR_URL` and `THEBE_PROWLARR_API_KEY` it
+also exposes `resource_search` and `pipeline_acquire/advance/status`: a
 deterministic job (download, copy, scan, verify) with bounded retries, persisted
 in `<agent store>/pipeline-jobs.json`. Writes need approval.
 
 `THEBE_ARIA2_URL` (and `THEBE_ARIA2_SECRET`, aria2's `rpc-secret`, when it has one) adds aria2 as a second
-download engine behind the same `download.*` tools. `download.add` sends magnets and `.torrent` links to
-qBittorrent and every other link to aria2 unless `engine` names one; `download.list` merges both and names an
+download engine behind the same `download_*` tools. `download_add` sends magnets and `.torrent` links to
+qBittorrent and every other link to aria2 unless `engine` names one; `download_list` merges both and names an
 engine that did not answer in `unreachable`. Every download carries `engine`, `id`, `phase` (`queued`,
 `downloading`, `paused`, `error`, `completed`), `badges` and `capabilities`, the same vocabulary clients
 use (`contracts/download-states.json`). aria2's RPC cannot delete files: an unfinished
@@ -185,16 +185,16 @@ aria2 download offers `remove_with_files` because removing it makes the owner's 
 clean up; a finished one cannot have its files deleted through aria2 and offers only `remove`.
 
 An acquisition job can start from a torrent or from a network-drive transfer:
-`pipeline.acquire` with `kind: "cloud_transfer"` and a `transferSource` fetches
+`pipeline_acquire` with `kind: "cloud_transfer"` and a `transferSource` fetches
 the share/direct link through OpenList's offline download, then runs the same
 place → scan → verify steps. Core keeps jobs acquired in the running process
 moving on its own (every minute),
 so an import finishes while the phone is asleep. A job restored after a Core
-restart is not auto-resumed — call `pipeline.advance` to continue it — and a
+restart is not auto-resumed — call `pipeline_advance` to continue it — and a
 failed job is never retried automatically.
 
-- `download.pause` and `download.resume` take `hashes` (1 to 20 download ids: torrent info-hashes, or aria2 ids when aria2 is configured; there is no "pause all"), keep the task and files, and need approval. qBittorrent 5 uses `stop`/`start` and 4.x uses `pause`/`resume`; Core detects the version. Unknown hashes are rejected rather than silently ignored. If the downloader lacks the operation, the tool does not appear.
-- `download.delete` also takes `hashes` (1 to 20), is irreversible, and needs approval. `deleteFiles` must be explicitly `true` or `false`: `false` removes only the task, `true` also deletes files on disk. A missing or non-boolean value is rejected; nothing is deleted by default.
+- `download_pause` and `download_resume` take `hashes` (1 to 20 download ids: torrent info-hashes, or aria2 ids when aria2 is configured; there is no "pause all"), keep the task and files, and need approval. qBittorrent 5 uses `stop`/`start` and 4.x uses `pause`/`resume`; Core detects the version. Unknown hashes are rejected rather than silently ignored. If the downloader lacks the operation, the tool does not appear.
+- `download_delete` also takes `hashes` (1 to 20), is irreversible, and needs approval. `deleteFiles` must be explicitly `true` or `false`: `false` removes only the task, `true` also deletes files on disk. A missing or non-boolean value is rejected; nothing is deleted by default.
 
 qBittorrent also supplies native download tasks to the Activity feed and, for
 completed tasks, bounded `task_output` Artifacts (Web API v4 and v5).
@@ -211,7 +211,7 @@ export NAVIDROME_FALLBACK_URL=https://music.example.com
 
 Needs the URL, username, and password together. Uses the Subsonic API for recent
 and most-played albums, artists, playlists, songs, search, artist details,
-lyrics, and the playback queue. `navidrome.queue` returns uniform song entries
+lyrics, and the playback queue. `navidrome_queue` returns uniform song entries
 (direct or transcoded stream URL, cover, title, artist, album, optional lyrics);
 Core does not play audio, the client does. Creating, updating, and deleting
 playlists are writes and can only run through an agent session's runtime
@@ -243,10 +243,10 @@ export IMMICH_API_KEY=your-immich-key
 
 These register read-only capabilities. Emby uses `X-Emby-Token` and the `/emby`
 prefix; Jellyfin uses `Authorization: MediaBrowser Token="..."` with no prefix.
-`emby.search` and `jellyfin.search` find items by title, person, or year and
-return item ids; `emby.item` and `jellyfin.item` read overview, type, year,
+`emby_search` and `jellyfin_search` find items by title, person, or year and
+return item ids; `emby_item` and `jellyfin_item` read overview, type, year,
 genres, and cast. `communityRating` is the media server's own rating.
-`immich.search` calls `POST /api/search/smart` for semantic search by image
+`immich_search` calls `POST /api/search/smart` for semantic search by image
 content; filename, date, and city filters still use the metadata listings. If
 machine learning is unavailable the error is surfaced, not treated as an empty
 library.
@@ -286,6 +286,7 @@ Operations are loaded from the OpenAPI document for discovery and reads, and
 writes need approval. Header values are environment references and are never
 sent to the model.
 
+- `resourceKinds` (for example `["container"]`) says what kind of thing this service looks after. When Core takes an event on by itself (`auto` mode), the services its executor may write to are found from the event's resource kind, so Arcane, plain Docker (through the restricted proxy) and Portainer are the same configuration, and Core has no code for any one of them. If no connection claims a kind, the kind's own name is the service. The executor writes with the generic `service_write`, which needs no OpenAPI document, only a method and a path.
 - `openapiPath` is fetched from `baseURL`. When the service does not serve its
   spec there, use `openapiURL` with an absolute `http(s)` URL instead (the spec is
   fetched without the API's auth headers, which stay on the API host).
@@ -293,8 +294,8 @@ sent to the model.
   `METHOD /path` entries. Each allow-listed read operation becomes its own tool
   (`service_api.<id>.<operationId>`) with a real input schema, listed on `/mcp`
   and in `/v1/capabilities`, so an MCP client gets named tools instead of one
-  generic call. Everything else stays behind `service_api_discover` /
-  `service_api_write` with runtime approval; operations that require a header
+  generic call. Everything else stays behind `service_discover` /
+  `service_write` with runtime approval; operations that require a header
   parameter are never exposed this way (headers are operator-owned).
 - Less typing, same trust model: `readMethods` (e.g. `["GET","HEAD"]`) treats
   every operation with those methods as read-only, and
@@ -308,10 +309,10 @@ sent to the model.
 - `writeOperations` (operation IDs or `METHOD /path`) exposes chosen writes as
   two-phase tools. Calling one performs **no change**: it returns a
   `preview` (`method`, `path`, `body`) and a single-use `confirmToken` that
-  expires in five minutes. `service_api.confirm` with that token executes exactly
+  expires in five minutes. `service_confirm` with that token executes exactly
   the previewed request. Both the preview and the execution are audited, and the
   client is expected to show the preview before confirming. The model's
-  own write path stays `service_api_write` with runtime approval.
+  own write path stays `service_write` with runtime approval.
 - Run `node scripts/accept-service-api.mjs` to check a configured service end to
   end (it spawns Core, lists the per-operation tools, discovers operations, and
   invokes a read; `--preview` checks the two-phase write).
@@ -363,9 +364,9 @@ At runtime only the name, description, and path of enabled skills are added to
 discovery; the body is read on demand. Skills report honestly when the tools
 they need are not configured instead of inventing results.
 
-- `container-triage`: read-only container status and log triage (`container.*`); restarts are not called by the model and still go through the diagnosis approval flow. Needs a container provider such as Arcane.
-- `download-monitor`: follows download and import progress with `download.*`, `pipeline.status`/`pipeline.advance`, and `files.list`.
-- `media-acquire`: `resource.search` finds sources, the user picks one, and `pipeline.acquire` downloads and imports it. Needs an indexer, downloader, file manager, and media server.
+- `container-triage`: read-only container status and log triage (`container_*`); restarts are not called by the model and still go through the diagnosis approval flow. Needs a container provider such as Arcane.
+- `download-monitor`: follows download and import progress with `download_*`, `pipeline_status`/`pipeline_advance`, and `files_list`.
+- `media-acquire`: `resource_search` finds sources, the user picks one, and `pipeline_acquire` downloads and imports it. Needs an indexer, downloader, file manager, and media server.
 
 ## Command risk guard (homelab and NAS heuristics)
 

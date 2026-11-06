@@ -74,8 +74,10 @@ export function createSubagentApi(
     createSession: async ({ runId, parentSessionId, profile }) => {
       const parent = await ctx.openSession(parentSessionId);
       const childModel = profile.model ?? parent.session.currentModel?.();
+      const wantsAllHomeTools = (profile.tools ?? []).includes("*");
       const childTools = (profile.tools ?? []).filter(
         (name) =>
+          name !== "*" &&
           !RESERVED_SUBAGENT_TOOLS.has(name) &&
           (profile.allowWrites || !SUBAGENT_WRITE_TOOLS.has(name))
       );
@@ -96,12 +98,27 @@ export function createSubagentApi(
         `${ctx.callerId}:subagent:${runId}`,
         () => stopChild?.()
       );
+      // `*` is every home tool the session has; a read-only profile leaves out the ones that change something.
+      // Either way the permission layer still decides each write.
+      const asksApproval = new Set(childOptions.toolsRequiringApproval ?? []);
+      const homeTools = childOptions.customTools
+        .filter((tool) =>
+          wantsAllHomeTools
+            ? !profile.readOnly || !asksApproval.has(tool.name)
+            : childTools.includes(tool.name)
+        )
+        .map((tool) =>
+          profile.directTools ? { ...tool, exposure: "direct" as const } : tool
+        );
+      // The tools the session has are the ones it may call.
+      childPolicy.registerTools([
+        ...childTools,
+        ...homeTools.map((tool) => tool.name),
+      ]);
       const session = await options.runtime.createSession({
         ...childOptions,
         customTools: [
-          ...childOptions.customTools.filter((tool) =>
-            childTools.includes(tool.name)
-          ),
+          ...homeTools,
           // The report tool is bound to this worker's Goal, so it exists only for a profile that lists it.
           ...(reportInbox && childTools.includes(GOAL_REPORT_TOOL_NAME)
             ? [reportInbox.toolFor(parentSessionId)]

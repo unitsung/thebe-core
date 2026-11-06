@@ -1,6 +1,12 @@
 /** Authenticated service boundary. Credentials and transport stay in adapters. */
 export interface ServiceAPIProvider {
   id: string;
+  /**
+   * The kinds of thing this service looks after (`container`, `media-server`...), as the operator says.
+   * An event about one of these kinds gives a Ticket's executor the writes of this service. A service
+   * that names no kind is only ever reached by an executor whose event is about a kind named like it.
+   */
+  resourceKinds?: readonly string[];
   catalog(input?: {
     query?: string;
     operationId?: string;
@@ -20,26 +26,29 @@ export interface ServiceAPIProvider {
   /**
    * The operations this service documents, for per-operation tool exposure. Only
    * operations the operator allow-listed as read-only become callable tools; the
-   * rest stay behind `service_api_discover` / `service_api_write`.
+   * rest stay behind `service_discover` / `service_write`.
    */
   operations?(): Promise<ServiceAPIOperation[]> | ServiceAPIOperation[];
 }
 
+export const SERVICE_API_WRITE_TOOL_NAME = "service_write";
 export const SERVICE_API_TOOL_NAMES = [
-  "service_api_discover",
-  "service_api_read",
-  "service_api_write",
+  "service_discover",
+  "service_read",
+  SERVICE_API_WRITE_TOOL_NAME,
 ] as const;
-export const SERVICE_API_WRITE_TOOL_NAME = "service_api_write";
+/** The argument that names the configured service a generic call is about. */
+export const SERVICE_ARGUMENT = "service";
 
 /**
  * Product/MCP-only capability that executes a previewed write. Not a model tool:
- * the model's approved write path stays `service_api_write`.
+ * the model's approved write path stays `service_write`.
  */
-export const SERVICE_API_CONFIRM_TOOL_NAME = "service_api.confirm";
+export const SERVICE_API_CONFIRM_TOOL_NAME = "service_confirm";
 
-/** Id prefix for one tool per allow-listed read operation of a configured service. */
-export const SERVICE_API_OPERATION_PREFIX = "service_api.";
+/** Id prefix for one tool per allow-listed read operation of a configured service: `service__<service>__<operation>`. */
+export const SERVICE_API_OPERATION_SEPARATOR = "__";
+export const SERVICE_API_OPERATION_PREFIX = `service${SERVICE_API_OPERATION_SEPARATOR}`;
 
 export type ServiceAPIParameterLocation = "path" | "query" | "header";
 
@@ -76,16 +85,18 @@ function segment(value: string): string {
   const cleaned = value
     .trim()
     .replace(/[^A-Za-z0-9_-]+/g, "_")
+    // `__` is the separator between the parts of an id, so it cannot occur inside one.
+    .replace(/_{2,}/g, "_")
     .replace(/^_+|_+$/g, "");
   return cleaned || "operation";
 }
 
-/** The tool id for one operation, e.g. `service_api.petstore.findPetsByStatus`. */
+/** The tool id for one operation, e.g. `service__petstore__findPetsByStatus`. */
 export function serviceOperationToolName(
   serviceId: string,
   operationId: string
 ): string {
-  return `${SERVICE_API_OPERATION_PREFIX}${segment(serviceId)}.${segment(operationId)}`;
+  return `${SERVICE_API_OPERATION_PREFIX}${segment(serviceId)}${SERVICE_API_OPERATION_SEPARATOR}${segment(operationId)}`;
 }
 
 /** Whether an operation can be exposed as a standalone read tool at all. */
@@ -94,7 +105,7 @@ export function serviceOperationExposable(
 ): boolean {
   if (!operation.readOnly) return false;
   // A required header parameter cannot be supplied generically (headers are
-  // operator-owned), so such an operation stays behind service_api_write.
+  // operator-owned), so such an operation stays behind service_write.
   return !operation.parameters.some(
     (parameter) => parameter.in === "header" && parameter.required
   );

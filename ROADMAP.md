@@ -49,7 +49,7 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   (music), OpenList (files and offline download), and qBittorrent (downloads).
 - Containers without a panel: the Docker Engine API through a restricted
   `docker-socket-proxy` (`THEBE_DOCKER_PROXY_URL`), with Arcane taking
-  priority when configured and the approved `container.restart` path unchanged.
+  priority when configured and the approved `container_restart` path unchanged.
 - Prowlarr release search, used inside the acquisition pipeline
   (`adapters/pipeline/prowlarr-search.ts`) rather than as a standalone adapter.
 - Two acquisition-job kinds on one durable state machine
@@ -60,9 +60,9 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   (`agent/pipeline/advancer.ts`) keeps jobs
   acquired in the running process moving without a client, so a network-drive
   import finishes while the phone sleeps; a job restored after a Core restart
-  still needs an explicit `pipeline.advance`.
+  still needs an explicit `pipeline_advance`.
 - Generic HTTP services defined by an OpenAPI 3 / Swagger 2 document, through
-  `service_api_discover` / `service_api_read` / `service_api_write`.
+  `service_discover` / `service_read` / `service_write`.
 - Session web search and `music_research`.
 - Skills (from `.thebe/skills/`) and external MCP servers (from `.thebe/mcp.json`,
   plus the global config and `.mcp.json`).
@@ -83,7 +83,7 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
 
 **Product contract**
 
-- Diagnosis `POST /v1/diagnosis` and `ActionReceipt` (slice 02: `container.restart`).
+- Diagnosis `POST /v1/diagnosis` and `ActionReceipt` (slice 02: `container_restart`).
 - Durable Artifacts (`diagnosis`, `report`, `resource_list`, `operation_receipt`,
   `task_output`), capability-run / Goal / Worker recovery, and the Activity read
   model with cursor and source/status/time filters.

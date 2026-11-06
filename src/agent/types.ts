@@ -149,6 +149,12 @@ export type GoalRun = {
   blocked?: boolean;
   /** Read-only run: the worker cannot edit, write or run commands, only look and report. */
   observe?: boolean;
+  /**
+   * Who carries the work out. Unset: the coding worker, for a task in the workspace. `ticket`: the home
+   * operator, for work an Eval took on (a Ticket): it has the home tools, not a shell or file editing, and
+   * what it may change is what the Ticket's Mandate allows.
+   */
+  executor?: "ticket";
   /** The worker's latest structured report. */
   report?: GoalReport;
   /** Set while the Goal is paused waiting for the person; cleared by their answer. */

@@ -32,7 +32,7 @@ describe("Navidrome client contract", () => {
     const tools = createNavidromeTools(provider, {
       policy: createPolicyEngine({
         now: () => new Date(),
-        allowedToolNames: ["navidrome.queue", "navidrome.lyrics"],
+        allowedToolNames: ["navidrome_queue", "navidrome_lyrics"],
       }),
       callerId: "contract",
     });
@@ -42,10 +42,10 @@ describe("Navidrome client contract", () => {
         .execute("c", args);
       return JSON.parse(result.content[0]!.text);
     };
-    expect(await call("navidrome.queue", { songIds: ["song-1"] })).toEqual(
+    expect(await call("navidrome_queue", { songIds: ["song-1"] })).toEqual(
       NAVIDROME_QUEUE_EXAMPLE
     );
-    expect(await call("navidrome.lyrics", { songId: "song-1" })).toEqual(
+    expect(await call("navidrome_lyrics", { songId: "song-1" })).toEqual(
       NAVIDROME_LYRICS_EXAMPLE
     );
   });

@@ -191,7 +191,7 @@ describe("qBittorrent pause and resume", () => {
   it("exposes the tools only when the provider supports them, and routes to it", async () => {
     const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
     expect(availablePipelineTools({ downloads: base })).not.toContain(
-      "download.pause"
+      "download_pause"
     );
     const pause = vi.fn(async () => {});
     const resume = vi.fn(async () => {});
@@ -207,10 +207,10 @@ describe("qBittorrent pause and resume", () => {
     const downloads = { ...base, get, pause, resume };
     const names = availablePipelineTools({ downloads });
     expect(names).toEqual(
-      expect.arrayContaining(["download.pause", "download.resume"])
+      expect.arrayContaining(["download_pause", "download_resume"])
     );
     expect(PIPELINE_WRITE_TOOL_NAMES).toEqual(
-      expect.arrayContaining(["download.pause", "download.resume"])
+      expect.arrayContaining(["download_pause", "download_resume"])
     );
 
     const allow = { allow: () => ({ ok: true }) } as any;
@@ -219,7 +219,7 @@ describe("qBittorrent pause and resume", () => {
       { policy: allow, callerId: "c" }
     );
     const result = await tools
-      .find((tool) => tool.name === "download.pause")!
+      .find((tool) => tool.name === "download_pause")!
       .execute("1", { hashes: [hash] });
     expect(pause).toHaveBeenCalledWith([hash]);
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
@@ -227,12 +227,12 @@ describe("qBittorrent pause and resume", () => {
       hashes: [hash],
     });
     await tools
-      .find((tool) => tool.name === "download.resume")!
+      .find((tool) => tool.name === "download_resume")!
       .execute("2", { hashes: [hash] });
     expect(resume).toHaveBeenCalledWith([hash]);
     await expect(
       tools
-        .find((tool) => tool.name === "download.pause")!
+        .find((tool) => tool.name === "download_pause")!
         .execute("3", { hashes: [] })
     ).rejects.toThrow("must not be empty");
     expect(pause).toHaveBeenCalledTimes(1);
@@ -249,13 +249,13 @@ describe("qBittorrent pause and resume", () => {
     );
     await expect(
       tools
-        .find((tool) => tool.name === "download.pause")!
+        .find((tool) => tool.name === "download_pause")!
         .execute("3b", { hashes: [hash] })
     ).rejects.toThrow("does not offer pause while paused");
     get.mockResolvedValueOnce(undefined as never);
     await expect(
       tools
-        .find((tool) => tool.name === "download.resume")!
+        .find((tool) => tool.name === "download_resume")!
         .execute("3c", { hashes: [hash] })
     ).rejects.toThrow("Unknown download");
     expect(pause).toHaveBeenCalledTimes(1);
@@ -265,7 +265,7 @@ describe("qBittorrent pause and resume", () => {
     const blocked = createPipelineTools(
       { downloads },
       { policy: deny, callerId: "c" }
-    ).find((tool) => tool.name === "download.resume")!;
+    ).find((tool) => tool.name === "download_resume")!;
     await expect(blocked.execute("4", { hashes: [hash] })).rejects.toThrow(
       "blocked"
     );
@@ -334,7 +334,7 @@ describe("qBittorrent delete", () => {
   it("is exposed only with provider support, needs an explicit deleteFiles, and is policy-gated", async () => {
     const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
     expect(availablePipelineTools({ downloads: base })).not.toContain(
-      "download.delete"
+      "download_delete"
     );
     const remove = vi.fn(async () => {});
     const get = vi.fn(async () =>
@@ -347,14 +347,14 @@ describe("qBittorrent delete", () => {
       })
     );
     const downloads = { ...base, get, remove };
-    expect(availablePipelineTools({ downloads })).toContain("download.delete");
-    expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download.delete");
+    expect(availablePipelineTools({ downloads })).toContain("download_delete");
+    expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download_delete");
 
     const allow = { allow: () => ({ ok: true }) } as any;
     const tool = createPipelineTools(
       { downloads },
       { policy: allow, callerId: "c" }
-    ).find((item) => item.name === "download.delete")!;
+    ).find((item) => item.name === "download_delete")!;
     await expect(tool.execute("1", { hashes: [hash] })).rejects.toThrow(
       "deleteFiles"
     );
@@ -382,7 +382,7 @@ describe("qBittorrent delete", () => {
     const blocked = createPipelineTools(
       { downloads },
       { policy: deny, callerId: "c" }
-    ).find((item) => item.name === "download.delete")!;
+    ).find((item) => item.name === "download_delete")!;
     await expect(
       blocked.execute("4", { hashes: [hash], deleteFiles: true })
     ).rejects.toThrow("blocked");
@@ -680,17 +680,17 @@ describe("pipeline tools", () => {
       libraries: [{ service: "emby", scan: vi.fn(), refreshItem: vi.fn() }],
     });
     expect(names).toEqual([
-      "download.add",
-      "download.list",
-      "download.status",
-      "library.scan",
-      "library.refresh_item",
+      "download_add",
+      "download_list",
+      "download_status",
+      "library_scan",
+      "library_refresh_item",
     ]);
     expect(
       names.filter((name) =>
         (PIPELINE_WRITE_TOOL_NAMES as readonly string[]).includes(name)
       )
-    ).toContain("download.add");
+    ).toContain("download_add");
   });
 
   it("routes calls to the provider and honours the policy", async () => {
@@ -700,7 +700,7 @@ describe("pipeline tools", () => {
       { downloads },
       { policy: allow, callerId: "c" }
     );
-    const tool = tools.find((candidate) => candidate.name === "download.add")!;
+    const tool = tools.find((candidate) => candidate.name === "download_add")!;
     const result = await tool.execute("1", {
       urls: ["magnet:?xt=1"],
       category: "tv",
@@ -722,12 +722,12 @@ describe("pipeline tools", () => {
     await expect(blocked.execute("3", {})).rejects.toThrow("blocked");
   });
 
-  it("passes the named engine to download.add and says which engine took the links", async () => {
+  it("passes the named engine to download_add and says which engine took the links", async () => {
     const add = vi.fn(async () => ({ submitted: 1, engine: "aria2" }));
     const tool = createPipelineTools(
       { downloads: { service: "q", add, list: vi.fn(), get: vi.fn() } },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "download.add")!;
+    ).find((candidate) => candidate.name === "download_add")!;
     const result = await tool.execute("1", {
       urls: ["https://f.example/a.iso"],
       engine: "aria2",
@@ -766,7 +766,7 @@ describe("pipeline tools", () => {
         },
       },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "download.list")!;
+    ).find((candidate) => candidate.name === "download_list")!;
     const result = await tool.execute("1", { engine: "qbittorrent", limit: 5 });
     expect(listWithProblems).toHaveBeenCalledWith(
       expect.objectContaining({ engine: "qbittorrent", limit: 5 })
@@ -785,7 +785,7 @@ describe("pipeline tools", () => {
     const tool = createPipelineTools(
       { libraries },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "library.scan")!;
+    ).find((candidate) => candidate.name === "library_scan")!;
     await expect(tool.execute("1", {})).rejects.toThrow("provider is required");
     await tool.execute("2", { provider: "jellyfin" });
     expect(libraries[1]!.scan).toHaveBeenCalled();

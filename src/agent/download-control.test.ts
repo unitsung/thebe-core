@@ -5,11 +5,23 @@ import { createThebeAgent } from "./index.ts";
 import { createFakeRuntime } from "../testing/runtime/index.ts";
 
 const containerProvider = (): ContainerInfoProvider => ({
-  async listContainers() { return []; },
-  async inspectContainer() { throw new Error("unused"); },
-  async getContainerLogs() { return ""; },
+  async listContainers() {
+    return [];
+  },
+  async inspectContainer() {
+    throw new Error("unused");
+  },
+  async getContainerLogs() {
+    return "";
+  },
   async getStatusSummary() {
-    return { totalContainers: 0, runningContainers: 0, pausedContainers: 0, exitedContainers: 0, lastUpdated: 0 };
+    return {
+      totalContainers: 0,
+      runningContainers: 0,
+      pausedContainers: 0,
+      exitedContainers: 0,
+      lastUpdated: 0,
+    };
   },
 });
 
@@ -18,7 +30,9 @@ function recordingRuntime() {
   const creates: Array<Parameters<typeof fake.runtime.createSession>[0]> = [];
   const runtime = {
     ...fake.runtime,
-    async createSession(create: Parameters<typeof fake.runtime.createSession>[0]) {
+    async createSession(
+      create: Parameters<typeof fake.runtime.createSession>[0]
+    ) {
       creates.push(create);
       return fake.runtime.createSession(create);
     },
@@ -40,18 +54,34 @@ describe("download pause and resume in a session", () => {
     const agent = createThebeAgent({
       runtime,
       provider: containerProvider(),
-      pipeline: { downloads: downloads({ pause: async () => {}, resume: async () => {}, remove: async () => {} }) },
+      pipeline: {
+        downloads: downloads({
+          pause: async () => {},
+          resume: async () => {},
+          remove: async () => {},
+        }),
+      },
     });
 
     await agent.createSession();
     const create = creates[0]!;
     expect(create.customTools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining(["download.list", "download.status", "download.pause", "download.resume", "download.delete"]),
+      expect.arrayContaining([
+        "download_list",
+        "download_status",
+        "download_pause",
+        "download_resume",
+        "download_delete",
+      ])
     );
     expect(create.toolsRequiringApproval).toEqual(
-      expect.arrayContaining(["download.pause", "download.resume", "download.delete"]),
+      expect.arrayContaining([
+        "download_pause",
+        "download_resume",
+        "download_delete",
+      ])
     );
-    expect(create.toolsRequiringApproval).not.toContain("download.list");
+    expect(create.toolsRequiringApproval).not.toContain("download_list");
   });
 
   it("offers neither tool when the downloader cannot pause or resume", async () => {
@@ -65,10 +95,10 @@ describe("download pause and resume in a session", () => {
     await agent.createSession();
     const create = creates[0]!;
     const names = create.customTools.map((tool) => tool.name);
-    expect(names).toContain("download.add");
-    expect(names).not.toContain("download.pause");
-    expect(names).not.toContain("download.resume");
-    expect(names).not.toContain("download.delete");
-    expect(create.toolsRequiringApproval).not.toContain("download.pause");
+    expect(names).toContain("download_add");
+    expect(names).not.toContain("download_pause");
+    expect(names).not.toContain("download_resume");
+    expect(names).not.toContain("download_delete");
+    expect(create.toolsRequiringApproval).not.toContain("download_pause");
   });
 });

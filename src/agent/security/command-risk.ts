@@ -706,8 +706,8 @@ export function assessToolCall(
     return assessment;
   }
 
-  if (toolName.startsWith("container.")) {
-    if (toolName === "container.restart" || toolName === "container.stop") {
+  if (toolName.startsWith("container_")) {
+    if (toolName === "container_restart" || toolName === "container_stop") {
       return {
         allowed: true,
         risk: "caution",

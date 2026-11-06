@@ -28,10 +28,10 @@ export function decide(input: {
   maxBlocks: number;
   allowedToolNames?: readonly string[];
 }): { allow: true } | { allow: false; reason: string } {
-  if (input.toolName === "container.restart") {
+  if (input.toolName === "container_restart") {
     return {
       allow: false,
-      reason: "container.restart requires on-device approval",
+      reason: "container_restart requires on-device approval",
     };
   }
   const allowedToolNames = input.allowedToolNames ?? CONTAINER_TOOL_NAMES;
@@ -59,7 +59,9 @@ export function createPolicyEngine(options: {
   const logsByDayAndCaller = new Map<string, number>();
   const maxToolCalls = options.maxToolCalls ?? 50;
   const maxBlocks = options.maxBlocks ?? 3;
-  const allowedToolNames = [...(options.allowedToolNames ?? CONTAINER_TOOL_NAMES)];
+  const allowedToolNames = [
+    ...(options.allowedToolNames ?? CONTAINER_TOOL_NAMES),
+  ];
   // Mutable per-Run state, one per run key (a session id). Concurrent sessions, goals and
   // subagents each count their own calls; before this, one object was shared and every new
   // prompt reset everyone else's budget. Callers without a key (control-plane invocations)
@@ -85,7 +87,8 @@ export function createPolicyEngine(options: {
 
   return {
     registerTools(names: readonly string[]): void {
-      for (const name of names) if (!allowedToolNames.includes(name)) allowedToolNames.push(name);
+      for (const name of names)
+        if (!allowedToolNames.includes(name)) allowedToolNames.push(name);
     },
     beginRun(runKey?: string): void {
       runs.set(runKey ?? DEFAULT_RUN, createPolicyRunState());
@@ -99,22 +102,25 @@ export function createPolicyEngine(options: {
     },
     allow(
       name: string,
-      callerId: string,
+      callerId: string
     ): { ok: true; budgetConsumed: number } | { ok: false; reason: string } {
-      if (name === "container.restart") {
-        return { ok: false, reason: "container.restart requires on-device approval" };
+      if (name === "container_restart") {
+        return {
+          ok: false,
+          reason: "container_restart requires on-device approval",
+        };
       }
       if (!allowedToolNames.includes(name)) {
         return { ok: false, reason: `unknown tool: ${name}` };
       }
-      if (name !== "container.logs") {
+      if (name !== "container_logs") {
         return { ok: true, budgetConsumed: 0 };
       }
       const day = options.now().toISOString().slice(0, 10);
       const key = `${day}:${callerId}`;
       const used = logsByDayAndCaller.get(key) ?? 0;
       if (used >= LOGS_DAILY_LIMIT) {
-        return { ok: false, reason: "container.logs daily budget exceeded" };
+        return { ok: false, reason: "container_logs daily budget exceeded" };
       }
       logsByDayAndCaller.set(key, used + 1);
       return { ok: true, budgetConsumed: 1 };
@@ -161,8 +167,7 @@ export function createPolicyEngine(options: {
         noteBlock(run ?? runFor(undefined));
         return {
           block: true,
-          reason:
-            error instanceof Error ? error.message : "policy hook failed",
+          reason: error instanceof Error ? error.message : "policy hook failed",
         };
       }
     },

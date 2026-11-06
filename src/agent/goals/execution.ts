@@ -109,6 +109,7 @@ export async function executeGoal(
         criteria: run.criteria,
         maxIterations: run.maxIterations,
         observe: run.observe,
+        executor: run.executor,
         allowAsk: run.allowAsk,
         guidance: run.guidance,
       },
@@ -123,7 +124,11 @@ export async function executeGoal(
         });
         const worker = await deps.subagents.spawnSubagent({
           // Observe mode is enforced by the profile's tool list, not by asking the model nicely.
-          profileName: run.observe ? "goal-observer" : "goal-worker",
+          profileName: run.observe
+            ? "goal-observer"
+            : run.executor === "ticket"
+              ? "ticket-worker"
+              : "goal-worker",
           taskPrompt: prompt,
           parentSessionId: run.thebeSessionId,
         });
@@ -199,7 +204,8 @@ export async function executeGoal(
           .join("\n");
 
         const reviewer = await deps.subagents.spawnSubagent({
-          profileName: "goal-reviewer",
+          profileName:
+            run.executor === "ticket" ? "ticket-reviewer" : "goal-reviewer",
           taskPrompt: buildGoalVerifierPrompt(
             {
               goal: run.goal,

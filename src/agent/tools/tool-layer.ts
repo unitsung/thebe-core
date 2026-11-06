@@ -10,14 +10,14 @@ export function createToolLayer(provider: ContainerInfoProvider) {
   return {
     async invoke(
       name: string,
-      args: { id?: string; tail?: number } = {},
+      args: { id?: string; tail?: number } = {}
     ): Promise<
       ContainerSummary[] | ContainerDetail | HostStatusSummary | string
     > {
-      if (name === "container.list") {
+      if (name === "container_list") {
         return provider.listContainers();
       }
-      if (name === "container.inspect") {
+      if (name === "container_inspect") {
         const detail = await provider.inspectContainer(args.id ?? "");
         return {
           ...detail,
@@ -27,11 +27,11 @@ export function createToolLayer(provider: ContainerInfoProvider) {
           },
         };
       }
-      if (name === "container.logs") {
+      if (name === "container_logs") {
         const raw = await provider.getContainerLogs(args.id ?? "", args.tail);
         return redactLogs(raw, args.tail);
       }
-      if (name === "container.status_summary") {
+      if (name === "container_status_summary") {
         return provider.getStatusSummary();
       }
       throw new Error(`unknown tool: ${name}`);

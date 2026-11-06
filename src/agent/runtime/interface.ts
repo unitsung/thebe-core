@@ -219,7 +219,9 @@ export const PERMISSION_MODES = [
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /** A mode from its exact name; undefined for anything else. */
-export function parsePermissionMode(value: unknown): PermissionMode | undefined {
+export function parsePermissionMode(
+  value: unknown
+): PermissionMode | undefined {
   return PERMISSION_MODES.find((mode) => mode === value);
 }
 
@@ -275,6 +277,8 @@ export type CustomToolDefinition = {
     params: unknown,
     signal?: AbortSignal
   ) => Promise<CustomToolResult>;
+  /** `direct`: the model has the tool from its first call. Otherwise it finds it with `tool_search`. */
+  exposure?: "direct";
 };
 
 export type EnabledResource = {

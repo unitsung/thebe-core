@@ -3,18 +3,23 @@ import { mapPiMessages } from "./map-events.ts";
 import type { PiSdk } from "../sdk/load-pi.ts";
 import type { PiSession } from "./pi-session.ts";
 
-export function toPiTool(sdk: PiSdk, tool: CustomToolDefinition) {
+/** `wireName` is what the model sees; Core's own name for the tool stays what it was. */
+export function toPiTool(
+  sdk: PiSdk,
+  tool: CustomToolDefinition,
+  wireName: string = tool.name
+) {
   return sdk.defineTool({
-    name: tool.name,
+    name: wireName,
     label: tool.label,
     description: tool.description,
     parameters: tool.parameters as never,
     executionMode: "sequential",
-    exposure: "deferred",
+    exposure: tool.exposure ?? "deferred",
     execute: async (
       toolCallId: string,
       params: unknown,
-      signal?: AbortSignal,
+      signal?: AbortSignal
     ) => {
       const result = await tool.execute(toolCallId, params, signal);
       return {

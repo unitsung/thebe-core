@@ -18,8 +18,8 @@ const MCP_EVENT_TOOLS = [
 ] as const;
 
 const ALIASES: Record<string, (typeof CONTAINER_TOOL_NAMES)[number]> = {
-  containers_summary: "container.status_summary",
-  container_logs: "container.logs",
+  containers_summary: "container_status_summary",
+  container_logs: "container_logs",
 };
 
 const ALL_TOOL_NAMES = new Set<string>([

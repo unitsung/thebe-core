@@ -27,8 +27,8 @@ function approval(
 ): ActivityRecord {
   return {
     id: createdAt,
-    kind: "container.restart",
-    actionId: "container.restart",
+    kind: "container_restart",
+    actionId: "container_restart",
     resource: { kind: "container", id: "c", provider: "arcane" },
     status,
     group: "recent",

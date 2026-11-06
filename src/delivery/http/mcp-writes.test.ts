@@ -189,9 +189,9 @@ describe("/mcp write tools", () => {
   it("are refused when the host turns writes off, whoever lists them", async () => {
     const { call, calls, provider, repairs } = setup(false);
     for (const [name, args] of [
-      ["container.restart", { id: "ctr-1" }],
+      ["container_restart", { id: "ctr-1" }],
       ["mcp:radarr/delete_movie", { id: 1 }],
-      ["strm.repair", { title: "Dune" }],
+      ["strm_repair", { title: "Dune" }],
     ] as const) {
       const reply = await call(name, args);
       expect(reply.result?.isError, name).toBe(true);
@@ -206,8 +206,8 @@ describe("/mcp write tools", () => {
     const requests: string[] = [];
     const { call } = setup(false, requests);
     for (const [name, args] of [
-      ["service_api.petstore.deletePet", { petId: 7 }],
-      ["service_api.confirm", { token: "t" }],
+      ["service__petstore__deletePet", { petId: 7 }],
+      ["service_confirm", { token: "t" }],
     ] as const) {
       const reply = await call(name, args);
       expect(reply.result?.isError, name).toBe(true);
@@ -225,7 +225,7 @@ describe("/mcp write tools", () => {
 
   it("run when the host enables them, and a restart leaves a receipt", async () => {
     const { call, calls, provider } = setup(true);
-    const restart = await call("container.restart", { id: "ctr-1" });
+    const restart = await call("container_restart", { id: "ctr-1" });
     expect(restart.result?.isError).toBeUndefined();
     expect(provider.restarts).toEqual(["ctr-1"]);
     const receipt = JSON.parse(text(restart));
@@ -239,14 +239,14 @@ describe("/mcp write tools", () => {
 
   it("restart the same container again each time they are called", async () => {
     const { call, provider } = setup(true);
-    await call("container.restart", { id: "ctr-1" });
-    await call("container.restart", { id: "ctr-1" });
+    await call("container_restart", { id: "ctr-1" });
+    await call("container_restart", { id: "ctr-1" });
     expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
   });
 
   it("let a Navidrome playlist be created unless the host turns writes off", async () => {
     const off = setup(false, [], []);
-    const refused = await off.call("navidrome.playlist.create", {
+    const refused = await off.call("navidrome_playlist_create", {
       name: "Mix",
       songIds: ["s1"],
     });
@@ -255,7 +255,7 @@ describe("/mcp write tools", () => {
 
     const created: string[] = [];
     const on = setup(true, [], created);
-    const done = await on.call("navidrome.playlist.create", {
+    const done = await on.call("navidrome_playlist_create", {
       name: "Mix",
       songIds: ["s1"],
     });
@@ -265,7 +265,7 @@ describe("/mcp write tools", () => {
 
   it("need an id to restart a container", async () => {
     const { call, provider } = setup(true);
-    const reply = await call("container.restart", {});
+    const reply = await call("container_restart", {});
     expect(reply.result?.isError).toBe(true);
     expect(provider.restarts).toEqual([]);
   });
@@ -313,12 +313,12 @@ describe("/mcp write tools by token scope", () => {
     const { call, calls, provider, requests, playlists, repairs } =
       await withTokens(true);
     for (const [name, args] of [
-      ["container.restart", { id: "ctr-1" }],
+      ["container_restart", { id: "ctr-1" }],
       ["mcp:radarr/delete_movie", { id: 1 }],
-      ["service_api.petstore.deletePet", { petId: 7 }],
-      ["service_api.confirm", { token: "t" }],
-      ["navidrome.playlist.create", { name: "Mix", songIds: ["s1"] }],
-      ["strm.repair", { title: "Dune" }],
+      ["service__petstore__deletePet", { petId: 7 }],
+      ["service_confirm", { token: "t" }],
+      ["navidrome_playlist_create", { name: "Mix", songIds: ["s1"] }],
+      ["strm_repair", { title: "Dune" }],
     ] as const) {
       const reply = await call(name, args, read);
       expect(reply.result?.isError, name).toBe(true);
@@ -338,9 +338,9 @@ describe("/mcp write tools by token scope", () => {
   it("a write token, and a token with no scope, can write", async () => {
     const { call, provider, repairs } = await withTokens(true);
     for (const token of [write, full]) {
-      const reply = await call("container.restart", { id: "ctr-1" }, token);
+      const reply = await call("container_restart", { id: "ctr-1" }, token);
       expect(reply.result?.isError, token.slice(0, 1)).toBeUndefined();
-      const repaired = await call("strm.repair", { title: "Dune" }, token);
+      const repaired = await call("strm_repair", { title: "Dune" }, token);
       expect(repaired.result?.isError, token.slice(0, 1)).toBeUndefined();
     }
     expect(provider.restarts).toEqual(["ctr-1", "ctr-1"]);
@@ -349,7 +349,7 @@ describe("/mcp write tools by token scope", () => {
 
   it("a write token is still refused when the host turns writes off", async () => {
     const { call, provider } = await withTokens(false);
-    const reply = await call("container.restart", { id: "ctr-1" }, write);
+    const reply = await call("container_restart", { id: "ctr-1" }, write);
     expect(reply.result?.isError).toBe(true);
     expect(text(reply)).toContain("THEBE_MCP_WRITES");
     expect(provider.restarts).toEqual([]);
@@ -359,8 +359,8 @@ describe("/mcp write tools by token scope", () => {
     const { call, calls, requests, playlists } = await withTokens(true);
     for (const [name, args] of [
       ["mcp:radarr/delete_movie", { id: 1 }],
-      ["service_api.petstore.deletePet", { petId: 7 }],
-      ["navidrome.playlist.delete", { id: "p1" }],
+      ["service__petstore__deletePet", { petId: 7 }],
+      ["navidrome_playlist_delete", { id: "p1" }],
     ] as const) {
       const reply = await call(name, args, write);
       expect(reply.result?.isError, name).toBe(true);
@@ -423,12 +423,12 @@ describe("/mcp audit rows", () => {
     );
 
     await call("mcp:radarr/list_movies", {}, read);
-    await call("container.restart", { id: "ctr-1" }, read); // refused: read token
+    await call("container_restart", { id: "ctr-1" }, read); // refused: read token
     await call("mcp:radarr/delete_movie", { id: 1 }, write); // refused: needs mcp:irreversible
 
     const rows = (await agent.listAudit({ identity: "Reader" })).entries;
     expect(rows.map((r) => [r.method, r.result, r.source]).sort()).toEqual([
-      ["container.restart", "denied", "mcp"],
+      ["container_restart", "denied", "mcp"],
       ["mcp:radarr/list_movies", "ok", "mcp"],
     ]);
     const writer = (await agent.listAudit({ identity: "Writer" })).entries;
@@ -486,24 +486,24 @@ describe("/mcp tools/list by token scope", () => {
     const readerSees = await list(read);
     expect(readerSees).toContain("mcp:radarr/list_movies");
     for (const hidden of [
-      "container.restart",
+      "container_restart",
       "mcp:radarr/delete_movie",
-      "navidrome.playlist.create",
+      "navidrome_playlist_create",
     ]) {
       expect(readerSees, hidden).not.toContain(hidden);
     }
     const writerSees = await list(write);
     for (const shown of [
-      "container.restart",
+      "container_restart",
       "mcp:radarr/delete_movie",
-      "navidrome.playlist.delete",
+      "navidrome_playlist_delete",
     ]) {
       expect(writerSees, shown).toContain(shown);
     }
   });
 });
 
-describe("/mcp service_api.confirm", () => {
+describe("/mcp service_confirm", () => {
   it("cannot run a DELETE the preview's caller was not allowed to send", async () => {
     const write = "w".repeat(64);
     const full = "f".repeat(64);
@@ -524,7 +524,7 @@ describe("/mcp service_api.confirm", () => {
     );
     // A full-access caller previews the DELETE; a write-only caller then tries to confirm it.
     const preview = await call(
-      "service_api.petstore.deletePet",
+      "service__petstore__deletePet",
       { petId: 7 },
       full
     );
@@ -532,7 +532,7 @@ describe("/mcp service_api.confirm", () => {
       JSON.parse(text(preview)).confirmToken ?? JSON.parse(text(preview)).token;
     expect(confirmToken, text(preview)).toBeTruthy();
     const refused = await call(
-      "service_api.confirm",
+      "service_confirm",
       { token: confirmToken },
       write
     );
@@ -540,7 +540,7 @@ describe("/mcp service_api.confirm", () => {
     expect(text(refused)).toContain("mcp:irreversible");
     expect(requests).toEqual([]);
     const allowed = await call(
-      "service_api.confirm",
+      "service_confirm",
       { token: confirmToken },
       full
     );
@@ -702,9 +702,9 @@ describe("/mcp operator marks on service API operations", () => {
         result?: { isError?: boolean; content?: Array<{ text: string }> };
       };
     };
-    const reversible = await call("service_api.shop.removeNote");
+    const reversible = await call("service__shop__removeNote");
     expect(reversible.result?.isError).toBeUndefined();
-    const held = await call("service_api.shop.emptyTrash");
+    const held = await call("service__shop__emptyTrash");
     expect(held.result?.isError).toBe(true);
     expect(held.result?.content?.[0]?.text).toContain("mcp:irreversible");
     // The held one never reached a preview, so there is nothing to confirm.

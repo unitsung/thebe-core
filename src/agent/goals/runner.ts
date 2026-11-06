@@ -50,6 +50,8 @@ export type GoalOptions = {
   maxIterations?: number;
   /** Read-only run: the worker reports what it finds and would do, and changes nothing. */
   observe?: boolean;
+  /** `ticket`: the home operator carries it out (see `GoalRun.executor`). */
+  executor?: "ticket";
   /** The worker may ask the person one question through `goal_report`. */
   allowAsk?: boolean;
   /** What the person has answered or said in review so far; every later checkpoint is told. */
@@ -138,19 +140,31 @@ export function buildGoalPrompt(
           "",
         ]
       : []),
-    "## Operating rules",
-    "- Inspect relevant code and the current configured workspace state before changing anything. Never search outside the configured workspace.",
-    "- Make focused changes, preserve unrelated user work, and use available tools when they provide evidence.",
-    "- Verify each meaningful checkpoint with the most relevant command, test, or observable artifact.",
-    "- If blocked, report the exact blocker and the smallest decision or external change required.",
-    "- Return ordinary answers and research results to the parent conversation buffer by default.",
-    "- Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
-    "- Never create output.md, docs files, or any other file merely to display an answer.",
-    "- outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.",
-    "- Use Pi's native find for filename searches and Pi's native grep for content searches.",
-    "- Do not use bash or rg for ordinary searches.",
-    "- Use bash only when the task genuinely requires executing a shell command.",
-    "",
+    ...(options.executor === "ticket"
+      ? [
+          "## Operating rules",
+          "- This is work on the person's home server that their own rules asked for. You have the home tools (the container tools), not a shell or file editing.",
+          "- Look at the CURRENT state first with the read tools. The event may be minutes old: if what it describes has already resolved, there is nothing to do, so report dropped and say why.",
+          "- Do what the rules ask, and only that. Your authority is the Mandate above: writes on the services it names, never deleting or overwriting data. A tool that is refused is outside it: do not look for a way around, report blocked and say what you were refused.",
+          "- After you act, check with the read tools that the situation is actually fixed. Report what you saw, not what you expect.",
+          "- If you cannot fix it, say so plainly and what you found (for example from the logs); do not repeat the same action hoping for a different result.",
+          "",
+        ]
+      : [
+          "## Operating rules",
+          "- Inspect relevant code and the current configured workspace state before changing anything. Never search outside the configured workspace.",
+          "- Make focused changes, preserve unrelated user work, and use available tools when they provide evidence.",
+          "- Verify each meaningful checkpoint with the most relevant command, test, or observable artifact.",
+          "- If blocked, report the exact blocker and the smallest decision or external change required.",
+          "- Return ordinary answers and research results to the parent conversation buffer by default.",
+          "- Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
+          "- Never create output.md, docs files, or any other file merely to display an answer.",
+          "- outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.",
+          "- Use Pi's native find for filename searches and Pi's native grep for content searches.",
+          "- Do not use bash or rg for ordinary searches.",
+          "- Use bash only when the task genuinely requires executing a shell command.",
+          "",
+        ]),
     "## Report with the goal_report tool",
     "At the end of every checkpoint call goal_report once: progress, ready (with evidence), blocked (say exactly what you need), or dropped (say why nothing needs doing).",
     options.allowAsk

@@ -165,7 +165,7 @@ export function createActionApi(options: {
             action: {
               status: "rejected",
               finishedAt,
-              summary: "container.restart was not approved on device.",
+              summary: "container_restart was not approved on device.",
             },
             error: "approval_required",
           })

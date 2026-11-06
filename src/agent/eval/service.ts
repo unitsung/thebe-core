@@ -1,10 +1,15 @@
 import { key } from "../tickets/ids.ts";
 import type { Trigger } from "../sources/types.ts";
-import { buildAssessmentPrompt, parseAssessment } from "./assess.ts";
-import type { AutoRestart } from "./auto-restart.ts";
+import {
+  buildAssessmentPrompt,
+  MAX_REASON_CHARS,
+  parseAssessment,
+  type Assessment,
+  type ThreadTicket,
+} from "./assess.ts";
 import type { DecisionStore } from "./decision-store.ts";
 import { policyVersion, type PolicyStore } from "./policy-store.ts";
-import type { Decision, DecisionAction, Policy } from "./types.ts";
+import type { Decision, NotTakenOn, Policy } from "./types.ts";
 
 /** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
@@ -14,7 +19,10 @@ export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
   "container.appeared",
 ]);
 
+const HOUR_MS = 60 * 60 * 1000;
 export const DEFAULT_ASSESSMENTS_PER_HOUR = 60;
+/** How often one thread may be taken on in an hour. The next one is left to the person, and recorded. */
+export const DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR = 3;
 /** Triggers older than this are not weighed after a restart: the moment to act has passed. */
 export const DEFAULT_BACKLOG_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -39,16 +47,34 @@ export function createEvalService(options: {
   now: () => Date;
   /** Questions to the model per hour before the rest are recorded as `assessment_limit`. 0 is no limit. */
   maxPerHour?: number;
-  /** What `auto` does with a positive assessment. Without it nothing is done. */
-  act?: AutoRestart;
-  /** Called after a Decision that took something on (`accept`) is kept, to give it its Ticket. Never throws into Eval. */
-  onAccepted?: (decision: Decision) => Promise<void>;
+  /**
+   * What `auto` does with a positive assessment: make the Ticket and hand it to an executor. It is given
+   * the Eval's own id, so a Decision made again after a crash gets the same Ticket and not a second.
+   */
+  accept?: (input: {
+    evalId: string;
+    decisionId: string;
+    thread: string;
+    triggers: Trigger[];
+    policy: Policy;
+    assessment: Assessment;
+    at: string;
+    policyVersion: string;
+  }) => Promise<{ ticketId: string; goalId?: string }>;
+  /** Work already taken on for a thread, shown to the assessment so it does not start the same work twice. */
+  threadTickets?: (thread: string) => Promise<ThreadTicket[]>;
+  /** How often one thread may be taken on in an hour. 0 is no limit. */
+  maxAcceptsPerThreadPerHour?: number;
   backlogAgeMs?: number;
   onError?: (error: unknown) => void;
 }): EvalService {
   // A limit of 0 (or less) turns the breaker off; unset keeps the default.
   const configured = options.maxPerHour ?? DEFAULT_ASSESSMENTS_PER_HOUR;
   const maxPerHour = configured > 0 ? configured : Number.POSITIVE_INFINITY;
+  const acceptsConfigured =
+    options.maxAcceptsPerThreadPerHour ?? DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR;
+  const maxAccepts =
+    acceptsConfigured > 0 ? acceptsConfigured : Number.POSITIVE_INFINITY;
   const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
   const pending = new Map<string, Trigger[]>();
   const assessedAt: number[] = [];
@@ -144,7 +170,7 @@ export function createEvalService(options: {
       });
       return;
     }
-    const hourAgo = options.now().getTime() - 60 * 60 * 1000;
+    const hourAgo = options.now().getTime() - HOUR_MS;
     while (assessedAt.length > 0 && assessedAt[0]! < hourAgo)
       assessedAt.shift();
     if (assessedAt.length >= maxPerHour) {
@@ -161,8 +187,10 @@ export function createEvalService(options: {
     assessedAt.push(options.now().getTime());
     let reply: string;
     try {
+      const earlier =
+        (await options.threadTickets?.(thread).catch(() => [])) ?? [];
       reply = await options.assess(
-        buildAssessmentPrompt(policy.rules, triggers),
+        buildAssessmentPrompt(policy.rules, triggers, earlier),
         policy.model
       );
     } catch (error) {
@@ -171,7 +199,7 @@ export function createEvalService(options: {
         reason: "the assessment could not be made",
         unavailableReason:
           error instanceof Error
-            ? error.message.slice(0, 200)
+            ? error.message.slice(0, MAX_REASON_CHARS)
             : "assessment failed",
       });
       return;
@@ -187,26 +215,55 @@ export function createEvalService(options: {
     }
     const wouldAccept = verdict.decision === "accept";
     if (policy.acceptMode === "auto" && wouldAccept) {
-      const action = await actOn(base.id, thread, triggers, policy);
-      // Taken on: a restart was done, or the person was asked. Anything else stays a "would have", with why.
-      const takenOn =
-        action.kind === "restart" ||
-        (action.kind === "diagnose" && action.status === "awaiting_approval");
-      const kept = await record({
-        outcome: takenOn ? "accept" : "ignore",
+      const positive = {
         wouldAccept: true,
         matchedRuleIds: verdict.matchedRuleIds,
         reason: verdict.reason,
-        action,
-      });
-      if (takenOn) {
-        // Taken on means a Ticket: the authorised unit of work, with the Mandate it was taken on under.
-        try {
-          await options.onAccepted?.(kept);
-        } catch (error) {
-          options.onError?.(error);
-        }
+      };
+      // A positive assessment that is not taken on stays a "would have", and says why.
+      const held = (notTakenOn: NotTakenOn) =>
+        record({ outcome: "ignore", ...positive, notTakenOn });
+      if (!options.accept) {
+        await held("no_executor");
+        return;
       }
+      // A quiesce that came while the model was thinking still stops it.
+      if (stopped) {
+        await held("quiesced");
+        return;
+      }
+      const hourStart = options.now().getTime() - HOUR_MS;
+      const takenOn = (await options.decisions.list({ thread })).filter(
+        (row) =>
+          row.outcome === "accept" && Date.parse(row.decidedAt) >= hourStart
+      ).length;
+      if (takenOn >= maxAccepts) {
+        await held("thread_limit");
+        return;
+      }
+      let ticket: { ticketId: string; goalId?: string };
+      try {
+        ticket = await options.accept({
+          evalId,
+          decisionId: base.id,
+          thread,
+          triggers,
+          policy,
+          assessment: verdict,
+          at: latest,
+          policyVersion: version,
+        });
+      } catch (error) {
+        options.onError?.(error);
+        await held("accept_failed");
+        return;
+      }
+      await record({
+        outcome: "accept",
+        ...positive,
+        ticketId: ticket.ticketId,
+        ...(ticket.goalId ? { goalId: ticket.goalId } : {}),
+      });
       return;
     }
     // observe: a positive assessment is what Core WOULD have taken on; it takes on nothing.
@@ -216,42 +273,6 @@ export function createEvalService(options: {
       matchedRuleIds: verdict.matchedRuleIds,
       reason: verdict.reason,
     });
-  }
-
-  /** `auto` acts here, and nowhere else. It never throws: a failure is a recorded action that did nothing. */
-  async function actOn(
-    decisionId: string,
-    thread: string,
-    triggers: Trigger[],
-    policy: Policy
-  ): Promise<DecisionAction> {
-    if (!options.act) {
-      return {
-        kind: "none",
-        status: "no_executor",
-        note: "this Core has nothing to carry the action out, so nothing was done",
-      };
-    }
-    // A quiesce that came while the model was thinking still stops the action.
-    if (stopped) {
-      return {
-        kind: "none",
-        status: "quiesced",
-        note: "Core was paused for maintenance, so nothing was done",
-      };
-    }
-    try {
-      return await options.act({ decisionId, thread, triggers, policy });
-    } catch (error) {
-      return {
-        kind: "none",
-        status: "act_failed",
-        note:
-          error instanceof Error
-            ? error.message.slice(0, 200)
-            : "action failed",
-      };
-    }
   }
 
   return {

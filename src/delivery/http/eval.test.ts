@@ -82,28 +82,27 @@ describe("policy over HTTP", () => {
     expect((await call("/v1/policy")).body).toEqual(saved.body);
   });
 
-  it("takes auto and the containers it may restart, and says the list even when it is empty", async () => {
+  it("takes auto like any mode, says which modes this Core has, and keeps what is left out", async () => {
     const { call, put } = open();
-    expect((await call("/v1/policy")).body.autoContainers).toEqual([]);
+    expect((await call("/v1/policy")).body.modes).toEqual([
+      "off",
+      "observe",
+      "auto",
+    ]);
     const saved = await put({
       rules: ["Restart a media server that stopped"],
       acceptMode: "auto",
-      autoContainers: ["emby", " jellyfin "],
     });
     expect(saved.status).toBe(200);
     expect(saved.body).toMatchObject({
       acceptMode: "auto",
-      autoContainers: ["emby", "jellyfin"],
+      modes: ["off", "observe", "auto"],
     });
     expect((await call("/v1/policy")).body).toEqual(saved.body);
-    // Going back to observe keeps the list; a bad list is a 400 and changes nothing.
-    expect((await put({ acceptMode: "observe" })).body.autoContainers).toEqual([
-      "emby",
-      "jellyfin",
-    ]);
-    const bad = await put({ autoContainers: "emby" });
-    expect(bad.status).toBe(400);
-    expect(bad.body.code).toBe("invalid_policy");
+    // Going back to observe keeps the rules.
+    const back = await put({ acceptMode: "observe" });
+    expect(back.body).toMatchObject({ acceptMode: "observe" });
+    expect(back.body.rules).toHaveLength(1);
   });
 
   it("refuses an unknown mode and other bad input with 400, and other methods with 405", async () => {

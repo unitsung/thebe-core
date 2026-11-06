@@ -1,7 +1,7 @@
 /**
  * Which single calls delete something that cannot be brought back.
  *
- * Judged per call (tool and arguments), not per tool: `download.delete` with `deleteFiles: false`
+ * Judged per call (tool and arguments), not per tool: `download_delete` with `deleteFiles: false`
  * only drops the task and is an ordinary write, with `deleteFiles: true` it removes the files too.
  * Over `/mcp` a caller needs the `mcp:irreversible` scope for these; anything unsure counts as
  * irreversible. See docs/research/irreversible-writes-2026-11-03.md for the list and the reasons.
@@ -28,8 +28,8 @@ const DELETE_FLAGS = new Set([
   "wipe",
 ]);
 
-const NAVIDROME_PLAYLIST_DELETE = "navidrome.playlist.delete";
-const DOWNLOAD_DELETE = "download.delete";
+const NAVIDROME_PLAYLIST_DELETE = "navidrome_playlist_delete";
+const DOWNLOAD_DELETE = "download_delete";
 
 function truthy(value: unknown): boolean {
   return value === true || value === "true" || value === 1 || value === "1";

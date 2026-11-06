@@ -745,8 +745,8 @@ describe("Thebe agent service (fake runtime)", () => {
         "read",
         "edit",
         "write",
-        "container.list",
-        "container.inspect",
+        "container_list",
+        "container_inspect",
       ])
     );
   });
@@ -766,7 +766,7 @@ describe("Thebe agent service (fake runtime)", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -1092,7 +1092,7 @@ describe("Thebe agent service (fake runtime)", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "container.status_summary" },
+          params: { name: "container_status_summary" },
         }),
       })
     );
@@ -1143,7 +1143,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
     const listed = await rpc("tools/list");
     const summary = listed.result?.tools?.find(
-      (tool) => tool.name === "container.status_summary"
+      (tool) => tool.name === "container_status_summary"
     );
     expect(summary?.annotations).toMatchObject({
       readOnlyHint: true,
@@ -1151,14 +1151,14 @@ describe("Thebe agent service (fake runtime)", () => {
     });
     expect(summary?._meta?.["thebe/category"]).toBe("containers");
     const restart = listed.result?.tools?.find(
-      (tool) => tool.name === "container.restart"
+      (tool) => tool.name === "container_restart"
     );
     expect(restart?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
     });
 
-    const ok = await rpc("tools/call", { name: "container.status_summary" });
+    const ok = await rpc("tools/call", { name: "container_status_summary" });
     expect(ok.result?.structuredContent).toMatchObject({
       runningContainers: 2,
     });
@@ -1166,7 +1166,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
     // A failing tool is a result the model can read, not a protocol error.
     const failed = await rpc("tools/call", {
-      name: "container.logs",
+      name: "container_logs",
       arguments: { id: "x" },
     });
     expect(failed.error).toBeUndefined();
@@ -1601,7 +1601,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
       const tools = await agent.listMcpTools();
       expect(tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["container.list", "list_core_events"])
+        expect.arrayContaining(["container_list", "list_core_events"])
       );
       const servers = await agent.listMcpServers();
       expect(servers.map((server) => server.name)).toContain("notes");
@@ -1765,12 +1765,12 @@ describe("Thebe agent service (fake runtime)", () => {
       await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
       await writeFile(
         join(dir, ".thebe", "agents", "limited.md"),
-        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container.list]\n---\nDo one diagnostic turn.\n"
+        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container_list]\n---\nDo one diagnostic turn.\n"
       );
       const fake = createFakeRuntime();
       fake.queueTurns([
         { kind: "text", text: "parent-secret" },
-        { kind: "tools", calls: [{ name: "container.list" }] },
+        { kind: "tools", calls: [{ name: "container_list" }] },
         { kind: "text", text: "must-not-run" },
       ]);
       const createCalls: Array<
@@ -1810,7 +1810,7 @@ describe("Thebe agent service (fake runtime)", () => {
       expect(completed.error).toContain("turn limit");
       const childCreate = createCalls.at(-1)!;
       expect(childCreate.inMemory).toBe(true);
-      expect(childCreate.builtinTools).toEqual(["container.list"]);
+      expect(childCreate.builtinTools).toEqual(["container_list"]);
       expect(childCreate.systemPrompt).not.toContain("parent-secret");
       expect(agent.messages().map((message) => message.text)).toEqual([
         "parent task",

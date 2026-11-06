@@ -123,15 +123,15 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 - `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
-- Eval 的 `auto` 模式不是环境变量，是你在策略里自己选的接单模式：默认是 `observe`，只记录「本来会做什么」，什么都不会动；你选了 `auto` 并列出 `autoContainers`，它才会行动。名单里的容器停了、你的规则判断「值得」、而且 Core 再看一眼它确实还停着，才会被直接重启；同一容器 1 小时内最多自动重启 3 次，第 4 次改成诊断并请你批准。不在名单里的容器只诊断，诊断建议重启就生成待批准。超过 5 分钟的旧事件、已经恢复的容器、Docker 自己正在重启的容器都不动。每次接单都生成一张工单（Ticket），写明授权范围（只到这一个容器的重启）、命中的规则和策略版本；每次自动重启都留回执（`approval.source` 为 `policy`）和审计，和你手动批准的重启走同一条路径。能改策略的只有 App 和你自己的令牌：只带 `/mcp` 范围的令牌够不到 `/v1/policy`，外部 agent 改不了这个模式。
-- `THEBE_EVAL_MAX_PER_HOUR` 是 Eval 每小时最多问模型的次数，默认 60，`0` 表示不限。它是熔断，不是预算：某个事件源吵起来（比如容器反复重启）时，防止没人看着的时候模型调用没完没了。超过之后，Gate 照常运行，每个事件仍会记一条 Decision，原因是 `assessment_limit`（App 的「观察」页显示「这一小时的评估次数已用完」，不是「没事」）。同一条线程上来回抖动的事件会先合并成一次研判，再计入次数，所以正常家用很少碰到。不是不小于 0 的整数时按默认值处理。
+- Eval 的 `auto` 不是环境变量，是策略里的接单模式：默认 `observe`，只记录「本来会做什么」，不动手；选了 `auto` 才行动。规则就是授权，没有名单：规则判断「值得」，Core 就生成一张工单（Ticket），交给执行器（能用 Core 的全部家庭运维工具，不带 shell 和文件编辑，怎么做自己规划；它的 reviewer 只拿不改东西的工具）。工单的范围（Mandate）从事件涉及的资源推出，不是模型说了算。写操作逐次判断：落在范围内的服务上、且不是不可逆（`DELETE`、`deleteFiles` 之类，用网关同一个分类器）就直接执行，否则立刻被拒、工单转给你，不会挂起等审批。能改策略的只有 App 和你自己的令牌，`/mcp` 令牌够不到。
+- `auto` 有三道保险，用来防止无人值守时失控，不是调优参数，数字也没有实测依据：同一条线程 1 小时内最多接单 3 次（第 4 次只在「观察」页记「本来会接单」，原因 `thread_limit`）；Eval 每小时最多问模型 60 次，超过后每个事件仍记一条 Decision，原因 `assessment_limit`，`THEBE_EVAL_MAX_PER_HOUR` 可改，`0` 不限；重启后只评估 24 小时内的事件。
 - `THEBE_SOURCES` 是 Core 在后台观察的来源（Source）清单，逗号分隔；**默认不设，即什么都不观察、不起任何定时器。** 目前只有 `container-health`：按 `THEBE_SOURCE_INTERVAL_MS`（默认 30000，不小于 1000）读取容器状态，状态变化时记一条触发（Trigger），线程为 `resource:container:<容器名>`。第一次读取只记基线，不会把已经停着的容器当作新消息；读取位置会保存，重启不重放。目前触发只被记录，没有东西读它们，也不会因此产生工单。容器接口不提供 Docker 自带的 healthcheck，所以「不健康」指状态变了，而不是健康检查失败。
-- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container.restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
+- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
 ## OpenList STRM 修复 provider
 
-Core 可以在启动时注册一个 provider-owned `strm.repair` 实现。配置完整的
+Core 可以在启动时注册一个 provider-owned `strm_repair` 实现。配置完整的
 OpenList 地址和 token 后，能力会自动出现在 Core capability catalog；缺少任一
 变量时不会暴露该写能力：
 
@@ -139,27 +139,27 @@ OpenList 地址和 token 后，能力会自动出现在 Core capability catalog�
 export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 # With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
-# Core exposes the acquisition pipeline tools: download.add/list/status/pause/resume, files.list/mkdir/copy/move/offline_download,
-# library.scan and library.refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource.search,
-# and pipeline.acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
+# Core exposes the acquisition pipeline tools: download_add/list/status/pause/resume, files_list/mkdir/copy/move/offline_download,
+# library_scan and library_refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource_search,
+# and pipeline_acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
 # persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
-# With THEBE_ARIA2_URL (and THEBE_ARIA2_SECRET) aria2 is a second download engine behind the same download.* tools:
-# magnets and .torrent links go to qBittorrent, other links to aria2, unless download.add names an engine.
+# With THEBE_ARIA2_URL (and THEBE_ARIA2_SECRET) aria2 is a second download engine behind the same download_* tools:
+# magnets and .torrent links go to qBittorrent, other links to aria2, unless download_add names an engine.
 ```
 
-`download.pause` / `download.resume` 按 `hashes`（1–20 个下载 id：种子 info-hash，配了 aria2 时也可以是 aria2 的 id；没有"全部暂停"）暂停或恢复
+`download_pause` / `download_resume` 按 `hashes`（1–20 个下载 id：种子 info-hash，配了 aria2 时也可以是 aria2 的 id；没有"全部暂停"）暂停或恢复
 下载，不删除任务和文件，需要审批。qBittorrent 5 使用 `stop`/`start`，4.x 使用 `pause`/`resume`，
 Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBittorrent 自身会忽略未知 hash）。下载器若不
 支持这两个操作，对应工具不会出现。
 
-`download.delete` 同样按 `hashes` 工作（1–20 个，没有"全部删除"），不可撤销，需要审批。`deleteFiles`
+`download_delete` 同样按 `hashes` 工作（1–20 个，没有"全部删除"），不可撤销，需要审批。`deleteFiles`
 必须明确给出 true 或 false：false 只移除任务并保留已下载文件，true 连同磁盘上的文件一起删除；缺省或
 非布尔值会被拒绝，不会默认删除。未知 hash 同样会被拒绝。下载器不支持时该工具不会出现。
 
-采集任务可以从种子开始，也可以从网盘转存开始：`pipeline.acquire` 传 `kind: "cloud_transfer"` 和
+采集任务可以从种子开始，也可以从网盘转存开始：`pipeline_acquire` 传 `kind: "cloud_transfer"` 和
 `transferSource` 时，先由 OpenList 的离线下载取回分享/直链，再走同样的 place → scan → verify。Core 会
 自己推进本进程内新建的任务（每分钟一次），所以手机休眠时
-也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline.advance`；失败的任务不会自动重试。
+也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline_advance`；失败的任务不会自动重试。
 
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
@@ -216,7 +216,7 @@ export NAVIDROME_FALLBACK_URL=https://music.example.com
 缺少任一必填变量时不会暴露 Navidrome 能力。可用能力包括最近添加、最近播放、
 专辑、歌手、歌单、歌曲、搜索、歌手详情、歌词和播放队列。
 
-`navidrome.queue` 返回统一的歌曲条目，包括直接播放或转码后的流地址、封面、
+`navidrome_queue` 返回统一的歌曲条目，包括直接播放或转码后的流地址、封面、
 标题、艺术家、专辑和可选歌词。Core 不负责播放；客户端消费队列后用
 自己的播放器、Now Playing 和远程控制实现。歌单创建、更新和删除属于写能力，
 只能通过 Agent 会话的运行时审批执行，capability invoke 返回 403；经 `/mcp` 调用时，
@@ -262,11 +262,11 @@ export IMMICH_API_KEY=your-immich-key
 `THEBE_EMBY_*`、`THEBE_JELLYFIN_*` 和 `THEBE_IMMICH_*` 是等价别名。Emby 使用
 `X-Emby-Token` 和 `/emby` 前缀。Jellyfin 使用 `Authorization: MediaBrowser Token="…"`，
 没有 `/emby` 前缀。检索走用户条目接口：Emby 查询参数用 PascalCase，Jellyfin 用
-OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或年份返回
-条目 id；`emby.item` / `jellyfin.item` 读取简介、类型、年份、题材和演职员。
+OpenAPI 的 camelCase。`emby_search` / `jellyfin_search` 按标题、人物或年份返回
+条目 id；`emby_item` / `jellyfin_item` 读取简介、类型、年份、题材和演职员。
 `communityRating` 是媒体服务器自己的评分。
 
-`immich.search` 调用 `POST /api/search/smart`，按画面内容做语义检索。它不是
+`immich_search` 调用 `POST /api/search/smart`，按画面内容做语义检索。它不是
 文件名、日期或城市过滤；那些条件仍走既有的 metadata 列表。机器学习不可用时
 错误保持可见，不当成空库。
 
@@ -279,11 +279,11 @@ OpenAPI 的 camelCase。`emby.search` / `jellyfin.search` 按标题、人物或�
 
 仓库还提供三个围绕 homelab 运维的 skill，放置和启用方式与上面相同：
 
-- `container-triage`：只读排查容器状态和日志（`container.*`），重启不由模型调用，
+- `container-triage`：只读排查容器状态和日志（`container_*`），重启不由模型调用，
   仍走诊断审批流程。需要配置容器 provider（Arcane，或经 docker-socket-proxy 的 Docker Engine API）。
-- `download-monitor`：用 `download.*`、`pipeline.status` / `pipeline.advance`、
-  `files.list` 查看下载与入库任务进度，定位卡住或失败的环节。
-- `media-acquire`：`resource.search` 找片源，由用户选定后用 `pipeline.acquire`
+- `download-monitor`：用 `download_*`、`pipeline_status` / `pipeline_advance`、
+  `files_list` 查看下载与入库任务进度，定位卡住或失败的环节。
+- `media-acquire`：`resource_search` 找片源，由用户选定后用 `pipeline_acquire`
   下载入库；后两者需要配置索引器、下载器、文件管理器和媒体服务器。
 
 对应工具未配置时，skill 会照实报告而不是编造结果。
@@ -319,19 +319,20 @@ export MY_SERVICE_API_KEY=...
 
 发现和读取操作从 OpenAPI 文档加载，写操作需要审批。请求头的值是环境变量名，不会发给模型。
 
+- `resourceKinds`（如 `["container"]`）声明这个服务管哪类资源。Core 自己发现事件后接单（`auto` 模式）时，执行器可以写的服务范围由事件的资源类型反查得到，所以 Arcane、原生 Docker（经受限代理）、Portainer 都是同一份配置，Core 里没有任何一个服务的专用代码。没有连接声明某个类型时，用类型名本身当服务名。执行器的写操作是通用的 `service_write`；不需要 OpenAPI 文档，只要按方法和路径发请求。
 - `openapiPath` 相对 `baseURL` 获取。服务不在那里提供文档时，用 `openapiURL` 给出绝对的 `http(s)` 地址（获取文档时不带 API 的认证头，认证头只发给 API 主机）。
-- `readOperations` 是运维人员指定的只读白名单（operationId 或 `METHOD /path`）。白名单内的每个读操作会成为独立工具 `service_api.<id>.<operationId>`，有真实的入参 schema，出现在 `/mcp` 和 `/v1/capabilities` 里。其余操作仍走 `service_api_discover` / `service_api_write`，写需要运行时审批。需要请求头参数的操作不会这样暴露（请求头由运维人员持有）。
+- `readOperations` 是运维人员指定的只读白名单（operationId 或 `METHOD /path`）。白名单内的每个读操作会成为独立工具 `service_api.<id>.<operationId>`，有真实的入参 schema，出现在 `/mcp` 和 `/v1/capabilities` 里。其余操作仍走 `service_discover` / `service_write`，写需要运行时审批。需要请求头参数的操作不会这样暴露（请求头由运维人员持有）。
 - `readMethods`（如 `["GET","HEAD"]`）把这些方法的操作都当作只读；`trustReadOnlyAnnotations: true` 额外信任文档自带的只读标注。两者默认都**关闭**——远端文档不能自己声明自己只读。
 - `irreversibleOperations` / `reversibleOperations`（operationId 或 `METHOD /path`）：你对某个操作能否撤销的标注，经 `/mcp` 调用时优先于 HTTP 方法规则（默认 `DELETE` 和带 `deleteFiles`、`purge` 一类参数的算不可逆）。前者要求 token 带 `mcp:irreversible`，后者放行只删记录的 `DELETE`；两处都列同一操作时按不可逆处理。
 - `excludeOperations`（operationId 或 `METHOD /path`）和 `excludeTags` 把操作从发现和命名工具里隐藏，匹配的请求一律拒绝，读、写、已批准的调用都不例外。用于管理类或破坏性接口。
-- `writeOperations` 把选定的写操作暴露为两阶段工具：调用本身**不做任何改动**，只返回 `preview`（`method`、`path`、`body`）和一次性 `confirmToken`（5 分钟过期）；`service_api.confirm` 携带该 token 才会执行刚才预览的那个请求。预览和执行都会审计。模型自己的写路径仍是 `service_api_write` 加运行时审批。
+- `writeOperations` 把选定的写操作暴露为两阶段工具：调用本身**不做任何改动**，只返回 `preview`（`method`、`path`、`body`）和一次性 `confirmToken`（5 分钟过期）；`service_confirm` 携带该 token 才会执行刚才预览的那个请求。预览和执行都会审计。模型自己的写路径仍是 `service_write` 加运行时审批。
 - `THEBE_OPENLIST_BASE_URL` / `THEBE_OPENLIST_TOKEN` 和 `THEBE_CLOUDSAVER_BASE_URL` / `THEBE_CLOUDSAVER_TOKEN` 是这两个服务的快捷配置，无需写 `THEBE_SERVICE_APIS`。CloudSaver 的 token 以 Bearer 形式发送。
 - `node scripts/accept-service-api.mjs` 可以端到端检查已配置的服务（启动 Core、列出逐操作工具、发现操作、调用一个读操作；`--preview` 检查两阶段写）。
 
 ## Arcane 容器 provider 与活动来源
 
-Arcane 提供容器能力（`container.list` / `container.inspect` / `container.logs` /
-`container.status_summary` / `container.restart` / `container.start`）；配置完整的地址与 API key 后，Core 还会把 Arcane 的
+Arcane 提供容器能力（`container_list` / `container_inspect` / `container_logs` /
+`container_status_summary` / `container_restart` / `container.start`）；配置完整的地址与 API key 后，Core 还会把 Arcane 的
 background activity 注册为 Activity 的后台任务来源（`provider=arcane`）：
 
 ```bash
@@ -359,8 +360,8 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 
 只连这个代理地址，Core 不打开 `docker.sock`，也不接受请求里传来的主机名，并拒绝
 重定向。代理只应开放读取端点与 `POST /containers/*/restart`；不要把它发布到公网，
-用 loopback 或 Tailscale 访问。读操作映射成同一组 `container.*`；唯一的写
-`container.restart` 仍走审批 → 执行 → 验证 → 回执，绝不挂到模型的工具循环里。
+用 loopback 或 Tailscale 访问。读操作映射成同一组 `container_*`；唯一的写
+`container_restart` 仍走审批 → 执行 → 验证 → 回执，绝不挂到模型的工具循环里。
 `ResourceRef.provider` 增加 `docker` 取值。日志可能是多路复用流（非 TTY）或纯文本
 （TTY/代理），Core 会自动解复用并在无法识别时按文本处理。
 

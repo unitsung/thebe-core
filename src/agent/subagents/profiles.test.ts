@@ -13,10 +13,12 @@ describe("built-in subagent profiles", () => {
       "goal-worker",
       "goal-observer",
       "goal-reviewer",
+      "ticket-worker",
+      "ticket-reviewer",
     ]);
     expect(RESERVED_SUBAGENT_TOOLS).toContain("run_subagent");
     expect(BUILTIN_SUBAGENT_PROFILES.diagnostics?.tools).toContain(
-      "container.list"
+      "container_list"
     );
   });
 
@@ -64,5 +66,37 @@ describe("built-in subagent profiles", () => {
         "Use bash only when the task genuinely requires executing a shell command."
       );
     }
+  });
+
+  it("gives a Ticket's executor every home tool and no shell or file editing, and its reviewer only the ones that change nothing", () => {
+    const worker = BUILTIN_SUBAGENT_PROFILES["ticket-worker"]!;
+    // `*` is every home tool; which writes it may make is the permission layer's call, under the Mandate.
+    expect(worker.tools).toContain("*");
+    expect(worker.tools).toContain("goal_report");
+    expect(worker.allowWrites).toBe(true);
+    for (const forbidden of ["bash", "edit", "write"]) {
+      expect(worker.tools).not.toContain(forbidden);
+    }
+    const reviewer = BUILTIN_SUBAGENT_PROFILES["ticket-reviewer"]!;
+    expect(reviewer.readOnly).toBe(true);
+    expect(reviewer.allowWrites).toBeFalsy();
+    expect(reviewer.tools).toContain("*");
+    for (const forbidden of ["bash", "edit", "write", "goal_report"]) {
+      expect(reviewer.tools).not.toContain(forbidden);
+    }
+  });
+
+  it("puts a Ticket's tools in front of its executor, so no turn of its budget goes to finding them", () => {
+    for (const name of ["ticket-worker", "ticket-reviewer"]) {
+      const profile = BUILTIN_SUBAGENT_PROFILES[name]!;
+      expect(profile.directTools).toBe(true);
+    }
+    // The budget is the one every Goal worker and reviewer has, not a number picked for this profile.
+    expect(BUILTIN_SUBAGENT_PROFILES["ticket-worker"]!.maxTurns).toBe(
+      BUILTIN_SUBAGENT_PROFILES["goal-worker"]!.maxTurns
+    );
+    expect(BUILTIN_SUBAGENT_PROFILES["ticket-reviewer"]!.maxTurns).toBe(
+      BUILTIN_SUBAGENT_PROFILES["goal-reviewer"]!.maxTurns
+    );
   });
 });

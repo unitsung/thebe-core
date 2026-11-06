@@ -1,3 +1,5 @@
+import { isUnattended, mandateAllows } from "../tickets/mandate.ts";
+import type { TicketMandate } from "../tickets/types.ts";
 import { join, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import {
@@ -506,6 +508,14 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           dockerGuard: hostSecurity.dockerGuard,
         },
       }),
+    mandateAllows: async (thebeSessionId, request) =>
+      mandateAllows(
+        await mandateLookup?.(thebeSessionId),
+        request.toolName,
+        request.args
+      ),
+    unattended: async (thebeSessionId) =>
+      isUnattended(await mandateLookup?.(thebeSessionId)),
     preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,
     lookupRemembered,
@@ -773,6 +783,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
+  // Bound by the composition root once the Ticket store exists. Until then a session has no Ticket, and
+  // no Mandate covers a write.
+  let mandateLookup:
+    | ((thebeSessionId: string) => Promise<TicketMandate | undefined>)
+    | undefined;
+
   function baseTools(
     toolPolicy = policy,
     toolCallerId = callerId,
@@ -976,9 +992,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
                 availablePipelineTools(options.pipeline!).includes(name)
               ),
               ...(allPipelineToolNames(options.pipeline).includes(
-                "pipeline.acquire"
+                "pipeline_acquire"
               )
-                ? ["pipeline.acquire"]
+                ? ["pipeline_acquire"]
                 : []),
             ]
           : []),
@@ -1216,6 +1232,11 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     checkNotQuiesced,
     resourcesNeedingReload,
     baseTools,
+    setMandateLookup(
+      lookup: (thebeSessionId: string) => Promise<TicketMandate | undefined>
+    ): void {
+      mandateLookup = lookup;
+    },
     sessionOptions,
     runPrompt,
     pipelineAdvancer,
@@ -1245,31 +1266,31 @@ function promptResult(
 function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
   const has = (name: string) => tools.includes(name);
   return [
-    ...(tools.includes("pipeline.acquire")
+    ...(tools.includes("pipeline_acquire")
       ? [
-          "Preferred route: resource.search → let the user choose a release → ONE pipeline.acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline.advance until done or failed → act on failure.advice. Use the individual download.*/files.*/library.* tools only for manual repair or when no job fits.",
+          "Preferred route: resource_search → let the user choose a release → ONE pipeline_acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline_advance until done or failed → act on failure.advice. Use the individual download_*/files_*/library_* tools only for manual repair or when no job fits.",
         ]
       : []),
     "Acquisition pipeline (find → download → place in library → scrape → verify). Work it as an explicit plan: state the steps once, then execute them, keeping a running checklist of what is done, pending and blocked. Writes are approved one by one, so batch related arguments (several URLs, several names) into one call and never repeat a step that already succeeded.",
-    "1. Find: use navidrome.search / emby.search / jellyfin.search first to learn what already exists, and web_search, music_research or service_api_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
-    has("download.add")
-      ? "2. Download: download.add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download.status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
-      : "2. Download: no downloader tool is configured; use service_api_discover to find a download operation, or tell the user which connection is missing.",
-    ...(has("download.delete")
+    "1. Find: use navidrome_search / emby_search / jellyfin_search first to learn what already exists, and web_search, music_research or service_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
+    has("download_add")
+      ? "2. Download: download_add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download_status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
+      : "2. Download: no downloader tool is configured; use service_discover to find a download operation, or tell the user which connection is missing.",
+    ...(has("download_delete")
       ? [
-          "Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download.pause otherwise.",
+          "Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download_pause otherwise.",
         ]
       : []),
-    ...(has("download.pause") || has("download.resume")
+    ...(has("download_pause") || has("download_resume")
       ? [
-          "Hold or restart a named download with download.pause / download.resume (hashes from download.list). Neither deletes the task or its files; confirm the new state with download.status.",
+          "Hold or restart a named download with download_pause / download_resume (hashes from download_list). Neither deletes the task or its files; confirm the new state with download_status.",
         ]
       : []),
-    has("files.copy")
-      ? "3. Place: files.list the finished folder and the library folder, files.mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files.copy (prefer copy; use files.move only after a verified copy). These are asynchronous: confirm with files.list that the files arrived."
+    has("files_copy")
+      ? "3. Place: files_list the finished folder and the library folder, files_mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files_copy (prefer copy; use files_move only after a verified copy). These are asynchronous: confirm with files_list that the files arrived."
       : "3. Place: move or copy the finished files into the library folder with the available file tools.",
-    has("library.scan")
-      ? "4. Scrape: library.scan so the media server sees the new files, then find the item with its search tool. If it is missing or misidentified, check the folder and file names, fix them, and use library.refresh_item (replaceAllMetadata only when the match was wrong)."
+    has("library_scan")
+      ? "4. Scrape: library_scan so the media server sees the new files, then find the item with its search tool. If it is missing or misidentified, check the folder and file names, fix them, and use library_refresh_item (replaceAllMetadata only when the match was wrong)."
       : "4. Scrape: trigger a library scan on the media server through its API and verify the item appears.",
     "5. Verify and report: show the final state (file location, library entry, metadata) and any step that is still running. If a step fails, diagnose it (logs, tasks, permissions), fix the cause, and resume from that step.",
   ].join("\n");
@@ -1299,13 +1320,13 @@ function buildSystemPrompt(
     "You are Thebe. Reply in the user's language and script (Simplified or Traditional Chinese, as they write).",
     REPLY_STYLE,
     "If a capability the task needs is not among your tools, say which one is missing. Never look for credentials, tokens or connection settings in files, environment variables or containers to work around it.",
-    "You can solve multi-step tasks with the available coding tools, service APIs and MCP tools; a missing named runbook is not a reason to stop. Discover service APIs with service_api_discover when available, inspect the actual files/folders and compose operations. Use bash/read/edit/write for coding and diagnosis in the configured Core workspace when needed. After approval continue the remaining steps without repeating successful writes. Verify asynchronous provider tasks before claiming completion, and identify the precise missing connection or permission when blocked.",
+    "You can solve multi-step tasks with the available coding tools, service APIs and MCP tools; a missing named runbook is not a reason to stop. Discover service APIs with service_discover when available, inspect the actual files/folders and compose operations. Use bash/read/edit/write for coding and diagnosis in the configured Core workspace when needed. After approval continue the remaining steps without repeating successful writes. Verify asynchronous provider tasks before claiming completion, and identify the precise missing connection or permission when blocked.",
     workspacePath
       ? `Your configured workspace is ${workspacePath}. Use only this directory as the default scope for file tools.`
       : "No workspace is configured. Do not read or write host files until the user configures a workspacePath or THEBE_WORKSPACE_DIR.",
     "Return ordinary answers and research results to the parent conversation buffer by default.",
     `For rich replies requested by the user, Thebe clients support Markdown images and fenced JSON cards: ${cardCatalogPrompt()}. Use one useful card rather than decorative clutter. Never invent media URLs, credentials or completed operations; use only accessible URLs returned by tools or supplied by the user. Ordinary answers remain concise Markdown. The Thebe app already shows container, download and file listings from their tools as tables, and library lookups as cards; do not repeat those as cards, and write a table card only to reshape or choose rows.`,
-    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome.queue, so never make player cards or URLs for them.',
+    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome_queue, so never make player cards or URLs for them.',
     "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
     "Never create output.md, docs files, or any other file merely to display an answer.",
     "outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.",

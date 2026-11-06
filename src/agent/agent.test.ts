@@ -42,11 +42,11 @@ describe("Thebe agent", () => {
       expect.arrayContaining([
         "bash",
         "read",
-        "container.list",
-        "container.inspect",
-        "container.logs",
-        "container.status_summary",
-      ]),
+        "container_list",
+        "container_inspect",
+        "container_logs",
+        "container_status_summary",
+      ])
     );
   });
 
@@ -65,12 +65,14 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
     const thebe = createThebeAgent({ runtime: fake.runtime, provider });
-    await expect(thebe.send("inspect nginx")).resolves.toMatchObject({ text: "inspected" });
+    await expect(thebe.send("inspect nginx")).resolves.toMatchObject({
+      text: "inspected",
+    });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.text).toContain("API_TOKEN=***REDACTED***");
     expect(toolResult?.text).toContain("NODE_ENV=production");
@@ -95,7 +97,7 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -116,12 +118,12 @@ describe("Thebe agent", () => {
     expect(JSON.stringify(thebe.messages())).not.toContain(CANARY);
   });
 
-  it("refuses container.start when the model tries to call it", async () => {
+  it("refuses container_start when the model tries to call it", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.start", args: { id: "abc123" } }],
+        calls: [{ name: "container_start", args: { id: "abc123" } }],
       },
       { kind: "text", text: "stopped" },
     ]);
@@ -129,10 +131,12 @@ describe("Thebe agent", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.send("start nginx")).resolves.toMatchObject({ text: "stopped" });
+    await expect(thebe.send("start nginx")).resolves.toMatchObject({
+      text: "stopped",
+    });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.isError).toBe(true);
-    expect(toolResult?.toolName).toBe("container.start");
+    expect(toolResult?.toolName).toBe("container_start");
   });
 
   it("appends JSONL audit without raw secrets", async () => {
@@ -152,7 +156,7 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -168,10 +172,10 @@ describe("Thebe agent", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    const inspectLine = lines.find((row) => row.method === "container.inspect");
+    const inspectLine = lines.find((row) => row.method === "container_inspect");
     expect(inspectLine).toMatchObject({
       timestamp: "2026-09-05T12:00:00.000Z",
-      method: "container.inspect",
+      method: "container_inspect",
       redactionFired: true,
     });
     expect(JSON.stringify(lines)).not.toContain("s3cret");
@@ -183,8 +187,8 @@ describe("Thebe agent", () => {
       {
         kind: "tools",
         calls: [
-          { name: "container.list", args: {} },
-          { name: "container.list", args: {} },
+          { name: "container_list", args: {} },
+          { name: "container_list", args: {} },
         ],
       },
       { kind: "text", text: "should not run" },

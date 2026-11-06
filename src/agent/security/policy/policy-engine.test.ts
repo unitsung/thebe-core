@@ -9,17 +9,17 @@ describe("PolicyEngine decide (§4 pure)", () => {
   it("allows known read-only tools with fresh state", () => {
     expect(
       decide({
-        toolName: "container.list",
+        toolName: "container_list",
         runState: createPolicyRunState(),
         maxToolCalls: 50,
         maxBlocks: 3,
-      }),
+      })
     ).toEqual({ allow: true });
   });
 
   it("rejects unknown tools", () => {
     const d = decide({
-      toolName: "container.start",
+      toolName: "container_start",
       runState: createPolicyRunState(),
       maxToolCalls: 50,
       maxBlocks: 3,
@@ -27,35 +27,35 @@ describe("PolicyEngine decide (§4 pure)", () => {
     expect(d.allow).toBe(false);
   });
 
-  it("rejects container.restart because approval is required", () => {
+  it("rejects container_restart because approval is required", () => {
     const d = decide({
-      toolName: "container.restart",
+      toolName: "container_restart",
       runState: createPolicyRunState(),
       maxToolCalls: 50,
       maxBlocks: 3,
     });
     expect(d).toEqual({
       allow: false,
-      reason: "container.restart requires on-device approval",
+      reason: "container_restart requires on-device approval",
     });
   });
 
   it("blocks everything once deny/violation latch is set", () => {
     expect(
       decide({
-        toolName: "container.list",
+        toolName: "container_list",
         runState: { ...createPolicyRunState(), denyLatch: true },
         maxToolCalls: 50,
         maxBlocks: 3,
-      }).allow,
+      }).allow
     ).toBe(false);
     expect(
       decide({
-        toolName: "container.list",
+        toolName: "container_list",
         runState: { ...createPolicyRunState(), violationLatch: true },
         maxToolCalls: 50,
         maxBlocks: 3,
-      }).allow,
+      }).allow
     ).toBe(false);
   });
 });
@@ -69,14 +69,14 @@ describe("PolicyEngine hooks (§4.4 deny-latch via shouldStopAfterTurn, Q9)", ()
     });
     policy.beginRun();
     await expect(
-      policy.beforeToolCall({ toolCall: { name: "container.list" } }),
+      policy.beforeToolCall({ toolCall: { name: "container_list" } })
     ).resolves.toEqual({});
     await expect(
-      policy.beforeToolCall({ toolCall: { name: "container.list" } }),
+      policy.beforeToolCall({ toolCall: { name: "container_list" } })
     ).resolves.toEqual({});
     expect(await policy.shouldStopAfterTurn()).toBe(true);
     const blocked = await policy.beforeToolCall({
-      toolCall: { name: "container.list" },
+      toolCall: { name: "container_list" },
     });
     expect(blocked.block).toBe(true);
     expect(blocked.reason).toContain("Budget exhausted");
@@ -91,9 +91,9 @@ describe("PolicyEngine hooks (§4.4 deny-latch via shouldStopAfterTurn, Q9)", ()
       maxBlocks: 10,
     });
     policy.beginRun();
-    await policy.beforeToolCall({ toolCall: { name: "container.list" } });
+    await policy.beforeToolCall({ toolCall: { name: "container_list" } });
     const b = await policy.beforeToolCall({
-      toolCall: { name: "container.list" },
+      toolCall: { name: "container_list" },
     });
     expect(b).not.toHaveProperty("terminate");
     expect(await policy.shouldStopAfterTurn()).toBe(true);
@@ -108,7 +108,7 @@ describe("PolicyEngine hooks (§4.4 deny-latch via shouldStopAfterTurn, Q9)", ()
     policy.beginRun();
     for (let i = 0; i < 3; i++) {
       const r = await policy.beforeToolCall({
-        toolCall: { name: "container.start" },
+        toolCall: { name: "container_start" },
       });
       expect(r.block).toBe(true);
     }
@@ -130,19 +130,23 @@ describe("PolicyEngine hooks (§4.4 deny-latch via shouldStopAfterTurn, Q9)", ()
       maxBlocks: 10,
     });
     policy.beginRun();
-    await policy.beforeToolCall({ toolCall: { name: "container.list" } });
+    await policy.beforeToolCall({ toolCall: { name: "container_list" } });
     expect(await policy.shouldStopAfterTurn()).toBe(true);
     policy.beginRun();
     expect(await policy.shouldStopAfterTurn()).toBe(false);
     await expect(
-      policy.beforeToolCall({ toolCall: { name: "container.list" } }),
+      policy.beforeToolCall({ toolCall: { name: "container_list" } })
     ).resolves.toEqual({});
   });
 });
 
 describe("run state per session", () => {
   const make = (maxToolCalls = 3) =>
-    createPolicyEngine({ now: () => new Date(), maxToolCalls, allowedToolNames: ["a"] });
+    createPolicyEngine({
+      now: () => new Date(),
+      maxToolCalls,
+      allowedToolNames: ["a"],
+    });
 
   it("keeps one session's budget when another session starts a run", async () => {
     const policy = make();
@@ -156,9 +160,16 @@ describe("run state per session", () => {
 
   it("exhausts only the session that used its calls", async () => {
     const policy = make(2);
-    for (let i = 0; i < 2; i += 1) await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
-    const blockedA = await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
-    const allowedB = await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "B" });
+    for (let i = 0; i < 2; i += 1)
+      await policy.beforeToolCall({ toolCall: { name: "a" }, runKey: "A" });
+    const blockedA = await policy.beforeToolCall({
+      toolCall: { name: "a" },
+      runKey: "A",
+    });
+    const allowedB = await policy.beforeToolCall({
+      toolCall: { name: "a" },
+      runKey: "B",
+    });
     expect(blockedA.block).toBe(true);
     expect(allowedB.block).toBeUndefined();
     expect(await policy.shouldStopAfterTurn("A")).toBe(true);

@@ -73,7 +73,7 @@ describe("thebe spec alignment tests", () => {
             "sec-fetch-site": "cross-site",
           },
           body: JSON.stringify({}),
-        }),
+        })
       );
       expect(res.status).toBe(403);
       const body = (await res.json()) as { ok: boolean; error?: string };
@@ -97,7 +97,7 @@ describe("thebe spec alignment tests", () => {
             host: "127.0.0.1:8787",
           },
           body: JSON.stringify({}),
-        }),
+        })
       );
       expect(res.status).toBe(403);
     });
@@ -110,31 +110,33 @@ describe("thebe spec alignment tests", () => {
         version: "0.1.0",
       });
       const health = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/health"),
+        new Request("http://127.0.0.1:8787/v1/health")
       );
       expect(health.headers.get("x-content-type-options")).toBe("nosniff");
 
       const created = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
       );
       const session = (await created.json()) as { thebeSessionId: string };
       const exported = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/export?format=jsonl`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/export?format=jsonl`
+        )
       );
       expect(exported.headers.get("x-content-type-options")).toBe("nosniff");
-      expect(exported.headers.get("content-disposition")).toContain("attachment");
+      expect(exported.headers.get("content-disposition")).toContain(
+        "attachment"
+      );
 
       const html = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/export?format=html`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/export?format=html`
+        )
       );
       expect(html.headers.get("x-content-type-options")).toBe("nosniff");
       expect(html.headers.get("content-disposition")).toContain("attachment");
       expect(html.headers.get("content-security-policy")).toContain(
-        "default-src 'none'",
+        "default-src 'none'"
       );
     });
 
@@ -155,7 +157,7 @@ describe("thebe spec alignment tests", () => {
             "sec-fetch-site": "same-origin",
           },
           body: JSON.stringify({}),
-        }),
+        })
       );
       expect(res.status).toBe(403);
       const body = (await res.json()) as { error?: string };
@@ -174,7 +176,7 @@ describe("thebe spec alignment tests", () => {
       });
 
       const created = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" }),
+        new Request("http://127.0.0.1:8787/v1/session", { method: "POST" })
       );
       const session = (await created.json()) as { thebeSessionId: string };
 
@@ -210,8 +212,8 @@ describe("thebe spec alignment tests", () => {
                 },
               ],
             }),
-          },
-        ),
+          }
+        )
       );
       expect(promptRes.status).toBe(200);
 
@@ -246,8 +248,8 @@ describe("thebe spec alignment tests", () => {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ mode: "branch_in_place" }),
-          },
-        ),
+          }
+        )
       );
       expect(forkedInPlace.status).toBe(201);
       const forkedMeta = (await forkedInPlace.json()) as {
@@ -259,24 +261,28 @@ describe("thebe spec alignment tests", () => {
       // Check children
       const childrenRes = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${s1.thebeSessionId}/children`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${s1.thebeSessionId}/children`
+        )
       );
       const childrenData = (await childrenRes.json()) as {
         sessions: Array<{ thebeSessionId: string }>;
       };
-      expect(childrenData.sessions.some((s) => s.thebeSessionId === forkedMeta.thebeSessionId)).toBe(true);
+      expect(
+        childrenData.sessions.some(
+          (s) => s.thebeSessionId === forkedMeta.thebeSessionId
+        )
+      ).toBe(true);
 
       const listed = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session"),
+        new Request("http://127.0.0.1:8787/v1/session")
       );
       const listedData = (await listed.json()) as {
         sessions: Array<{ thebeSessionId: string; inPlace?: boolean }>;
       };
       expect(
         listedData.sessions.some(
-          (s) => s.thebeSessionId === forkedMeta.thebeSessionId,
-        ),
+          (s) => s.thebeSessionId === forkedMeta.thebeSessionId
+        )
       ).toBe(false);
     });
   });
@@ -292,7 +298,7 @@ describe("thebe spec alignment tests", () => {
 
       // Initially active
       const status1 = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/system/status"),
+        new Request("http://127.0.0.1:8787/v1/system/status")
       );
       expect((await status1.json()) as { quiesced: boolean }).toEqual({
         ok: true,
@@ -303,7 +309,7 @@ describe("thebe spec alignment tests", () => {
       const qRes = await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/system/quiesce", {
           method: "POST",
-        }),
+        })
       );
       expect(qRes.status).toBe(200);
 
@@ -313,13 +319,13 @@ describe("thebe spec alignment tests", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: "blocked" }),
-        }),
+        })
       );
       expect(promptRes.status).toBe(503);
 
       // Read requests still work
       const listRes = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session"),
+        new Request("http://127.0.0.1:8787/v1/session")
       );
       expect(listRes.status).toBe(200);
 
@@ -327,7 +333,7 @@ describe("thebe spec alignment tests", () => {
       const unqRes = await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/system/unquiesce", {
           method: "POST",
-        }),
+        })
       );
       expect(unqRes.status).toBe(200);
       expect(app.agent.isQuiesced()).toBe(false);
@@ -347,8 +353,8 @@ describe("thebe spec alignment tests", () => {
 
       const res = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/context`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/context`
+        )
       );
       expect(res.status).toBe(200);
       const data = (await res.json()) as {
@@ -371,8 +377,8 @@ describe("thebe spec alignment tests", () => {
       const res = await app.handler.handle(
         new Request(
           `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/tool-call/call_123/stop`,
-          { method: "POST" },
-        ),
+          { method: "POST" }
+        )
       );
       expect(res.status).toBe(200);
       expect((await res.json()) as { ok: boolean }).toEqual({ ok: true });
@@ -389,17 +395,19 @@ describe("thebe spec alignment tests", () => {
 
       const listRes = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task`
+        )
       );
       expect(listRes.status).toBe(200);
-      expect((await listRes.json()) as { tasks: unknown[] }).toEqual({ tasks: [] });
+      expect((await listRes.json()) as { tasks: unknown[] }).toEqual({
+        tasks: [],
+      });
 
       const stopOne = await app.handler.handle(
         new Request(
           `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task/task-1/stop`,
-          { method: "POST" },
-        ),
+          { method: "POST" }
+        )
       );
       expect(stopOne.status).toBe(200);
       expect(await stopOne.json()).toEqual({ ok: true });
@@ -407,8 +415,8 @@ describe("thebe spec alignment tests", () => {
       const stopAll = await app.handler.handle(
         new Request(
           `http://127.0.0.1:8787/v1/session/${s.thebeSessionId}/background-task/stop-all`,
-          { method: "POST" },
-        ),
+          { method: "POST" }
+        )
       );
       expect(stopAll.status).toBe(200);
       expect(await stopAll.json()).toEqual({ ok: true });
@@ -426,7 +434,7 @@ describe("thebe spec alignment tests", () => {
       const testRes1 = await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/provider/fake/test", {
           method: "POST",
-        }),
+        })
       );
       expect(testRes1.status).toBe(400);
 
@@ -436,7 +444,7 @@ describe("thebe spec alignment tests", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ apiKey: "test-api-key" }),
-        }),
+        })
       );
       expect(setKeyRes.status).toBe(200);
 
@@ -444,7 +452,7 @@ describe("thebe spec alignment tests", () => {
       const testRes2 = await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/provider/fake/test", {
           method: "POST",
-        }),
+        })
       );
       expect(testRes2.status).toBe(200);
       const testBody = (await testRes2.json()) as { ok: boolean };
@@ -454,7 +462,7 @@ describe("thebe spec alignment tests", () => {
       const delKeyRes = await app.handler.handle(
         new Request("http://127.0.0.1:8787/v1/provider/fake/api-key", {
           method: "DELETE",
-        }),
+        })
       );
       expect(delKeyRes.status).toBe(200);
     });
@@ -475,7 +483,7 @@ describe("thebe spec alignment tests", () => {
       });
 
       const filteredHost = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/session?hostId=host-a"),
+        new Request("http://127.0.0.1:8787/v1/session?hostId=host-a")
       );
       const hostData = (await filteredHost.json()) as {
         sessions: Array<{ selectedContext?: { hostId?: string } }>;
@@ -484,7 +492,7 @@ describe("thebe spec alignment tests", () => {
       expect(hostData.sessions[0]?.selectedContext?.hostId).toBe("host-a");
 
       const runningRes = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/agent/running"),
+        new Request("http://127.0.0.1:8787/v1/agent/running")
       );
       expect(runningRes.status).toBe(200);
       const runningData = (await runningRes.json()) as { sessions: unknown[] };
@@ -500,7 +508,7 @@ describe("thebe spec alignment tests", () => {
       });
 
       const res = await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/provider"),
+        new Request("http://127.0.0.1:8787/v1/provider")
       );
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -530,7 +538,7 @@ describe("thebe spec alignment tests", () => {
             title: "Chat Only Session",
             builtinTools: [],
           }),
-        }),
+        })
       );
       expect(createRes.status).toBe(201);
       const created = (await createRes.json()) as {
@@ -549,8 +557,8 @@ describe("thebe spec alignment tests", () => {
             body: JSON.stringify({
               rememberedPermissions: { bash: "deny" },
             }),
-          },
-        ),
+          }
+        )
       );
       expect(patchRes.status).toBe(200);
       const patched = (await patchRes.json()) as {
@@ -576,17 +584,17 @@ describe("thebe spec alignment tests", () => {
       // Prompt twice
       await app.agent.prompt(
         { text: "first question" },
-        { thebeSessionId: session.thebeSessionId },
+        { thebeSessionId: session.thebeSessionId }
       );
       await app.agent.prompt(
         { text: "second question" },
-        { thebeSessionId: session.thebeSessionId },
+        { thebeSessionId: session.thebeSessionId }
       );
 
       const allRes = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message`
+        )
       );
       const allBody = (await allRes.json()) as {
         messages: Array<{ id: string }>;
@@ -596,8 +604,8 @@ describe("thebe spec alignment tests", () => {
       const secondId = allBody.messages[1]!.id;
       const beforeRes = await app.handler.handle(
         new Request(
-          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message?before=${secondId}&limit=1`,
-        ),
+          `http://127.0.0.1:8787/v1/session/${session.thebeSessionId}/message?before=${secondId}&limit=1`
+        )
       );
       expect(beforeRes.status).toBe(200);
       const beforeBody = (await beforeRes.json()) as {
@@ -611,7 +619,7 @@ describe("thebe spec alignment tests", () => {
       const events: unknown[] = [];
       const policy = createPolicyEngine({ now: () => new Date() });
       const slowTool = {
-        name: "container.logs",
+        name: "container_logs",
         label: "Logs",
         description: "A tool that takes too long",
         parameters: {},
@@ -632,14 +640,18 @@ describe("thebe spec alignment tests", () => {
       const result = await wrapped[0]!.execute("call_123", {});
       expect(result.isError).toBe(true);
       expect(result.details).toMatchObject({ watchdogTimeout: true });
-      expect(result.content[0]?.text).toContain("<tool_output tool=\"container.logs\">");
-      expect(result.content[0]?.text).toContain("exceeded watchdog timeout (15ms)");
+      expect(result.content[0]?.text).toContain(
+        '<tool_output tool="container_logs">'
+      );
+      expect(result.content[0]?.text).toContain(
+        "exceeded watchdog timeout (15ms)"
+      );
 
       expect(events).toHaveLength(1);
       expect(events[0]).toMatchObject({
         type: "tool_watchdog_timeout",
         toolCallId: "call_123",
-        toolName: "container.logs",
+        toolName: "container_logs",
         elapsedMs: 15,
       });
     });

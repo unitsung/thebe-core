@@ -1,60 +1,63 @@
 import { describe, expect, it } from "vitest";
 import type { Trigger } from "../sources/types.ts";
-import type { AutoRestart } from "./auto-restart.ts";
+import { buildAssessmentPrompt, parseAssessment } from "./assess.ts";
 import { createDecisionStore } from "./decision-store.ts";
 import {
   createPolicyStore,
-  MAX_AUTO_CONTAINERS,
   PolicyError,
   policyVersion,
 } from "./policy-store.ts";
-import { createEvalService } from "./service.ts";
-import type { Decision, DecisionAction } from "./types.ts";
+import {
+  createEvalService,
+  DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR,
+} from "./service.ts";
 
 const T0 = Date.parse("2026-11-06T10:00:00Z");
 const hex = (n: number) => n.toString(16).padStart(32, "0");
-const down = (n: number): Trigger => ({
+const down = (n: number, thread = "resource:container:emby"): Trigger => ({
   id: hex(n),
   source: "container-health",
   kind: "container.went_down",
   at: new Date(T0 + n * 1000).toISOString(),
-  threads: ["resource:container:emby"],
-  resource: { kind: "container", id: "emby" },
+  threads: [thread],
+  resource: { kind: "container", id: thread.split(":")[2]! },
   payload: { from: "running", to: "exited" },
 });
+
+type Accept = NonNullable<Parameters<typeof createEvalService>[0]["accept"]>;
+type AcceptInput = Parameters<Accept>[0];
 
 async function setup(
   options: {
     mode?: "observe" | "auto";
     verdict?: "accept" | "ignore";
-    act?: AutoRestart;
-    withAct?: boolean;
-    onAccepted?: (decision: Decision) => Promise<void>;
+    accept?: Accept;
+    withAccept?: boolean;
+    maxAccepts?: number;
+    clock?: { now: number };
     /** Runs while the model "thinks", before it answers. */
     whileAssessing?: () => void;
+    earlier?: { title: string; at: string; state: string }[];
   } = {}
 ) {
-  const now = () => new Date(T0 + 60_000);
+  const clock = options.clock ?? { now: T0 + 60_000 };
+  const now = () => new Date(clock.now);
   const policy = createPolicyStore({ now });
   await policy.set({
     rules: ["Restart a media server that stopped"],
     acceptMode: options.mode ?? "auto",
-    autoContainers: ["emby"],
   });
   const rule = (await policy.get()).rules[0]!;
   const decisions = createDecisionStore({});
-  const calls: unknown[] = [];
-  const accepted: Decision[] = [];
-  const act: AutoRestart =
-    options.act ??
+  const accepted: AcceptInput[] = [];
+  const prompts: string[] = [];
+  const accept: Accept =
+    options.accept ??
     (async (input) => {
-      calls.push(input);
+      accepted.push(input);
       return {
-        kind: "restart",
-        status: "succeeded",
-        note: "Restarted emby.",
-        container: "emby",
-        receiptId: "r1",
+        ticketId: `ticket-${accepted.length}`,
+        goalId: `goal-${accepted.length}`,
       };
     });
   const service = createEvalService({
@@ -62,139 +65,185 @@ async function setup(
     decisions,
     sources: "container-health",
     now,
-    act: options.withAct === false ? undefined : act,
-    onAccepted:
-      options.onAccepted ??
-      (async (decision) => {
-        accepted.push(decision);
-      }),
-    assess: async () => {
+    maxAcceptsPerThreadPerHour: options.maxAccepts,
+    accept: options.withAccept === false ? undefined : accept,
+    threadTickets: async () => options.earlier ?? [],
+    assess: async (prompt) => {
+      prompts.push(prompt);
       options.whileAssessing?.();
       return JSON.stringify({
         decision: options.verdict ?? "accept",
         matched: options.verdict === "ignore" ? [] : [rule.id],
+        intent: "bring the emby container back up",
         reason: "it stopped",
       });
     },
   });
-  return { service, decisions, calls, accepted };
+  return { service, decisions, accepted, prompts, policy, rule, clock };
 }
 
-async function run(s: Awaited<ReturnType<typeof setup>>) {
-  s.service.enqueue([down(1)]);
+async function run(
+  s: Awaited<ReturnType<typeof setup>>,
+  n = 1,
+  thread?: string
+) {
+  s.service.enqueue([down(n, thread)]);
   await s.service.idle();
-  return (await s.decisions.list())[0]!;
+  return (
+    await s.decisions.list({ thread: thread ?? "resource:container:emby" })
+  )[0]!;
 }
 
-describe("auto in Eval", () => {
-  it("takes on a positive assessment and records what was done", async () => {
+describe("auto in Eval: a positive assessment becomes a Ticket", () => {
+  it("takes it on through the executor, with the Eval's own id and what the assessment said", async () => {
     const s = await setup();
     const decision = await run(s);
-    expect(s.calls).toHaveLength(1);
     expect(decision).toMatchObject({
       outcome: "accept",
       wouldAccept: true,
-      action: { kind: "restart", status: "succeeded", receiptId: "r1" },
+      ticketId: "ticket-1",
+      goalId: "goal-1",
     });
-    // The id the action keys its single restart on is the Decision's own.
-    expect(s.calls[0]).toMatchObject({
+    expect(s.accepted).toHaveLength(1);
+    expect(s.accepted[0]).toMatchObject({
+      evalId: decision.evalId,
       decisionId: decision.id,
       thread: "resource:container:emby",
-    });
-  });
-
-  it("counts being handed to the person as taken on, and a refusal to act as a would-have", async () => {
-    const asked = await setup({
-      act: async () =>
-        ({
-          kind: "diagnose",
-          status: "awaiting_approval",
-          note: "asked",
-        }) as DecisionAction,
-    });
-    expect(await run(asked)).toMatchObject({ outcome: "accept" });
-    const skipped = await setup({
-      act: async () =>
-        ({ kind: "none", status: "stale", note: "too old" }) as DecisionAction,
-    });
-    expect(await run(skipped)).toMatchObject({
-      outcome: "ignore",
-      wouldAccept: true,
-      action: { kind: "none", status: "stale" },
-    });
-  });
-
-  it("does nothing when there is nothing to carry the action out, and says so", async () => {
-    const s = await setup({ withAct: false });
-    expect(await run(s)).toMatchObject({
-      outcome: "ignore",
-      wouldAccept: true,
-      action: { kind: "none", status: "no_executor" },
-    });
-  });
-
-  it("gives what it took on a Ticket, and what it did not take on none", async () => {
-    const s = await setup();
-    const decision = await run(s);
-    expect(s.accepted.map((row) => row.id)).toEqual([decision.id]);
-    const skipped = await setup({
-      act: async () =>
-        ({ kind: "none", status: "stale", note: "too old" }) as DecisionAction,
-    });
-    await run(skipped);
-    expect(skipped.accepted).toEqual([]);
-    const observing = await setup({ mode: "observe" });
-    await run(observing);
-    expect(observing.accepted).toEqual([]);
-  });
-
-  it("keeps the Decision when the Ticket cannot be made", async () => {
-    const s = await setup({
-      onAccepted: async () => {
-        throw new Error("disk full");
+      policyVersion: decision.policyVersion,
+      assessment: {
+        intent: "bring the emby container back up",
+        matchedRuleIds: [s.rule.id],
       },
     });
-    expect(await run(s)).toMatchObject({ outcome: "accept" });
   });
 
-  it("never acts in observe, and never when the model says no", async () => {
+  it("does nothing in observe, and nothing when the model says no", async () => {
     const observing = await setup({ mode: "observe" });
-    const decision = await run(observing);
-    expect(decision).toMatchObject({ outcome: "ignore", wouldAccept: true });
-    expect(decision.action).toBeUndefined();
-    expect(observing.calls).toEqual([]);
+    const seen = await run(observing);
+    expect(seen).toMatchObject({ outcome: "ignore", wouldAccept: true });
+    expect(seen.ticketId).toBeUndefined();
+    expect(observing.accepted).toEqual([]);
 
     const refused = await setup({ verdict: "ignore" });
     expect(await run(refused)).toMatchObject({
       outcome: "ignore",
       wouldAccept: false,
     });
-    expect(refused.calls).toEqual([]);
+    expect(refused.accepted).toEqual([]);
   });
 
-  it("records a failing action as nothing done instead of losing the Decision", async () => {
-    const s = await setup({
-      act: async () => {
-        throw new Error("provider exploded");
-      },
-    });
-    expect(await run(s)).toMatchObject({
+  it("keeps a positive assessment as a would-have, and says why it was not taken on", async () => {
+    const noExecutor = await setup({ withAccept: false });
+    expect(await run(noExecutor)).toMatchObject({
       outcome: "ignore",
       wouldAccept: true,
-      action: { kind: "none", status: "act_failed", note: "provider exploded" },
+      notTakenOn: "no_executor",
+    });
+
+    const failing = await setup({
+      accept: async () => {
+        throw new Error("could not start");
+      },
+    });
+    expect(await run(failing)).toMatchObject({
+      outcome: "ignore",
+      wouldAccept: true,
+      notTakenOn: "accept_failed",
     });
   });
 
-  it("does not act when Core was paused while the model was thinking", async () => {
+  it("does not take it on when Core was paused while the model was thinking", async () => {
     const holder: { stop?: () => void } = {};
     const s = await setup({ whileAssessing: () => holder.stop?.() });
     holder.stop = () => s.service.stop();
     expect(await run(s)).toMatchObject({
       outcome: "ignore",
       wouldAccept: true,
-      action: { kind: "none", status: "quiesced" },
+      notTakenOn: "quiesced",
     });
-    expect(s.calls).toEqual([]);
+    expect(s.accepted).toEqual([]);
+  });
+
+  it("takes one thread on only so often in an hour, then leaves it to the person", async () => {
+    const s = await setup();
+    const outcomes: string[] = [];
+    for (let n = 1; n <= DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR + 1; n++) {
+      s.clock.now += 60_000;
+      s.service.enqueue([down(n)]);
+      await s.service.idle();
+      const latest = (
+        await s.decisions.list({ thread: "resource:container:emby" })
+      )[0]!;
+      outcomes.push(
+        `${latest.outcome}${latest.notTakenOn ? `:${latest.notTakenOn}` : ""}`
+      );
+    }
+    expect(outcomes).toEqual([
+      "accept",
+      "accept",
+      "accept",
+      "ignore:thread_limit",
+    ]);
+    expect(s.accepted).toHaveLength(3);
+    // Another thread is its own count, and an hour later the first thread is open again.
+    s.clock.now += 30_000;
+    expect(await run(s, 50, "resource:container:plex")).toMatchObject({
+      outcome: "accept",
+    });
+    s.clock.now += 61 * 60_000;
+    expect(await run(s, 60)).toMatchObject({ outcome: "accept" });
+  });
+
+  it("has no limit when it is 0", async () => {
+    const s = await setup({ maxAccepts: 0 });
+    for (let n = 1; n <= 5; n++) {
+      s.clock.now += 1000;
+      await run(s, n);
+    }
+    expect(s.accepted).toHaveLength(5);
+  });
+
+  it("shows the assessment the work already taken on for the thread, so it is not started twice", async () => {
+    const s = await setup({
+      earlier: [
+        {
+          title: "bring emby back up",
+          at: "2026-11-06T09:58:00Z",
+          state: "running",
+        },
+      ],
+    });
+    await run(s);
+    expect(s.prompts[0]).toContain("Work already taken on for this thread");
+    expect(s.prompts[0]).toContain("bring emby back up (running)");
+    const none = await setup();
+    await run(none);
+    expect(none.prompts[0]).not.toContain("Work already taken on");
+  });
+});
+
+describe("the assessment says what the work is", () => {
+  const rules = [{ id: "r1", text: "Restart a media server that stopped" }];
+
+  it("asks for an intent with an accept, and keeps it", () => {
+    const prompt = buildAssessmentPrompt(rules, [down(1)]);
+    expect(prompt).toContain('"intent"');
+    const parsed = parseAssessment(
+      '{"decision":"accept","matched":["r1"],"intent":"  bring emby back up  ","reason":"x"}',
+      rules
+    );
+    expect(parsed?.intent).toBe("bring emby back up");
+    // No intent is still an accept; an ignore carries none.
+    expect(
+      parseAssessment(
+        '{"decision":"accept","matched":["r1"],"reason":"x"}',
+        rules
+      )?.intent
+    ).toBeUndefined();
+    expect(
+      parseAssessment('{"decision":"ignore","intent":"x","reason":"y"}', rules)
+        ?.intent
+    ).toBeUndefined();
   });
 });
 
@@ -203,6 +252,7 @@ describe("the auto policy", () => {
 
   it("takes auto like any other mode, and refuses a mode it does not know", async () => {
     const store = createPolicyStore({ now });
+    expect((await store.get()).acceptMode).toBe("observe");
     expect((await store.set({ acceptMode: "auto" })).acceptMode).toBe("auto");
     await expect(store.set({ acceptMode: "nonsense" })).rejects.toThrow(
       /off, observe or auto/
@@ -213,36 +263,10 @@ describe("the auto policy", () => {
     expect((await store.get()).acceptMode).toBe("auto");
   });
 
-  it("keeps the list of containers, replaces it, clears it, and checks it", async () => {
+  it("is part of the version, so Decisions under observe and auto are different", async () => {
     const store = createPolicyStore({ now });
-    expect(
-      (await store.set({ autoContainers: [" emby ", "emby", "jellyfin"] }))
-        .autoContainers
-    ).toEqual(["emby", "jellyfin"]);
-    // Leaving it out keeps it.
-    expect((await store.set({ rules: ["a"] })).autoContainers).toEqual([
-      "emby",
-      "jellyfin",
-    ]);
-    expect(
-      (await store.set({ autoContainers: [] })).autoContainers
-    ).toBeUndefined();
-    for (const bad of [
-      "emby",
-      [""],
-      [3],
-      Array.from({ length: MAX_AUTO_CONTAINERS + 1 }, (_, i) => `c${i}`),
-    ]) {
-      await expect(store.set({ autoContainers: bad })).rejects.toBeInstanceOf(
-        PolicyError
-      );
-    }
-  });
-
-  it("is part of the version, so Decisions under different lists are different", async () => {
-    const store = createPolicyStore({ now });
-    const a = await store.set({ rules: ["a"], autoContainers: ["emby"] });
-    const b = await store.set({ autoContainers: ["emby", "plex"] });
+    const a = await store.set({ rules: ["a"], acceptMode: "observe" });
+    const b = await store.set({ acceptMode: "auto" });
     expect(policyVersion(a, "s")).not.toBe(policyVersion(b, "s"));
   });
 });

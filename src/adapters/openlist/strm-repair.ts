@@ -54,7 +54,7 @@ export type OpenListStrmRepairProviderOptions = {
   maxSearchResults?: number;
 };
 
-/** Provider-owned OpenList implementation for the Core `strm.repair` boundary. */
+/** Provider-owned OpenList implementation for the Core `strm_repair` boundary. */
 export class OpenListStrmRepairProvider implements StrmRepairProvider {
   readonly service = "openlist";
 
@@ -68,7 +68,10 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     this.baseUrl = options.baseUrl.trim().replace(/\/+$/, "");
     this.token = options.token.trim();
     this.fetchImpl = options.fetch ?? fetch;
-    this.maxSearchResults = Math.max(1, Math.min(options.maxSearchResults ?? 500, 500));
+    this.maxSearchResults = Math.max(
+      1,
+      Math.min(options.maxSearchResults ?? 500, 500)
+    );
   }
 
   async repair(input: StrmRepairRequest): Promise<StrmRepairOutcome> {
@@ -76,20 +79,29 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     const title = requestTitle(input) || fileStem(sourcePath);
     const sourceFile = await this.getFile(sourcePath);
     if (sourceFile.isDirectory) {
-      throw new ProviderError("UNKNOWN", `STRM source is a directory: ${sourcePath}`);
+      throw new ProviderError(
+        "UNKNOWN",
+        `STRM source is a directory: ${sourcePath}`
+      );
     }
 
     const before = await this.readText(sourcePath, sourceFile);
     const candidates = await this.search(title);
     const candidate = chooseCandidate(candidates, title);
     if (!candidate) {
-      throw new ProviderError("NOT_FOUND", `No media candidate found for ${title}`);
+      throw new ProviderError(
+        "NOT_FOUND",
+        `No media candidate found for ${title}`
+      );
     }
 
     const targetPath = joinPath(candidate.parent, candidate.name);
     const targetFile = await this.getFile(targetPath);
     if (targetFile.isDirectory) {
-      throw new ProviderError("UNKNOWN", `STRM target is a directory: ${targetPath}`);
+      throw new ProviderError(
+        "UNKNOWN",
+        `STRM target is a directory: ${targetPath}`
+      );
     }
     await this.probeFile(targetPath, targetFile);
 
@@ -108,9 +120,15 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     }
 
     await this.writeText(sourcePath, `${targetPath}\n`);
-    const after = await this.readText(sourcePath, await this.getFile(sourcePath));
+    const after = await this.readText(
+      sourcePath,
+      await this.getFile(sourcePath)
+    );
     if (parseStrmTarget(after) !== targetPath) {
-      throw new ProviderError("UNKNOWN", "STRM path verification failed after write");
+      throw new ProviderError(
+        "UNKNOWN",
+        "STRM path verification failed after write"
+      );
     }
 
     return {
@@ -144,22 +162,33 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     try {
       return await response.text();
     } catch (cause) {
-      throw new ProviderError("UNKNOWN", `Unable to read OpenList file: ${path}`, cause);
+      throw new ProviderError(
+        "UNKNOWN",
+        `Unable to read OpenList file: ${path}`,
+        cause
+      );
     }
   }
 
   private async probeFile(path: string, file: OpenListFile): Promise<void> {
-    const response = await this.fetchFile(path, file, "*/*", { Range: "bytes=0-0" });
-    const contentType = response.headers.get("content-type")
+    const response = await this.fetchFile(path, file, "*/*", {
+      Range: "bytes=0-0",
+    });
+    const contentType = response.headers
+      .get("content-type")
       ?.split(";", 1)[0]
       ?.trim()
       .toLowerCase();
     const contentLength = response.headers.get("content-length")?.trim();
-    const isDocument = contentType !== undefined && NON_MEDIA_CONTENT_TYPES.has(contentType);
+    const isDocument =
+      contentType !== undefined && NON_MEDIA_CONTENT_TYPES.has(contentType);
     const isEmpty = contentLength === "0";
     await response.body?.cancel();
     if (isDocument || isEmpty) {
-      throw new ProviderError("UNKNOWN", `OpenList target is not a media response: ${path}`);
+      throw new ProviderError(
+        "UNKNOWN",
+        `OpenList target is not a media response: ${path}`
+      );
     }
   }
 
@@ -167,7 +196,7 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     path: string,
     file: OpenListFile,
     accept: string,
-    extraHeaders: Record<string, string> = {},
+    extraHeaders: Record<string, string> = {}
   ): Promise<Response> {
     const url = fileURL(this.baseUrl, path, file);
     let response: Response;
@@ -177,12 +206,18 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
         headers: { Accept: accept, ...extraHeaders },
       });
     } catch (cause) {
-      throw new ProviderError("UNREACHABLE", `OpenList file is unreachable: ${path}`, cause);
+      throw new ProviderError(
+        "UNREACHABLE",
+        `OpenList file is unreachable: ${path}`,
+        cause
+      );
     }
     if (!response.ok) {
       throw new ProviderError(
-        response.status === 401 || response.status === 403 ? "UNAUTHORIZED" : "UNKNOWN",
-        `OpenList file request failed (${response.status}): ${path}`,
+        response.status === 401 || response.status === 403
+          ? "UNAUTHORIZED"
+          : "UNKNOWN",
+        `OpenList file request failed (${response.status}): ${path}`
       );
     }
     return response;
@@ -252,7 +287,7 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
       body?: JsonObject;
       headers?: Record<string, string>;
       rawBody?: string;
-    },
+    }
   ): Promise<unknown> {
     let response: Response;
     try {
@@ -264,16 +299,26 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
           ...(options.body ? { "Content-Type": "application/json" } : {}),
           ...options.headers,
         },
-        body: options.rawBody ?? (options.body === undefined ? undefined : JSON.stringify(options.body)),
+        body:
+          options.rawBody ??
+          (options.body === undefined
+            ? undefined
+            : JSON.stringify(options.body)),
       });
     } catch (cause) {
-      throw new ProviderError("UNREACHABLE", "OpenList API is unreachable", cause);
+      throw new ProviderError(
+        "UNREACHABLE",
+        "OpenList API is unreachable",
+        cause
+      );
     }
 
     if (!response.ok) {
       throw new ProviderError(
-        response.status === 401 || response.status === 403 ? "UNAUTHORIZED" : "UNKNOWN",
-        `OpenList API request failed (${response.status})`,
+        response.status === 401 || response.status === 403
+          ? "UNAUTHORIZED"
+          : "UNKNOWN",
+        `OpenList API request failed (${response.status})`
       );
     }
 
@@ -281,14 +326,18 @@ export class OpenListStrmRepairProvider implements StrmRepairProvider {
     try {
       envelope = await response.json();
     } catch (cause) {
-      throw new ProviderError("UNKNOWN", "OpenList API returned invalid JSON", cause);
+      throw new ProviderError(
+        "UNKNOWN",
+        "OpenList API returned invalid JSON",
+        cause
+      );
     }
     const object = asObject(envelope);
     const code = typeof object.code === "number" ? object.code : 0;
     if (code !== 200) {
       throw new ProviderError(
         code === 401 || code === 403 ? "UNAUTHORIZED" : "UNKNOWN",
-        stringField(object, "message") || `OpenList API error (${code})`,
+        stringField(object, "message") || `OpenList API error (${code})`
       );
     }
     return object.data;
@@ -305,7 +354,10 @@ function requestPath(input: StrmRepairRequest): string {
     stringField(resource, "id");
   const path = normalizePath(raw);
   if (!path.toLowerCase().endsWith(".strm")) {
-    throw new ProviderError("UNKNOWN", "strm.repair requires a .strm source path");
+    throw new ProviderError(
+      "UNKNOWN",
+      "strm_repair requires a .strm source path"
+    );
   }
   return path;
 }
@@ -315,16 +367,26 @@ function requestTitle(input: StrmRepairRequest): string {
   return stringField(args, "title").trim();
 }
 
-function chooseCandidate(results: OpenListSearchResult[], title: string): OpenListSearchResult | undefined {
+function chooseCandidate(
+  results: OpenListSearchResult[],
+  title: string
+): OpenListSearchResult | undefined {
   const expected = normalizeName(title);
   if (!expected) return undefined;
   return results
-    .filter((item) => !item.isDirectory && MEDIA_EXTENSIONS.has(fileExtension(item.name)))
+    .filter(
+      (item) =>
+        !item.isDirectory && MEDIA_EXTENSIONS.has(fileExtension(item.name))
+    )
     .map((item) => ({ item, score: candidateScore(item, expected) }))
     .filter(({ score }) => score > 0)
     .sort((left, right) => {
-      return right.score - left.score ||
-        joinPath(left.item.parent, left.item.name).localeCompare(joinPath(right.item.parent, right.item.name));
+      return (
+        right.score - left.score ||
+        joinPath(left.item.parent, left.item.name).localeCompare(
+          joinPath(right.item.parent, right.item.name)
+        )
+      );
     })
     .map(({ item }) => item)[0];
 }
@@ -364,7 +426,8 @@ function fileURL(baseUrl: string, path: string, file: OpenListFile): string {
       try {
         const rawURL = new URL(raw);
         const baseURL = new URL(baseUrl);
-        if (rawURL.host.toLowerCase() === baseURL.host.toLowerCase()) return raw;
+        if (rawURL.host.toLowerCase() === baseURL.host.toLowerCase())
+          return raw;
       } catch {
         // Fall back to the signed OpenList path below.
       }
@@ -423,10 +486,10 @@ function normalizeName(value: string): string {
 
 function asObject(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as JsonObject
+    ? (value as JsonObject)
     : {};
 }
 
 function stringField(object: JsonObject, key: string): string {
-  return typeof object[key] === "string" ? object[key] as string : "";
+  return typeof object[key] === "string" ? (object[key] as string) : "";
 }

@@ -5,13 +5,11 @@ import type { AcceptMode, Policy, PolicyRule } from "./types.ts";
 
 export const MAX_RULES = 20;
 export const MAX_RULE_LENGTH = 500;
-export const MAX_AUTO_CONTAINERS = 20;
 
 export type PolicyInput = {
   rules?: unknown;
   acceptMode?: unknown;
   model?: unknown;
-  autoContainers?: unknown;
 };
 
 export class PolicyError extends Error {}
@@ -58,7 +56,6 @@ export function createPolicyStore(options: {
           input.acceptMode === undefined
             ? before.acceptMode
             : parseMode(input.acceptMode),
-        ...autoContainersOf(input.autoContainers, before.autoContainers),
         ...(input.model === undefined
           ? before.model
             ? { model: before.model }
@@ -92,7 +89,6 @@ export function policyVersion(policy: Policy, sources: string): string {
       rules: policy.rules.map((rule) => rule.text),
       mode: policy.acceptMode,
       model: policy.model ?? null,
-      autoContainers: policy.autoContainers ?? [],
       sources,
     })
   );
@@ -123,33 +119,6 @@ function parseRules(value: unknown): PolicyRule[] {
 function parseMode(value: unknown): AcceptMode {
   if (value === "off" || value === "observe" || value === "auto") return value;
   throw new PolicyError("acceptMode must be off, observe or auto");
-}
-
-/** Left out keeps what was there; a list replaces it (an empty list clears it). */
-function autoContainersOf(
-  value: unknown,
-  before: string[] | undefined
-): { autoContainers?: string[] } {
-  if (value === undefined) return before ? { autoContainers: before } : {};
-  if (!Array.isArray(value)) {
-    throw new PolicyError("autoContainers must be a list of container names");
-  }
-  const names: string[] = [];
-  for (const entry of value) {
-    if (typeof entry !== "string" || !entry.trim()) {
-      throw new PolicyError(
-        "each autoContainers entry must be a container name"
-      );
-    }
-    const name = entry.trim();
-    if (name.length > 200)
-      throw new PolicyError("a container name is too long");
-    if (!names.includes(name)) names.push(name);
-  }
-  if (names.length > MAX_AUTO_CONTAINERS) {
-    throw new PolicyError(`at most ${MAX_AUTO_CONTAINERS} autoContainers`);
-  }
-  return names.length > 0 ? { autoContainers: names } : {};
 }
 
 function parseModel(value: unknown): { providerId: string; modelId: string } {

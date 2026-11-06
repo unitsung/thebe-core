@@ -283,8 +283,8 @@ at once with `429 rate_limited` (`THEBE_MCP_RATE_LIMIT` changes it, `0` turns it
 internet, set `THEBE_MCP_PORT=8788` and expose only that port (Tailscale Funnel, a tunnel or a reverse proxy):
 it serves `/mcp` and nothing else, so `/v1`, `/openapi.json` and `/docs` cannot be reached through it.
 
-A delete that cannot be undone needs `mcp:irreversible`, judged per call: `download.delete` with
-`deleteFiles: true`, `navidrome.playlist.delete`, a service API call that sends an HTTP `DELETE` or sets a
+A delete that cannot be undone needs `mcp:irreversible`, judged per call: `download_delete` with
+`deleteFiles: true`, `navidrome_playlist_delete`, a service API call that sends an HTTP `DELETE` or sets a
 delete-style flag such as `deleteFiles` or `purge`, and a provider tool its server marks destructive. A
 `mcp:write` token is refused these at once (`403 mcp_irreversible_required`) with the command that grants the
 scope. A token made without `--scope` keeps full access.
