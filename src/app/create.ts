@@ -42,6 +42,8 @@ export function createThebeApp(options: {
     | import("../delivery/http/token-store.ts").TokenVerifier;
   auditPath?: string;
   agentStoreDir?: string;
+  /** Sources Core watches for events; see `CreateThebeAgentOptions.sources`. Off unless given. */
+  sources?: { containerHealth?: boolean; intervalMs?: number };
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
   now?: () => Date;
@@ -115,6 +117,7 @@ export function createThebeApp(options: {
     provider: options.provider,
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
+    sources: options.sources,
     now: options.now,
     callerId: options.callerId,
     model: options.model,

@@ -9,7 +9,12 @@ export async function handleHealthEventsCompatibility(
 ): Promise<Response | undefined> {
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
-    return json({ ok: true, version: context.version });
+    // `tickets` tells a client this Core can list the Tickets that authorise its tasks.
+    return json({
+      ok: true,
+      version: context.version,
+      capabilities: context.agent ? ["tickets"] : [],
+    });
   }
   if (
     request.method === "GET" &&

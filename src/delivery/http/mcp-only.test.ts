@@ -28,6 +28,7 @@ describe("the /mcp-only gateway handler", () => {
   it("does not reveal the API, the OpenAPI document or the docs", async () => {
     for (const path of [
       "/v1/health",
+      "/v1/tickets",
       "/v1/session",
       "/openapi.json",
       "/docs",

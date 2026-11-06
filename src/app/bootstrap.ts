@@ -200,6 +200,7 @@ export async function bootstrapThebe(
     // `thebe token` commands apply without a restart.
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
+    sources: parseSources(process.env),
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
@@ -326,4 +327,25 @@ function readPackageVersion(fromDir: string): string {
     dir = parent;
   }
   return "0.1.0";
+}
+
+/**
+ * `THEBE_SOURCES` is a comma list of the Sources Core watches (today: `container-health`). Unset or empty
+ * means none, so nothing is read in the background. `THEBE_SOURCE_INTERVAL_MS` sets the poll interval.
+ */
+export function parseSources(
+  env: NodeJS.ProcessEnv
+): { containerHealth: boolean; intervalMs?: number } | undefined {
+  const names = (env.THEBE_SOURCES ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) return undefined;
+  const interval = Number(env.THEBE_SOURCE_INTERVAL_MS);
+  return {
+    containerHealth: names.includes("container-health"),
+    ...(Number.isFinite(interval) && interval >= 1000
+      ? { intervalMs: interval }
+      : {}),
+  };
 }

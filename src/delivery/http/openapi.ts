@@ -696,6 +696,21 @@ const operations: Operation[] = [
     parameters: [idParameter()],
   },
   {
+    method: "get",
+    path: "/v1/tickets",
+    summary: "List Tickets, newest first (read-only)",
+    tag: "ticket",
+    responseSchema: "TicketList",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}",
+    summary: "Read one Ticket",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "Ticket",
+  },
+  {
     method: "post",
     path: "/v1/goals",
     summary: "Create a session and start a Goal",
@@ -1332,6 +1347,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         name: "activity",
         description:
           "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object",
+      },
+      {
+        name: "ticket",
+        description:
+          "Read-only Tickets: the authorised units of work. A Ticket is made by a decision, never posted by a caller.",
       },
       {
         name: "goal",
@@ -2691,6 +2711,57 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
         },
+        TicketList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Ticket" },
+            },
+          },
+        },
+        Ticket: {
+          type: "object",
+          description:
+            "One authorised unit of work. It wraps existing objects (a Goal keeps its own id and progress); its stage is derived from them, not stored.",
+          required: [
+            "id",
+            "title",
+            "mandate",
+            "subscriptions",
+            "links",
+            "createdAt",
+          ],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Derived from the decision that produced it, so the same request gives the same id.",
+            },
+            title: { type: "string" },
+            mandate: {
+              type: "object",
+              required: ["strength", "decidedBy", "evalId", "requester"],
+              properties: {
+                strength: { type: "string", enum: ["explicit", "inferred"] },
+                decidedBy: { type: "string", enum: ["direct", "eval"] },
+                evalId: { type: "string" },
+                requester: { type: "string" },
+              },
+            },
+            subscriptions: { type: "array", items: { type: "string" } },
+            links: {
+              type: "object",
+              required: ["sessionIds"],
+              properties: {
+                legacyGoalId: { type: "string" },
+                sessionIds: { type: "array", items: { type: "string" } },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
         ProductGoalList: {
           type: "object",
           required: ["goals"],
@@ -2764,6 +2835,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 options: { type: "array", items: { type: "string" } },
                 askedAt: { type: "string" },
               },
+            },
+            ticketId: {
+              type: "string",
+              description:
+                "The Ticket that authorises this task, when one was recorded.",
             },
             report: {
               type: "object",
