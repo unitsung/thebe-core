@@ -15,6 +15,8 @@ import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createDeviceRegistry } from "../delivery/http/devices.ts";
 import { createPushIdentity } from "./push/identity.ts";
+import { createQuietHoursStore } from "../delivery/http/quiet-hours.ts";
+import { createQuietHoursNotifier } from "./push/quiet-notifier.ts";
 import { createPushNotifier } from "./push/notifier.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
 import { createMcpClientRegistry } from "../adapters/mcp/index.ts";
@@ -101,10 +103,20 @@ export function createThebeApp(options: {
           devices: deviceRegistry,
         })
       : undefined;
+  // Quiet hours only delay the push; the approval itself is already waiting.
+  const quietHours = createQuietHoursStore({ dir: deviceDir });
+  const notifier = pushNotifier
+    ? createQuietHoursNotifier({
+        inner: pushNotifier,
+        quiet: quietHours,
+        dir: deviceDir,
+      })
+    : undefined;
+  void notifier?.resume();
   const agent = createThebeAgent({
-    onPendingApproval: pushNotifier
+    onPendingApproval: notifier
       ? (record) => {
-          void pushNotifier.notify({
+          void notifier.notify({
             category: "thebe.permission",
             title: "Thebe",
             body: "An action is waiting for your approval.",
@@ -169,6 +181,7 @@ export function createThebeApp(options: {
       pushIdentity && relayUrl
         ? { publicKey: pushIdentity.publicKey, relayUrl }
         : undefined,
+    quietHours,
     workspacePath: options.workspacePath,
   });
   return { agent, prompt, send: prompt, handler };

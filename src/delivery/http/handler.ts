@@ -20,6 +20,7 @@ export type ThebeHttpHandlerOptions = {
   /** Use this registry instead of opening one on `deviceStoreDir`, so the push notifier shares it. */
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: { publicKey: string; relayUrl: string };
+  quietHours?: import("./quiet-hours.ts").QuietHoursStore;
   workspacePath?: string;
   /** Calls a minute a scoped token may make over `/mcp`; 0 is no limit. Default: `THEBE_MCP_RATE_LIMIT`, else 120. */
   mcpRateLimit?: number;
@@ -53,6 +54,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     deviceStoreDir: options.deviceStoreDir,
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
+    quietHours: options.quietHours,
     workspacePath: options.workspacePath,
     mcpRateLimit: options.mcpRateLimit,
   });

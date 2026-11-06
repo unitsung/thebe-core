@@ -31,6 +31,7 @@ describe("the /mcp-only gateway handler", () => {
       "/v1/tickets",
       "/v1/policy",
       "/v1/decisions",
+      "/v1/push/quiet-hours",
       "/v1/session",
       "/openapi.json",
       "/docs",

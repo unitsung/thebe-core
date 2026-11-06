@@ -158,6 +158,20 @@ const operations: Operation[] = [
     responseSchema: "Ok",
   },
   {
+    method: "get",
+    path: "/v1/push/quiet-hours",
+    summary: "Read the daily window in which Core holds its pushes",
+    tag: "compatibility",
+  },
+  {
+    method: "put",
+    path: "/v1/push/quiet-hours",
+    summary:
+      "Set the quiet-hours window ({quietHours: {start, end, timeZone?}}) or turn it off with null",
+    tag: "compatibility",
+    requestBody: { required: true },
+  },
+  {
     method: "post",
     path: "/v1/messages",
     summary: "Send a prompt (compatibility endpoint)",
