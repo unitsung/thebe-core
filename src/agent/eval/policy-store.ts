@@ -5,11 +5,13 @@ import type { AcceptMode, Policy, PolicyRule } from "./types.ts";
 
 export const MAX_RULES = 20;
 export const MAX_RULE_LENGTH = 500;
+export const MAX_AUTO_CONTAINERS = 20;
 
 export type PolicyInput = {
   rules?: unknown;
   acceptMode?: unknown;
   model?: unknown;
+  autoContainers?: unknown;
 };
 
 export class PolicyError extends Error {}
@@ -22,6 +24,8 @@ export type PolicyStore = {
 export function createPolicyStore(options: {
   dir?: string;
   now: () => Date;
+  /** Whether the host lets the mode be `auto`. Off by default: setting it is then refused. */
+  autoAllowed?: boolean;
 }): PolicyStore {
   let current: Policy | undefined;
   const file = options.dir ? join(options.dir, "policy.json") : undefined;
@@ -55,7 +59,8 @@ export function createPolicyStore(options: {
         acceptMode:
           input.acceptMode === undefined
             ? before.acceptMode
-            : parseMode(input.acceptMode),
+            : parseMode(input.acceptMode, options.autoAllowed === true),
+        ...autoContainersOf(input.autoContainers, before.autoContainers),
         ...(input.model === undefined
           ? before.model
             ? { model: before.model }
@@ -89,6 +94,7 @@ export function policyVersion(policy: Policy, sources: string): string {
       rules: policy.rules.map((rule) => rule.text),
       mode: policy.acceptMode,
       model: policy.model ?? null,
+      autoContainers: policy.autoContainers ?? [],
       sources,
     })
   );
@@ -116,14 +122,44 @@ function parseRules(value: unknown): PolicyRule[] {
   return rules;
 }
 
-function parseMode(value: unknown): AcceptMode {
+function parseMode(value: unknown, autoAllowed: boolean): AcceptMode {
   if (value === "off" || value === "observe") return value;
   if (value === "auto") {
-    throw new PolicyError(
-      "acceptMode auto is not available yet: Core can only watch (observe) or stay off"
-    );
+    if (!autoAllowed) {
+      throw new PolicyError(
+        "acceptMode auto is not enabled on this Core: the host has to allow it (THEBE_EVAL_AUTO)"
+      );
+    }
+    return "auto";
   }
-  throw new PolicyError("acceptMode must be off or observe");
+  throw new PolicyError("acceptMode must be off, observe or auto");
+}
+
+/** Left out keeps what was there; a list replaces it (an empty list clears it). */
+function autoContainersOf(
+  value: unknown,
+  before: string[] | undefined
+): { autoContainers?: string[] } {
+  if (value === undefined) return before ? { autoContainers: before } : {};
+  if (!Array.isArray(value)) {
+    throw new PolicyError("autoContainers must be a list of container names");
+  }
+  const names: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      throw new PolicyError(
+        "each autoContainers entry must be a container name"
+      );
+    }
+    const name = entry.trim();
+    if (name.length > 200)
+      throw new PolicyError("a container name is too long");
+    if (!names.includes(name)) names.push(name);
+  }
+  if (names.length > MAX_AUTO_CONTAINERS) {
+    throw new PolicyError(`at most ${MAX_AUTO_CONTAINERS} autoContainers`);
+  }
+  return names.length > 0 ? { autoContainers: names } : {};
 }
 
 function parseModel(value: unknown): { providerId: string; modelId: string } {

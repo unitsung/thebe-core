@@ -720,7 +720,7 @@ const operations: Operation[] = [
     method: "put",
     path: "/v1/policy",
     summary:
-      "Change the rules, accept mode (off or observe) or model; auto is not available yet",
+      "Change the rules, accept mode (off, observe or auto), the containers auto may restart, or the model; auto needs the host to allow it",
     tag: "ticket",
     requestBody: { required: true },
     requestSchema: "PolicyInput",
@@ -2772,9 +2772,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             acceptMode: {
               type: "string",
-              enum: ["off", "observe"],
+              enum: ["off", "observe", "auto"],
               description:
-                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto does not exist yet.",
+                "off: record events, weigh none. observe: weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: act on a positive assessment. A stopped container on autoContainers is restarted by Core (at most 3 an hour per container; the next goes to the person); any other is only diagnosed, which asks the person. Needs the host to allow it (THEBE_EVAL_AUTO).",
+            },
+            autoContainers: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Container names auto may restart without asking. A hard cap the model cannot widen. Empty or unset: no direct restart.",
+            },
+            autoAvailable: {
+              type: "boolean",
+              description:
+                "Whether the host allows acceptMode auto; PUT of auto is 400 when false.",
             },
             model: {
               type: "object",
@@ -2795,7 +2806,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             "Any of these; what is left out stays as it was. rules is a list of plain-language strings (at most 20, 500 characters each). model: null returns to Core's default.",
           properties: {
             rules: { type: "array", items: { type: "string" } },
-            acceptMode: { type: "string", enum: ["off", "observe"] },
+            acceptMode: { type: "string", enum: ["off", "observe", "auto"] },
+            autoContainers: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "At most 20 container names. A list replaces the old one; [] clears it.",
+            },
             model: {
               type: "object",
               nullable: true,
@@ -2819,7 +2836,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         Decision: {
           type: "object",
           description:
-            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
+            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. In auto, outcome accept means it was acted on (see action). unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
           required: [
             "id",
             "evalId",
@@ -2853,6 +2870,19 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "boolean",
               description:
                 "The deterministic Gate stopped it before any model was asked.",
+            },
+            action: {
+              type: "object",
+              description:
+                "auto only: what was done about a positive assessment. kind restart (a stopped container was restarted; status is the receipt's, receiptId reads it), diagnose (handed to the person: awaiting_approval or no_restart_advised) or none (nothing done; status says why: stale, not_down_event, already_up, container_not_found, container_ambiguous, quiesced, auto_disabled, act_failed...).",
+              required: ["kind", "status", "note"],
+              properties: {
+                kind: { type: "string", enum: ["restart", "diagnose", "none"] },
+                status: { type: "string" },
+                note: { type: "string" },
+                container: { type: "string" },
+                receiptId: { type: "string" },
+              },
             },
             policyVersion: { type: "string" },
             decidedAt: { type: "string", format: "date-time" },

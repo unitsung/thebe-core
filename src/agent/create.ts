@@ -9,6 +9,7 @@ import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
+import { createAutoRestart } from "./eval/auto-restart.ts";
 import { createEvalService } from "./eval/service.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
@@ -77,17 +78,44 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "eval")
       : undefined,
     now: ctx.now,
+    autoAllowed: options.evalAutoAllowed === true,
   });
   const decisionStore = createDecisionStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "eval", "decisions")
       : undefined,
   });
+  const diagnosis = createDiagnosisApi({
+    now: ctx.now,
+    policy: ctx.policy,
+    audit: ctx.audit,
+    baseTools: ctx.baseTools,
+    createSession: sessions.createSession,
+    prompt: prompts.prompt,
+    activityStore,
+    artifactStore,
+  });
+  const actions = createActionApi({
+    now: ctx.now,
+    provider: options.provider,
+    audit: ctx.audit,
+    getDiagnosis: diagnosis.getDiagnosis,
+    activityStore,
+    artifactStore,
+  });
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,
     sources: options.sources?.containerHealth ? "container-health" : "",
     maxPerHour: options.evalMaxPerHour,
+    autoAllowed: options.evalAutoAllowed === true,
+    act: createAutoRestart({
+      provider: options.provider,
+      actions,
+      activity: activityStore,
+      diagnose: diagnosis.diagnose,
+      now: ctx.now,
+    }),
     now: ctx.now,
     onError: () => {
       // A failed Eval leaves no Decision; the next start weighs it again.
@@ -147,24 +175,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     void triggerStore.list().then((rows) => evalService.recover(rows));
   }
   sourceRunner.start();
-  const diagnosis = createDiagnosisApi({
-    now: ctx.now,
-    policy: ctx.policy,
-    audit: ctx.audit,
-    baseTools: ctx.baseTools,
-    createSession: sessions.createSession,
-    prompt: prompts.prompt,
-    activityStore,
-    artifactStore,
-  });
-  const actions = createActionApi({
-    now: ctx.now,
-    provider: options.provider,
-    audit: ctx.audit,
-    getDiagnosis: diagnosis.getDiagnosis,
-    activityStore,
-    artifactStore,
-  });
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
@@ -177,10 +187,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       executeAction: actions.executeApprovedAction,
     }),
     async getPolicy() {
-      return policyStore.get();
+      // `autoAvailable` is the host's switch, so a client can offer the mode only where it can be set.
+      return {
+        ...(await policyStore.get()),
+        autoAvailable: options.evalAutoAllowed === true,
+      };
     },
     async setPolicy(input) {
-      return policyStore.set(input);
+      return {
+        ...(await policyStore.set(input)),
+        autoAvailable: options.evalAutoAllowed === true,
+      };
     },
     async listDecisions(query) {
       return decisionStore.list(query);
