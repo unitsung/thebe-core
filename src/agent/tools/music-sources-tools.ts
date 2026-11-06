@@ -159,6 +159,7 @@ export function createMusicSourcesTools(
     });
     tools.push({
       name: SQMUSIC_DOWNLOAD_TOOL_NAME,
+      requiresApproval: true,
       label: "Download with SQMusic",
       description: SQMUSIC_DOWNLOAD_DESCRIPTION,
       parameters: SQMUSIC_DOWNLOAD_SCHEMA,

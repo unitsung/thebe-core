@@ -1,6 +1,7 @@
 import type { ServiceAPIProvider } from "../capabilities/service-api.ts";
 import {
   SERVICE_API_TOOL_NAMES,
+  SERVICE_API_WRITE_TOOL_NAME,
   SERVICE_ARGUMENT,
 } from "../capabilities/service-api.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
@@ -15,6 +16,7 @@ export function createServiceAPITools(
 ): CustomToolDefinition[] {
   return SERVICE_API_TOOL_NAMES.map((name) => ({
     name,
+    requiresApproval: name === SERVICE_API_WRITE_TOOL_NAME,
     label: name,
     description:
       name === "service_discover"

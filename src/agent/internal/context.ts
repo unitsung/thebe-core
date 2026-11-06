@@ -41,16 +41,11 @@ import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createMusicSourcesTools } from "../tools/music-sources-tools.ts";
-import {
-  NETEASE_TOOL_NAME,
-  SQMUSIC_DOWNLOAD_TOOL_NAME,
-  SQMUSIC_TOOL_NAME,
-} from "../capabilities/music-sources.ts";
+import {} from "../capabilities/music-sources.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
 import { createServiceAPITools } from "../tools/service-api-tools.ts";
 import {
   allPipelineToolNames,
-  availablePipelineTools,
   canRunPipelineJobs,
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
@@ -59,26 +54,14 @@ import {
   createPipelineAdvancer,
   DEFAULT_INTERVAL_MS as PIPELINE_ADVANCE_INTERVAL_MS,
 } from "../pipeline/advancer.ts";
-import { PIPELINE_WRITE_TOOL_NAMES } from "../capabilities/pipeline.ts";
-import {
-  SERVICE_API_TOOL_NAMES,
-  SERVICE_API_WRITE_TOOL_NAME,
-} from "../capabilities/service-api.ts";
+import {} from "../capabilities/service-api.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
 } from "../../agent/tools/media-library-tools.ts";
-import { CONTAINER_TOOL_NAMES } from "../capabilities/containers.ts";
-import {
-  EMBY_LOOKUP_TOOL_NAMES,
-  IMMICH_SEARCH_TOOL_NAMES,
-  JELLYFIN_LOOKUP_TOOL_NAMES,
-} from "../capabilities/media.ts";
-import {
-  NAVIDROME_TOOL_NAMES,
-  NAVIDROME_WRITE_TOOL_NAMES,
-} from "../capabilities/navidrome.ts";
-import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
+import {} from "../capabilities/media.ts";
+import {} from "../capabilities/navidrome.ts";
+import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore } from "../store.ts";
 import {
   httpError,
@@ -115,11 +98,7 @@ import {
   type MemoryOperation,
   type MemoryTarget,
 } from "../memory/memory.ts";
-import {
-  createMemoryTools,
-  MEMORY_TOOL_NAME,
-  type MemoryView,
-} from "../tools/memory-tool.ts";
+import { createMemoryTools, type MemoryView } from "../tools/memory-tool.ts";
 import {
   checkAgentInstructions,
   clampStoredInstructions,
@@ -313,23 +292,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     now,
     maxToolCalls: options.maxToolCalls,
     maxBlocks: options.maxBlocks,
-    allowedToolNames: [
-      ...Object.keys(CORE_EVENT_TOOLS),
-      ...(options.musicResearch ? ["music_research"] : []),
-      ...(options.musicSources?.netease ? [NETEASE_TOOL_NAME] : []),
-      ...(options.musicSources?.sqmusic
-        ? [SQMUSIC_TOOL_NAME, SQMUSIC_DOWNLOAD_TOOL_NAME]
-        : []),
-      ...(options.webSearch ? ["web_search"] : []),
-      ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
-      ...CONTAINER_TOOL_NAMES,
-      ...(options.navidrome ? NAVIDROME_TOOL_NAMES : []),
-      ...(options.emby ? EMBY_LOOKUP_TOOL_NAMES : []),
-      ...(options.jellyfin ? JELLYFIN_LOOKUP_TOOL_NAMES : []),
-      ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
-      ...(options.serviceAPIProviders?.length ? SERVICE_API_TOOL_NAMES : []),
-      ...(options.pipeline ? allPipelineToolNames(options.pipeline) : []),
-    ],
+    // Every tool the session builds is registered once they exist (below), so the list is the tools.
+    allowedToolNames: [],
   });
   const audit = options.auditPath
     ? createAuditLog(options.auditPath, now)
@@ -908,27 +872,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   ) {
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
     const isChatOnly = effectiveBuiltinTools.length === 0;
+    const homeTools = isChatOnly
+      ? []
+      : baseTools(sessionPolicy, sessionCallerId, true, eventSessionId);
+    // The tools that ask first say so themselves; the rest of the list is the host's own tools.
     const toolsRequiringApproval = [
       ...TOOLS_REQUIRING_APPROVAL,
       ...WORKSPACE_READ_TOOLS,
-      ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
-      ...(options.musicSources?.sqmusic ? [SQMUSIC_DOWNLOAD_TOOL_NAME] : []),
-      ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
-      ...(options.serviceAPIProviders?.length
-        ? [SERVICE_API_WRITE_TOOL_NAME]
-        : []),
-      ...(options.pipeline
-        ? [
-            ...PIPELINE_WRITE_TOOL_NAMES.filter((name) =>
-              availablePipelineTools(options.pipeline!).includes(name)
-            ),
-            ...(allPipelineToolNames(options.pipeline).includes(
-              "pipeline_acquire"
-            )
-              ? ["pipeline_acquire"]
-              : []),
-          ]
-        : []),
+      ...homeTools
+        .filter((tool) => tool.requiresApproval)
+        .map((tool) => tool.name),
     ];
     // Resolved live: a session opened without an explicit id uses the active one.
     const fullAccessScopeId = () =>
@@ -961,37 +914,34 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         : {}),
       customTools: isChatOnly
         ? []
-        : wrapCustomTools(
-            baseTools(sessionPolicy, sessionCallerId, true, eventSessionId),
-            {
-              policy: sessionPolicy,
-              audit,
-              // What a call that asks for approval did is worth reading afterwards, not only hashing.
-              summarizeCall: (name) => toolsRequiringApproval.includes(name),
-              toolWatchdogMs: options.toolWatchdogMs,
-              modelResultLimit:
-                options.modelResultLimit && options.modelResultLimit > 0
-                  ? options.modelResultLimit
-                  : undefined,
-              sessionId: () =>
-                explicitSessionId ?? getActive()?.meta.thebeSessionId,
-              onEvent: (event) => {
-                const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
-                if (sid) eventLog.appendEvent(sid, event);
-              },
-              onStop: () => {
-                if (sessionStop) {
-                  void sessionStop();
-                  return;
-                }
-                const sid =
-                  eventSessionId ??
-                  explicitSessionId ??
-                  getActive()?.meta.thebeSessionId;
-                if (sid) void state.openedSessions.get(sid)?.session.abort();
-              },
-            }
-          ),
+        : wrapCustomTools(homeTools, {
+            policy: sessionPolicy,
+            audit,
+            // What a call that asks for approval did is worth reading afterwards, not only hashing.
+            summarizeCall: (name) => toolsRequiringApproval.includes(name),
+            toolWatchdogMs: options.toolWatchdogMs,
+            modelResultLimit:
+              options.modelResultLimit && options.modelResultLimit > 0
+                ? options.modelResultLimit
+                : undefined,
+            sessionId: () =>
+              explicitSessionId ?? getActive()?.meta.thebeSessionId,
+            onEvent: (event) => {
+              const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
+              if (sid) eventLog.appendEvent(sid, event);
+            },
+            onStop: () => {
+              if (sessionStop) {
+                void sessionStop();
+                return;
+              }
+              const sid =
+                eventSessionId ??
+                explicitSessionId ??
+                getActive()?.meta.thebeSessionId;
+              if (sid) void state.openedSessions.get(sid)?.session.abort();
+            },
+          }),
       builtinTools: effectiveBuiltinTools,
       systemPrompt: currentSystemPrompt(),
       enabledResources: isChatOnly ? [] : enabledResources,
@@ -1173,6 +1123,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       )
     );
   }
+
+  // The policy allows exactly the tools the host builds: no second list to keep in step with them.
+  policy.registerTools(baseTools().map((tool) => tool.name));
 
   return {
     options,
