@@ -1,6 +1,7 @@
 import { json, readJson } from "../json.ts";
 import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { parseDeviceCategories } from "../devices.ts";
+import { QuietHoursError } from "../quiet-hours.ts";
 import { handleCompatibility } from "./compat.ts";
 
 /** Health, event collection, device-registration, and legacy message routes. */
@@ -30,6 +31,38 @@ export async function handleHealthEventsCompatibility(
       publicKey: pushIdentity?.publicKey ?? null,
       relayUrl: pushIdentity?.relayUrl ?? null,
     });
+  }
+  if (path === "/v1/push/quiet-hours") {
+    const { quietHours } = context;
+    if (!quietHours) {
+      return json({ ok: false, error: "quiet hours unavailable" }, 503);
+    }
+    if (request.method === "GET") {
+      return json({ quietHours: (await quietHours.get()) ?? null });
+    }
+    if (request.method === "PUT") {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const body = await readJson(request);
+      try {
+        // `null` (or leaving it out) turns quiet hours off.
+        return json({
+          quietHours: (await quietHours.set(body.quietHours)) ?? null,
+        });
+      } catch (error) {
+        if (error instanceof QuietHoursError) {
+          return json(
+            { ok: false, error: error.message, code: "invalid_quiet_hours" },
+            400
+          );
+        }
+        throw error;
+      }
+    }
+    return json(
+      { ok: false, error: "Use GET or PUT", code: "method_not_allowed" },
+      405
+    );
   }
   if (request.method === "GET" && path === "/v1/devices") {
     if (!deviceRegistry) {

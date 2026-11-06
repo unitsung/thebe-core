@@ -38,6 +38,7 @@ export type ThebeHttpRouterOptions = {
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: ThebeHttpContext["pushIdentity"];
+  quietHours?: ThebeHttpContext["quietHours"];
   workspacePath?: string;
   /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
   mcpRateLimit?: number;

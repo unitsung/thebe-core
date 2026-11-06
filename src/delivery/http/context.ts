@@ -1,6 +1,7 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { json } from "./json.ts";
 import type { DeviceRegistry } from "./devices.ts";
+import type { QuietHoursStore } from "./quiet-hours.ts";
 import type { TokenCaller } from "./token-store.ts";
 
 /** The shared seam between HTTP dispatch and focused route modules. */
@@ -17,6 +18,8 @@ export type ThebeHttpContext = {
   deviceRegistry?: DeviceRegistry;
   /** Where devices register for push and the key Core signs events with; absent when push is off. */
   pushIdentity?: { publicKey: string; relayUrl: string };
+  /** The daily window in which Core holds its pushes. */
+  quietHours?: QuietHoursStore;
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
@@ -39,6 +42,7 @@ export function createThebeHttpContext(
     path?: string;
     deviceRegistry?: DeviceRegistry;
     pushIdentity?: { publicKey: string; relayUrl: string };
+    quietHours?: QuietHoursStore;
     workspacePath?: string;
   }
 ): ThebeHttpContext {
@@ -54,6 +58,7 @@ export function createThebeHttpContext(
     caller: options.caller,
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
+    quietHours: options.quietHours,
     workspacePath: options.workspacePath,
   };
 }
