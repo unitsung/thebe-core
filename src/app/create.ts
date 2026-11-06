@@ -46,6 +46,8 @@ export function createThebeApp(options: {
   agentStoreDir?: string;
   /** Sources Core watches for events; see `CreateThebeAgentOptions.sources`. Off unless given. */
   sources?: { containerHealth?: boolean; intervalMs?: number };
+  /** Eval's hourly limit on questions to the model; see `CreateThebeAgentOptions.evalMaxPerHour`. */
+  evalMaxPerHour?: number;
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
   now?: () => Date;
@@ -130,6 +132,7 @@ export function createThebeApp(options: {
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
     sources: options.sources,
+    evalMaxPerHour: options.evalMaxPerHour,
     now: options.now,
     callerId: options.callerId,
     model: options.model,

@@ -13,7 +13,7 @@ export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
   "container.appeared",
 ]);
 
-export const DEFAULT_ASSESSMENTS_PER_HOUR = 20;
+export const DEFAULT_ASSESSMENTS_PER_HOUR = 60;
 /** Triggers older than this are not weighed after a restart: the moment to act has passed. */
 export const DEFAULT_BACKLOG_AGE_MS = 24 * 60 * 60 * 1000;
 
@@ -36,11 +36,14 @@ export function createEvalService(options: {
   /** Asks the model; returns its raw reply. Rejects on a timeout or provider failure. */
   assess: (prompt: string, model: Policy["model"]) => Promise<string>;
   now: () => Date;
+  /** Questions to the model per hour before the rest are recorded as `assessment_limit`. 0 is no limit. */
   maxPerHour?: number;
   backlogAgeMs?: number;
   onError?: (error: unknown) => void;
 }): EvalService {
-  const maxPerHour = options.maxPerHour ?? DEFAULT_ASSESSMENTS_PER_HOUR;
+  // A limit of 0 (or less) turns the breaker off; unset keeps the default.
+  const configured = options.maxPerHour ?? DEFAULT_ASSESSMENTS_PER_HOUR;
+  const maxPerHour = configured > 0 ? configured : Number.POSITIVE_INFINITY;
   const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
   const pending = new Map<string, Trigger[]>();
   const assessedAt: number[] = [];

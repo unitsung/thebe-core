@@ -322,6 +322,25 @@ describe("eval service", () => {
     expect(b.decidedAt).not.toBe(a.decidedAt);
   });
 
+  it("asks the model every time when the limit is 0", async () => {
+    const s = await setup(
+      () => '{"decision":"ignore","matched":[],"reason":"x"}',
+      { maxPerHour: 0 }
+    );
+    for (const n of [1, 2, 3, 4, 5]) {
+      s.service.enqueue([
+        trigger(n, { threads: [`resource:container:c${n}`] }),
+      ]);
+      await s.service.idle();
+    }
+    expect(s.prompts).toHaveLength(5);
+    expect(
+      (await s.decisions.list()).some(
+        (d) => d.unavailableReason === "assessment_limit"
+      )
+    ).toBe(false);
+  });
+
   it("caps assessments per hour and records the rest as unavailable, then recovers after the hour", async () => {
     const s = await setup(
       () => '{"decision":"ignore","matched":[],"reason":"x"}',

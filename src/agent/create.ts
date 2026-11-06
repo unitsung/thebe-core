@@ -87,6 +87,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     policy: policyStore,
     decisions: decisionStore,
     sources: options.sources?.containerHealth ? "container-health" : "",
+    maxPerHour: options.evalMaxPerHour,
     now: ctx.now,
     onError: () => {
       // A failed Eval leaves no Decision; the next start weighs it again.

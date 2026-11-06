@@ -201,6 +201,7 @@ export async function bootstrapThebe(
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
     sources: parseSources(process.env),
+    evalMaxPerHour: parseEvalMaxPerHour(process.env),
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
@@ -348,4 +349,17 @@ export function parseSources(
       ? { intervalMs: interval }
       : {}),
   };
+}
+
+/**
+ * `THEBE_EVAL_MAX_PER_HOUR`: how many times an hour Eval may ask the model. Unset or not a whole number
+ * of at least 0 keeps Core's default (60); `0` turns the limit off.
+ */
+export function parseEvalMaxPerHour(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_EVAL_MAX_PER_HOUR?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
