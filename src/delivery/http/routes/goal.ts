@@ -46,24 +46,31 @@ export async function handleGoalRoutes(
     if (!parsed.sessionId) {
       return json({ ok: false, error: "goal not found" }, 404);
     }
+    let sessionId = parsed.sessionId;
+    if (/^[a-f0-9]{32}$/.test(sessionId)) {
+      const ticket = await agent.getTicket(sessionId);
+      if (ticket?.links.legacyGoalId) {
+        sessionId = ticket.links.legacyGoalId;
+      }
+    }
     if (parsed.kind === "item") {
-      if (request.method === "GET") return getGoal(agent, parsed.sessionId);
+      if (request.method === "GET") return getGoal(agent, sessionId);
       if (request.method === "POST") {
         const blocked = quiescedWrite(context);
         if (blocked) return blocked;
-        return createGoal(request, agent, parsed.sessionId);
+        return createGoal(request, agent, sessionId);
       }
       return undefined;
     }
     if (parsed.kind === "log") {
       if (request.method !== "GET") return undefined;
-      return goalLog(context, agent, parsed.sessionId);
+      return goalLog(context, agent, sessionId);
     }
     if (parsed.kind === "answer") {
       if (request.method !== "POST") return undefined;
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
-      return answerGoal(request, agent, parsed.sessionId);
+      return answerGoal(request, agent, sessionId);
     }
     if (
       parsed.kind === "pause" ||
@@ -75,7 +82,7 @@ export async function handleGoalRoutes(
         const blocked = quiescedWrite(context);
         if (blocked) return blocked;
       }
-      return controlGoal(agent, parsed.sessionId, parsed.kind);
+      return controlGoal(agent, sessionId, parsed.kind);
     }
     return undefined;
   } catch (error) {
@@ -100,6 +107,18 @@ async function createGoal(
     );
   }
   const criteria = asStringList(body.criteria);
+  const rawThreads = (body as { threads?: unknown }).threads;
+  const threads = parseThreads(rawThreads);
+  if (rawThreads !== undefined && threads === undefined) {
+    return json(
+      {
+        ok: false,
+        error: "threads must be an array of strings or {kind, id} objects",
+        code: "invalid_body",
+      },
+      400
+    );
+  }
   const maxIterations =
     typeof body.maxIterations === "number" ? body.maxIterations : undefined;
   const model =
@@ -160,7 +179,7 @@ async function createGoal(
     ...(body.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
   });
   // The person asked for this task, so it is authorised directly. A retry maps to the same Ticket.
-  await agent.recordGoalTicket(run);
+  await agent.recordGoalTicket(run, threads ? { threads } : undefined);
   return json(await withTicket(agent, run), existingSessionId ? 200 : 201);
 }
 
@@ -368,6 +387,34 @@ function asStringList(value: unknown): string[] | undefined {
     (item): item is string => typeof item === "string" && Boolean(item.trim())
   );
   return items.length > 0 ? items : undefined;
+}
+
+function parseThreads(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const threads: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      const trimmed = item.trim();
+      if (trimmed.startsWith("resource:")) {
+        threads.push(trimmed);
+      } else if (trimmed.includes(":")) {
+        threads.push(`resource:${trimmed}`);
+      } else {
+        threads.push(`resource:container:${trimmed}`);
+      }
+    } else if (item && typeof item === "object") {
+      const { kind, id } = item as Record<string, unknown>;
+      if (typeof kind === "string" && typeof id === "string" && kind && id) {
+        threads.push(`resource:${kind}:${id}`);
+      } else {
+        return undefined;
+      }
+    } else {
+      return undefined;
+    }
+  }
+  return [...new Set(threads)];
 }
 
 function mapGoalError(error: unknown): Response {

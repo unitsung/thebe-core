@@ -8,9 +8,11 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { directEvalId, ticketIdFor } from "./ids.ts";
-import type { Ticket } from "./types.ts";
+import type { Ticket, TicketInput } from "./types.ts";
+import type { Trigger } from "../sources/types.ts";
 
 export const DEFAULT_TICKET_RETENTION = 500;
+export const MAX_INPUTS_PER_TICKET = 200;
 
 const ID_RE = /^[a-f0-9]{32}$/;
 
@@ -32,6 +34,7 @@ export type TicketStore = {
     requester: string;
     goalId?: string;
     sessionIds?: string[];
+    subscriptions?: string[];
   }): Promise<Ticket>;
   /**
    * Records the Ticket for work Eval took on under the person's policy. Its id derives from the Eval, so a
@@ -52,6 +55,15 @@ export type TicketStore = {
     /** The Goal that carries it out. Its session id: the Ticket's Mandate is looked up from it. */
     goalId?: string;
   }): Promise<Ticket>;
+  /**
+   * Fan-out: attaches a Trigger to the newest live Ticket subscribed to any of its threads.
+   * Returns the ticket id if attached, or an empty array if no live subscriber was found.
+   */
+  attachTrigger(options: {
+    trigger: Trigger;
+    isLive: (ticket: Ticket) => Promise<boolean> | boolean;
+    attachedAt?: string;
+  }): Promise<string[]>;
 };
 
 export function createTicketStore(options: {
@@ -61,6 +73,13 @@ export function createTicketStore(options: {
   const maxItems = options.maxItems ?? DEFAULT_TICKET_RETENTION;
   const memory = new Map<string, Ticket>();
   let loaded = !options.dir;
+  let chain: Promise<unknown> = Promise.resolve();
+
+  function serial<T>(task: () => Promise<T>): Promise<T> {
+    const run = chain.then(task, task);
+    chain = run.catch(() => undefined);
+    return run;
+  }
 
   async function ensureLoaded(): Promise<void> {
     if (loaded) return;
@@ -79,7 +98,13 @@ export function createTicketStore(options: {
         const parsed = JSON.parse(
           await readFile(join(options.dir, name), "utf8")
         ) as Ticket;
-        if (parsed && ID_RE.test(parsed.id)) memory.set(parsed.id, parsed);
+        if (parsed && ID_RE.test(parsed.id)) {
+          parsed.inputs = Array.isArray(parsed.inputs) ? parsed.inputs : [];
+          parsed.subscriptions = Array.isArray(parsed.subscriptions)
+            ? parsed.subscriptions
+            : [];
+          memory.set(parsed.id, parsed);
+        }
       } catch {
         // A damaged file is skipped, not fatal.
       }
@@ -122,67 +147,125 @@ export function createTicketStore(options: {
       return newestFirst([...memory.values()]);
     },
     async recordDirect(input) {
-      await ensureLoaded();
-      const evalId = directEvalId({
-        thread: input.thread,
-        triggerId: input.triggerId,
-        kind: input.kind,
-        at: input.at,
+      return serial(async () => {
+        await ensureLoaded();
+        const evalId = directEvalId({
+          thread: input.thread,
+          triggerId: input.triggerId,
+          kind: input.kind,
+          at: input.at,
+        });
+        const id = ticketIdFor(evalId);
+        const existing = memory.get(id);
+        if (existing) return existing;
+        const ticket: Ticket = {
+          id,
+          title: input.title,
+          mandate: {
+            strength: "explicit",
+            decidedBy: "direct",
+            evalId,
+            requester: input.requester,
+          },
+          subscriptions: [
+            ...new Set([input.thread, ...(input.subscriptions ?? [])]),
+          ],
+          inputs: [],
+          links: {
+            ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
+            sessionIds: input.sessionIds ?? [],
+          },
+          createdAt: input.at,
+        };
+        memory.set(id, ticket);
+        await persist(ticket);
+        await prune();
+        return ticket;
       });
-      const id = ticketIdFor(evalId);
-      const existing = memory.get(id);
-      if (existing) return existing;
-      const ticket: Ticket = {
-        id,
-        title: input.title,
-        mandate: {
-          strength: "explicit",
-          decidedBy: "direct",
-          evalId,
-          requester: input.requester,
-        },
-        subscriptions: [input.thread],
-        links: {
-          ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
-          sessionIds: input.sessionIds ?? [],
-        },
-        createdAt: input.at,
-      };
-      memory.set(id, ticket);
-      await persist(ticket);
-      await prune();
-      return ticket;
     },
     async recordAccepted(input) {
-      await ensureLoaded();
-      const id = ticketIdFor(input.evalId);
-      const existing = memory.get(id);
-      if (existing) return existing;
-      const ticket: Ticket = {
-        id,
-        title: input.title,
-        mandate: {
-          strength: "inferred",
-          decidedBy: "eval",
-          evalId: input.evalId,
-          requester: input.requester,
-          policyVersion: input.policyVersion,
-          matchedRuleIds: input.matchedRuleIds,
-          scope: input.scope,
-          ...(input.intent ? { intent: input.intent } : {}),
-        },
-        subscriptions: [input.thread],
-        links: {
-          decisionId: input.decisionId,
-          ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
-          sessionIds: input.goalId ? [input.goalId] : [],
-        },
-        createdAt: input.at,
-      };
-      memory.set(id, ticket);
-      await persist(ticket);
-      await prune();
-      return ticket;
+      return serial(async () => {
+        await ensureLoaded();
+        const id = ticketIdFor(input.evalId);
+        const existing = memory.get(id);
+        if (existing) return existing;
+        const ticket: Ticket = {
+          id,
+          title: input.title,
+          mandate: {
+            strength: "inferred",
+            decidedBy: "eval",
+            evalId: input.evalId,
+            requester: input.requester,
+            policyVersion: input.policyVersion,
+            matchedRuleIds: input.matchedRuleIds,
+            scope: input.scope,
+            ...(input.intent ? { intent: input.intent } : {}),
+          },
+          subscriptions: [input.thread],
+          inputs: [],
+          links: {
+            decisionId: input.decisionId,
+            ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
+            sessionIds: input.goalId ? [input.goalId] : [],
+          },
+          createdAt: input.at,
+        };
+        memory.set(id, ticket);
+        await persist(ticket);
+        await prune();
+        return ticket;
+      });
+    },
+    async attachTrigger(options) {
+      return serial(async () => {
+        await ensureLoaded();
+        for (const ticket of memory.values()) {
+          if (
+            ticket.inputs.some((item) => item.triggerId === options.trigger.id)
+          ) {
+            return [ticket.id];
+          }
+        }
+        const matchingTickets = [...memory.values()].filter((ticket) =>
+          ticket.subscriptions.some((sub) =>
+            options.trigger.threads.some(
+              (thread) => normalizeThread(sub) === normalizeThread(thread)
+            )
+          )
+        );
+        if (matchingTickets.length === 0) return [];
+        const liveMatches: Ticket[] = [];
+        for (const ticket of matchingTickets) {
+          if (await options.isLive(ticket)) {
+            liveMatches.push(ticket);
+          }
+        }
+        if (liveMatches.length === 0) return [];
+        const target = newestFirst(liveMatches)[0]!;
+        const matchingThread =
+          target.subscriptions.find((sub) =>
+            options.trigger.threads.some(
+              (thread) => normalizeThread(sub) === normalizeThread(thread)
+            )
+          ) ?? options.trigger.threads[0]!;
+        const input: TicketInput = {
+          triggerId: options.trigger.id,
+          seq: target.inputs.length + 1,
+          source: options.trigger.source,
+          kind: options.trigger.kind,
+          thread: matchingThread,
+          at: options.trigger.at,
+          attachedAt: options.attachedAt ?? new Date().toISOString(),
+          ...(options.trigger.payload
+            ? { payload: options.trigger.payload }
+            : {}),
+        };
+        target.inputs.push(input);
+        if (target.inputs.length > MAX_INPUTS_PER_TICKET) target.inputs.shift();
+        await persist(target);
+        return [target.id];
+      });
     },
   };
 }
@@ -191,4 +274,10 @@ function newestFirst(tickets: Ticket[]): Ticket[] {
   return tickets.sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
   );
+}
+
+function normalizeThread(thread: string): string {
+  if (thread.startsWith("resource:")) return thread;
+  if (thread.includes(":")) return `resource:${thread}`;
+  return thread;
 }

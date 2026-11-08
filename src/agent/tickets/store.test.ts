@@ -16,6 +16,15 @@ const request = (n: number) => ({
   sessionIds: [`s${n}`],
 });
 
+const trigger = (n: number, thread = "resource:container:emby") => ({
+  id: key("trigger", "container-health", String(n)),
+  source: "container-health",
+  kind: "container.went_down",
+  at: `2026-11-06T10:05:0${n}.000Z`,
+  threads: [thread],
+  payload: { from: "running", to: "exited" },
+});
+
 describe("key", () => {
   it("is stable, 32 hex characters, and does not confuse where the parts split", () => {
     expect(key("a", "bc")).toBe(key("a", "bc"));
@@ -115,5 +124,97 @@ describe("a Ticket for work Eval took on", () => {
     // The first record stands.
     expect(again.title).toBe(first.title);
     expect(await createTicketStore({ dir }).list()).toHaveLength(1);
+  });
+});
+
+describe("ticket fan-out and inputs", () => {
+  it("attaches a trigger to an active subscribed ticket", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const attached = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => true,
+    });
+    expect(attached).toEqual([ticket.id]);
+    const updated = await store.get(ticket.id);
+    expect(updated?.inputs).toHaveLength(1);
+    expect(updated?.inputs[0]).toMatchObject({
+      triggerId: trigger(1).id,
+      seq: 1,
+      source: "container-health",
+      kind: "container.went_down",
+      thread: "resource:container:emby",
+    });
+  });
+
+  it("ignores ended tickets and attaches nothing when no live ticket is subscribed", async () => {
+    const store = createTicketStore({});
+    await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const attached = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => false,
+    });
+    expect(attached).toEqual([]);
+  });
+
+  it("gives the event to the newest live ticket when multiple match", async () => {
+    const store = createTicketStore({});
+    const first = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const second = await store.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+    const attached = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => true,
+    });
+    expect(attached).toEqual([second.id]);
+    expect((await store.get(first.id))?.inputs).toHaveLength(0);
+    expect((await store.get(second.id))?.inputs).toHaveLength(1);
+  });
+
+  it("is idempotent when the same trigger is attached twice", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const first = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => true,
+    });
+    const second = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => true,
+    });
+    expect(first).toEqual([ticket.id]);
+    expect(second).toEqual([ticket.id]);
+    expect((await store.get(ticket.id))?.inputs).toHaveLength(1);
+  });
+
+  it("persists inputs across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-inputs-"));
+    const firstStore = createTicketStore({ dir });
+    const ticket = await firstStore.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    await firstStore.attachTrigger({
+      trigger: trigger(1),
+      isLive: () => true,
+    });
+    const secondStore = createTicketStore({ dir });
+    const loaded = await secondStore.get(ticket.id);
+    expect(loaded?.inputs).toHaveLength(1);
+    expect(loaded?.inputs[0]?.triggerId).toBe(trigger(1).id);
   });
 });

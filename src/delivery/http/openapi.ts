@@ -2656,6 +2656,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "After the independent review passes, pause with a review `attention` and wait for the person to accept or send it back.",
             },
+            threads: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Thread keys this task concerns, e.g. resource:container:emby. While the task is open, later triggers on these threads attach as inputs without a new assessment.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2935,6 +2941,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               },
             },
             subscriptions: { type: "array", items: { type: "string" } },
+            inputs: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketInput" },
+              description:
+                "Later events on subscribed threads attached to the ticket without a new assessment.",
+            },
             links: {
               type: "object",
               required: ["sessionIds"],
@@ -2948,6 +2960,30 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               },
             },
             createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        TicketInput: {
+          type: "object",
+          description:
+            "One later event on a subscribed thread attached to the ticket without a new assessment.",
+          required: [
+            "triggerId",
+            "seq",
+            "source",
+            "kind",
+            "thread",
+            "at",
+            "attachedAt",
+          ],
+          properties: {
+            triggerId: { type: "string" },
+            seq: { type: "integer" },
+            source: { type: "string" },
+            kind: { type: "string" },
+            thread: { type: "string" },
+            at: { type: "string", format: "date-time" },
+            attachedAt: { type: "string", format: "date-time" },
+            payload: { type: "object" },
           },
         },
         ProductGoalList: {
