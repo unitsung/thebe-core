@@ -4,9 +4,11 @@ import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
 import { key } from "./tickets/ids.ts";
 import { createTicketStore } from "./tickets/store.ts";
+import type { Ticket } from "./tickets/types.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
 import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
+import type { Trigger } from "./sources/types.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
 import type { Policy } from "./eval/types.ts";
@@ -122,8 +124,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       const since = ctx.now().getTime() - DEFAULT_BACKLOG_AGE_MS;
       const rows = (await ticketStore.list()).filter(
         (ticket) =>
-          ticket.subscriptions.includes(thread) &&
-          Date.parse(ticket.createdAt) >= since
+          ticket.subscriptions.some(
+            (s) =>
+              s === thread ||
+              (s.startsWith("resource:") ? s : `resource:${s}`) ===
+                (thread.startsWith("resource:") ? thread : `resource:${thread}`)
+          ) && Date.parse(ticket.createdAt) >= since
       );
       return rows.map((ticket) => ({
         title: ticket.title,
@@ -222,6 +228,39 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       }
     },
   });
+
+  async function isTicketLive(ticket: Ticket): Promise<boolean> {
+    if (!ticket.links.legacyGoalId) return false;
+    const goal =
+      goals.getGoal(ticket.links.legacyGoalId) ??
+      (await goals.listGoals()).find(
+        (g) => g.thebeSessionId === ticket.links.legacyGoalId
+      );
+    if (!goal) return false;
+    return (
+      goal.status === "running" ||
+      goal.status === "pausing" ||
+      goal.status === "paused"
+    );
+  }
+
+  async function dispatchTriggers(triggers: readonly Trigger[]): Promise<void> {
+    const unattached: Trigger[] = [];
+    for (const trigger of triggers) {
+      const attachedTo = await ticketStore.attachTrigger({
+        trigger,
+        isLive: isTicketLive,
+        attachedAt: ctx.now().toISOString(),
+      });
+      if (attachedTo.length === 0) {
+        unattached.push(trigger);
+      }
+    }
+    if (unattached.length > 0) {
+      evalService.enqueue(unattached);
+    }
+  }
+
   const sourceRunner = createSourceRunner({
     sources: options.sources?.containerHealth
       ? [
@@ -233,14 +272,27 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : [],
     store: triggerStore,
     intervalMs: options.sources?.intervalMs,
-    onTriggers: (triggers) => evalService.enqueue(triggers),
+    onTriggers: (triggers) => void dispatchTriggers(triggers),
     onError: () => {
       // A Source that cannot be read this time (for example Docker is down) is tried again next tick.
     },
   });
   // Triggers recorded before a restart that no Decision covers are weighed now, within an age bound.
   if (options.sources?.containerHealth) {
-    void triggerStore.list().then((rows) => evalService.recover(rows));
+    void triggerStore.list().then(async (rows) => {
+      const unattached: Trigger[] = [];
+      for (const trigger of rows) {
+        const attachedTo = await ticketStore.attachTrigger({
+          trigger,
+          isLive: isTicketLive,
+          attachedAt: ctx.now().toISOString(),
+        });
+        if (attachedTo.length === 0) {
+          unattached.push(trigger);
+        }
+      }
+      evalService.recover(unattached);
+    });
   }
   sourceRunner.start();
   return {
@@ -278,7 +330,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async getTicketForGoal(goalId) {
       return ticketStore.getByGoal(goalId);
     },
-    async recordGoalTicket(run) {
+    async recordGoalTicket(run, goalOptions) {
       // The person asked for this task: a direct Decision, so Eval does not weigh it.
       return ticketStore.recordDirect({
         thread: `chat:${run.thebeSessionId}`,
@@ -289,6 +341,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         requester: "chat",
         goalId: run.thebeSessionId,
         sessionIds: [run.thebeSessionId],
+        subscriptions: goalOptions?.threads,
+      });
+    },
+    async attachTrigger(trigger) {
+      return ticketStore.attachTrigger({
+        trigger,
+        isLive: isTicketLive,
+        attachedAt: ctx.now().toISOString(),
       });
     },
     listSchedules: schedules.listSchedules,

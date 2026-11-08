@@ -27,6 +27,20 @@ export type TicketMandate = {
   intent?: string;
 };
 
+/**
+ * One later event on a subscribed thread handed to the ticket as an input without a new evaluation.
+ */
+export type TicketInput = {
+  triggerId: string;
+  seq: number;
+  source: string;
+  kind: string;
+  thread: string;
+  at: string;
+  attachedAt: string;
+  payload?: Record<string, unknown>;
+};
+
 export type TicketLinks = {
   /** The Goal that carries the work out. Its id is the session id. */
   legacyGoalId?: string;
@@ -41,6 +55,8 @@ export type Ticket = {
   mandate: TicketMandate;
   /** Thread keys this Ticket follows, e.g. `chat:<sessionId>` or `resource:container:emby`. */
   subscriptions: string[];
+  /** Events on subscribed threads attached while the Ticket is open. */
+  inputs: TicketInput[];
   links: TicketLinks;
   createdAt: string;
 };

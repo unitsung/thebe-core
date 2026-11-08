@@ -12,6 +12,11 @@ _Avoid_: dotted ids (`container_list`), `service_api_*`, one name for clients an
 This repository and the Agent it is. Package and repo name are `thebe-core`. It replaces `core_v0`, an earlier repository that has been deleted; nothing here depends on it, and it is not a version of this one.
 _Avoid_: thebe-agent-core, Thebe Agent Core, core_v0 (the deleted predecessor, not a release line), a dashboard proxy with no Agent
 
+**Ticket**:
+An authorised unit of work in `src/agent/tickets/`. Created by a decision: a person asking (`direct`, e.g. `POST /v1/goals`), or Eval taking on an event under the person's policy (`eval`). Its id is derived from its content, so the same request or event produces the same Ticket. A Ticket wraps existing objects (a Goal keeps its own id, status, report, and attention); its stage is derived on every read and not stored.
+A Ticket subscribes to resource threads (`subscriptions`). While the Ticket is open, subsequent events on those threads are fanned out to it directly as `inputs` (`seq`, `source`, `kind`, `thread`, `at`, `attachedAt`), skipping Eval and model prompts entirely (0 tokens). An ended Ticket stops receiving inputs.
+_Avoid_: treating Ticket as a duplicate of Goal, storing derived status or stage on Ticket, or running Eval for events on threads with an open Ticket
+
 **AgentRuntime**:
 Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. It is a structural seam, not a claim that a second runtime is integrated.
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code

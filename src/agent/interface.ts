@@ -494,7 +494,12 @@ export interface ThebeAgent {
   /** Events the enabled Sources observed, newest first. Recorded for audit; nothing acts on them yet. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   /** Records the Ticket for a Goal the person asked for. Idempotent. */
-  recordGoalTicket(run: GoalRun): Promise<Ticket>;
+  recordGoalTicket(
+    run: GoalRun,
+    options?: { threads?: string[] }
+  ): Promise<Ticket>;
+  /** Attaches a trigger to an open subscribed ticket as an input. Returns ticket ids if attached. */
+  attachTrigger?(trigger: Trigger): Promise<string[]>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;

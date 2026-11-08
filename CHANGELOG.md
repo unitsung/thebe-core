@@ -20,6 +20,11 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- Subscriptions and fan-out (Phase 2, fourth slice). A Ticket subscribes to the resource threads it concerns (`subscriptions`, such as `resource:container:emby`). Later events on a subscribed thread reach that open ticket as inputs directly, with no new assessment and no model call:
+  - `POST /v1/goals` accepts `threads` (`["resource:container:emby"]` or `[{kind: "container", id: "emby"}]`), which are recorded on the Ticket's `subscriptions`.
+  - When an event arrives from a Source, Core checks if any open Ticket is subscribed to its threads. If so, the event is attached as an input (`seq`, `source`, `kind`, `thread`, `at`, `attachedAt`) to the newest open Ticket, and skips Eval entirely (0 tokens and 0 model calls).
+  - An ended ticket stops receiving inputs; events after completion go through the Gate and Assessment as usual.
+  - `inputs` are persisted on the Ticket, survive a Core restart, and are returned on `GET /v1/tickets` and `GET /v1/tickets/{id}`.
 - `auto` (Phase 2, third slice), as the plan and the dsh prototype have it: the rules are the authority, a positive assessment is taken on as a Ticket, and an executor carries it out. `acceptMode: "auto"` is a mode the person picks in the policy; the default is still `observe`, so nothing acts until they choose it. There is no list of containers: the person's rules decide.
   - The assessment now also says in one sentence what the work is (`intent`), and is shown the work already taken on for the thread, so it does not start the same work twice.
   - Taking it on makes a Ticket (`strength: "inferred"`, `decidedBy: "eval"`). Its Mandate records the policy version, the matched rules, the `intent`, and a `scope` of `service:write` (for example `docker:write`) inferred from what the event is about, never from what the model said: the services whose connection lists the event's resource kind in `resourceKinds` (`THEBE_SERVICE_APIS`), or the kind's own name when none does. Its links carry the `decisionId` and the Goal (`legacyGoalId`). The Ticket id derives from the Eval, so a Decision made again after a crash gives the same Ticket and the same Goal.
