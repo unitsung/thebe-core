@@ -1317,6 +1317,20 @@ const operations: Operation[] = [
     responseSchema: "OAuthPairingCode",
   },
   {
+    method: "get",
+    path: "/v1/oauth/connections",
+    summary: "List authorised MCP OAuth connector grants",
+    tag: "mcp",
+    responseSchema: "OAuthConnectionList",
+  },
+  {
+    method: "delete",
+    path: "/v1/oauth/connections/{grantId}",
+    summary: "Revoke an MCP OAuth connector grant",
+    tag: "mcp",
+    parameters: [idParameter("grantId")],
+  },
+  {
     method: "post",
     path: "/mcp",
     summary: "MCP JSON-RPC endpoint",
@@ -1680,6 +1694,39 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             ok: { type: "boolean" },
             code: { type: "string" },
             expiresAt: { type: "string", format: "date-time" },
+          },
+        },
+        OAuthConnection: {
+          type: "object",
+          required: [
+            "id",
+            "clientId",
+            "clientName",
+            "scopes",
+            "createdAt",
+            "refreshToken",
+          ],
+          properties: {
+            id: { type: "string" },
+            clientId: { type: "string" },
+            clientName: { type: "string" },
+            scopes: {
+              type: "array",
+              items: { type: "string" },
+            },
+            createdAt: { type: "string", format: "date-time" },
+            expiresAt: { type: "string", format: "date-time" },
+            refreshToken: { type: "boolean" },
+          },
+        },
+        OAuthConnectionList: {
+          type: "object",
+          required: ["connections"],
+          properties: {
+            connections: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OAuthConnection" },
+            },
           },
         },
         AuditRecord: {

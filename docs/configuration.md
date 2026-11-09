@@ -235,6 +235,21 @@ curl -fsS -X POST \
 `/mcp` scope 的 token 不能调用 pairing API。本地 TUI 也可以运行 `/pair`
 （别名 `/oauth`、`/connector`）直接生成一次性码，并显示 issuer、resource 和过期时间。
 
+App 的完整权限 token 可以在主 API 端口查看和吊销 connector grant：
+
+```bash
+curl -fsS -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections
+
+curl -fsS -X DELETE -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections/GRANT_ID
+```
+
+列表包含每个 grant 的 client、scope、创建时间、可选过期时间，以及是否持有
+refresh token。吊销会立即使相关 access token、refresh token 和尚未兑换的
+authorization code 失效，connector 必须重新走授权流程。只有 `/mcp` scope 的
+token 调用这两个路由都会得到 `403 token_scope`；公网 MCP 网关不暴露它们。
+
 授权服务器使用 Authorization Code + PKCE、精确 redirect URI 匹配、绑定
 `/mcp` 的 Resource Indicators，以及 PS256 JWT access token。access token
 有效 15 分钟；带 `offline_access` 和 `prompt=consent` 时签发 30 天轮换的

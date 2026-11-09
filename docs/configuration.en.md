@@ -194,6 +194,24 @@ Enter `code` in the browser before `expiresAt`. The code works once. A scoped
 (aliases `/oauth` and `/connector`) to issue a one-time code and show its
 issuer, resource, and expiry.
 
+The full-access App token can inspect and revoke connector grants on the main
+API listener:
+
+```bash
+curl -fsS -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections
+
+curl -fsS -X DELETE -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections/GRANT_ID
+```
+
+Listing returns each grant's client, scopes, creation time, optional expiry, and
+whether it has a refresh token. Revocation immediately invalidates its access
+tokens, refresh tokens, and unredeemed authorization codes; the connector must
+complete the authorization flow again. Scoped `/mcp` tokens get
+`403 token_scope` on both routes, and the internet-facing MCP gateway does not
+expose them.
+
 The authorization server uses Authorization Code + PKCE, exact redirect URI
 matching, Resource Indicators bound to `/mcp`, and PS256 JWT access tokens.
 Access tokens last 15 minutes. A request with `offline_access` and

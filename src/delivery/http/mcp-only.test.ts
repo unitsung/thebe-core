@@ -24,6 +24,8 @@ const oauth: OAuthHttpIntegration = {
     code: "ABCDE-23456",
     expiresAt: "2026-11-09T10:05:00.000Z",
   }),
+  listConnections: async () => [],
+  revokeConnection: async () => false,
   resource: "https://home.example/mcp",
 };
 const oauthGateway = createMcpOnlyHandler(
@@ -54,6 +56,8 @@ describe("the /mcp-only gateway handler", () => {
       "/v1/policy",
       "/v1/decisions",
       "/v1/push/quiet-hours",
+      "/v1/oauth/connections",
+      "/v1/oauth/connections/grant-1",
       "/v1/session",
       "/openapi.json",
       "/docs",

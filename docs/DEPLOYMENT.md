@@ -403,6 +403,20 @@ refresh token at `/oauth/revoke`; revocation also invalidates the related access
 The token endpoint is rate-limited, and the pairing interaction limits repeated attempts by request and by
 remote address.
 
+The App can inspect and revoke every connector grant from the main API listener with its full-access token:
+
+```bash
+curl -fsS -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections
+curl -fsS -X DELETE -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/connections/GRANT_ID
+```
+
+The list reports the client name, scopes, timestamps, and whether a refresh token exists. Revocation removes
+the grant and invalidates its access tokens, refresh tokens, and unredeemed authorization codes immediately.
+That connector must authorize again. These management routes require the full-access token, refuse a scoped
+`/mcp` token with `403 token_scope`, and remain unavailable through the internet-facing MCP port.
+
 Core stores signing keys, provider state, and pairing-code hashes in `oauth-keys.json`, `oauth-state.json`,
 and `oauth-pairing.json` under the config directory (modes `0600`). The key file is bound to the issuer.
 Changing `THEBE_OAUTH_ISSUER` against an existing key file makes startup fail; choose the final issuer before
