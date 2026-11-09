@@ -95,7 +95,7 @@ type DelegationOrigin = {
   requester: string;
   requestIdNamespace: string;
   ticketKind: string;
-  labelNamespace: "mcp" | "http";
+  labelNamespace: "mcp" | "http" | "mainSession";
 };
 
 const HTTP_DELEGATION_ORIGIN: DelegationOrigin = {
@@ -104,6 +104,15 @@ const HTTP_DELEGATION_ORIGIN: DelegationOrigin = {
   ticketKind: "http-delegate",
   labelNamespace: "http",
 };
+
+const MAIN_SESSION_DELEGATION_ORIGIN: DelegationOrigin = {
+  requester: "chat",
+  requestIdNamespace: "main-session-ticket-delegate",
+  ticketKind: "main-session-delegate",
+  labelNamespace: "mainSession",
+};
+
+export type TicketInvocationSource = "mcp" | "main-session";
 
 export function createTicketControlApi(options: {
   store: TicketStore;
@@ -499,7 +508,8 @@ export function createTicketControlApi(options: {
   async function invoke(
     name: TicketToolName,
     input: Record<string, unknown>,
-    caller: McpCaller
+    caller: McpCaller,
+    source: TicketInvocationSource = "mcp"
   ): Promise<unknown> {
     switch (name) {
       case TICKET_LIST_TOOL_NAME:
@@ -517,7 +527,9 @@ export function createTicketControlApi(options: {
         return ticket;
       }
       case TICKET_DELEGATE_TOOL_NAME:
-        return delegate(input, caller);
+        return source === "main-session"
+          ? delegateFrom(input, MAIN_SESSION_DELEGATION_ORIGIN)
+          : delegate(input, caller);
       case TICKET_REPLY_TOOL_NAME:
         return reply(input);
       case TICKET_CONTROL_TOOL_NAME: {

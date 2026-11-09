@@ -315,6 +315,10 @@ approval flow. Recalled Session
 text, Ticket text, reports, events, and tool output remain untrusted data and
 cannot authorize a wider action. `POST /v1/main-session/interrupt` interrupts
 an initialized Session and returns `404` rather than creating one.
+`ticket_delegate` creates the same direct Ticket and Goal as a person-facing
+request and records its requester as `chat`; its idempotency namespace is
+separate from raw `/mcp`, so a main-Session request is never attributed to an
+external MCP caller.
 
 `GET /v1/main-session` and the existing `/v1/session/{id}` inspection routes
 remain available while Core is quiesced. A main-session message or interrupt is

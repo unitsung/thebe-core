@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import type { McpRegistry } from "../../agent/extensions/mcp.ts";
 import type { EnabledResource } from "../../agent/runtime/interface.ts";
@@ -255,6 +255,66 @@ describe("main Session", () => {
     expect(prompted.body).toMatchObject({
       text: "There are no tasks.",
       tools: ["ticket_list"],
+    });
+  });
+
+  it("attributes a delegated Ticket to the person, not to an MCP caller", async () => {
+    const { app, fake, call } = open();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "ticket_delegate",
+            args: {
+              task: "Verify the backup set",
+              idempotencyKey: "main-session-backup-check",
+              observe: true,
+              maxIterations: 1,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const prompted = call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Check the backups in the background." }),
+    });
+    await vi.waitFor(() => {
+      expect(app.agent.pendingPermissionIds()).toHaveLength(1);
+    });
+    const permissionId = app.agent.pendingPermissionIds()[0]!;
+    expect(
+      (
+        await call(`/v1/permissions/${permissionId}/resolve`, {
+          method: "POST",
+          body: JSON.stringify({ response: "allow" }),
+        })
+      ).status
+    ).toBe(200);
+    expect((await prompted).status).toBe(200);
+
+    const ticket = (await app.agent.listTickets()).find(
+      (item) => item.title === "Verify the backup set"
+    );
+    expect(ticket).toMatchObject({
+      mandate: {
+        strength: "explicit",
+        decidedBy: "direct",
+        requester: "chat",
+      },
+    });
+    expect(ticket?.links.requestId).toMatch(/^[a-f0-9]{32}$/);
+    const goalId = ticket?.links.legacyGoalId;
+    expect(goalId).toBeDefined();
+    await expect(app.agent.getSession(goalId!)).resolves.toMatchObject({
+      labels: {
+        ticketRequester: "chat",
+        ticketRequestId: ticket?.links.requestId,
+        mainSessionRequester: "chat",
+        mainSessionRequestId: ticket?.links.requestId,
+      },
     });
   });
 

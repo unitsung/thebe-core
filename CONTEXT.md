@@ -85,6 +85,7 @@ _Avoid_: naming this Ask, a second agent loop, a parallel Thebe CLI suite
 
 **Main Session**:
 The one durable person-facing Session owned by a Core, with the stable id `thebe-main`. It starts lazily, resumes its runtime transcript after a restart, and is exposed by `GET /v1/main-session` and `POST /v1/main-session/messages`. It has no shell, file, or edit tools. Its read-only `session_search` tool searches or reads earlier person-facing Core Sessions without changing the active conversation; its remaining tools inspect and control Tickets (`ticket_list`, `ticket_get`, `ticket_delegate`, `ticket_reply`, `ticket_control`). The three Ticket writes use the normal session approval handler, and recalled Session text, Ticket inputs, and tool output remain untrusted data that cannot broaden a Mandate. Existing Session routes can still inspect the same conversation, but Ask Thebe and other entry points must not create a second main Session.
+Delegation through the main Session is a direct request from `chat`, with its own stable idempotency namespace; it is not attributed to an `/mcp` caller.
 _Avoid_: one main Session per client, inheriting executor tools, letting the main Session approve a worker action on behalf of the person, or duplicating Ticket state into the Session.
 
 **TUI**:
