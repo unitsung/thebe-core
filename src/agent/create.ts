@@ -2,7 +2,6 @@ import { createControlApi } from "./control/service.ts";
 import { createPromptApi } from "./conversations/service.ts";
 import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
-import { key } from "./tickets/ids.ts";
 import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
 import type { Ticket } from "./tickets/types.ts";
@@ -368,6 +367,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     sessions,
     now: ctx.now,
   });
+  void ticketControl.backfillGoals().catch(() => {
+    // The next Ticket read retries; a migration failure must not prevent Core from starting.
+  });
   const mainSession = createMainSessionApi({
     ctx,
     tickets: ticketControl,
@@ -407,12 +409,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     sourceHealth: sourceRunner.health,
     async listTickets() {
+      await ticketControl.backfillGoals();
       return ticketStore.list();
     },
     async getTicket(id) {
       return ticketStore.get(id);
     },
     async getTicketForGoal(goalId) {
+      await ticketControl.backfillGoals();
       return ticketStore.getByGoal(goalId);
     },
     async delegateTicket(input) {
@@ -423,15 +427,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async recordGoalTicket(run, goalOptions) {
       // The person asked for this task: a direct Decision, so Eval does not weigh it.
-      return ticketStore.recordDirect({
-        thread: `chat:${run.thebeSessionId}`,
-        triggerId: key("trigger", "chat", "goal-start", run.thebeSessionId),
-        kind: "goal-start",
-        at: run.createdAt,
-        title: run.goal.slice(0, 120),
+      return ticketControl.recordGoal(run, {
         requester: "chat",
-        goalId: run.thebeSessionId,
-        sessionIds: [run.thebeSessionId],
         subscriptions: goalOptions?.threads,
       });
     },

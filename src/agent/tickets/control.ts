@@ -105,6 +105,8 @@ export function createTicketControlApi(options: {
   now: () => Date;
 }) {
   const delegateFlights = new Map<string, Promise<TicketTaskView>>();
+  const backfillCutoff = options.now().getTime();
+  let backfillFlight: Promise<void> | undefined;
 
   async function goalFor(ticket: Ticket): Promise<GoalRun | undefined> {
     const id = ticket.links.legacyGoalId;
@@ -181,6 +183,47 @@ export function createTicketControlApi(options: {
     };
   }
 
+  async function recordGoal(
+    run: GoalRun,
+    input: { requester: string; subscriptions?: string[] }
+  ): Promise<Ticket> {
+    const existing = await options.store.getByGoal(run.thebeSessionId);
+    if (existing) return existing;
+    return options.store.recordDirect({
+      thread: `chat:${run.thebeSessionId}`,
+      triggerId: key("trigger", "chat", "goal-start", run.thebeSessionId),
+      kind: "goal-start",
+      at: run.createdAt,
+      title: run.goal.slice(0, 120),
+      requester: input.requester,
+      goalId: run.thebeSessionId,
+      sessionIds: [run.thebeSessionId],
+      subscriptions: input.subscriptions,
+    });
+  }
+
+  /**
+   * Goals that predate Tickets get one direct migration Ticket. This runs once per Core process and is
+   * awaited by every Ticket read, so a client never sees a partially migrated catalogue.
+   */
+  function backfillGoals(): Promise<void> {
+    if (backfillFlight) return backfillFlight;
+    backfillFlight = (async () => {
+      for (const run of await options.goals.listGoals()) {
+        const createdAt = Date.parse(run.createdAt);
+        if (!Number.isFinite(createdAt) || createdAt >= backfillCutoff)
+          continue;
+        if (!(await options.store.getByGoal(run.thebeSessionId))) {
+          await recordGoal(run, { requester: "migration" });
+        }
+      }
+    })().catch((error) => {
+      backfillFlight = undefined;
+      throw error;
+    });
+    return backfillFlight;
+  }
+
   async function get(ticketId: string): Promise<TicketTaskView | undefined> {
     const ticket = await options.store.get(ticketId);
     if (!ticket) return undefined;
@@ -196,6 +239,7 @@ export function createTicketControlApi(options: {
   async function list(
     input: Record<string, unknown> = {}
   ): Promise<TicketTaskView[]> {
+    await backfillGoals();
     const requested =
       typeof input.limit === "number" && Number.isFinite(input.limit)
         ? Math.floor(input.limit)
@@ -418,6 +462,8 @@ export function createTicketControlApi(options: {
     delegate,
     delegateHttp,
     reply,
+    recordGoal,
+    backfillGoals,
   };
 }
 

@@ -35,13 +35,18 @@ const defaultTurns: FakeTurnBatch = [
   pass,
 ];
 
-function open(agentStoreDir?: string, turns: FakeTurnBatch = defaultTurns) {
+function open(
+  agentStoreDir?: string,
+  turns: FakeTurnBatch = defaultTurns,
+  now?: () => Date
+) {
   const fake = createFakeRuntime();
   fake.queueTurns(turns);
   const app = createThebeApp({
     runtime: fake.runtime,
     provider,
     agentStoreDir,
+    now,
   });
   const call = async (path: string, init?: RequestInit) => {
     const res = await app.handler.handle(
@@ -135,6 +140,55 @@ describe("tickets", () => {
       Record<string, any>
     >;
     expect(tickets.map((t) => t.id)).toEqual([created.body.ticketId]);
+  });
+
+  it("backfills existing Goals once without changing their Goal identity", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-backfill-"));
+    const first = open(
+      dir,
+      defaultTurns,
+      () => new Date("2026-11-09T00:00:00.000Z")
+    );
+    const session = await first.app.agent.createSession({
+      title: "Legacy backup task",
+    });
+    const run = await first.app.agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Verify the legacy backup",
+    });
+    await first.app.agent.waitGoal(run.thebeSessionId);
+    expect(await first.app.agent.getTicketForGoal(run.thebeSessionId)).toBe(
+      undefined
+    );
+
+    const second = open(dir, [], () => new Date("2026-11-10T00:00:00.000Z"));
+    const firstRead = (await second.call("/v1/tickets")).body.tickets as Array<
+      Record<string, any>
+    >;
+    const secondRead = (await second.call("/v1/tickets")).body.tickets as Array<
+      Record<string, any>
+    >;
+
+    expect(firstRead).toHaveLength(1);
+    expect(secondRead).toEqual(firstRead);
+    expect(firstRead[0]).toMatchObject({
+      title: "Verify the legacy backup",
+      mandate: {
+        strength: "explicit",
+        decidedBy: "direct",
+        requester: "migration",
+      },
+      links: {
+        legacyGoalId: run.thebeSessionId,
+        sessionIds: [run.thebeSessionId],
+      },
+      createdAt: run.createdAt,
+    });
+    const goal = (await second.call(`/v1/goals/${run.thebeSessionId}`)).body;
+    expect(goal).toMatchObject({
+      id: run.thebeSessionId,
+      ticketId: firstRead[0]?.id,
+    });
   });
 
   it("delegates idempotently and replies to the Ticket's attention", async () => {
