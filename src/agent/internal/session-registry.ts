@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { AgentRuntime } from "../runtime/index.ts";
+import type { AgentRuntime, RuntimeMessage } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { SessionState, OpenedSession } from "./session-state.ts";
 
@@ -94,6 +94,30 @@ export function createSessionRegistry(input: {
     return opened;
   }
 
+  /**
+   * Reads a transcript without making that Session the active conversation.
+   * Recall must not redirect subsequent unscoped work just because it inspected history.
+   */
+  async function readMessages(
+    thebeSessionId: string
+  ): Promise<RuntimeMessage[]> {
+    const cached = input.state.openedSessions.get(thebeSessionId);
+    if (cached) return cached.session.messages();
+    const meta = await input.lookup(thebeSessionId);
+    const session = await input.runtime.resumeSession(
+      meta.runtimeSessionId,
+      input.createSessionOptions(meta.thebeSessionId, meta.builtinTools)
+    );
+    try {
+      if (meta.leafId && session.navigateTo) {
+        await session.navigateTo(meta.leafId);
+      }
+      return session.messages();
+    } finally {
+      session.dispose();
+    }
+  }
+
   async function reapIdleSessions(
     idleMs = input.idleTimeoutMs
   ): Promise<number> {
@@ -137,6 +161,7 @@ export function createSessionRegistry(input: {
       requestStop = value;
     },
     openSession,
+    readMessages,
     reapIdleSessions,
   };
 }

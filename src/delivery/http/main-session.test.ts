@@ -109,6 +109,7 @@ describe("main Session", () => {
     expect(state.mcp).toBeUndefined();
     expect(state.enabledResources).toEqual([]);
     expect(state.tools.map((tool) => tool.name)).toEqual([
+      "session_search",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",
@@ -124,6 +125,48 @@ describe("main Session", () => {
       thebeSessionId: "thebe-main",
       status: "idle",
     });
+  });
+
+  it("recalls an earlier Core Session without taking over the active conversation", async () => {
+    const { app, fake, call } = open();
+    fake.queueTurns([{ kind: "text", text: "Use restic nightly." }]);
+    const previous = await call("/v1/session", {
+      method: "POST",
+      body: JSON.stringify({ title: "Backup plan" }),
+    });
+    await call(`/v1/session/${previous.body.thebeSessionId}/prompt`, {
+      method: "POST",
+      body: JSON.stringify({ text: "How should backups run?" }),
+    });
+
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "session_search",
+            args: { query: "restic backups" },
+          },
+        ],
+      },
+      { kind: "text", text: "You chose restic nightly." },
+    ]);
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "What did we decide about backups?" }),
+    });
+    expect(prompted.status).toBe(200);
+    expect(prompted.body.tools).toContain("session_search");
+
+    const info = await call("/v1/main-session");
+    const state = fake.snapshot(info.body.session.runtimeSessionId);
+    const recalled = state.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolName === "session_search"
+    );
+    expect(recalled?.text).toContain(previous.body.thebeSessionId);
+    expect(recalled?.text).toContain("Use restic nightly.");
+    expect(app.agent.lastThebeSessionId()).toBe("thebe-main");
   });
 
   it("applies model and thinking selections to the first main Session turn", async () => {
@@ -243,6 +286,7 @@ describe("main Session", () => {
     );
     expect(resumedState.builtinTools).toEqual([]);
     expect(resumedState.tools.map((tool) => tool.name)).toEqual([
+      "session_search",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",

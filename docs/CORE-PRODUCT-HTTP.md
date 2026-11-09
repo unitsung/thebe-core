@@ -305,9 +305,13 @@ first message labels it `kind: main` and `thebe.main: true`; later messages and
 Core recreation keep the same identity and runtime transcript.
 
 The main Session has no shell, file, or edit tools and does not run a Goal
-directly. It receives `ticket_list`, `ticket_get`, `ticket_delegate`, and
-`ticket_reply`. The two write tools use the normal `/v1/permissions` approval
-flow. Ticket text, reports, events, and tool output remain untrusted data and
+directly. Its read-only `session_search` tool browses earlier person-facing Core
+Sessions, finds messages by exact keywords, and reads a bounded message window
+without making the inspected Session active. Hidden and internal assessment
+Sessions are excluded, as is the current main Session. The other tools are
+`ticket_list`, `ticket_get`, `ticket_delegate`, and `ticket_reply`. The two
+Ticket writes use the normal `/v1/permissions` approval flow. Recalled Session
+text, Ticket text, reports, events, and tool output remain untrusted data and
 cannot authorize a wider action. `POST /v1/main-session/interrupt` interrupts
 an initialized Session and returns `404` rather than creating one.
 
