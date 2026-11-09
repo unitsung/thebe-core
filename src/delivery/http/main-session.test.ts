@@ -1,0 +1,223 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
+import type { McpRegistry } from "../../agent/extensions/mcp.ts";
+import type { EnabledResource } from "../../agent/runtime/interface.ts";
+import { createThebeApp } from "../../app/create.ts";
+import { createFakeRuntime } from "../../testing/runtime/index.ts";
+
+const provider: ContainerInfoProvider = {
+  listContainers: async () => [],
+  inspectContainer: async () => {
+    throw new Error("unused");
+  },
+  getContainerLogs: async () => "ok",
+  getStatusSummary: async () => ({
+    totalContainers: 0,
+    runningContainers: 0,
+    pausedContainers: 0,
+    exitedContainers: 0,
+    lastUpdated: 1,
+  }),
+};
+
+function open(
+  agentStoreDir?: string,
+  fake = createFakeRuntime(),
+  extra: {
+    mcp?: McpRegistry;
+    enabledResources?: EnabledResource[];
+  } = {}
+) {
+  const app = createThebeApp({
+    runtime: fake.runtime,
+    provider,
+    agentStoreDir,
+    ...extra,
+  });
+  const call = async (path: string, init?: RequestInit) => {
+    const response = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787${path}`, {
+        ...init,
+        headers: { "content-type": "application/json" },
+      })
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as Record<string, any>,
+    };
+  };
+  return { app, fake, call };
+}
+
+describe("main Session", () => {
+  it("starts lazily and exposes only the Ticket control tools", async () => {
+    const mcp: McpRegistry = {
+      listTools: async () => [],
+      listServers: async () => [],
+      setServerEnabled: async () => undefined,
+      runtimeServers: () => [
+        {
+          name: "external",
+          command: "external",
+          enabled: true,
+        },
+      ],
+      invokeTool: async () => undefined,
+      close() {},
+    };
+    const { app, fake, call } = open(undefined, undefined, {
+      mcp,
+      enabledResources: [
+        {
+          kind: "skill",
+          identity: "main-session-test",
+          source: "/tmp/main-session-test",
+          version: "1",
+        },
+      ],
+    });
+    expect((await call("/v1/main-session")).body).toEqual({
+      id: "thebe-main",
+      initialized: false,
+    });
+
+    fake.queueTurns([{ kind: "text", text: "Thebe is here." }]);
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Hello" }),
+    });
+    expect(prompted.status).toBe(200);
+    expect(prompted.body).toMatchObject({
+      text: "Thebe is here.",
+      thebeSessionId: "thebe-main",
+    });
+
+    const info = await call("/v1/main-session");
+    expect(info.body).toMatchObject({
+      id: "thebe-main",
+      initialized: true,
+      session: {
+        thebeSessionId: "thebe-main",
+        labels: { kind: "main", "thebe.main": "true" },
+      },
+    });
+    const state = fake.snapshot(info.body.session.runtimeSessionId);
+    expect(state.builtinTools).toEqual([]);
+    expect(state.mcp).toBeUndefined();
+    expect(state.enabledResources).toEqual([]);
+    expect(state.tools.map((tool) => tool.name)).toEqual([
+      "ticket_list",
+      "ticket_get",
+      "ticket_delegate",
+      "ticket_reply",
+    ]);
+    expect(state.toolsRequiringApproval).toEqual(
+      expect.arrayContaining(["ticket_delegate", "ticket_reply"])
+    );
+    expect(state.tools.map((tool) => tool.name)).not.toContain("bash");
+    expect(state.tools.map((tool) => tool.name)).not.toContain("write");
+    expect(state.tools.map((tool) => tool.name)).not.toContain("edit");
+    expect(await app.agent.getMainSession()).toMatchObject({
+      thebeSessionId: "thebe-main",
+      status: "idle",
+    });
+  });
+
+  it("lets the main Session read Tickets through its own tool", async () => {
+    const { fake, call } = open();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [{ name: "ticket_list", args: {} }],
+      },
+      { kind: "text", text: "There are no tasks." },
+    ]);
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "What is running?" }),
+    });
+    expect(prompted.status).toBe(200);
+    expect(prompted.body).toMatchObject({
+      text: "There are no tasks.",
+      tools: ["ticket_list"],
+    });
+  });
+
+  it("restores the same Session and transcript after Core recreation", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-main-session-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "First answer." }]);
+    const first = open(dir, fake);
+    const created = await first.call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "First question" }),
+    });
+    expect(created.status).toBe(200);
+
+    fake.queueTurns([{ kind: "text", text: "Second answer." }]);
+    const second = open(dir, fake);
+    const before = await second.call("/v1/main-session");
+    expect(before.body).toMatchObject({
+      id: "thebe-main",
+      initialized: true,
+      session: { thebeSessionId: "thebe-main" },
+    });
+    const resumed = await second.call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Second question" }),
+    });
+    expect(resumed.status).toBe(200);
+    expect(resumed.body).toMatchObject({
+      text: "Second answer.",
+      thebeSessionId: "thebe-main",
+    });
+    const resumedState = fake.snapshot(
+      String(before.body.session.runtimeSessionId)
+    );
+    expect(resumedState.builtinTools).toEqual([]);
+    expect(resumedState.tools.map((tool) => tool.name)).toEqual([
+      "ticket_list",
+      "ticket_get",
+      "ticket_delegate",
+      "ticket_reply",
+    ]);
+    await expect(second.app.agent.loadMessages("thebe-main")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: "user", text: "First question" }),
+        expect.objectContaining({ role: "assistant", text: "First answer." }),
+        expect.objectContaining({ role: "user", text: "Second question" }),
+        expect.objectContaining({ role: "assistant", text: "Second answer." }),
+      ])
+    );
+  });
+
+  it("documents the lazy entry point, message and interrupt routes", async () => {
+    const { call } = open();
+    const spec = await call("/openapi.json");
+    expect(spec.status).toBe(200);
+    expect(spec.body.paths).toMatchObject({
+      "/v1/main-session": { get: expect.any(Object) },
+      "/v1/main-session/messages": { post: expect.any(Object) },
+      "/v1/main-session/interrupt": { post: expect.any(Object) },
+    });
+    expect(spec.body.components.schemas).toMatchObject({
+      MainSession: expect.any(Object),
+      MainSessionPromptRequest: expect.any(Object),
+      MainSessionPromptResponse: expect.any(Object),
+    });
+  });
+
+  it("keeps reads available and refuses prompts while quiesced", async () => {
+    const { app, call } = open();
+    await app.agent.quiesce();
+    expect((await call("/v1/main-session")).status).toBe(200);
+    const blocked = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Hello" }),
+    });
+    expect(blocked.status).toBe(503);
+  });
+});

@@ -1,5 +1,7 @@
 export { createThebeAgent } from "./create.ts";
 export type { McpCaller, ThebeAgent } from "./interface.ts";
+export { MAIN_SESSION_ID } from "./main-session/service.ts";
+export type { MainSessionInfo } from "./main-session/service.ts";
 export type {
   HomelabCapability,
   HomelabCapabilityCategory,

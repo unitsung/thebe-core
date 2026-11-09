@@ -110,8 +110,11 @@ Work named for the first beta, not yet complete in this checkout.
 - **Main Session and the remaining continuity work.** The long-task delegation
   slice is in place over both `/mcp` and HTTP: callers can list and inspect
   Tickets, idempotently delegate a Goal, answer its Attention, and approve or
-  deny a pending worker permission. The persistent main Session, Ask Thebe,
-  Recall, cross-entry continuity and real external-agent acceptance remain.
+  deny a pending worker permission. The persistent main Session is also in
+  place behind `/v1/main-session`, with lazy creation, restart recovery,
+  Ticket-only tools, and the generic Session routes available for inspection.
+  Ask Thebe clients, Recall, cross-entry continuity and real external-agent
+  acceptance remain.
 
 ## Later
 

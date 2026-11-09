@@ -12,6 +12,7 @@ export const PRODUCT_HTTP_PATH = {
   enabledResources: "/v1/resources/enabled",
   artifacts: "/v1/artifacts",
   tickets: "/v1/tickets",
+  mainSession: "/v1/main-session",
   policy: "/v1/policy",
   decisions: "/v1/decisions",
   permissionSettings: "/v1/settings/permissions",
@@ -26,6 +27,8 @@ export const PRODUCT_HTTP_SEGMENT = {
   cancel: "cancel",
   resolve: "resolve",
   reply: "reply",
+  messages: "messages",
+  interrupt: "interrupt",
   servers: "servers",
   tools: "tools",
 } as const;
