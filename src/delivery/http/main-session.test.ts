@@ -126,6 +126,70 @@ describe("main Session", () => {
     });
   });
 
+  it("applies model and thinking selections to the first main Session turn", async () => {
+    const { fake, call } = open();
+    fake.queueTurns([{ kind: "text", text: "Configured." }]);
+
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        text: "Hello",
+        model: { providerId: "deepseek", modelId: "deepseek-reasoner" },
+        thinking: "high",
+      }),
+    });
+
+    expect(prompted.status).toBe(200);
+    const info = await call("/v1/main-session");
+    const state = fake.snapshot(info.body.session.runtimeSessionId);
+    expect(state.model).toEqual({
+      providerId: "deepseek",
+      modelId: "deepseek-reasoner",
+    });
+    expect(state.thinkingLevel).toBe("high");
+  });
+
+  it("rejects invalid runtime selections before creating the main Session", async () => {
+    const { call } = open();
+
+    const badModel = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        text: "Hello",
+        model: { providerId: "deepseek" },
+      }),
+    });
+    const badThinking = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Hello", thinking: "extreme" }),
+    });
+
+    expect(badModel.status).toBe(400);
+    expect(badThinking.status).toBe(400);
+    expect((await call("/v1/main-session")).body.initialized).toBe(false);
+  });
+
+  it("refuses a thinking level the selected model cannot apply", async () => {
+    const { call } = open();
+
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        text: "Hello",
+        model: { providerId: "fake", modelId: "fake-2" },
+        thinking: "high",
+      }),
+    });
+
+    expect(prompted).toMatchObject({
+      status: 400,
+      body: {
+        code: "thinking_unsupported",
+        error: "thinking level high was applied as off",
+      },
+    });
+  });
+
   it("lets the main Session read Tickets through its own tool", async () => {
     const { fake, call } = open();
     fake.queueTurns([

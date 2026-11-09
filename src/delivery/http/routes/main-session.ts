@@ -36,11 +36,17 @@ export async function handleMainSessionRoutes(
     ) {
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
-      const parsed = await readPromptBody(request);
+      const parsed = await readPromptBody(request, {
+        runtimeSelection: true,
+      });
       if (!parsed.ok) return promptBodyError(parsed);
       const result = await agent.askMainSession(
         { text: parsed.text, files: parsed.files },
-        { mode: parsed.mode }
+        {
+          mode: parsed.mode,
+          model: parsed.model,
+          thinking: parsed.thinking,
+        }
       );
       return json({
         text: result.text,

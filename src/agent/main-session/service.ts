@@ -1,5 +1,10 @@
 import type { AgentContext } from "../internal/context.ts";
-import type { PromptInput, RuntimeModelRef } from "../runtime/interface.ts";
+import type {
+  PromptInput,
+  RuntimeModelRef,
+  RuntimeThinkingInfo,
+  ThinkingLevel,
+} from "../runtime/interface.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { TicketControlApi } from "../tickets/control.ts";
 import {
@@ -8,10 +13,11 @@ import {
   TICKET_TOOL_WRITE_NAMES,
   TICKET_TOOL_NAMES,
 } from "../tickets/tools.ts";
-import type {
-  SessionRunStatus,
-  ThebePromptOptions,
-  ThebePromptResult,
+import {
+  httpError,
+  type SessionRunStatus,
+  type ThebePromptOptions,
+  type ThebePromptResult,
 } from "../types.ts";
 
 export const MAIN_SESSION_ID = "thebe-main";
@@ -20,6 +26,14 @@ export type MainSessionInfo = AgentSessionMeta & {
   status: SessionRunStatus;
   streaming: boolean;
   initialized: true;
+};
+
+export type MainSessionPromptOptions = Omit<
+  ThebePromptOptions,
+  "thebeSessionId"
+> & {
+  model?: RuntimeModelRef;
+  thinking?: ThinkingLevel;
 };
 
 type MainSessionDependencies = {
@@ -41,6 +55,11 @@ type MainSessionDependencies = {
     ): Promise<
       AgentSessionMeta & { status: SessionRunStatus; streaming: boolean }
     >;
+    setModel(thebeSessionId: string, model: RuntimeModelRef): Promise<void>;
+    setThinkingLevel(
+      thebeSessionId: string,
+      level: ThinkingLevel
+    ): Promise<RuntimeThinkingInfo>;
   };
   prompts: {
     prompt(
@@ -106,16 +125,33 @@ export function createMainSessionApi(dependencies: MainSessionDependencies) {
 
   async function askMainSession(
     input: string | PromptInput,
-    options: Omit<ThebePromptOptions, "thebeSessionId"> = {}
+    options: MainSessionPromptOptions = {}
   ): Promise<ThebePromptResult> {
-    await sessions.ensureSession(MAIN_SESSION_ID, {
+    const { model: requestedModel, thinking, ...promptOptions } = options;
+    const ensured = await sessions.ensureSession(MAIN_SESSION_ID, {
       title: "Thebe",
       labels: { kind: "main", "thebe.main": "true" },
       builtinTools: [],
-      model,
+      model: requestedModel ?? model,
     });
+    if (requestedModel && !ensured.created) {
+      await sessions.setModel(MAIN_SESSION_ID, requestedModel);
+    }
+    if (thinking) {
+      const applied = await sessions.setThinkingLevel(
+        MAIN_SESSION_ID,
+        thinking
+      );
+      if (applied.level !== thinking) {
+        throw httpError(
+          400,
+          `thinking level ${thinking} was applied as ${applied.level}`,
+          "thinking_unsupported"
+        );
+      }
+    }
     return prompts.prompt(input, {
-      ...options,
+      ...promptOptions,
       thebeSessionId: MAIN_SESSION_ID,
     });
   }
