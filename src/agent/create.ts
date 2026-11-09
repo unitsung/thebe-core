@@ -33,6 +33,7 @@ import { createGoalReportInbox } from "./goals/report.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { canRunPipelineJobs } from "./tools/pipeline-tools.ts";
+import { createMainSessionApi } from "./main-session/service.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -367,9 +368,19 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     sessions,
     now: ctx.now,
   });
+  const mainSession = createMainSessionApi({
+    ctx,
+    tickets: ticketControl,
+    sessions,
+    prompts,
+    model: options.mainSessionModel,
+  });
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
+    mainSessionId: mainSession.mainSessionId,
+    getMainSession: mainSession.getMainSession,
+    askMainSession: mainSession.askMainSession,
     ...prompts,
     ...sessions,
     ...goals,

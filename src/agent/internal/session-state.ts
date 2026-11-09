@@ -1,6 +1,6 @@
 import type { AgentRuntime, RuntimeSession } from "../runtime/index.ts";
 import type { AgentSessionMeta } from "../store.ts";
-import type { SessionRunStatus } from "../types.ts";
+import { httpError, type SessionRunStatus } from "../types.ts";
 
 export type OpenedSession = {
   meta: AgentSessionMeta;
@@ -48,7 +48,12 @@ export function createSessionState(input: {
   async function lookup(thebeSessionId: string): Promise<AgentSessionMeta> {
     const cached = memory.get(thebeSessionId);
     if (cached) return cached;
-    const loaded = await input.load(thebeSessionId);
+    const loaded = await input.load(thebeSessionId).catch((error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw httpError(404, `unknown session: ${thebeSessionId}`);
+      }
+      throw error;
+    });
     memory.set(thebeSessionId, loaded);
     return loaded;
   }

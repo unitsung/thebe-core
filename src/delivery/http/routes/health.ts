@@ -17,6 +17,7 @@ export async function handleHealthEventsCompatibility(
       capabilities: context.agent
         ? [
             "tickets",
+            "main-session",
             "policy",
             "decisions",
             ...(sources.length > 0 ? ["sources"] : []),

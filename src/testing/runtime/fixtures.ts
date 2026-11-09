@@ -27,6 +27,7 @@ export type FakeSessionState = {
   autoCompact: boolean;
   tools: CustomToolDefinition[];
   builtinTools: string[];
+  mcp: CreateRuntimeSessionOptions["mcp"];
   enabledResources: CreateRuntimeSessionOptions["enabledResources"];
   model: RuntimeModelRef;
   thinkingLevel: ThinkingLevel;

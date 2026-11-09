@@ -80,6 +80,7 @@ export function createFakeRuntime(
   ): void {
     state.tools = create.customTools;
     state.builtinTools = [...(create.builtinTools ?? state.builtinTools)];
+    state.mcp = create.mcp;
     state.enabledResources = create.enabledResources;
     state.permissionHandler = create.permissionHandler;
     state.toolsRequiringApproval = [
@@ -105,6 +106,7 @@ export function createFakeRuntime(
         autoCompact: create.autoCompact ?? true,
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? PI_BUILTIN_TOOLS)],
+        mcp: create.mcp,
         enabledResources: create.enabledResources,
         model: create.model ?? models[0]!,
         thinkingLevel: "off",
@@ -164,6 +166,7 @@ export function createFakeRuntime(
         autoCompact: create.autoCompact ?? parent.autoCompact,
         tools: create.customTools,
         builtinTools: [...(create.builtinTools ?? parent.builtinTools)],
+        mcp: create.mcp,
         enabledResources: create.enabledResources,
         model: { ...parent.model },
         thinkingLevel: parent.thinkingLevel,

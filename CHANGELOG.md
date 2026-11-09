@@ -26,6 +26,15 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- A durable main Session at `GET /v1/main-session` and
+  `POST /v1/main-session/messages`. It starts lazily under the stable
+  `thebe-main` id, resumes the same runtime transcript after Core recreation,
+  and has no shell, file or edit tools. Instead it gets `ticket_list`,
+  `ticket_get`, `ticket_delegate` and `ticket_reply`; the two writes use the
+  normal per-session approval flow. `GET` remains available while Core is
+  quiesced, while messages and interrupts are refused. The route is documented
+  in OpenAPI, `GET /v1/health` advertises `main-session`, and the existing
+  `/v1/session/{id}` surfaces continue to inspect it.
 - Durable long-task delegation over `/mcp` (the first Phase 3 Ticket slice).
   `ticket_list` and `ticket_get` are read tools; `ticket_delegate` and
   `ticket_reply` require `mcp:write` and `THEBE_MCP_WRITES`. A delegated task

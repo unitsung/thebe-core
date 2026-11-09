@@ -141,6 +141,7 @@ describe("decisions over HTTP", () => {
   it("lists capabilities for a Core that has them", async () => {
     expect((await open().call("/v1/health")).body.capabilities).toEqual([
       "tickets",
+      "main-session",
       "policy",
       "decisions",
     ]);

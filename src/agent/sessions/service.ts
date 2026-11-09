@@ -14,6 +14,14 @@ import {
   type ProductPendingPermission,
 } from "../security/pending-permission.ts";
 
+type SessionCreateInput = {
+  title?: string;
+  labels?: Record<string, string>;
+  selectedContext?: AgentSessionMeta["selectedContext"];
+  model?: RuntimeModelRef;
+  builtinTools?: readonly string[];
+};
+
 export function createSessionApi(
   ctx: AgentContext,
   restoreSessionState?: (thebeSessionId: string) => Promise<void>,
@@ -40,46 +48,81 @@ export function createSessionApi(
     cancelSubagentsForParent,
     resolvePermission,
   } = ctx;
+  const ensureFlights = new Map<
+    string,
+    Promise<{ created: boolean; meta: AgentSessionMeta }>
+  >();
 
-  return {
-    async createSession(init?: {
-      title?: string;
-      labels?: Record<string, string>;
-      selectedContext?: AgentSessionMeta["selectedContext"];
-      model?: RuntimeModelRef;
-      builtinTools?: readonly string[];
-    }): Promise<AgentSessionMeta> {
-      checkNotQuiesced();
-      const effectiveModel = init?.model ?? options.model;
-      const thebeSessionId = randomUUID();
-      const session = await options.runtime.createSession(
-        sessionOptions(thebeSessionId, init?.builtinTools, effectiveModel),
-      );
-      const meta = touchMeta({
-        thebeSessionId,
-        runtimeId: options.runtime.runtimeId,
-        runtimeSessionId: session.runtimeSessionId,
-        title: init?.title,
-        labels: init?.labels,
-        selectedContext: init?.selectedContext,
-        builtinTools: init?.builtinTools ? [...init.builtinTools] : undefined,
-        model: effectiveModel
-          ? { providerId: effectiveModel.providerId, modelId: effectiveModel.modelId }
-          : undefined,
-      });
-      await persist(meta);
-      ctx.active = { meta, session };
-      if (effectiveModel) {
-        try {
-          await session.setModel(effectiveModel);
-        } catch (err: unknown) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (msg.includes("unknown model")) {
-            throw err;
+  async function createSessionAt(
+    thebeSessionId: string,
+    init?: SessionCreateInput,
+  ): Promise<AgentSessionMeta> {
+    checkNotQuiesced();
+    const effectiveModel = init?.model ?? options.model;
+    const session = await options.runtime.createSession(
+      sessionOptions(thebeSessionId, init?.builtinTools, effectiveModel),
+    );
+    const meta = touchMeta({
+      thebeSessionId,
+      runtimeId: options.runtime.runtimeId,
+      runtimeSessionId: session.runtimeSessionId,
+      title: init?.title,
+      labels: init?.labels,
+      selectedContext: init?.selectedContext,
+      builtinTools: init?.builtinTools ? [...init.builtinTools] : undefined,
+      model: effectiveModel
+        ? {
+            providerId: effectiveModel.providerId,
+            modelId: effectiveModel.modelId,
           }
+        : undefined,
+    });
+    await persist(meta);
+    ctx.active = { meta, session };
+    if (effectiveModel) {
+      try {
+        await session.setModel(effectiveModel);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("unknown model")) {
+          throw err;
         }
       }
-      return meta;
+    }
+    return meta;
+  }
+
+  return {
+    async createSession(init?: SessionCreateInput): Promise<AgentSessionMeta> {
+      return createSessionAt(randomUUID(), init);
+    },
+    async ensureSession(
+      thebeSessionId: string,
+      init?: SessionCreateInput,
+    ): Promise<{ created: boolean; meta: AgentSessionMeta }> {
+      const pending = ensureFlights.get(thebeSessionId);
+      if (pending) return pending;
+      const flight = (async () => {
+        checkNotQuiesced();
+        try {
+          await lookup(thebeSessionId);
+        } catch (error) {
+          if ((error as { status?: unknown }).status !== 404) throw error;
+          return {
+            created: true,
+            meta: await createSessionAt(thebeSessionId, init),
+          };
+        }
+        const opened = await openSession(thebeSessionId);
+        await restoreSessionState?.(thebeSessionId);
+        return { created: false, meta: opened.meta };
+      })();
+      ensureFlights.set(thebeSessionId, flight);
+      try {
+        return await flight;
+      } finally {
+        ensureFlights.delete(thebeSessionId);
+      }
     },
     async listSessions(query?: {
       status?: string;

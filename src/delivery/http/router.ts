@@ -12,6 +12,7 @@ import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
 import { handleGoalRoutes } from "./routes/goal.ts";
 import { handleTicketRoutes } from "./routes/tickets.ts";
+import { handleMainSessionRoutes } from "./routes/main-session.ts";
 import { handleEvalRoutes } from "./routes/eval.ts";
 import { handleScheduleRoutes } from "./routes/schedules.ts";
 import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
@@ -160,6 +161,8 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (evalResponse) return evalResponse;
       const ticketResponse = await handleTicketRoutes(context);
       if (ticketResponse) return ticketResponse;
+      const mainSessionResponse = await handleMainSessionRoutes(context);
+      if (mainSessionResponse) return mainSessionResponse;
       const goalResponse = await handleGoalRoutes(context);
       if (goalResponse) {
         return goalResponse;

@@ -15,6 +15,7 @@ import {
   PI_BUILTIN_TOOLS,
   TOOLS_REQUIRING_APPROVAL,
   asPromptInput,
+  type CustomToolDefinition,
   type EnabledResource,
   type NormalizedEvent,
   type PermissionPreflightDecision,
@@ -324,6 +325,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       withUserInstructions(baseSystemPrompt, instructions),
       options.memoryStore?.load() ?? emptyMemory()
     );
+  type SessionOptionsDecoration = {
+    customTools: CustomToolDefinition[];
+    systemPrompt?: string;
+  };
+  let decorateSessionOptions:
+    | ((thebeSessionId: string) => SessionOptionsDecoration | undefined)
+    | undefined;
 
   function memoryView(): MemoryView {
     const snapshot = options.memoryStore?.load() ?? emptyMemory();
@@ -880,11 +888,21 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     sessionCallerId = callerId,
     sessionStop?: () => void | Promise<void>
   ) {
+    const decoration = explicitSessionId
+      ? decorateSessionOptions?.(explicitSessionId)
+      : undefined;
+    if (decoration) {
+      policy.registerTools(decoration.customTools.map((tool) => tool.name));
+    }
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
-    const isChatOnly = effectiveBuiltinTools.length === 0;
+    const usesIsolatedTools = decoration !== undefined;
+    const isChatOnly =
+      effectiveBuiltinTools.length === 0 &&
+      (decoration?.customTools.length ?? 0) === 0;
     const homeTools = isChatOnly
       ? []
-      : baseTools(sessionPolicy, sessionCallerId, true, eventSessionId);
+      : (decoration?.customTools ??
+        baseTools(sessionPolicy, sessionCallerId, true, eventSessionId));
     // The tools that ask first say so themselves; the rest of the list is the host's own tools.
     const toolsRequiringApproval = [
       ...TOOLS_REQUIRING_APPROVAL,
@@ -898,7 +916,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       explicitSessionId ?? getActive()?.meta.thebeSessionId;
     return {
       model: sessionModel ?? options.model,
-      ...(!isChatOnly && sessionCallerId === callerId
+      ...(!isChatOnly && !usesIsolatedTools && sessionCallerId === callerId
         ? (() => {
             const runtimeMcp = createRuntimeMcpOptions(mcp, {
               policy: sessionPolicy,
@@ -953,8 +971,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             },
           }),
       builtinTools: effectiveBuiltinTools,
-      systemPrompt: currentSystemPrompt(),
-      enabledResources: isChatOnly ? [] : enabledResources,
+      systemPrompt: decoration?.systemPrompt
+        ? [currentSystemPrompt(), decoration.systemPrompt]
+            .filter(Boolean)
+            .join("\n\n")
+        : currentSystemPrompt(),
+      enabledResources: isChatOnly || usesIsolatedTools ? [] : enabledResources,
       ...(workspacePath ? { cwd: workspacePath, workspacePath } : {}),
       permissionHandler: permissions.permissionHandler(
         permissionSessionId,
@@ -1204,6 +1226,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       mandateLookup = lookup;
     },
     sessionOptions,
+    setSessionOptionsDecorator(
+      decorator:
+        | ((thebeSessionId: string) => SessionOptionsDecoration | undefined)
+        | undefined
+    ): void {
+      decorateSessionOptions = decorator;
+    },
     runPrompt,
     pipelineAdvancer,
     lookupRemembered,

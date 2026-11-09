@@ -793,6 +793,32 @@ const operations: Operation[] = [
     responseSchema: "TicketTask",
   },
   {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.mainSession,
+    summary:
+      "Read the durable main Session without creating it; initialized is false until its first message",
+    tag: "main-session",
+    responseSchema: "MainSession",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.mainSession}/${PRODUCT_HTTP_SEGMENT.messages}`,
+    summary:
+      "Start or resume the one durable person-facing Session and run one turn",
+    tag: "main-session",
+    requestBody: { required: true },
+    requestSchema: "MainSessionPromptRequest",
+    responseSchema: "MainSessionPromptResponse",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.mainSession}/${PRODUCT_HTTP_SEGMENT.interrupt}`,
+    summary:
+      "Interrupt the current main Session turn without creating an uninitialized Session",
+    tag: "main-session",
+    responseSchema: "Ok",
+  },
+  {
     method: "post",
     path: "/v1/goals",
     summary: "Create a session and start a Goal",
@@ -1448,6 +1474,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           "Tickets: durable authorised units of work. The Ticket carries identity and mandate; the Goal behind it keeps progress, reports, Attention and pending permissions.",
       },
       {
+        name: "main-session",
+        description:
+          "The one durable person-facing Session. It can inspect and control Tickets but has no shell, file or edit tools.",
+      },
+      {
         name: "goal",
         description:
           "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
@@ -1492,6 +1523,57 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { $ref: "#/components/schemas/SourceHealth" },
             },
             push: { $ref: "#/components/schemas/PushOutboxStatus" },
+          },
+        },
+        MainSession: {
+          type: "object",
+          required: ["id", "initialized"],
+          properties: {
+            id: {
+              type: "string",
+              enum: ["thebe-main"],
+              description:
+                "The stable id of the one main Session owned by this Core.",
+            },
+            initialized: {
+              type: "boolean",
+              description:
+                "False until a person sends the main Session its first message.",
+            },
+            session: {
+              type: "object",
+              additionalProperties: true,
+              description:
+                "Session metadata and current run state when initialized.",
+            },
+          },
+        },
+        MainSessionPromptRequest: {
+          type: "object",
+          description:
+            "The main Session accepts the same text, file attachments and prompt modes as a normal Session; its id cannot be overridden.",
+          properties: {
+            text: { type: "string" },
+            mode: {
+              type: "string",
+              enum: ["prompt", "steer", "followUp"],
+            },
+            files: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+        MainSessionPromptResponse: {
+          type: "object",
+          required: ["text", "tools", "thebeSessionId"],
+          properties: {
+            text: { type: "string" },
+            tools: { type: "array", items: { type: "string" } },
+            thebeSessionId: {
+              type: "string",
+              enum: ["thebe-main"],
+            },
           },
         },
         SourceHealth: {
