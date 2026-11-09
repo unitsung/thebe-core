@@ -103,6 +103,15 @@ Work named for the first beta, not yet complete in this checkout.
   container image is now built and pushed to GHCR (linux/amd64 + arm64) by
   `.github/workflows/publish-image.yml`; its first green run and a live
   `scripts/smoke.mjs` against a real deployment are still pending.
+- **Real MCP OAuth connector acceptance.** The embedded authorization server,
+  pairing flow, scope narrowing, JWT validation, persistence, revocation and
+  listener isolation have local integration coverage. A real claude.ai and
+  ChatGPT connector login through the public HTTPS listener is still required.
+- **Main Session and the remaining Ticket controls.** The first long-task slice
+  is in place: `/mcp` can list and inspect Tickets, idempotently delegate a Goal,
+  answer its Attention, and approve or deny a pending worker permission. HTTP
+  Ticket control, the persistent main Session, Ask Thebe, Recall and the other
+  Phase 3 continuity work remain.
 
 ## Later
 
@@ -116,11 +125,10 @@ Named after the first beta.
   path, as with containers and diagnosis).
 - **Scoped tokens.** Shipped in part: `thebe token create <name> --scope mcp:read|mcp:write`
   limits a token to `/mcp`, read-only or with writes; full access stays the default so nothing
-  changes for existing tokens. Still open: a scope for one service category or one named tool, a
-  scope for "no admin routes" on `/v1`, `tools/list` filtered to what the token may call, a switch
-  that refuses irreversible deletes whatever the scope, a listener that serves only `/mcp` for
-  exposing it to the internet, and the token's name in the audit record as the caller. Not
-  scheduled.
+  changes for existing tokens. The shipped scopes also include `mcp:irreversible`, filter
+  `tools/list`, refuse downstream irreversible calls per invocation, keep scoped tokens off all
+  `/v1` routes, support the isolated gateway listener, and record the token name in audit.
+  Still open: a scope for one service category or one named tool.
 - **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are on by default, with a host
   switch (`THEBE_MCP_WRITES=off`), and the calling agent asks its own user. A stricter option would hold
   each write until a person approves it in Core (an out-of-band queue, with scoped tokens so

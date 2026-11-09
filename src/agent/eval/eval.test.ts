@@ -10,7 +10,7 @@ import {
   PolicyError,
   policyVersion,
 } from "./policy-store.ts";
-import { createEvalService } from "./service.ts";
+import { createEvalService, type EvalUnavailableNotice } from "./service.ts";
 
 const T0 = Date.parse("2026-11-06T10:00:00Z");
 const hex = (n: number) => n.toString(16).padStart(32, "0");
@@ -34,6 +34,7 @@ async function setup(
     mode?: "off" | "observe";
     maxPerHour?: number;
     clock?: () => Date;
+    onUnavailable?: (notice: EvalUnavailableNotice) => void;
   } = {}
 ) {
   let now = T0 + 60_000;
@@ -51,6 +52,7 @@ async function setup(
     sources: "container-health",
     now: clock,
     maxPerHour: opts.maxPerHour,
+    onUnavailable: opts.onUnavailable,
     assess: async (prompt) => {
       prompts.push(prompt);
       return reply(prompt);
@@ -256,6 +258,41 @@ describe("eval service", () => {
       outcome: "unavailable",
       unavailableReason: "unparseable_reply",
     });
+  });
+
+  it("notifies once while an assessment outage continues, and again after recovery", async () => {
+    const notices: EvalUnavailableNotice[] = [];
+    let failing = true;
+    const s = await setup(
+      () => {
+        if (failing) throw new Error("503 provider unavailable");
+        return '{"decision":"ignore","matched":[],"reason":"nothing to do"}';
+      },
+      { onUnavailable: (notice) => notices.push(notice) }
+    );
+
+    s.service.enqueue([trigger(1)]);
+    await s.service.idle();
+    s.service.enqueue([trigger(2, { threads: ["resource:container:plex"] })]);
+    await s.service.idle();
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toMatchObject({
+      thread: "resource:container:emby",
+      unavailableReason: "503 provider unavailable",
+      id: expect.stringMatching(/^eval-unavailable-/),
+    });
+
+    failing = false;
+    s.advance(1000);
+    s.service.enqueue([
+      trigger(3, { threads: ["resource:container:jellyfin"] }),
+    ]);
+    await s.service.idle();
+    failing = true;
+    s.advance(1000);
+    s.service.enqueue([trigger(4, { threads: ["resource:container:sonarr"] })]);
+    await s.service.idle();
+    expect(notices).toHaveLength(2);
   });
 
   it("weighs everything that queued on a thread meanwhile as ONE question", async () => {

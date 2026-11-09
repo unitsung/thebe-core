@@ -49,7 +49,7 @@ export function createApnsClient({
 
   return {
     /** Resolves `{ status, reason }`; a 410 or BadDeviceToken means the token is dead. */
-    send({ token, environment, payload }) {
+    send({ token, environment, payload, collapseId }) {
       const target =
         origin ?? (environment === "production" ? PRODUCTION : SANDBOX);
       return new Promise((resolve, reject) => {
@@ -61,6 +61,7 @@ export function createApnsClient({
           "apns-push-type": "alert",
           "apns-priority": "10",
           "content-type": "application/json",
+          ...(collapseId ? { "apns-collapse-id": collapseId } : {}),
         });
         let status = 0;
         let body = "";

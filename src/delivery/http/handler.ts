@@ -1,36 +1,52 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { DeviceRegistry } from "./devices.ts";
-import { normalizedPath } from "./context.ts";
+import { normalizedPath, type ThebeHttpContext } from "./context.ts";
 import { json } from "./json.ts";
 import { agentError } from "./parsing/errors.ts";
 import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
-import type { TokenCaller, TokenSource, TokenVerifier } from "./token-store.ts";
+import { bearerChallenge } from "./oauth/metadata.ts";
+import type { OAuthHttpIntegration } from "./oauth/service.ts";
+import type {
+  AsyncTokenVerifier,
+  TokenCaller,
+  TokenSource,
+  TokenVerifier,
+} from "./token-store.ts";
 
 export { validateRequestSecurity } from "./security.ts";
 
 export type ThebeHttpHandlerOptions = {
   version: string;
   /** A fixed token, or a source asked on every request so rotation needs no restart. */
-  token?: string | TokenSource | TokenVerifier;
+  token?: string | TokenSource | TokenVerifier | AsyncTokenVerifier;
   agent?: ThebeAgent;
   allowedHosts?: string[];
   deviceStoreDir?: string;
   /** Use this registry instead of opening one on `deviceStoreDir`, so the push notifier shares it. */
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: { publicKey: string; relayUrl: string };
+  /** Push delivery state for `/v1/health`; absent when push is off. */
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: import("./quiet-hours.ts").QuietHoursStore;
   workspacePath?: string;
   /** Calls a minute a scoped token may make over `/mcp`; 0 is no limit. Default: `THEBE_MCP_RATE_LIMIT`, else 120. */
   mcpRateLimit?: number;
+  /** OAuth access-token verification and the public resource metadata for the gateway. */
+  oauth?: OAuthHttpIntegration;
 };
 
 /** Stable public composition shell for the HTTP agent. */
 export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
-  const identify: ((received: string) => TokenCaller | undefined) | undefined =
+  const identifyStatic:
+    | ((
+        received: string
+      ) => TokenCaller | undefined | Promise<TokenCaller | undefined>)
+    | undefined =
     typeof options.token === "object" && options.token !== null
-      ? (received) => (options.token as TokenVerifier).verify(received)
+      ? (received) =>
+          (options.token as TokenVerifier | AsyncTokenVerifier).verify(received)
       : typeof options.token === "function"
         ? (received) => {
             // A source with no token (revoked, unreadable) refuses everything rather than opening up.
@@ -45,6 +61,14 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
                 ? { name: "default" }
                 : undefined
           : undefined;
+  const identify:
+    | ((received: string) => Promise<TokenCaller | undefined>)
+    | undefined =
+    identifyStatic || options.oauth
+      ? async (received) =>
+          (await identifyStatic?.(received)) ??
+          (await options.oauth?.verify(received))
+      : undefined;
   const allowedHostsSet = options.allowedHosts
     ? new Set(options.allowedHosts)
     : undefined;
@@ -54,9 +78,11 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     deviceStoreDir: options.deviceStoreDir,
     deviceRegistry: options.deviceRegistry,
     pushIdentity: options.pushIdentity,
+    pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
     workspacePath: options.workspacePath,
     mcpRateLimit: options.mcpRateLimit,
+    oauth: options.oauth,
   });
 
   return {
@@ -69,8 +95,13 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
       // a client's "Open API docs" link can launch Safari. Swagger UI still asks
       // for X-Thebe-Token through its Authorize control when trying requests.
       let caller: TokenCaller | undefined;
-      if (identify && !isDocumentationRequest(request)) {
-        caller = identify(receivedToken(request));
+      const path = pathOf(request);
+      if (
+        identify &&
+        !isDocumentationRequest(request) &&
+        !options.oauth?.isPublicPath(path)
+      ) {
+        caller = await identify(receivedToken(request));
         if (!caller) {
           return json(
             {
@@ -79,10 +110,11 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
                 "Missing or invalid token (send X-Thebe-Token, or Authorization: Bearer)",
               code: "unauthorized",
             },
-            401
+            401,
+            oauthChallenge(options.oauth, path)
           );
         }
-        if (caller.scopes && pathOf(request) !== "/mcp") {
+        if (caller.scopes && path !== "/mcp") {
           // A valid token, but not one for this route: 403, so the caller can tell it from a bad token.
           return json(
             {
@@ -156,4 +188,13 @@ function hasHttpStatus(error: unknown): boolean {
     status >= 400 &&
     status < 600
   );
+}
+
+function oauthChallenge(
+  oauth: OAuthHttpIntegration | undefined,
+  path: string
+): Record<string, string> | undefined {
+  return oauth && path === "/mcp"
+    ? { "www-authenticate": bearerChallenge(oauth.resource) }
+    : undefined;
 }

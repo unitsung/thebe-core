@@ -3,6 +3,10 @@ import type {
   ContainerInfoProvider,
   ContainerState,
 } from "../capabilities/containers.ts";
+import type {
+  DownloadItem,
+  DownloadProvider,
+} from "../capabilities/pipeline.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { parseEvalMaxPerHour, parseSources } from "../../app/bootstrap.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
@@ -41,6 +45,54 @@ function docker(state: ContainerState) {
     calls,
     set: (next: ContainerState) => {
       current = next;
+    },
+  };
+}
+
+function download(phase: DownloadItem["phase"]) {
+  const calls = { list: 0 };
+  let failure: Error | undefined;
+  let current: DownloadItem = {
+    hash: "a".repeat(40),
+    id: "a".repeat(40),
+    name: "Example",
+    engine: "qbittorrent",
+    phase,
+    state: phase === "completed" ? "seeding" : "downloading",
+    badges: [],
+    capabilities: [],
+    progress: phase === "completed" ? 1 : 0.5,
+    ...(phase === "completed"
+      ? { completedAt: "2026-11-06T10:01:00.000Z" }
+      : {}),
+  };
+  const provider = {
+    service: "downloads",
+    add: async () => ({ submitted: 0 }),
+    list: async () => {
+      calls.list += 1;
+      if (failure) throw failure;
+      return [{ ...current }];
+    },
+    get: async (hash: string) =>
+      current.hash === hash ? { ...current } : undefined,
+  } as DownloadProvider;
+  return {
+    provider,
+    calls,
+    set(next: DownloadItem["phase"]) {
+      current = {
+        ...current,
+        phase: next,
+        state: next === "completed" ? "seeding" : "downloading",
+        progress: next === "completed" ? 1 : 0.5,
+      };
+    },
+    fail(error: Error = new Error("download engine unavailable")) {
+      failure = error;
+    },
+    recover() {
+      failure = undefined;
     },
   };
 }
@@ -87,6 +139,115 @@ describe("watching sources", () => {
     expect(d.calls.list).toBeGreaterThan(reads);
     await app.agent.quiesce();
   });
+
+  it("records a download entering completed on its resource thread", async () => {
+    vi.useFakeTimers();
+    const d = download("completed");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: docker("running").provider,
+      pipeline: { downloads: d.provider },
+      sources: { downloadCompleted: true, intervalMs: 1000 },
+    });
+    await vi.advanceTimersByTimeAsync(0); // baseline: old completed downloads are history
+    expect(await app.agent.listTriggers()).toEqual([]);
+
+    d.set("downloading");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await app.agent.listTriggers()).toEqual([]);
+
+    d.set("completed");
+    await vi.advanceTimersByTimeAsync(1000);
+    const thread = `resource:download:qbittorrent:${"a".repeat(40)}`;
+    const triggers = await app.agent.listTriggers({ thread });
+    expect(triggers).toHaveLength(1);
+    expect(triggers[0]).toMatchObject({
+      source: "download-completed",
+      kind: "download.completed",
+      threads: [thread],
+      resource: {
+        kind: "download",
+        id: `qbittorrent:${"a".repeat(40)}`,
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await app.agent.listTriggers({ thread })).toHaveLength(1);
+    await app.agent.quiesce();
+  });
+
+  it("reports consecutive Source failures in health and clears them on recovery", async () => {
+    vi.useFakeTimers();
+    const d = download("downloading");
+    d.fail();
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: docker("running").provider,
+      pipeline: { downloads: d.provider },
+      sources: { downloadCompleted: true, intervalMs: 1000 },
+    });
+    const health = async () =>
+      (await (
+        await app.handler.handle(new Request("http://127.0.0.1:8787/v1/health"))
+      ).json()) as {
+        capabilities: string[];
+        sources: Array<Record<string, unknown>>;
+      };
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await health()).toMatchObject({
+      capabilities: expect.arrayContaining(["sources"]),
+      sources: [
+        {
+          id: "download-completed",
+          state: "failing",
+          consecutiveFailures: 2,
+          lastError: "download engine unavailable",
+        },
+      ],
+    });
+
+    d.recover();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await health()).toMatchObject({
+      sources: [
+        {
+          id: "download-completed",
+          state: "healthy",
+          consecutiveFailures: 0,
+        },
+      ],
+    });
+    const recovered = await health();
+    expect(recovered.sources[0]).not.toHaveProperty("lastError");
+    await app.agent.quiesce();
+  });
+
+  it("keeps a requested download Source visible when no engine is configured", async () => {
+    vi.useFakeTimers();
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: docker("running").provider,
+      sources: { downloadCompleted: true, intervalMs: 1000 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    const response = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/health")
+    );
+    const body = (await response.json()) as {
+      sources: Array<Record<string, unknown>>;
+    };
+    expect(body.sources).toEqual([
+      expect.objectContaining({
+        id: "download-completed",
+        state: "failing",
+        consecutiveFailures: 1,
+        lastError: "No download provider is configured",
+      }),
+    ]);
+    await app.agent.quiesce();
+  });
 });
 
 describe("THEBE_SOURCES", () => {
@@ -95,22 +256,32 @@ describe("THEBE_SOURCES", () => {
     expect(parseSources({ THEBE_SOURCES: " " })).toBeUndefined();
     expect(parseSources({ THEBE_SOURCES: "Container-Health" })).toEqual({
       containerHealth: true,
+      downloadCompleted: false,
     });
     expect(parseSources({ THEBE_SOURCES: "nonsense" })).toEqual({
       containerHealth: false,
+      downloadCompleted: false,
     });
     expect(
       parseSources({
         THEBE_SOURCES: "container-health",
         THEBE_SOURCE_INTERVAL_MS: "5000",
       })
-    ).toEqual({ containerHealth: true, intervalMs: 5000 });
+    ).toEqual({
+      containerHealth: true,
+      downloadCompleted: false,
+      intervalMs: 5000,
+    });
     expect(
       parseSources({
         THEBE_SOURCES: "container-health",
         THEBE_SOURCE_INTERVAL_MS: "5",
       })
-    ).toEqual({ containerHealth: true });
+    ).toEqual({ containerHealth: true, downloadCompleted: false });
+    expect(parseSources({ THEBE_SOURCES: "download-completed" })).toEqual({
+      containerHealth: false,
+      downloadCompleted: true,
+    });
   });
 });
 

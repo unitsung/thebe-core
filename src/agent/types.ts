@@ -83,6 +83,13 @@ export type SubagentRun = {
   error?: string;
 };
 
+/** The first action an unattended Ticket worker asked for that its Mandate refused. */
+export type MandateDenial = {
+  toolName: string;
+  toolCallId?: string;
+  detail: string;
+};
+
 /** A durable-objective run attached to one ordinary parent conversation. */
 export type GoalRunStatus =
   | "running"
@@ -120,6 +127,23 @@ export type GoalAttention = {
   question: string;
   options?: string[];
   askedAt: string;
+};
+
+export type GoalWatchdogReason =
+  | "goal_no_progress"
+  | "worker_inactivity"
+  | "reviewer_inactivity";
+
+/** A bounded record of the Watchdog's last action. It never grants authority or changes a Mandate. */
+export type GoalWatchdogState = {
+  state: "checking" | "retrying" | "waiting_for_person";
+  reason: GoalWatchdogReason;
+  action: "status_check" | "retry_worker" | "pause";
+  /** What was being measured when the intervention began. */
+  since: string;
+  /** When this action was taken. */
+  at: string;
+  summary?: string;
 };
 
 export type GoalRun = {
@@ -165,6 +189,10 @@ export type GoalRun = {
   reviewBeforeDone?: boolean;
   /** The person's answers and review notes so far, given to every later checkpoint. */
   guidance?: string[];
+  /** Last semantic progress observed by the Watchdog. Audit events do not move this clock. */
+  progressAt?: string;
+  /** Set while Watchdog is checking, retrying, or waiting for the person. */
+  watchdog?: GoalWatchdogState;
 };
 
 /** @deprecated Use ThebePromptResult */

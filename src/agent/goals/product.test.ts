@@ -192,6 +192,28 @@ describe("product Goal mapper", () => {
     expect(status.status).toBe("running");
     expect(status.phase).toBe("pausing");
   });
+
+  it("exposes a Watchdog escalation without leaking internal progress state", () => {
+    const mapped = toProductGoal(
+      goalRun({
+        status: "paused",
+        progressAt: "2026-01-01T00:00:00.000Z",
+        watchdog: {
+          state: "waiting_for_person",
+          reason: "worker_inactivity",
+          action: "pause",
+          since: "2026-01-01T00:10:00.000Z",
+          at: "2026-01-01T00:20:00.000Z",
+          summary: "The worker stopped reporting activity.",
+        },
+      })
+    );
+    expect(mapped.watchdog).toMatchObject({
+      state: "waiting_for_person",
+      action: "pause",
+    });
+    expect(mapped).not.toHaveProperty("progressAt");
+  });
 });
 
 describe("a blocked goal", () => {

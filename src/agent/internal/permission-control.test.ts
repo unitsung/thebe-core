@@ -15,7 +15,8 @@ const request = (toolName: string): PermissionRequest => ({
 
 function control(
   mandates: Record<string, Pick<TicketMandate, "scope">>,
-  unattended: string[] = []
+  unattended: string[] = [],
+  refusals: Record<string, string> = {}
 ) {
   return createPermissionControl({
     initialMode: "manual",
@@ -33,6 +34,8 @@ function control(
     mandateAllows: async (sessionId, req) =>
       mandateAllows(mandates[sessionId] as never, req.toolName, req.args),
     unattended: async (sessionId) => unattended.includes(sessionId),
+    mandateRefusal: async (sessionId) =>
+      refusals[sessionId] ?? `${sessionId} refused the request`,
   });
 }
 
@@ -121,5 +124,19 @@ describe("a write inside a Ticket's Mandate", () => {
     const handler = permissions.permissionHandler("goal1");
     expect(await handler.preflight(request("bash"))).toBe("deny");
     expect(await handler.preflight(request(RESTART))).toBe("allow");
+  });
+
+  it("keeps the first Mandate refusal for the Goal to turn into a blocker", async () => {
+    const permissions = control({ goal1: covered }, ["goal1"], {
+      goal1: "radarr is outside this Ticket's Mandate.",
+    });
+    const handler = permissions.permissionHandler("goal1");
+    expect(await handler.preflight(request("radarr_restart"))).toBe("deny");
+    expect(await handler.preflight(request("navidrome_restart"))).toBe("deny");
+    expect(permissions.takeMandateDenial("goal1")).toMatchObject({
+      toolName: "radarr_restart",
+      detail: "radarr is outside this Ticket's Mandate.",
+    });
+    expect(permissions.takeMandateDenial("goal1")).toBeUndefined();
   });
 });

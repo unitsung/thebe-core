@@ -28,6 +28,8 @@ const WRITES = [
   "navidrome_playlist_update",
   "sqmusic_download",
   "strm_repair",
+  "ticket_delegate",
+  "ticket_reply",
 ];
 
 const READS = [
@@ -59,6 +61,8 @@ const READS = [
   "navidrome_search",
   "netease_music",
   "sqmusic_search",
+  "ticket_get",
+  "ticket_list",
 ];
 
 describe("what Core's own capabilities may change", () => {

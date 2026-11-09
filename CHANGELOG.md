@@ -7,6 +7,10 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Changed
 
+- The Pi runtime packages are pinned to `@earendil-works/*` `1.5.0`, which
+  raises `undici` and `minimatch` past the currently audited vulnerable ranges.
+  The transitive `node-forge` lock moves to `1.4.3`. The sandbox runtime still
+  pins `zod` 3, whose audit advisory has no compatible upstream fix yet.
 - Emby and Jellyfin share one adapter. They speak the same MediaBrowser REST API and differ only in the path prefix and how the key is sent, so `MediaBrowserAdapter("emby" | "jellyfin", options)` and `createMediaBrowserProviderFromEnv(flavor)` replace `EmbyAdapter`, `JellyfinAdapter` and their two env readers (the environment variables are unchanged). A Jellyfin-style `/api` suffix on an Emby address is now trimmed too.
 - A tool says itself whether a call asks first (`requiresApproval`), and a session's approval list and the policy's allow-list are made from the tools it builds. They used to be restated, option by option, in three places in the session setup, so a new tool had to be added to all three.
 - The audit record of a call that asks for approval (a write) now has a `summary`: its arguments, redacted and cut to 200 characters, so a write an executor made without asking (`POST /containers/emby/restart` on `docker`) can be read afterwards. Reads keep only the hash. `GET /v1/audit` returns it and the App shows it on the record's page.
@@ -15,11 +19,37 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Fixed
 
+- An Eval-created Ticket is revalidated against the current Policy before paused work resumes: automatic acceptance, matched rules, the Source, and the inferred service scope must still hold. A denied check leaves the Goal paused, returns `409 ticket_mandate_invalid`, records `ticket.mandate_revalidate` as denied in the audit log, and starts no worker. Direct Tickets are unaffected.
+- An unattended Ticket worker's first Mandate refusal is now carried from permission control to the Goal instead of ending as an ordinary tool error. The Goal stops before the worker's completion claim reaches the reviewer, ends `failed` plus `blocked`, appears in Activity as `person` / `blocked`, and sends one push notice. This covers both a write on a service outside the inferred scope and an irreversible `DELETE` on a covered service.
 - A service connection with no readable OpenAPI description was reported to the model as a failed discovery ("No JSON OpenAPI found"), and a real model then gave up without trying `service_write`, which needs no description. Discovery now says the service has no description and how to call it anyway (a method and a path from its own documentation), and `service_read` works on such a service for the methods the operator listed in `readMethods`. A Ticket's task also says how the Mandate's service is named in a call.
 - Over `/mcp`, `strm.repair` and `sqmusic_download` ran even when the host had set `THEBE_MCP_WRITES=off`, because the write check matched a fixed list of tool names. Core's own tools are now judged by what they declare (the same `effect` that sets their `readOnlyHint`), so any write tool a Core capability adds is held by `THEBE_MCP_WRITES` and by a token's `mcp:write` scope.
 
 ### Added
 
+- Durable long-task delegation over `/mcp` (the first Phase 3 Ticket slice).
+  `ticket_list` and `ticket_get` are read tools; `ticket_delegate` and
+  `ticket_reply` require `mcp:write` and `THEBE_MCP_WRITES`. A delegated task
+  creates one direct Ticket and Goal, keyed by a caller-supplied
+  `idempotencyKey`, so retries and Core restarts return the same assignment.
+  `ticket_get` returns the Goal's status, structured report, final receipt,
+  open Attention, and pending tool permissions. `ticket_reply` answers the
+  Attention, accepts or sends back a review, or resolves one pending worker
+  permission. Arbitrary `bash` and irreversible calls require
+  `mcp:irreversible`; ordinary writes use `mcp:write`. HTTP Tickets remain
+  read-only. Read tools stay available while Core is quiesced; write tools
+  return `-32003`.
+- OAuth 2.1 for the public MCP gateway, off until `THEBE_OAUTH_ISSUER` is set.
+  Clients use Authorization Code + PKCE with exact redirect matching, Resource
+  Indicators bound to the configured `/mcp` URL, PS256 JWT access tokens, and
+  optional rotating refresh tokens. The authorization page accepts a short-lived,
+  single-use pairing code issued through `POST /v1/oauth/pairing-code` by a
+  full-access App token, then lets the person narrow the requested
+  `mcp:read` / `mcp:write` / `mcp:irreversible` scopes. Pre-registration is the
+  default; dynamic registration is opt-in. Tokens, grants, signing keys, and
+  pairing-code hashes persist under the config directory, and grant revocation
+  invalidates the next `/mcp` request immediately. The `/mcp`-only listener
+  publishes only `/mcp`, RFC 9728 protected-resource metadata, and the OAuth
+  protocol endpoints; `/v1`, `/openapi.json`, and `/docs` remain `404`.
 - Subscriptions and fan-out (Phase 2, fourth slice). A Ticket subscribes to the resource threads it concerns (`subscriptions`, such as `resource:container:emby`). Later events on a subscribed thread reach that open ticket as inputs directly, with no new assessment and no model call:
   - `POST /v1/goals` accepts `threads` (`["resource:container:emby"]` or `[{kind: "container", id: "emby"}]`), which are recorded on the Ticket's `subscriptions`.
   - When an event arrives from a Source, Core checks if any open Ticket is subscribed to its threads. If so, the event is attached as an input (`seq`, `source`, `kind`, `thread`, `at`, `attachedAt`) to the newest open Ticket, and skips Eval entirely (0 tokens and 0 model calls).
@@ -35,6 +65,10 @@ All notable changes to Thebe Core are documented here. The format is based on
   - A Decision that was taken on is `outcome: "accept"` with `ticketId` and `goalId`; one that was not stays `ignore` with `wouldAccept` and `notTakenOn` (`thread_limit`, `quiesced`, `no_executor`, `accept_failed`).
   - `GET/PUT /v1/policy` now also say `modes`, so a client offers `auto` only where it exists. `POST /v1/action` no longer accepts `approval.client: "policy"` from a caller: only Core records that source. A scoped token reaches only `/mcp`, so an external agent cannot change the mode.
 - Quiet hours for the approval push. `GET/PUT /v1/push/quiet-hours` set a daily window (`{quietHours: {start: "23:00", end: "07:00", timeZone?}}`, `null` turns it off). During it Core holds the "waiting for your approval" push and sends it when the window ends. Only the interruption is delayed: the approval is already in the list and can be answered. Held pushes are kept on disk (at most 10, newest kept; the same approval replaces itself), so a restart in the night does not lose them, and ones left over when Core starts after the window are sent then.
+- Push notices go through a durable, idempotent outbox. Notices for one Ticket to one device are delivered in order with signed `ticket` and `seq` fields; the head is retried with back-off from 5 to 300 seconds and later notices wait. Nothing is lost while the relay is unreachable, three transient relay or APNs errors drop the head, a permanent refusal drops it at once, and every drop is recorded with its reason. Queues, sequence counters and delivered ids survive a Core restart. With push enabled, `GET /v1/health` gains `push` (`pending`, `consecutiveFailures`, `dropped`, and when set `lastError`, `lastFailureAt`, `lastDrop`). The relay persists delivered ids for 24 hours across its own restarts, leaves an id unclaimed after an APNs failure so Core can retry it, and passes `id`, `ticket`, `seq` and an `apns-collapse-id` to the device. Upgrade the relay before Core because the signed event format is now v2.
+- Goal Watchdog and a human concurrency reserve. Core scans every 60 seconds; a Goal with no semantic progress gets one read-only status check after 30 minutes and is paused into `person / stalled` after 60. An inactive worker or reviewer is cancelled and retried once after 10 minutes, then pauses the Goal after another 10. Each action is audited as `watchdog.status_check`, `watchdog.retry_worker` or `watchdog.pause` and retained on the Goal's `watchdog` field. With total subagent concurrency above 1, one slot is reserved for a person's request and background Goal work can use only the rest.
+- A `download-completed` Source, off by default. Add it to `THEBE_SOURCES` with a configured download provider; its first read is a baseline, then a download moving into `completed` emits `download.completed` on `resource:download:<engine>:<hash>`. A partial multi-engine listing fails without advancing the cursor. `GET /v1/health` now reports each enabled Source's `starting` / `healthy` / `failing` state, consecutive failures and latest error, including a requested download Source whose provider is missing.
+- Eval's unavailable path now pushes once per outage. A provider error, unusable reply, or hourly assessment limit still records `outcome: "unavailable"` and never becomes a "no"; repeated failures in the same outage do not push again, and the next successful assessment re-arms the notice. Goal notifications also deep-link through the App's `thebe://goal/<id>` route.
 - Eval, in observe (Phase 2, second slice). With a Source on (`THEBE_SOURCES`), each new Trigger is weighed against rules the person wrote in plain words, and Core records what it WOULD have taken on. It takes on nothing: no Ticket is made and no write is run.
   - `GET/PUT /v1/policy`: `rules` (plain-language strings, at most 20, 500 characters each), `acceptMode` (`observe`, the default, or `off`; `auto` is refused with `400` because it does not exist yet) and an optional `model` (`{providerId, modelId}`, or `null` for Core's default) so a cheap model can do the weighing. Leaving a field out keeps it. `PUT` is refused while Core is quiesced.
   - `GET /v1/decisions` (`?thread=`, `?limit=`) and `/v1/decisions/{id}`, read-only. A Decision says `outcome`, which rules matched (`matchedRuleIds`), a one-sentence `reason`, and the `policyVersion` it was made under (a hash of the rules, mode, model and which Sources were on). In observe a positive assessment is `outcome: "ignore"` with `wouldAccept: true`; "no rule applies" is `wouldAccept: false`.

@@ -98,14 +98,33 @@ async function start(
   const auditDir = await mkdtemp(join(tmpdir(), "auto-audit-"));
   const d = docker(["emby", "nightly-backup"]);
   const fake = createFakeRuntime();
+  const pushes: Array<Record<string, unknown>> = [];
   lastFake = fake;
   const app = createThebeApp({
     runtime: fake.runtime,
     provider: d.provider,
     serviceAPIProviders: [d.service],
     auditPath: join(auditDir, "audit.jsonl"),
+    agentStoreDir: auditDir,
     sources: { containerHealth: true, intervalMs: 1000 },
+    pushRelayUrl: "https://relay.example",
+    pushFetch: (async (_url: string, init: RequestInit) => {
+      pushes.push(JSON.parse(init.body as string) as Record<string, unknown>);
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch,
   });
+  await app.handler.handle(
+    new Request("http://127.0.0.1:8787/v1/devices", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        token: "t1",
+        platform: "ios",
+        relayDeviceId: "relay-1",
+        categories: ["thebe.activity"],
+      }),
+    })
+  );
   await vi.advanceTimersByTimeAsync(0); // the Source's baseline
   const policy = await app.agent.setPolicy({
     rules: ["If a media server stops, it is worth restarting it."],
@@ -129,7 +148,7 @@ async function start(
       { kind: "text" as const, text: REVIEW_PASS },
     ]),
   ]);
-  return { app, d };
+  return { app, d, fake, pushes };
 }
 
 const decisionsOf = (app: Awaited<ReturnType<typeof start>>["app"]) =>
@@ -187,6 +206,72 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     await app.agent.quiesce();
   });
 
+  it("refuses to resume an Eval Ticket after its Policy rule is removed, audits it, and resumes after repair", async () => {
+    const { app, d, fake } = await start("auto", "accept", [{ kind: "hang" }]);
+    d.set("emby", "exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () =>
+      expect(await decisionsOf(app)).toHaveLength(1)
+    );
+
+    const [decision] = await decisionsOf(app);
+    const goalId = decision!.goalId!;
+    await vi.waitFor(() =>
+      expect(app.agent.getGoal(goalId)?.activeSubagent?.status).toBe("running")
+    );
+    await app.agent.pauseGoal(goalId);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "paused",
+    });
+    const subagentsBefore = await app.agent.listSubagents(goalId);
+
+    await app.agent.setPolicy({ rules: [] });
+    const response = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/goals/${goalId}/resume`, {
+        method: "POST",
+      })
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "ticket_mandate_invalid",
+      error: expect.stringContaining("matched rule"),
+    });
+    expect(app.agent.getGoal(goalId)?.status).toBe("paused");
+    expect(await app.agent.listSubagents(goalId)).toHaveLength(
+      subagentsBefore.length
+    );
+    expect(
+      (
+        await app.agent.listAudit({
+          method: "ticket.mandate_revalidate",
+          sessionId: goalId,
+        })
+      ).entries
+    ).toEqual([
+      expect.objectContaining({
+        result: "denied",
+        source: "ticket",
+        summary: expect.stringContaining("matched rule"),
+      }),
+    ]);
+
+    await app.agent.setPolicy({
+      rules: ["If a media server stops, it is worth restarting it."],
+    });
+    fake.queueTurns([
+      { kind: "text", text: WORKER_DONE },
+      { kind: "text", text: REVIEW_PASS },
+    ]);
+    await app.agent.resumeGoal(goalId);
+    await vi.waitFor(() =>
+      expect(app.agent.getGoal(goalId)?.status).toBe("completed")
+    );
+    expect(await app.agent.listSubagents(goalId)).toHaveLength(
+      subagentsBefore.length + 2
+    );
+    await app.agent.quiesce();
+  });
+
   it("makes no Ticket and restarts nothing in observe, and still shows what it would have done", async () => {
     const { app, d } = await start("observe");
     d.set("emby", "exited");
@@ -216,48 +301,85 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     await app.agent.quiesce();
   });
 
-  it("does not cover what the Mandate does not: a delete, or a service the event is not about", async () => {
-    const { app, d } = await start("auto", "accept", [
-      {
-        kind: "tools",
-        calls: [
-          {
-            name: "service_write",
-            args: {
-              service: "docker",
-              method: "DELETE",
-              path: "/containers/emby",
-            },
-            id: "delete-emby",
-          },
-          {
-            name: "service_write",
-            args: {
-              service: "radarr",
-              method: "POST",
-              path: "/api/v3/command",
-            },
-            id: "other-service",
-          },
-        ],
+  it.each([
+    {
+      name: "a service the event is not about",
+      call: {
+        name: "service_write",
+        args: {
+          service: "radarr",
+          method: "POST",
+          path: "/api/v3/command",
+        },
+        id: "other-service",
       },
-      { kind: "text", text: WORKER_DONE },
-      { kind: "text", text: REVIEW_PASS },
-    ]);
-    d.set("emby", "exited");
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.waitFor(async () =>
-      expect(await decisionsOf(app)).toHaveLength(1)
-    );
-    const [decision] = await decisionsOf(app);
-    // Nobody is there to approve them, so both are refused on the spot: the run goes on and finishes
-    // instead of waiting for an answer, and neither reached a service.
-    await vi.waitFor(() =>
-      expect(app.agent.getGoal(decision!.goalId!)?.status).toBe("completed")
-    );
-    expect(d.requests).toEqual([]);
-    await app.agent.quiesce();
-  });
+      detail: "service_write acts on radarr, outside this Ticket's Mandate.",
+    },
+    {
+      name: "an irreversible delete",
+      call: {
+        name: "service_write",
+        args: {
+          service: "docker",
+          method: "DELETE",
+          path: "/containers/emby",
+        },
+        id: "delete-emby",
+      },
+      detail:
+        "service_write sends an HTTP DELETE to the service, so this Ticket's Mandate does not authorize it.",
+    },
+  ])(
+    "blocks at once on $name, without asking the reviewer to accept the worker's claim",
+    async ({ call, detail }) => {
+      const { app, d, pushes } = await start("auto", "accept", [
+        {
+          kind: "tools",
+          calls: [call],
+        },
+        { kind: "text", text: WORKER_DONE },
+        { kind: "text", text: REVIEW_PASS },
+      ]);
+      d.set("emby", "exited");
+      await vi.advanceTimersByTimeAsync(1000);
+      await vi.waitFor(async () =>
+        expect(await decisionsOf(app)).toHaveLength(1)
+      );
+      const [decision] = await decisionsOf(app);
+      await vi.waitFor(() =>
+        expect(app.agent.getGoal(decision!.goalId!)).toMatchObject({
+          status: "failed",
+          blocked: true,
+          error: detail,
+        })
+      );
+      const goal = app.agent.getGoal(decision!.goalId!)!;
+      expect(goal.subagentRunIds).toHaveLength(1);
+      expect(d.requests).toEqual([]);
+      await vi.waitFor(() => expect(pushes).toHaveLength(1));
+      expect(pushes[0]).toMatchObject({
+        relayDeviceId: "relay-1",
+        category: "thebe.activity",
+        body: `A task is blocked and needs you: ${detail}`,
+        deepLink: `thebe://goal/${encodeURIComponent(goal.thebeSessionId)}`,
+        ticket: decision!.ticketId,
+        seq: 1,
+      });
+      const activity = await app.handler.handle(
+        new Request(`http://127.0.0.1:8787/v1/activity/${goal.thebeSessionId}`)
+      );
+      expect(activity.status).toBe(200);
+      expect(await activity.json()).toMatchObject({
+        type: "goal",
+        stage: "person",
+        reason: "blocked",
+        goal: {
+          error: { code: "goal_blocked", message: detail },
+        },
+      });
+      await app.agent.quiesce();
+    }
+  );
 
   it("does not let the reviewer change anything: it has the tools that change nothing", async () => {
     // The worker finishes without restarting; the reviewer then tries to, and has no such tool.

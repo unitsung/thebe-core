@@ -27,6 +27,7 @@ let mock;
 let received = [];
 let respondWith = { status: 200, body: "" };
 let relay;
+let apnsClient;
 let base;
 let clock = Date.UTC(2026, 10, 1);
 
@@ -51,6 +52,7 @@ before(async () => {
     origin: `http://127.0.0.1:${mock.address().port}`,
     now: () => clock,
   });
+  apnsClient = apns;
   relay = createRelay({ dataDir: dir, apns, now: () => clock });
   await new Promise((resolve) => relay.server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${relay.server.address().port}`;
@@ -104,7 +106,8 @@ test("a signed event reaches APNs as a minimal alert with the deep link", async 
   received = [];
   respondWith = { status: 200, body: "" };
   const id = await registered();
-  const response = await post("/v1/events", signedEvent(id));
+  const event = signedEvent(id);
+  const response = await post("/v1/events", event);
   assert.equal(response.status, 200);
   assert.equal(received.length, 1);
   const [call] = received;
@@ -122,7 +125,9 @@ test("a signed event reaches APNs as a minimal alert with the deep link", async 
       category: "thebe.permission",
     },
     deepLink: "thebe://approval/abc",
+    id: event.id,
   });
+  assert.match(call.headers["apns-collapse-id"], /^[0-9a-f]{32}$/);
 });
 
 test("an event signed by another key is refused and never reaches APNs", async () => {
@@ -232,4 +237,90 @@ test("registration rejects a bad token or key", async () => {
     ).status,
     400
   );
+});
+
+test("ticket and sequence reach the device and cannot be tampered with", async () => {
+  received = [];
+  const id = await registered();
+  const event = signedEvent(id, { ticket: "ticket-a", seq: 7 });
+  assert.equal((await post("/v1/events", event)).status, 200);
+  assert.equal(received[0].body.id, event.id);
+  assert.equal(received[0].body.ticket, "ticket-a");
+  assert.equal(received[0].body.seq, 7);
+  assert.equal(
+    (await post("/v1/events", signedEvent(id, { seq: 0 }))).status,
+    400
+  );
+  assert.equal(
+    (await post("/v1/events", signedEvent(id, { ticket: "" }))).status,
+    400
+  );
+
+  const tampered = signedEvent(id, { ticket: "ticket-a", seq: 8 });
+  tampered.seq = 9;
+  assert.equal((await post("/v1/events", tampered)).status, 401);
+  assert.equal(received.length, 1);
+});
+
+test("an event APNs refused can be retried under the same id", async () => {
+  received = [];
+  const id = await registered();
+  const event = signedEvent(id, { id: "retry-me" });
+  respondWith = {
+    status: 503,
+    body: JSON.stringify({ reason: "ServiceUnavailable" }),
+  };
+  assert.equal((await post("/v1/events", event)).status, 502);
+  respondWith = { status: 200, body: "" };
+  const retry = await post("/v1/events", event);
+  assert.equal(retry.status, 200);
+  assert.equal((await retry.json()).duplicate, undefined);
+  assert.equal(received.length, 2);
+  // Delivered now: a third try is a duplicate and sends nothing.
+  assert.equal(
+    (await (await post("/v1/events", event)).json()).duplicate,
+    true
+  );
+  assert.equal(received.length, 2);
+});
+
+test("an event is still sent once after the relay restarts", async () => {
+  received = [];
+  const id = await registered();
+  const event = signedEvent(id, { id: "across-restart" });
+  assert.equal((await post("/v1/events", event)).status, 200);
+  assert.equal(received.length, 1);
+
+  const second = createRelay({
+    dataDir: dir,
+    apns: apnsClient,
+    now: () => clock,
+  });
+  await new Promise((resolve) => second.server.listen(0, "127.0.0.1", resolve));
+  try {
+    const again = await fetch(
+      `http://127.0.0.1:${second.server.address().port}/v1/events`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(event),
+      }
+    );
+    assert.equal(again.status, 200);
+    assert.equal((await again.json()).duplicate, true);
+    assert.equal(received.length, 1);
+  } finally {
+    second.server.close();
+  }
+});
+
+test("a delivered event id is remembered for a day, not for ever", async () => {
+  received = [];
+  const id = await registered();
+  const first = signedEvent(id, { id: "day-old" });
+  assert.equal((await post("/v1/events", first)).status, 200);
+  clock += 25 * 60 * 60 * 1000;
+  const next = signedEvent(id, { id: "day-old" });
+  assert.equal((await post("/v1/events", next)).status, 200);
+  assert.equal(received.length, 2);
 });

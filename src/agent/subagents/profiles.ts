@@ -155,6 +155,22 @@ export const BUILTIN_SUBAGENT_PROFILES: Record<string, BuiltinSubagentProfile> =
       directTools: true,
       allowWrites: true,
     },
+    "ticket-observer": {
+      name: "ticket-observer",
+      description:
+        "Inspect the current home-server state for one stuck Ticket without changing anything.",
+      systemPrompt: [
+        "You are a read-only status observer for work on the person's home server.",
+        "You receive only the explicit status-check task below; do not assume parent conversation context.",
+        "Look at the current state with the read tools. Do not restart, edit, or change anything.",
+        "Report evidence about whether the work is still moving, what is currently true, and the smallest safe next step.",
+        RESPONSE_AND_FILE_OUTPUT_POLICY,
+      ].join("\n"),
+      tools: ["ls", "read", "*"],
+      readOnly: true,
+      maxTurns: 4,
+      directTools: true,
+    },
     "ticket-reviewer": {
       name: "ticket-reviewer",
       description:

@@ -20,7 +20,8 @@ export type PersonReason =
   | "failed"
   | "blocked"
   | "answer"
-  | "review";
+  | "review"
+  | "stalled";
 export type ActivityStageInfo = { stage: ActivityStage; reason?: PersonReason };
 
 /** A failure stays in front of the person this long; after that it is history in Activity. */
@@ -54,12 +55,15 @@ export function activityStage(
         case "paused":
           // Something is waiting on the person, so it does not age into history: letting it fall out of
           // sight is exactly the silent wait that is not allowed. A plain pause is idle.
-          return item.goal.attention
-            ? {
-                stage: "person",
-                reason:
-                  item.goal.attention.kind === "review" ? "review" : "answer",
-              }
+          if (item.goal.attention) {
+            return {
+              stage: "person",
+              reason:
+                item.goal.attention.kind === "review" ? "review" : "answer",
+            };
+          }
+          return item.goal.watchdog?.state === "waiting_for_person"
+            ? { stage: "person", reason: "stalled" }
             : { stage: "idle" };
         case "failed":
           return recentFailure(

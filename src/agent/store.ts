@@ -37,6 +37,15 @@ export type StoredGoalEvent = {
         type: "goal_status";
         status: "running" | "pausing" | "paused" | "cancelled" | "failed";
         message?: string;
+      }
+    | {
+        type: "goal_watchdog";
+        action: "status_check" | "retry_worker" | "pause";
+        reason:
+          | "goal_no_progress"
+          | "worker_inactivity"
+          | "reviewer_inactivity";
+        message?: string;
       };
   at: string;
 };

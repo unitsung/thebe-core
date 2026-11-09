@@ -78,6 +78,13 @@ file contents.
   "permissionMode": "manual",
   "maxSubagentConcurrency": 3,
   "maxSubagentsPerParent": 2,
+  "watchdog": {
+    "intervalMs": 60000,
+    "goalFirstMs": 1800000,
+    "goalSecondMs": 3600000,
+    "workerFirstMs": 600000,
+    "workerSecondMs": 600000
+  },
   "enabledResources": [
     {
       "kind": "skill",
@@ -99,9 +106,18 @@ file contents.
 
 - `autoSummaryDelayMs` is in milliseconds; `60000` or `120000` summarizes after the user has been idle for one or two minutes.
 - `permissionMode` is the host default for new sessions: `plan`, `manual`, `acceptEdits`, or `bypassPermissions` (see [Permission modes](#permission-modes)). Only these four names are read. You can also change it at runtime with `/permissions` or the settings menu.
-- `maxSubagentConcurrency` and `maxSubagentsPerParent` cap global child concurrency and per-parent concurrency for one-shot in-memory subagents (clamped to 1 to 16; a profile's `maxTurns` is clamped to 1 to 50). Normal sessions are unaffected.
+- `maxSubagentConcurrency` and `maxSubagentsPerParent` cap global child concurrency and per-parent concurrency for one-shot in-memory subagents (clamped to 1 to 16; a profile's `maxTurns` is clamped to 1 to 50). Normal sessions are unaffected. When total concurrency is above 1, Core reserves one slot for a person's request; background Goal workers and reviewers may use only the remaining slots. At 1 there is no separate background capacity.
+- `watchdog` values are milliseconds; non-positive values fall back to the defaults. Core scans every 60 seconds. A Goal with no semantic progress gets one read-only status check after 30 minutes and is paused into `person / stalled` after 60. A worker or reviewer with no activity for 10 minutes is cancelled and retried once; another 10 minutes without activity pauses the Goal. Each intervention writes `watchdog.status_check`, `watchdog.retry_worker`, or `watchdog.pause` to the audit log and records the latest state on the Goal's `watchdog` field. `goalSecondMs` cannot be shorter than `goalFirstMs`.
 - `workspacePath` is the mandatory workspace authorization boundary. Absolute paths are used as given; relative paths resolve against the Thebe config directory, not the launch directory. `read`, `ls`, `find`, and `grep` inside the workspace do not prompt; reads outside it need confirmation. `AGENT.md`, `AGENTS.md`, and `CLAUDE.md` are treated like any other file: readable inside the workspace, confirmed outside. `bash`, `write`, and `edit` follow the permission mode.
 - `outputDirectory` is only the default location when the user explicitly asks to save a generated document. Ordinary answers are shown in the message.
+
+## Event sources and Eval
+
+- `THEBE_SOURCES` is a comma-separated list of Sources Core watches in the background. It is unset by default, so Core starts no Source timer and reads nothing. `THEBE_SOURCE_INTERVAL_MS` sets the poll interval (default 30000, at least 1000).
+- `container-health` records `container.went_down`, `container.recovered`, `container.appeared`, `container.removed`, and `container.state_changed` on `resource:container:<name>`. Docker's own healthcheck is not exposed, so "unhealthy" here means the observed state changed.
+- `download-completed` requires a configured download provider. It records `download.completed` when a download moves from any non-completed phase into `completed`, on `resource:download:<engine>:<hash>`. If any engine in a multi-engine listing is unreachable, the read fails without advancing the cursor.
+- Both Sources establish a baseline on the first read, persist their cursor, and do not replay after a restart. When Sources are enabled, `GET /v1/health` includes `sources`; each entry has `state` (`starting`, `healthy`, or `failing`), `consecutiveFailures`, and the latest error. A successful read clears the failure count. A requested `download-completed` Source with no download provider stays visible as `failing`.
+- Eval asks the configured assessment model about eligible Triggers under the Policy. `THEBE_EVAL_MAX_PER_HOUR` caps questions at 60 per hour by default; `0` removes the cap. A provider error, an unusable reply, or the hourly limit records a Decision with `outcome: "unavailable"`, never a "no". Core pushes one notice for an assessment outage and waits for a successful assessment before it announces another.
 
 ## Model providers and sign-in
 
@@ -109,6 +125,83 @@ Model providers are managed by the Pi runtime adapter. List and configure them
 from the TUI settings or through `GET /v1/provider`; credentials are kept in the
 agent directory, never in `config.json`. `POST /v1/provider/{id}/test` checks a
 provider with a real probe.
+
+## MCP OAuth gateway
+
+OAuth is optional and stays disabled until `THEBE_OAUTH_ISSUER` names the stable
+public origin of the authorization server. It exists so claude.ai and ChatGPT
+connectors that understand OAuth can connect to `/mcp` without a manually
+entered bearer token.
+
+```dotenv
+THEBE_MCP_PORT=8788
+THEBE_OAUTH_ISSUER=https://thebe.example.com
+THEBE_MCP_RESOURCE_URL=https://thebe.example.com/mcp
+THEBE_OAUTH_CLIENTS_FILE=oauth-clients.json
+THEBE_OAUTH_PAIRING_TTL_SECONDS=300
+```
+
+- `THEBE_OAUTH_ISSUER` must be an absolute origin without a path. HTTPS is
+  required except on loopback, and the value must stay unchanged after the
+  signing key is created.
+- `THEBE_MCP_RESOURCE_URL` is the one resource OAuth may issue tokens for. It
+  defaults to the issuer followed by `/mcp`, and its path must be exactly
+  `/mcp`.
+- `THEBE_OAUTH_CLIENTS_FILE` points to the pre-registered client file. A
+  relative path is resolved under the config directory; the default is
+  `$THEBE_CONFIG_DIR/oauth-clients.json`. `THEBE_OAUTH_CLIENTS` accepts inline
+  JSON with the same shape instead.
+- `THEBE_OAUTH_DYNAMIC_REGISTRATION` is off by default. Set it to `true` only
+  when a connector cannot use a pre-registered client. If
+  `THEBE_OAUTH_REGISTRATION_TOKEN` is also set, `/oauth/register` requires that
+  value as its initial access token.
+- `THEBE_OAUTH_PAIRING_TTL_SECONDS` defaults to 300 and is limited to 60–900.
+
+The client file contains one entry per connector:
+
+```json
+{
+  "clients": [
+    {
+      "clientId": "home-connector",
+      "clientName": "Claude connector",
+      "clientSecret": "optional-secret",
+      "redirectUris": ["https://client.example/callback"],
+      "scopes": ["mcp:read", "offline_access"]
+    }
+  ]
+}
+```
+
+`client_id`, `client_name`, `client_secret`, and `redirect_uris` are accepted as
+snake-case aliases; `scope` may replace `scopes`. Redirect URIs match exactly
+and need HTTPS except on loopback. Without a secret the client is public and
+uses PKCE. The default client scopes are `mcp:read` and `offline_access`.
+Supported scopes are `mcp:read`, `mcp:write`, `mcp:irreversible`, and
+`offline_access`.
+
+The authorization page requires a one-time pairing code. With the App's
+full-access token, issue one from the main API listener:
+
+```bash
+curl -fsS -X POST \
+  -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/pairing-code
+```
+
+Enter `code` in the browser before `expiresAt`. The code works once. A scoped
+`/mcp` token cannot call the pairing API. The Core API and browser flow are
+implemented; the TUI does not yet have a dedicated pairing-code command.
+
+The authorization server uses Authorization Code + PKCE, exact redirect URI
+matching, Resource Indicators bound to `/mcp`, and PS256 JWT access tokens.
+Access tokens last 15 minutes. A request with `offline_access` and
+`prompt=consent` receives a rotating 30-day refresh token, and revoking that
+refresh token invalidates its access token on the next `/mcp` request. The
+issuer, signing keys, provider state, pairing hashes, and client grants live in
+the config directory; back them up together. See
+[DEPLOYMENT.md](DEPLOYMENT.md#412-oauth-for-claudeai-and-chatgpt-connectors) for
+the public listener and reverse-proxy setup.
 
 ## Service connections
 

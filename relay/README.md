@@ -5,9 +5,11 @@ An optional, separately deployed service. It holds the APNs credentials so a sel
 ## How it works
 
 1. The App registers its APNs token with the relay together with the public key of the Core it trusts (`POST /v1/registrations`). The relay returns a `relayDeviceId`.
-2. Core signs each event with its Ed25519 key and sends it (`POST /v1/events`). The relay checks the signature against the key registered for that device, drops stale (over 5 minutes), repeated and over-rate (30 per minute) events, and sends the alert to APNs over HTTP/2.
-3. An event holds a short generic line, a category and a `thebe://` deep link. Nothing else reaches Apple.
+2. Core signs each event with its Ed25519 key and sends it (`POST /v1/events`). The signature covers the visible message and ordering metadata. The relay checks it against the key registered for that device, drops stale (over 5 minutes), repeated and over-rate (30 per minute) events, and sends the alert to APNs over HTTP/2.
+3. An event holds a short generic line, a category, a `thebe://` deep link, an event id, and optional `ticket` and `seq` for device-side ordering.
 4. A token APNs reports as gone (410, `Unregistered`, `BadDeviceToken`) is dropped.
+5. A successfully delivered event id is remembered for 24 hours in `seen.json`, including across relay restarts. An APNs failure leaves the id unclaimed so Core can retry it.
+6. The event id is also sent as `apns-collapse-id`, so APNs replaces a retry rather than showing the same notice twice.
 
 ## Configuration
 
@@ -17,7 +19,7 @@ An optional, separately deployed service. It holds the APNs credentials so a sel
 | `APNS_KEY_ID`    | The key's 10-character ID                                                                                    |
 | `APNS_TEAM_ID`   | The team ID (`5PY7FY4MQK`)                                                                                   |
 | `APNS_TOPIC`     | The bundle ID, default `com.unitsung.thebe`                                                                  |
-| `RELAY_DATA_DIR` | Where registrations are kept, default `./data`                                                               |
+| `RELAY_DATA_DIR` | Where registrations and delivered ids are kept, default `./data`                                             |
 | `RELAY_PORT`     | Port on `127.0.0.1`, default 8788                                                                            |
 
 The relay listens on loopback only. Put TLS in front of it (Tailscale Serve, Caddy, a reverse proxy) and give that HTTPS address to Core as `THEBE_PUSH_RELAY_URL`. The App only accepts an `https` relay address (or localhost for testing).

@@ -146,6 +146,21 @@ describe("activityStage", () => {
     expect(activityStage(goal({ status: "paused" }), now)).toEqual({
       stage: "idle",
     });
+    expect(
+      activityStage(
+        goal({
+          status: "paused",
+          watchdog: {
+            state: "waiting_for_person",
+            reason: "worker_inactivity",
+            action: "pause",
+            since: "2026-11-06T10:00:00.000Z",
+            at: "2026-11-06T10:20:00.000Z",
+          },
+        }),
+        now
+      )
+    ).toEqual({ stage: "person", reason: "stalled" });
   });
 
   it("does not put a failed background task or a service's failed transfer in front of the person", () => {

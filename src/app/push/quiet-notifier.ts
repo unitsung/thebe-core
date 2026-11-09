@@ -5,11 +5,11 @@ import {
   msUntilQuietEnds,
   type QuietHoursStore,
 } from "../../delivery/http/quiet-hours.ts";
-import type { PushNotice, PushNotifier } from "./notifier.ts";
+import type { DurablePushNotifier, PushNotice } from "./notifier.ts";
 
 export const DEFAULT_HELD_NOTICES = 10;
 
-export type QuietHoursNotifier = PushNotifier & {
+export type QuietHoursNotifier = DurablePushNotifier & {
   /** After a start: send what was held before a restart if quiet hours are over, or wait for them to end. */
   resume(): Promise<void>;
   stop(): void;
@@ -22,7 +22,7 @@ export type QuietHoursNotifier = PushNotifier & {
  * `maxHeld` the oldest is dropped, the newest are what the person needs.
  */
 export function createQuietHoursNotifier(options: {
-  inner: PushNotifier;
+  inner: DurablePushNotifier;
   quiet: QuietHoursStore;
   dir?: string;
   now?: () => Date;
@@ -100,6 +100,18 @@ export function createQuietHoursNotifier(options: {
       const window = await options.quiet.get();
       if (window && isQuiet(window, now())) arm(window);
       else await flush();
+    },
+    flush() {
+      return options.inner.flush();
+    },
+    status() {
+      return options.inner.status();
+    },
+    close() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      options.inner.close();
     },
     stop() {
       stopped = true;

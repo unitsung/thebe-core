@@ -3,6 +3,7 @@ import { CONTAINER_TOOL_NAMES } from "../../../agent/capabilities/containers.ts"
 import {
   DIAGNOSE_FROM_EVENTS_TOOL,
   LIST_CORE_EVENTS_TOOL,
+  capabilityChangesThings,
   listCoreMcpTools,
   toMcpWireTool,
   type McpWireTool,
@@ -103,6 +104,21 @@ async function listedTools(
     .filter((tool) => mayWrite || tool.annotations.readOnlyHint);
 }
 
+async function isReadOnlyTool(
+  agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
+  name: string
+): Promise<boolean> {
+  const mapped = ALIASES[name] ?? name;
+  const tools = agent ? await agent.listMcpTools() : listCoreMcpTools();
+  const tool = tools.find(
+    (item) =>
+      item.name === mapped ||
+      item.id === mapped ||
+      (mapped.startsWith("mcp:") && item.name === mapped)
+  );
+  return Boolean(tool && !capabilityChangesThings(tool));
+}
+
 /**
  * Text stays the universal fallback; a JSON object result is also offered as `structuredContent`
  * so clients can read typed data without re-parsing the text.
@@ -150,20 +166,6 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
       },
     });
   }
-  if (method === "tools/call" && agent?.isQuiesced()) {
-    return json(
-      {
-        jsonrpc: "2.0",
-        id,
-        error: {
-          code: -32003,
-          message:
-            "System is quiesced for maintenance; write operations are temporarily disabled",
-        },
-      },
-      503
-    );
-  }
   if (method === "tools/list") {
     return json({
       jsonrpc: "2.0",
@@ -177,6 +179,20 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     const params = asObject(body.params);
     const name = typeof params.name === "string" ? params.name : "";
     if (!name) return mcpError(id, -32602, "tools/call requires params.name");
+    if (agent?.isQuiesced() && !(await isReadOnlyTool(agent, name))) {
+      return json(
+        {
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32003,
+            message:
+              "System is quiesced for maintenance; write operations are temporarily disabled",
+          },
+        },
+        503
+      );
+    }
     try {
       const { text, isError } = await callTool(agent, name, params.arguments, {
         name: context.caller?.name,

@@ -4,8 +4,13 @@ import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
 import { key } from "./tickets/ids.ts";
 import { createTicketStore } from "./tickets/store.ts";
+import { createTicketControlApi } from "./tickets/control.ts";
 import type { Ticket } from "./tickets/types.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
+import {
+  createDownloadCompletedSource,
+  createUnconfiguredDownloadCompletedSource,
+} from "./sources/download-completed.ts";
 import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
 import type { Trigger } from "./sources/types.ts";
@@ -15,7 +20,7 @@ import type { Policy } from "./eval/types.ts";
 import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
-import { inferScope } from "./tickets/mandate.ts";
+import { inferScope, revalidateMandate } from "./tickets/mandate.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
@@ -27,6 +32,7 @@ import { createSubagentApi } from "./subagents/api.ts";
 import { createGoalReportInbox } from "./goals/report.ts";
 import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
+import { canRunPipelineJobs } from "./tools/pipeline-tools.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
@@ -42,7 +48,67 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const extensions = createExtensionApi(ctx, artifactStore);
   const reportInbox = createGoalReportInbox(ctx.now);
   const subagents = createSubagentApi(ctx, artifactStore, reportInbox);
-  const goals = createGoalApi(ctx, subagents, artifactStore, reportInbox);
+  const ticketStore = createTicketStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "tickets")
+      : undefined,
+  });
+  const enabledSources = [
+    ...(options.sources?.containerHealth ? ["container-health"] : []),
+    ...(options.sources?.downloadCompleted ? ["download-completed"] : []),
+  ];
+  const policyStore = createPolicyStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "eval")
+      : undefined,
+    now: ctx.now,
+  });
+  const servicesForResource = (kind: string): string[] => {
+    const services = (options.serviceAPIProviders ?? [])
+      .filter((service) => service.resourceKinds?.includes(kind))
+      .map((service) => service.id);
+    if (kind === "download" && options.pipeline) {
+      services.push("download");
+      if (options.pipeline.files) services.push("files");
+      if (options.pipeline.libraries?.length) services.push("library");
+      if (canRunPipelineJobs(options.pipeline)) services.push("pipeline");
+    }
+    return [...new Set(services)];
+  };
+  const { watchdog: goalWatchdog, ...goals } = createGoalApi(
+    ctx,
+    subagents,
+    artifactStore,
+    reportInbox,
+    {
+      watchdog: options.watchdog,
+      getTicketIdForGoal: async (goalId) =>
+        (await ticketStore.getByGoal(goalId))?.id,
+      revalidateMandate: async (goalId) => {
+        const ticket = await ticketStore.getByGoal(goalId);
+        if (!ticket) {
+          return {
+            allowed: false,
+            reason: "the Eval-created Ticket is missing",
+          };
+        }
+        if (ticket.mandate.decidedBy !== "eval") {
+          return {
+            allowed: false,
+            reason: "the Goal's Ticket is not an Eval-created Ticket",
+          };
+        }
+        return revalidateMandate({
+          mandate: ticket.mandate,
+          subscriptions: ticket.subscriptions,
+          policy: await policyStore.get(),
+          servicesForResource,
+          enabledSources,
+        });
+      },
+      onNeedsPerson: options.onGoalNeedsPerson,
+    }
+  );
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
@@ -60,6 +126,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     isQuiesced: () => options.runtime.isQuiesced(),
   });
   schedules.start();
+  goalWatchdog.start();
   ctx.pipelineAdvancer?.start();
   const activityStore = createActivityStore({
     dir: options.agentStoreDir
@@ -68,21 +135,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     now: ctx.now,
     onPendingApproval: options.onPendingApproval,
   });
-  const ticketStore = createTicketStore({
-    dir: options.agentStoreDir
-      ? join(options.agentStoreDir, "tickets")
-      : undefined,
-  });
   const triggerStore = createTriggerStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "triggers")
       : undefined,
-  });
-  const policyStore = createPolicyStore({
-    dir: options.agentStoreDir
-      ? join(options.agentStoreDir, "eval")
-      : undefined,
-    now: ctx.now,
   });
   const decisionStore = createDecisionStore({
     dir: options.agentStoreDir
@@ -116,7 +172,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,
-    sources: options.sources?.containerHealth ? "container-health" : "",
+    sources: enabledSources.join(","),
     maxPerHour: options.evalMaxPerHour,
     threadTickets: async (thread) => {
       // The work taken on for this thread that the Eval could still be looking at: nothing older than the
@@ -148,11 +204,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         return { ticketId, goalId: existing.links.legacyGoalId };
       }
       const intent = input.assessment.intent ?? `Handle ${input.thread}`;
-      const scope = inferScope(input.triggers, (kind) =>
-        (options.serviceAPIProviders ?? [])
-          .filter((service) => service.resourceKinds?.includes(kind))
-          .map((service) => service.id)
-      );
+      const scope = inferScope(input.triggers, servicesForResource);
       // The Goal's session exists first and the Ticket is made before the executor runs: the executor's
       // writes are judged by the Ticket's Mandate, found from this session.
       const session = await sessions.createSession({
@@ -194,6 +246,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     onError: () => {
       // A failed Eval leaves no Decision; the next start weighs it again.
     },
+    onUnavailable: options.onEvalUnavailable,
     // One question to the model with no tools. The session exists only for this answer.
     assess: async (prompt, model) => {
       const session = await sessions.createSession({
@@ -262,23 +315,36 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   }
 
   const sourceRunner = createSourceRunner({
-    sources: options.sources?.containerHealth
-      ? [
-          createContainerHealthSource({
-            provider: options.provider,
-            now: ctx.now,
-          }),
-        ]
-      : [],
+    sources: [
+      ...(options.sources?.containerHealth
+        ? [
+            createContainerHealthSource({
+              provider: options.provider,
+              now: ctx.now,
+            }),
+          ]
+        : []),
+      ...(options.sources?.downloadCompleted
+        ? [
+            options.pipeline?.downloads
+              ? createDownloadCompletedSource({
+                  downloads: options.pipeline.downloads,
+                  now: ctx.now,
+                })
+              : createUnconfiguredDownloadCompletedSource(),
+          ]
+        : []),
+    ],
     store: triggerStore,
     intervalMs: options.sources?.intervalMs,
+    now: ctx.now,
     onTriggers: (triggers) => void dispatchTriggers(triggers),
     onError: () => {
       // A Source that cannot be read this time (for example Docker is down) is tried again next tick.
     },
   });
   // Triggers recorded before a restart that no Decision covers are weighed now, within an age bound.
-  if (options.sources?.containerHealth) {
+  if (enabledSources.length > 0) {
     void triggerStore.list().then(async (rows) => {
       const unattached: Trigger[] = [];
       for (const trigger of rows) {
@@ -295,6 +361,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     });
   }
   sourceRunner.start();
+  const ticketControl = createTicketControlApi({
+    store: ticketStore,
+    goals,
+    sessions,
+    now: ctx.now,
+  });
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
@@ -305,6 +377,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ...subagents,
     ...createControlApi(ctx, artifactStore, {
       executeAction: actions.executeApprovedAction,
+      tickets: ticketControl,
     }),
     async getPolicy() {
       return withModes(await policyStore.get());
@@ -321,6 +394,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async listTriggers(query) {
       return triggerStore.list(query);
     },
+    sourceHealth: sourceRunner.health,
     async listTickets() {
       return ticketStore.list();
     },
@@ -359,6 +433,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     deleteSchedule: schedules.deleteSchedule,
     runSchedule: schedules.runSchedule,
     async quiesce() {
+      goalWatchdog.stop();
       sourceRunner.stop();
       evalService.stop();
       ctx.pipelineAdvancer?.stop();
@@ -367,6 +442,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async unquiesce() {
       await options.runtime.unquiesce();
+      goalWatchdog.start();
       schedules.start();
       evalService.start();
       sourceRunner.start();

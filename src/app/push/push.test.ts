@@ -2,14 +2,21 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createPublicKey, verify } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type {
+  ContainerInfoProvider,
+  ContainerState,
+} from "../../agent/capabilities/containers.ts";
 import { createDeviceRegistry } from "../../delivery/http/devices.ts";
 import { createThebeHttpHandler } from "../../delivery/http/handler.ts";
+import { createThebeApp } from "../create.ts";
+import { createFakeRuntime } from "../../testing/runtime/index.ts";
 import { createPushIdentity, pushEventMessage } from "./identity.ts";
 import { createPushNotifier } from "./notifier.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
   );
@@ -99,6 +106,8 @@ describe("push notifier", () => {
       deepLink: "thebe://approval/abc",
       id: "approval-abc",
     });
+    await notifier.flush();
+    notifier.close();
 
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://relay.example/v1/events");
@@ -107,6 +116,8 @@ describe("push notifier", () => {
     } & Parameters<typeof pushEventMessage>[0];
     const event: Parameters<typeof pushEventMessage>[0] = rest;
     expect(event.relayDeviceId).toBe("relay-1");
+    expect(event.ticket).toBe("approval-abc");
+    expect(event.seq).toBe(1);
     // The signature is random base64, so it can contain "t1" by chance; only the readable fields matter.
     expect(JSON.stringify(rest)).not.toContain("t1");
     expect(
@@ -119,7 +130,7 @@ describe("push notifier", () => {
     ).toBe(true);
   });
 
-  it("never throws when the relay is down", async () => {
+  it("keeps the notice queued when the relay is down", async () => {
     const dir = await tempDir();
     const devices = createDeviceRegistry({ dir });
     await devices.register({
@@ -145,6 +156,13 @@ describe("push notifier", () => {
         id: "x",
       })
     ).resolves.toBeUndefined();
+    expect(notifier.status()).toMatchObject({
+      pending: 1,
+      consecutiveFailures: 1,
+      dropped: 0,
+    });
+    expect(notifier.status().lastError).toContain("relay unreachable");
+    notifier.close();
   });
 });
 
@@ -173,6 +191,43 @@ describe("push identity route", () => {
       available: true,
       publicKey: "abc",
       relayUrl: "https://relay.example",
+    });
+  });
+
+  it("reports outbox state on health only when push is on", async () => {
+    const off = createThebeHttpHandler({ version: "0.1.0" });
+    const offBody = (await (
+      await off.handle(new Request("http://127.0.0.1:8787/v1/health"))
+    ).json()) as Record<string, unknown>;
+    expect(offBody).not.toHaveProperty("push");
+
+    const on = createThebeHttpHandler({
+      version: "0.1.0",
+      pushOutbox: {
+        status: () => ({
+          pending: 2,
+          consecutiveFailures: 3,
+          dropped: 1,
+          lastDrop: {
+            id: "notice-1",
+            reason: "relay refused (404): unknown device",
+            at: "2026-11-01T00:00:00.000Z",
+          },
+        }),
+      },
+    });
+    const onBody = (await (
+      await on.handle(new Request("http://127.0.0.1:8787/v1/health"))
+    ).json()) as Record<string, unknown>;
+    expect(onBody.push).toEqual({
+      pending: 2,
+      consecutiveFailures: 3,
+      dropped: 1,
+      lastDrop: {
+        id: "notice-1",
+        reason: "relay refused (404): unknown device",
+        at: "2026-11-01T00:00:00.000Z",
+      },
     });
   });
 
@@ -217,3 +272,203 @@ describe("push identity route", () => {
     ).toBe("relay-9");
   });
 });
+
+describe("push app composition", () => {
+  it("exposes the outbox on health when a relay is configured", async () => {
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyContainers(),
+      agentStoreDir: await tempDir(),
+      pushRelayUrl: "https://relay.example",
+      pushFetch: (async () =>
+        new Response("{}", { status: 200 })) as unknown as typeof fetch,
+    });
+    const body = (await (
+      await app.handler.handle(new Request("http://127.0.0.1:8787/v1/health"))
+    ).json()) as Record<string, unknown>;
+    expect(body.push).toEqual({
+      pending: 0,
+      consecutiveFailures: 0,
+      dropped: 0,
+    });
+  });
+
+  it("turns a Goal attention into an ordered ticket notification", async () => {
+    const dir = await tempDir();
+    const calls: Array<Record<string, unknown>> = [];
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: { state: "ask", question: "Which library?" },
+          },
+        ],
+      },
+    ]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: emptyContainers(),
+      agentStoreDir: dir,
+      pushRelayUrl: "https://relay.example",
+      pushFetch: (async (_url: string, init: RequestInit) => {
+        calls.push(JSON.parse(init.body as string) as Record<string, unknown>);
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "t1",
+          platform: "ios",
+          relayDeviceId: "relay-1",
+          categories: ["thebe.activity"],
+        }),
+      })
+    );
+    const created = (await (
+      await app.handler.handle(
+        new Request("http://127.0.0.1:8787/v1/goals", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            goal: "Move the library",
+            allowAsk: true,
+          }),
+        })
+      )
+    ).json()) as Record<string, unknown>;
+    await app.agent.waitGoal(String(created.id));
+    await vi.waitFor(() => {
+      expect(calls).toHaveLength(1);
+    });
+    expect(calls[0]).toMatchObject({
+      relayDeviceId: "relay-1",
+      category: "thebe.activity",
+      body: "A task has a question for you.",
+      deepLink: expect.stringContaining("thebe://goal/"),
+      ticket: created.ticketId,
+      seq: 1,
+    });
+  });
+
+  it("pushes one notice while model assessments stay unavailable", async () => {
+    vi.useFakeTimers();
+    const dir = await tempDir();
+    const calls: Array<Record<string, unknown>> = [];
+    const containers = switchableContainers(["emby", "plex"]);
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "error", message: "503 provider unavailable" },
+      { kind: "error", message: "503 provider unavailable" },
+    ]);
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: containers.provider,
+      agentStoreDir: dir,
+      sources: { containerHealth: true, intervalMs: 1000 },
+      pushRelayUrl: "https://relay.example",
+      pushFetch: (async (_url: string, init: RequestInit) => {
+        calls.push(JSON.parse(init.body as string) as Record<string, unknown>);
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "t1",
+          platform: "ios",
+          relayDeviceId: "relay-1",
+          categories: ["thebe.activity"],
+        }),
+      })
+    );
+    await app.agent.setPolicy({
+      rules: ["Restart a media server that stopped"],
+      acceptMode: "observe",
+    });
+    await vi.advanceTimersByTimeAsync(0); // Source baseline
+    containers.set("emby", "exited");
+    containers.set("plex", "exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () =>
+      expect(await app.agent.listDecisions()).toHaveLength(2)
+    );
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({
+      category: "thebe.activity",
+      body: expect.stringContaining("could not reach the model provider"),
+      deepLink: "thebe://core",
+    });
+    await app.agent.quiesce();
+  });
+});
+
+function emptyContainers(): ContainerInfoProvider {
+  return {
+    listContainers: async () => [],
+    inspectContainer: async (id) => ({
+      id,
+      name: id,
+      image: "image",
+      state: "running",
+      config: {},
+    }),
+    getContainerLogs: async () => "",
+    getStatusSummary: async () => ({
+      totalContainers: 0,
+      runningContainers: 0,
+      pausedContainers: 0,
+      exitedContainers: 0,
+      lastUpdated: 0,
+    }),
+  };
+}
+
+function switchableContainers(names: string[]) {
+  const states = new Map(
+    names.map((name) => [name, "running" as ContainerState])
+  );
+  const provider = {
+    listContainers: async () =>
+      [...states].map(([name, state]) => ({
+        id: `id-${name}`,
+        name,
+        image: "image",
+        state,
+        status: state,
+        created: 1,
+      })),
+    inspectContainer: async (id: string) => ({
+      id,
+      name: id.slice(3),
+      image: "image",
+      state: states.get(id.slice(3)) ?? "running",
+      config: {},
+    }),
+    getContainerLogs: async () => "",
+    getStatusSummary: async () => ({
+      totalContainers: names.length,
+      runningContainers: [...states.values()].filter(
+        (state) => state === "running"
+      ).length,
+      pausedContainers: 0,
+      exitedContainers: [...states.values()].filter(
+        (state) => state === "exited"
+      ).length,
+      lastUpdated: 1,
+    }),
+  } as ContainerInfoProvider;
+  return {
+    provider,
+    set(name: string, state: ContainerState) {
+      states.set(name, state);
+    },
+  };
+}
