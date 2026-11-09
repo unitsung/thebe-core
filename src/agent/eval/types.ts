@@ -3,6 +3,33 @@ export type AcceptMode = "off" | "observe" | "auto";
 /** One rule the person wrote in plain words, e.g. "Restart a media server that stopped, but not at night". */
 export type PolicyRule = { id: string; text: string };
 
+/**
+ * Read-only work done before an Assessment. It is evidence for the same Decision, never an authorization:
+ * observations and suggestions are data, and any write still follows the Ticket's normal Mandate.
+ */
+export type SpeculativePreparation = {
+  source: string;
+  observedAt: string;
+  resource?: { kind: string; id: string };
+  diagnosis?: {
+    code: string;
+    title: string;
+    summary: string;
+    confidence: "low" | "medium" | "high";
+  };
+  observations: Array<{
+    kind: string;
+    severity: string;
+    fact: string;
+  }>;
+  suggestions: Array<{
+    title: string;
+    detail: string;
+    kind: "read" | "write";
+    requiresApproval: boolean;
+  }>;
+};
+
 export type Policy = {
   rules: PolicyRule[];
   /**

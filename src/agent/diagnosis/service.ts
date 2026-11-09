@@ -36,8 +36,16 @@ type Audit = ReturnType<typeof createAuditLog>;
 
 export type DiagnosisApi = {
   diagnose(request: DiagnosisRequest): Promise<DiagnosisResult>;
+  preview(request: DiagnosisRequest): Promise<DiagnosisPreview>;
   getDiagnosis(runId: string): Promise<DiagnosisResult | undefined>;
   explainDiagnosis(runId: string, question?: string): Promise<DiagnosisResult>;
+};
+
+export type DiagnosisPreview = Pick<
+  DiagnosisResult,
+  "resource" | "observations" | "diagnosis" | "recommendations"
+> & {
+  observedAt: string;
 };
 
 export function createDiagnosisApi(options: {
@@ -232,6 +240,25 @@ export function createDiagnosisApi(options: {
 
   return {
     diagnose,
+    async preview(request: DiagnosisRequest) {
+      const resource = normalizeResource(request.resource);
+      if (!resource.id) {
+        throw httpError(400, "resource.id is required", "invalid_body");
+      }
+      const observedAt = options.now().toISOString();
+      const collected = await collect(resource, observedAt);
+      const baseline = deterministicDiagnosis({
+        resource,
+        observations: collected.observations,
+      });
+      return {
+        resource,
+        observedAt,
+        observations: collected.observations,
+        diagnosis: baseline.diagnosis,
+        recommendations: baseline.recommendations,
+      };
+    },
     async getDiagnosis(runId: string) {
       return runs.get(runId);
     },

@@ -11,6 +11,7 @@ import {
   createEvalService,
   DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR,
 } from "./service.ts";
+import type { SpeculativePreparation } from "./types.ts";
 
 const T0 = Date.parse("2026-11-06T10:00:00Z");
 const hex = (n: number) => n.toString(16).padStart(32, "0");
@@ -38,6 +39,8 @@ async function setup(
     /** Runs while the model "thinks", before it answers. */
     whileAssessing?: () => void;
     earlier?: { title: string; at: string; state: string }[];
+    prepare?: () => Promise<SpeculativePreparation | undefined>;
+    preparationTimeoutMs?: number;
   } = {}
 ) {
   const clock = options.clock ?? { now: T0 + 60_000 };
@@ -68,6 +71,8 @@ async function setup(
     maxAcceptsPerThreadPerHour: options.maxAccepts,
     accept: options.withAccept === false ? undefined : accept,
     threadTickets: async () => options.earlier ?? [],
+    ...(options.prepare ? { prepare: options.prepare } : {}),
+    preparationTimeoutMs: options.preparationTimeoutMs,
     assess: async (prompt) => {
       prompts.push(prompt);
       options.whileAssessing?.();
@@ -219,6 +224,60 @@ describe("auto in Eval: a positive assessment becomes a Ticket", () => {
     const none = await setup();
     await run(none);
     expect(none.prompts[0]).not.toContain("Work already taken on");
+  });
+
+  it("uses read-only preparation and carries it into an accepted execution", async () => {
+    const preparation: SpeculativePreparation = {
+      source: "container-diagnosis",
+      observedAt: "2026-11-06T10:00:01.000Z",
+      resource: { kind: "container", id: "emby" },
+      diagnosis: {
+        code: "container_exited",
+        title: "Container is not running",
+        summary: "Observed state for emby is exited.",
+        confidence: "high",
+      },
+      observations: [
+        {
+          kind: "logs",
+          severity: "error",
+          fact: "Recent logs contain an OOM line.",
+        },
+      ],
+      suggestions: [],
+    };
+    const s = await setup({ prepare: async () => preparation });
+
+    await run(s);
+
+    expect(s.prompts[0]).toContain(
+      '<tool_output tool="speculative_preparation">'
+    );
+    expect(s.prompts[0]).toContain("Container is not running");
+    expect(s.accepted[0]?.preparation).toEqual(preparation);
+  });
+
+  it("still assesses when read-only preparation fails", async () => {
+    const s = await setup({
+      prepare: async () => {
+        throw new Error("diagnosis provider unavailable");
+      },
+    });
+
+    expect(await run(s)).toMatchObject({ outcome: "accept" });
+    expect(s.prompts[0]).not.toContain("speculative_preparation");
+    expect(s.accepted[0]?.preparation).toBeUndefined();
+  });
+
+  it("discards read-only preparation that does not finish in time", async () => {
+    const s = await setup({
+      prepare: () => new Promise(() => {}),
+      preparationTimeoutMs: 5,
+    });
+
+    expect(await run(s)).toMatchObject({ outcome: "accept" });
+    expect(s.prompts[0]).not.toContain("speculative_preparation");
+    expect(s.accepted[0]?.preparation).toBeUndefined();
   });
 });
 
