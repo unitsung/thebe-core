@@ -63,7 +63,10 @@ import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
 import type { Ticket } from "./tickets/types.ts";
 import type { TicketTaskView } from "./tickets/control.ts";
-import type { MainSessionInfo } from "./main-session/service.ts";
+import type {
+  MainSessionInfo,
+  MainSessionPromptOptions,
+} from "./main-session/service.ts";
 import type { Trigger } from "./sources/types.ts";
 import type { SourceHealth } from "./sources/runner.ts";
 import type { Decision, Policy } from "./eval/types.ts";
@@ -241,7 +244,7 @@ export interface ThebeAgent {
   /** Start or resume the main Session and send it one person-facing turn. */
   askMainSession(
     input: string | PromptInput,
-    options?: Omit<ThebePromptOptions, "thebeSessionId">
+    options?: MainSessionPromptOptions
   ): Promise<ThebePromptResult>;
   send(text: string, thebeSessionId?: string): Promise<ThebePromptResult>;
   toolNames(): string[];

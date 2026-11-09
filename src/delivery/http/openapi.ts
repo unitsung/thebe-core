@@ -1551,7 +1551,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         MainSessionPromptRequest: {
           type: "object",
           description:
-            "The main Session accepts the same text, file attachments and prompt modes as a normal Session; its id cannot be overridden.",
+            "The main Session accepts the same text, file attachments and prompt modes as a normal Session; its id cannot be overridden. Model and thinking selections are applied before the prompt.",
           properties: {
             text: { type: "string" },
             mode: {
@@ -1561,6 +1561,18 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             files: {
               type: "array",
               items: { type: "object", additionalProperties: true },
+            },
+            model: {
+              type: "object",
+              required: ["providerId", "modelId"],
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
+            thinking: {
+              type: "string",
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
             },
           },
         },

@@ -297,10 +297,12 @@ arguments. Core permission modes are `plan`, `manual`, `acceptEdits`, and `bypas
 `GET /v1/main-session` reads the one durable person-facing Session without
 creating it. Before first use it returns
 `{id: "thebe-main", initialized: false}`. `POST /v1/main-session/messages`
-accepts the normal prompt body (`text`, `files`, and `mode`) and lazily creates
-or resumes that Session. Its id cannot be overridden. The first message labels
-it `kind: main` and `thebe.main: true`; later messages and Core recreation keep
-the same identity and runtime transcript.
+accepts the normal prompt body (`text`, `files`, and `mode`) plus optional
+`model` and `thinking` selections, and lazily creates or resumes that Session.
+The selections are applied before the turn, including when lazily creating the
+Session; invalid selections return `400`. Its id cannot be overridden. The
+first message labels it `kind: main` and `thebe.main: true`; later messages and
+Core recreation keep the same identity and runtime transcript.
 
 The main Session has no shell, file, or edit tools and does not run a Goal
 directly. It receives `ticket_list`, `ticket_get`, `ticket_delegate`, and
