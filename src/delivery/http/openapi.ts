@@ -751,9 +751,27 @@ const operations: Operation[] = [
   {
     method: "get",
     path: "/v1/tickets",
-    summary: "List Tickets, newest first (read-only)",
+    summary: "List Tickets, newest first",
     tag: "ticket",
     responseSchema: "TicketList",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets",
+    summary:
+      "Delegate one direct Ticket and Goal, idempotent by the caller's key",
+    tag: "ticket",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "TicketDelegateRequest",
+    responseSchema: "TicketDelegation",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "The same idempotency key returned the existing Ticket",
+        schema: "TicketDelegation",
+      },
+    ],
   },
   {
     method: "get",
@@ -762,6 +780,17 @@ const operations: Operation[] = [
     tag: "ticket",
     parameters: [idParameter()],
     responseSchema: "Ticket",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/reply",
+    summary:
+      "Answer or review a Ticket's Attention, or resolve one pending worker permission",
+    tag: "ticket",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "TicketReplyRequest",
+    responseSchema: "TicketTask",
   },
   {
     method: "post",
@@ -1416,7 +1445,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "ticket",
         description:
-          "Read-only Tickets: the authorised units of work. A Ticket is made by a decision, never posted by a caller.",
+          "Tickets: durable authorised units of work. The Ticket carries identity and mandate; the Goal behind it keeps progress, reports, Attention and pending permissions.",
       },
       {
         name: "goal",
@@ -3045,6 +3074,148 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             createdAt: { type: "string", format: "date-time" },
           },
         },
+        TicketDelegateRequest: {
+          type: "object",
+          required: ["task", "idempotencyKey"],
+          properties: {
+            task: {
+              type: "string",
+              maxLength: 16000,
+              description:
+                "The complete long-running objective. The worker does not inherit the caller's conversation.",
+            },
+            idempotencyKey: {
+              type: "string",
+              minLength: 1,
+              maxLength: 256,
+              description:
+                "Stable caller-generated key. Retrying with the same key returns the existing Ticket.",
+            },
+            criteria: {
+              type: "array",
+              maxItems: 20,
+              items: { type: "string", minLength: 1, maxLength: 500 },
+            },
+            maxIterations: {
+              type: "integer",
+              minimum: 1,
+              maximum: 50,
+              description: "Maximum worker checkpoints; defaults to 8.",
+            },
+            observe: {
+              type: "boolean",
+              description: "Inspect and report without changing anything.",
+            },
+            allowAsk: {
+              type: "boolean",
+              default: true,
+              description:
+                "Let the worker pause with a question answerable through /v1/tickets/{id}/reply.",
+            },
+            reviewBeforeDone: {
+              type: "boolean",
+              description:
+                "After independent review passes, wait for the person to accept the result.",
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketReplyRequest: {
+          type: "object",
+          properties: {
+            attentionId: {
+              type: "string",
+              description: "The open Attention id from the Ticket or its Goal.",
+            },
+            answer: {
+              type: "string",
+              maxLength: 4000,
+              description:
+                "The answer, or feedback when sending a reviewed result back.",
+            },
+            decision: {
+              type: "string",
+              enum: ["accept", "reject"],
+              description: "Required when the Attention is a review.",
+            },
+            permissionId: {
+              type: "string",
+              description:
+                "A pending permission id from TicketTask.pendingPermissions.",
+            },
+            permissionDecision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "The decision for permissionId.",
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketTask: {
+          type: "object",
+          required: ["ticket", "stage", "pendingPermissions", "receipt"],
+          properties: {
+            ticket: { $ref: "#/components/schemas/Ticket" },
+            stage: {
+              type: "string",
+              enum: [
+                "unassigned",
+                "running",
+                "attention",
+                "paused",
+                "completed",
+                "blocked",
+                "failed",
+                "cancelled",
+              ],
+            },
+            goal: { $ref: "#/components/schemas/ProductGoal" },
+            pendingPermissions: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PendingPermission" },
+            },
+            receipt: {
+              type: "object",
+              required: ["state", "complete"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "unassigned",
+                    "running",
+                    "attention",
+                    "paused",
+                    "completed",
+                    "blocked",
+                    "failed",
+                    "cancelled",
+                  ],
+                },
+                complete: { type: "boolean" },
+                summary: { type: "string" },
+                finalReport: { type: "string" },
+                artifactId: { type: "string" },
+                error: { type: "string" },
+              },
+            },
+          },
+        },
+        TicketDelegation: {
+          allOf: [
+            { $ref: "#/components/schemas/TicketTask" },
+            {
+              type: "object",
+              required: ["reused"],
+              properties: {
+                reused: {
+                  type: "boolean",
+                  description:
+                    "True when this key already named a Ticket and no task was started.",
+                },
+              },
+            },
+          ],
+        },
         TicketInput: {
           type: "object",
           description:
@@ -3108,6 +3279,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
             finishedAt: { type: "string" },
             summary: { type: "string" },
+            finalReport: {
+              type: "string",
+              description:
+                "The isolated worker/reviewer result retained with a terminal Goal.",
+            },
             artifactId: { type: "string" },
             currentRun: { $ref: "#/components/schemas/ProductGoalRun" },
             error: {

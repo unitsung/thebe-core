@@ -404,6 +404,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async getTicketForGoal(goalId) {
       return ticketStore.getByGoal(goalId);
     },
+    async delegateTicket(input) {
+      return ticketControl.delegateHttp(input);
+    },
+    async replyTicket(input) {
+      return ticketControl.reply(input);
+    },
     async recordGoalTicket(run, goalOptions) {
       // The person asked for this task: a direct Decision, so Eval does not weigh it.
       return ticketStore.recordDirect({

@@ -35,9 +35,15 @@ All notable changes to Thebe Core are documented here. The format is based on
   open Attention, and pending tool permissions. `ticket_reply` answers the
   Attention, accepts or sends back a review, or resolves one pending worker
   permission. Arbitrary `bash` and irreversible calls require
-  `mcp:irreversible`; ordinary writes use `mcp:write`. HTTP Tickets remain
-  read-only. Read tools stay available while Core is quiesced; write tools
-  return `-32003`.
+  `mcp:irreversible`; ordinary writes use `mcp:write`. Read tools stay
+  available while Core is quiesced; write tools return `-32003`.
+- HTTP Ticket controls. `POST /v1/tickets` delegates one direct Ticket and Goal
+  idempotently from `{task, idempotencyKey, criteria?, maxIterations?, observe?,
+  allowAsk?, reviewBeforeDone?}`. The first request returns `201`; retrying the
+  same key returns `200`, the same Ticket and Goal, and `reused: true`.
+  `POST /v1/tickets/{id}/reply` answers or reviews its Attention or resolves
+  one pending worker permission. Both routes are refused while Core is
+  quiesced. The Ticket still wraps the Goal instead of copying its state.
 - OAuth 2.1 for the public MCP gateway, off until `THEBE_OAUTH_ISSUER` is set.
   Clients use Authorization Code + PKCE with exact redirect matching, Resource
   Indicators bound to the configured `/mcp` URL, PS256 JWT access tokens, and

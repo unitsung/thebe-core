@@ -25,6 +25,7 @@ export const PRODUCT_HTTP_SEGMENT = {
   log: "log",
   cancel: "cancel",
   resolve: "resolve",
+  reply: "reply",
   servers: "servers",
   tools: "tools",
 } as const;

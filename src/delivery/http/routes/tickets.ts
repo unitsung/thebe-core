@@ -1,10 +1,16 @@
-import { agentUnavailable, type ThebeHttpContext } from "../context.ts";
-import { json } from "../json.ts";
+import {
+  agentUnavailable,
+  quiescedWrite,
+  type ThebeHttpContext,
+} from "../context.ts";
+import { json, readJson } from "../json.ts";
+import { agentError } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
+import { PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
 
 /**
- * Tickets, read-only. A Ticket is created by a decision (a person asking, later Eval accepting a Trigger),
- * never by a caller posting one, so there is no write route here.
+ * Ticket HTTP controls. The Ticket is the durable assignment; the Goal behind it still owns progress,
+ * reports, attention and pending permissions.
  */
 export async function handleTicketRoutes(
   context: ThebeHttpContext
@@ -14,25 +20,57 @@ export async function handleTicketRoutes(
     return undefined;
   }
   if (!context.agent) return agentUnavailable();
-  if (context.request.method !== "GET") {
-    return json(
-      { ok: false, error: "Tickets are read-only", code: "method_not_allowed" },
-      405
-    );
+  const { request, agent } = context;
+  try {
+    if (context.path === base) {
+      if (request.method === "GET") {
+        return json({ tickets: await agent.listTickets() });
+      }
+      if (request.method === "POST") {
+        const blocked = quiescedWrite(context);
+        if (blocked) return blocked;
+        const result = await agent.delegateTicket(await readJson(request));
+        return json(result, result.reused ? 200 : 201);
+      }
+      return methodNotAllowed();
+    }
+
+    const id = context.parts[2];
+    if (id && context.parts.length === 3) {
+      if (request.method !== "GET") return methodNotAllowed();
+      const ticket = await agent.getTicket(id);
+      if (!ticket) return ticketNotFound();
+      return json(ticket);
+    }
+    if (
+      id &&
+      context.parts.length === 4 &&
+      context.parts[3] === PRODUCT_HTTP_SEGMENT.reply
+    ) {
+      if (request.method !== "POST") return methodNotAllowed();
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      const input = await readJson(request);
+      return json(
+        await agent.replyTicket({
+          ...input,
+          ticketId: id,
+        })
+      );
+    }
+    return ticketNotFound();
+  } catch (error) {
+    return agentError(error);
   }
-  if (context.path === base) {
-    return json({ tickets: await context.agent.listTickets() });
-  }
-  const id = context.parts[2];
-  const ticket =
-    id && context.parts.length === 3
-      ? await context.agent.getTicket(id)
-      : undefined;
-  if (!ticket) {
-    return json(
-      { ok: false, error: "ticket not found", code: "not_found" },
-      404
-    );
-  }
-  return json(ticket);
+}
+
+function methodNotAllowed(): Response {
+  return json(
+    { ok: false, error: "method not allowed", code: "method_not_allowed" },
+    405
+  );
+}
+
+function ticketNotFound(): Response {
+  return json({ ok: false, error: "ticket not found", code: "not_found" }, 404);
 }

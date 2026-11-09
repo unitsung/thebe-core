@@ -62,6 +62,7 @@ import type { DiagnosisRequest, DiagnosisResult } from "./diagnosis/types.ts";
 import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
 import type { Ticket } from "./tickets/types.ts";
+import type { TicketTaskView } from "./tickets/control.ts";
 import type { Trigger } from "./sources/types.ts";
 import type { SourceHealth } from "./sources/runner.ts";
 import type { Decision, Policy } from "./eval/types.ts";
@@ -491,10 +492,16 @@ export interface ThebeAgent {
   listArtifacts(query?: ArtifactQuery): Promise<AgentArtifact[]>;
   getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
   getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
-  /** Tickets: the authorised units of work. Read-only to clients; created by decisions, not by callers. */
+  /** Tickets: the authorised units of work. The Goal behind one keeps its status, report and attention. */
   listTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
+  /** Delegate one direct Ticket and Goal from the person-facing HTTP API. Idempotent by key. */
+  delegateTicket(
+    input: Record<string, unknown>
+  ): Promise<TicketTaskView & { reused: boolean }>;
+  /** Answer or review a Ticket's Attention, or resolve one of its pending worker permissions. */
+  replyTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
   /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
   getPolicy(): Promise<Policy & { modes: string[] }>;
   setPolicy(input: {

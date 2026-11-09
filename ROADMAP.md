@@ -107,11 +107,11 @@ Work named for the first beta, not yet complete in this checkout.
   pairing flow, scope narrowing, JWT validation, persistence, revocation and
   listener isolation have local integration coverage. A real claude.ai and
   ChatGPT connector login through the public HTTPS listener is still required.
-- **Main Session and the remaining Ticket controls.** The first long-task slice
-  is in place: `/mcp` can list and inspect Tickets, idempotently delegate a Goal,
-  answer its Attention, and approve or deny a pending worker permission. HTTP
-  Ticket control, the persistent main Session, Ask Thebe, Recall and the other
-  Phase 3 continuity work remain.
+- **Main Session and the remaining continuity work.** The long-task delegation
+  slice is in place over both `/mcp` and HTTP: callers can list and inspect
+  Tickets, idempotently delegate a Goal, answer its Attention, and approve or
+  deny a pending worker permission. The persistent main Session, Ask Thebe,
+  Recall, cross-entry continuity and real external-agent acceptance remain.
 
 ## Later
 

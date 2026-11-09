@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
@@ -26,9 +26,18 @@ const pass = {
   text: "VERDICT: pass\nEVIDENCE: checked it\nREMAINING: none",
 };
 
-function open(agentStoreDir?: string) {
+type FakeTurnBatch = Parameters<
+  ReturnType<typeof createFakeRuntime>["queueTurns"]
+>[0];
+
+const defaultTurns: FakeTurnBatch = [
+  { kind: "text", text: "GOAL_STATUS: complete" },
+  pass,
+];
+
+function open(agentStoreDir?: string, turns: FakeTurnBatch = defaultTurns) {
   const fake = createFakeRuntime();
-  fake.queueTurns([{ kind: "text", text: "GOAL_STATUS: complete" }, pass]);
+  fake.queueTurns(turns);
   const app = createThebeApp({
     runtime: fake.runtime,
     provider,
@@ -95,10 +104,15 @@ describe("tickets", () => {
     expect(ticket).not.toHaveProperty("stage");
   });
 
-  it("is read-only and answers 404 for an unknown or malformed id", async () => {
+  it("rejects unsupported Ticket methods and unknown ids", async () => {
     const { call } = open();
     expect(
-      (await call("/v1/tickets", { method: "POST", body: "{}" })).status
+      (
+        await call("/v1/tickets/" + "0".repeat(32), {
+          method: "POST",
+          body: "{}",
+        })
+      ).status
     ).toBe(405);
     expect((await call("/v1/tickets/abc", { method: "DELETE" })).status).toBe(
       405
@@ -121,5 +135,190 @@ describe("tickets", () => {
       Record<string, any>
     >;
     expect(tickets.map((t) => t.id)).toEqual([created.body.ticketId]);
+  });
+
+  it("delegates idempotently and replies to the Ticket's attention", async () => {
+    const { app, call } = open(undefined, [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "ask",
+              question: "Which library should I move?",
+              options: ["Movies", "Shows"],
+            },
+          },
+        ],
+      },
+    ]);
+    const request = {
+      task: "Move the selected library",
+      idempotencyKey: "http-delegate-library",
+      criteria: ["the selected library is in its new location"],
+    };
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body).toMatchObject({
+      reused: false,
+      ticket: {
+        title: "Move the selected library",
+        mandate: {
+          strength: "explicit",
+          decidedBy: "direct",
+          requester: "http",
+        },
+      },
+      stage: "running",
+      goal: { status: "running" },
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+
+    const retried = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({
+      reused: true,
+      ticket: { id: ticketId },
+      goal: { id: goalId },
+    });
+
+    await vi.waitFor(() => {
+      expect(app.agent.getGoal(goalId)?.attention?.kind).toBe("answer");
+    });
+    const attention = app.agent.getGoal(goalId)?.attention;
+    expect(attention).toBeDefined();
+
+    const replied = await call(`/v1/tickets/${ticketId}/reply`, {
+      method: "POST",
+      body: JSON.stringify({
+        attentionId: attention?.id,
+        answer: "Movies",
+      }),
+    });
+    expect(replied.status).toBe(200);
+    expect(replied.body).toMatchObject({
+      ticket: { id: ticketId },
+      stage: expect.any(String),
+    });
+    expect(
+      (
+        await call(`/v1/goals/${goalId}/stop`, {
+          method: "POST",
+          body: "{}",
+        })
+      ).status
+    ).toBe(200);
+  });
+
+  it("validates Ticket commands and refuses writes while quiesced", async () => {
+    const { app, call } = open();
+    const invalid = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({ task: "Inspect the library" }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.code).toBe("invalid_body");
+
+    await app.agent.quiesce();
+    const blocked = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Inspect the library",
+        idempotencyKey: "quiesced-http",
+      }),
+    });
+    expect(blocked.status).toBe(503);
+    const blockedReply = await call(`/v1/tickets/${"0".repeat(32)}/reply`, {
+      method: "POST",
+      body: JSON.stringify({ attentionId: "attention" }),
+    });
+    expect(blockedReply.status).toBe(503);
+  });
+
+  it("resolves one pending worker permission by Ticket id", async () => {
+    const { app, call } = open(undefined, [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "write",
+            args: { path: "notes.txt", content: "updated" },
+          },
+          {
+            name: "goal_report",
+            args: {
+              state: "dropped",
+              reason: "nothing else needs changing",
+            },
+          },
+        ],
+      },
+    ]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Update the temporary workspace",
+        idempotencyKey: "http-permission",
+      }),
+    });
+    expect(created.status).toBe(201);
+    await vi.waitFor(() => {
+      expect(app.agent.listPendingPermissions()).toHaveLength(1);
+    });
+    const pending = app.agent.listPendingPermissions()[0]!;
+
+    const replied = await call(`/v1/tickets/${created.body.ticket.id}/reply`, {
+      method: "POST",
+      body: JSON.stringify({
+        permissionId: pending.id,
+        permissionDecision: "allow",
+      }),
+    });
+    expect(replied.status).toBe(200);
+    expect(replied.body.pendingPermissions).toEqual([]);
+    await expect(
+      app.agent.waitGoal(created.body.goal.id)
+    ).resolves.toMatchObject({
+      status: "completed",
+    });
+  });
+
+  it("finds an HTTP-delegated Ticket after a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-http-delegate-"));
+    const first = open(dir);
+    const created = await first.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Inspect the library",
+        idempotencyKey: "http-restart",
+        observe: true,
+      }),
+    });
+    expect(created.status).toBe(201);
+    await first.app.agent.waitGoal(created.body.goal.id);
+
+    const second = open(dir, []);
+    const retried = await second.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Inspect the library",
+        idempotencyKey: "http-restart",
+        observe: true,
+      }),
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({
+      reused: true,
+      ticket: { id: created.body.ticket.id },
+      goal: { id: created.body.goal.id },
+    });
   });
 });
