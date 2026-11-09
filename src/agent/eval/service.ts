@@ -9,7 +9,12 @@ import {
 } from "./assess.ts";
 import type { DecisionStore } from "./decision-store.ts";
 import { policyVersion, type PolicyStore } from "./policy-store.ts";
-import type { Decision, NotTakenOn, Policy } from "./types.ts";
+import type {
+  Decision,
+  NotTakenOn,
+  Policy,
+  SpeculativePreparation,
+} from "./types.ts";
 
 /** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
@@ -26,6 +31,8 @@ export const DEFAULT_ASSESSMENTS_PER_HOUR = 60;
 export const DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR = 3;
 /** Triggers older than this are not weighed after a restart: the moment to act has passed. */
 export const DEFAULT_BACKLOG_AGE_MS = 24 * 60 * 60 * 1000;
+/** Read-only preparation is useful, never worth silently holding the Assessment. */
+export const DEFAULT_PREPARATION_TIMEOUT_MS = 20_000;
 
 export type EvalService = {
   /** Triggers just recorded. Weighed one thread at a time. Never throws. */
@@ -69,11 +76,22 @@ export function createEvalService(options: {
     triggers: Trigger[];
     policy: Policy;
     assessment: Assessment;
+    preparation?: SpeculativePreparation;
     at: string;
     policyVersion: string;
   }) => Promise<{ ticketId: string; goalId?: string }>;
   /** Work already taken on for a thread, shown to the assessment so it does not start the same work twice. */
   threadTickets?: (thread: string) => Promise<ThreadTicket[]>;
+  /**
+   * Best-effort read-only work before the Assessment. A failure is not an Assessment failure: the model
+   * still weighs the Triggers, and no user attention is created for unused preparation.
+   */
+  prepare?: (input: {
+    thread: string;
+    triggers: Trigger[];
+  }) => Promise<SpeculativePreparation | undefined>;
+  /** Upper bound for read-only preparation. Defaults to 20 seconds. */
+  preparationTimeoutMs?: number;
   /** How often one thread may be taken on in an hour. 0 is no limit. */
   maxAcceptsPerThreadPerHour?: number;
   backlogAgeMs?: number;
@@ -92,6 +110,8 @@ export function createEvalService(options: {
   const maxAccepts =
     acceptsConfigured > 0 ? acceptsConfigured : Number.POSITIVE_INFINITY;
   const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
+  const preparationTimeoutMs =
+    options.preparationTimeoutMs ?? DEFAULT_PREPARATION_TIMEOUT_MS;
   const pending = new Map<string, Trigger[]>();
   const assessedAt: number[] = [];
   let draining: Promise<void> | undefined;
@@ -214,11 +234,24 @@ export function createEvalService(options: {
     // Assessment. A failure is never a "no": it is recorded as unavailable.
     assessedAt.push(options.now().getTime());
     let reply: string;
+    let preparation: SpeculativePreparation | undefined;
     try {
-      const earlier =
-        (await options.threadTickets?.(thread).catch(() => [])) ?? [];
+      const earlierPromise =
+        options.threadTickets?.(thread).catch(() => []) ?? Promise.resolve([]);
+      const preparationPromise = options.prepare
+        ? boundedPreparation(
+            options.prepare({ thread, triggers }),
+            preparationTimeoutMs,
+            options.onError
+          )
+        : Promise.resolve(undefined);
+      const [earlier, prepared] = await Promise.all([
+        earlierPromise,
+        preparationPromise,
+      ]);
+      preparation = prepared;
       reply = await options.assess(
-        buildAssessmentPrompt(policy.rules, triggers, earlier),
+        buildAssessmentPrompt(policy.rules, triggers, earlier, preparation),
         policy.model
       );
     } catch (error) {
@@ -275,6 +308,7 @@ export function createEvalService(options: {
           triggers,
           policy,
           assessment: verdict,
+          ...(preparation ? { preparation } : {}),
           at: latest,
           policyVersion: version,
         });
@@ -346,6 +380,38 @@ export function createEvalService(options: {
       stopped = false;
     },
   };
+}
+
+function boundedPreparation(
+  preparation: Promise<SpeculativePreparation | undefined>,
+  timeoutMs: number,
+  onError?: (error: unknown) => void
+): Promise<SpeculativePreparation | undefined> {
+  return new Promise((resolve) => {
+    const report = (error: unknown) => {
+      try {
+        onError?.(error);
+      } catch {
+        // Observability must not turn best-effort preparation into a failed Assessment.
+      }
+    };
+    const timer = setTimeout(() => {
+      report(new Error("read-only preparation timed out"));
+      resolve(undefined);
+    }, timeoutMs);
+    timer.unref?.();
+    preparation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        report(error);
+        resolve(undefined);
+      }
+    );
+  });
 }
 
 function isAssessmentAttempt(decision: Decision): boolean {

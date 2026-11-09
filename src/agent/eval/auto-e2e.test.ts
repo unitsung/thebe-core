@@ -22,6 +22,7 @@ function docker(names: string[]) {
   );
   const restarted: string[] = [];
   const requests: string[] = [];
+  const inspections: string[] = [];
   const provider = {
     listContainers: async () =>
       [...state].map(([name, s]) => ({
@@ -32,13 +33,16 @@ function docker(names: string[]) {
         status: s,
         created: 1,
       })),
-    inspectContainer: async (id: string) => ({
-      id,
-      name: id.slice(3),
-      image: "img",
-      state: state.get(id.slice(3)) ?? "running",
-      config: {},
-    }),
+    inspectContainer: async (id: string) => {
+      inspections.push(id);
+      return {
+        id,
+        name: id.slice(3),
+        image: "img",
+        state: state.get(id.slice(3)) ?? "running",
+        config: {},
+      };
+    },
     getContainerLogs: async () => "",
     getStatusSummary: async () => ({
       totalContainers: names.length,
@@ -67,6 +71,7 @@ function docker(names: string[]) {
     service,
     restarted,
     requests,
+    inspections,
     set: (n: string, s: ContainerState) => state.set(n, s),
   };
 }
@@ -284,6 +289,8 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     expect(decision!.ticketId).toBeUndefined();
     expect(await app.agent.listTickets()).toEqual([]);
     expect(d.restarted).toEqual([]);
+    expect(d.inspections).toContain("emby");
+    expect(await app.agent.listArtifacts({ kind: "diagnosis" })).toEqual([]);
     await app.agent.quiesce();
   });
 

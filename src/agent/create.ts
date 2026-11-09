@@ -15,13 +15,16 @@ import { createTriggerStore } from "./sources/store.ts";
 import type { Trigger } from "./sources/types.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
-import type { Policy } from "./eval/types.ts";
+import type { Policy, SpeculativePreparation } from "./eval/types.ts";
 import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
 import { inferScope, revalidateMandate } from "./tickets/mandate.ts";
 import { createActivityStore } from "./activity/store.ts";
-import { createDiagnosisApi } from "./diagnosis/service.ts";
+import {
+  createDiagnosisApi,
+  type DiagnosisPreview,
+} from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
 import { createAgentContext } from "./internal/context.ts";
 import type { CreateThebeAgentOptions, ThebeAgent } from "./interface.ts";
@@ -190,6 +193,24 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
             : undefined) ?? "unknown",
       }));
     },
+    prepare: async ({ triggers }) => {
+      const latestDown = [...triggers]
+        .reverse()
+        .find(
+          (trigger) =>
+            trigger.kind === "container.went_down" &&
+            trigger.resource?.kind === "container"
+        );
+      if (!latestDown?.resource) return undefined;
+      const preview = await diagnosis.preview({
+        resource: {
+          kind: "container",
+          id: latestDown.resource.id,
+          provider: "unknown",
+        },
+      });
+      return toSpeculativePreparation(preview);
+    },
     accept: async (input) => {
       const ticketId = ticketIdFor(input.evalId);
       // Made again after a crash: the same Eval is the same Ticket, and its Goal already started.
@@ -228,6 +249,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
           ),
           triggers: input.triggers,
           scope,
+          ...(input.preparation ? { preparation: input.preparation } : {}),
         }),
         criteria: [
           "The situation the event describes is resolved, checked with the read tools after any action; or you reported why it cannot be (blocked), or that nothing needed doing (dropped).",
@@ -459,7 +481,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       sourceRunner.start();
       ctx.pipelineAdvancer?.start();
     },
-    ...diagnosis,
+    diagnose: diagnosis.diagnose,
+    getDiagnosis: diagnosis.getDiagnosis,
+    explainDiagnosis: diagnosis.explainDiagnosis,
     ...actions,
     async listArtifacts(query) {
       return artifactStore.list(query);
@@ -470,6 +494,36 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async getArtifactContent(artifactId) {
       return artifactStore.getContent(artifactId);
     },
+  };
+}
+
+function toSpeculativePreparation(
+  preview: DiagnosisPreview
+): SpeculativePreparation {
+  return {
+    source: "container-diagnosis",
+    observedAt: preview.observedAt,
+    resource: {
+      kind: preview.resource.kind,
+      id: preview.resource.id,
+    },
+    diagnosis: {
+      code: preview.diagnosis.code.slice(0, 120),
+      title: preview.diagnosis.title.slice(0, 200),
+      summary: preview.diagnosis.summary.slice(0, 600),
+      confidence: preview.diagnosis.confidence,
+    },
+    observations: preview.observations.slice(0, 8).map((observation) => ({
+      kind: observation.kind,
+      severity: observation.severity,
+      fact: observation.fact.slice(0, 600),
+    })),
+    suggestions: preview.recommendations.slice(0, 4).map((recommendation) => ({
+      title: recommendation.title.slice(0, 200),
+      detail: recommendation.detail.slice(0, 300),
+      kind: recommendation.kind,
+      requiresApproval: recommendation.requiresApproval,
+    })),
   };
 }
 
