@@ -114,9 +114,14 @@ describe("main Session", () => {
       "ticket_get",
       "ticket_delegate",
       "ticket_reply",
+      "ticket_control",
     ]);
     expect(state.toolsRequiringApproval).toEqual(
-      expect.arrayContaining(["ticket_delegate", "ticket_reply"])
+      expect.arrayContaining([
+        "ticket_delegate",
+        "ticket_reply",
+        "ticket_control",
+      ])
     );
     expect(state.tools.map((tool) => tool.name)).not.toContain("bash");
     expect(state.tools.map((tool) => tool.name)).not.toContain("write");
@@ -291,6 +296,7 @@ describe("main Session", () => {
       "ticket_get",
       "ticket_delegate",
       "ticket_reply",
+      "ticket_control",
     ]);
     await expect(second.app.agent.loadMessages("thebe-main")).resolves.toEqual(
       expect.arrayContaining([

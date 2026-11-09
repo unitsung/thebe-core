@@ -793,6 +793,31 @@ const operations: Operation[] = [
     responseSchema: "TicketTask",
   },
   {
+    method: "post",
+    path: "/v1/tickets/{id}/pause",
+    summary: "Pause a running Ticket after the current checkpoint",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/resume",
+    summary:
+      "Resume a paused Ticket, or return 409 while it is waiting for a reply",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/stop",
+    summary: "Stop a running or paused Ticket",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
     method: "get",
     path: PRODUCT_HTTP_PATH.mainSession,
     summary:

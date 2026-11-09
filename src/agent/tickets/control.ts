@@ -10,6 +10,7 @@ import {
   TICKET_GET_TOOL_NAME,
   TICKET_LIST_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
+  TICKET_CONTROL_TOOL_NAME,
   type TicketToolName,
 } from "./tools.ts";
 import type { Ticket } from "./types.ts";
@@ -48,6 +49,8 @@ export type TicketTaskView = {
   receipt: TicketReceipt;
 };
 
+export type TicketControlAction = "pause" | "resume" | "stop";
+
 export type TicketControlApi = ReturnType<typeof createTicketControlApi>;
 
 type GoalPort = {
@@ -59,6 +62,7 @@ type GoalPort = {
     observe?: boolean;
     allowAsk?: boolean;
     reviewBeforeDone?: boolean;
+    executor?: "ticket";
   }): Promise<GoalRun>;
   getGoal(thebeSessionId: string): GoalRun | undefined;
   listGoals(): Promise<GoalRun[]>;
@@ -70,6 +74,9 @@ type GoalPort = {
       decision?: "accept" | "reject";
     }
   ): Promise<GoalRun>;
+  pauseGoal(thebeSessionId: string): Promise<GoalRun>;
+  resumeGoal(thebeSessionId: string): Promise<GoalRun>;
+  stopGoal(thebeSessionId: string): Promise<GoalRun>;
 };
 
 type SessionPort = {
@@ -309,6 +316,7 @@ export function createTicketControlApi(options: {
         thebeSessionId: session.thebeSessionId,
         goal: task,
         criteria,
+        executor: "ticket",
         maxIterations:
           typeof input.maxIterations === "number"
             ? input.maxIterations
@@ -428,6 +436,66 @@ export function createTicketControlApi(options: {
     return (await get(ticketId))!;
   }
 
+  async function control(input: {
+    ticketId: string;
+    action: TicketControlAction;
+  }): Promise<TicketTaskView> {
+    const ticketId = input.ticketId.trim();
+    if (!ticketId) {
+      throw httpError(400, "ticketId is required", "invalid_body");
+    }
+    if (
+      input.action !== "pause" &&
+      input.action !== "resume" &&
+      input.action !== "stop"
+    ) {
+      throw httpError(
+        400,
+        "action must be pause, resume, or stop",
+        "invalid_body"
+      );
+    }
+    const ticket = await options.store.get(ticketId);
+    if (!ticket) throw httpError(404, "ticket not found", "not_found");
+    const goal = await goalFor(ticket);
+    if (!goal) {
+      throw httpError(
+        409,
+        "ticket has no running assignment",
+        "ticket_unassigned"
+      );
+    }
+    if (input.action === "pause" && goal.status !== "running") {
+      throw httpError(
+        409,
+        "ticket can only be paused while running",
+        "invalid_transition"
+      );
+    }
+    if (input.action === "resume" && goal.status !== "paused") {
+      throw httpError(
+        409,
+        "ticket can only be resumed while paused",
+        "invalid_transition"
+      );
+    }
+    if (
+      input.action === "stop" &&
+      goal.status !== "running" &&
+      goal.status !== "pausing" &&
+      goal.status !== "paused"
+    ) {
+      throw httpError(409, "ticket is already finished", "invalid_transition");
+    }
+    if (input.action === "pause")
+      await options.goals.pauseGoal(goal.thebeSessionId);
+    if (input.action === "resume")
+      await options.goals.resumeGoal(goal.thebeSessionId);
+    if (input.action === "stop")
+      await options.goals.stopGoal(goal.thebeSessionId);
+    return (await get(ticketId))!;
+  }
+
   async function invoke(
     name: TicketToolName,
     input: Record<string, unknown>,
@@ -452,6 +520,14 @@ export function createTicketControlApi(options: {
         return delegate(input, caller);
       case TICKET_REPLY_TOOL_NAME:
         return reply(input);
+      case TICKET_CONTROL_TOOL_NAME: {
+        const ticketId =
+          typeof input.ticketId === "string" ? input.ticketId.trim() : "";
+        return control({
+          ticketId,
+          action: input.action as TicketControlAction,
+        });
+      }
     }
   }
 
@@ -462,6 +538,7 @@ export function createTicketControlApi(options: {
     delegate,
     delegateHttp,
     reply,
+    control,
     recordGoal,
     backfillGoals,
   };

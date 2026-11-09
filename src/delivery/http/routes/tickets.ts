@@ -58,6 +58,23 @@ export async function handleTicketRoutes(
         })
       );
     }
+    if (
+      id &&
+      context.parts.length === 4 &&
+      (context.parts[3] === PRODUCT_HTTP_SEGMENT.pause ||
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.resume ||
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.stop)
+    ) {
+      if (request.method !== "POST") return methodNotAllowed();
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      return json(
+        await agent.controlTicket({
+          ticketId: id,
+          action: context.parts[3],
+        })
+      );
+    }
     return ticketNotFound();
   } catch (error) {
     return agentError(error);

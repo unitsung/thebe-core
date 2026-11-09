@@ -111,6 +111,11 @@ export async function executeGoal(
   initialIteration = 0,
   initialReview?: GoalReviewResult
 ): Promise<void> {
+  async function cancelSpawnedIfControlled(runId: string): Promise<void> {
+    if (!run.stopRequested && !run.pauseRequested) return;
+    await deps.subagents.cancelSubagent(runId, run.thebeSessionId);
+  }
+
   try {
     const result = await runGoalLoop({
       options: {
@@ -151,6 +156,7 @@ export async function executeGoal(
             (update) => deps.emitChild(run, iteration, "worker", update)
           );
           try {
+            await cancelSpawnedIfControlled(worker.runId);
             workerResult = await deps.subagents.waitSubagent(worker.runId);
           } finally {
             workerUnsubscribe();
@@ -257,6 +263,7 @@ export async function executeGoal(
             (update) => deps.emitChild(run, iteration, "reviewer", update)
           );
           try {
+            await cancelSpawnedIfControlled(reviewer.runId);
             reviewerResult = await deps.subagents.waitSubagent(reviewer.runId);
           } finally {
             reviewerUnsubscribe();

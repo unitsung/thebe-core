@@ -89,13 +89,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         if (!ticket) {
           return {
             allowed: false,
-            reason: "the Eval-created Ticket is missing",
-          };
-        }
-        if (ticket.mandate.decidedBy !== "eval") {
-          return {
-            allowed: false,
-            reason: "the Goal's Ticket is not an Eval-created Ticket",
+            reason: "the Ticket is missing",
           };
         }
         return revalidateMandate({
@@ -424,6 +418,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async replyTicket(input) {
       return ticketControl.reply(input);
+    },
+    async controlTicket(input) {
+      return ticketControl.control(input);
     },
     async recordGoalTicket(run, goalOptions) {
       // The person asked for this task: a direct Decision, so Eval does not weigh it.

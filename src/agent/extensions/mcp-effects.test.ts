@@ -28,6 +28,7 @@ const WRITES = [
   "navidrome_playlist_update",
   "sqmusic_download",
   "strm_repair",
+  "ticket_control",
   "ticket_delegate",
   "ticket_reply",
 ];
