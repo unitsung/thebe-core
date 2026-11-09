@@ -615,6 +615,69 @@ describe("Thebe TUI agent slash commands", () => {
     expect(shown).toContain("THEBE_OAUTH_ISSUER");
   });
 
+  it("lists and revokes OAuth connectors through /connections", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const oauthConnectors = {
+      list: vi.fn(async () => [
+        {
+          id: "grant-1",
+          clientId: "home-connector",
+          clientName: "Claude connector",
+          scopes: ["mcp:read", "offline_access"],
+          createdAt: "2026-11-10T06:00:00.000Z",
+          expiresAt: "2026-12-10T06:00:00.000Z",
+          refreshToken: true,
+        },
+      ]),
+      revoke: vi.fn(async (id: string) => id === "grant-1"),
+    };
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+      oauthConnectors,
+    });
+
+    await handleSlash("/connections list");
+    await handleSlash("/connections revoke grant-1");
+    await handleSlash("/connections revoke missing");
+
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(oauthConnectors.list).toHaveBeenCalledOnce();
+    expect(oauthConnectors.revoke).toHaveBeenNthCalledWith(1, "grant-1");
+    expect(oauthConnectors.revoke).toHaveBeenNthCalledWith(2, "missing");
+    expect(shown).toContain("Claude connector - grant-1");
+    expect(shown).toContain("Scopes: mcp:read, offline_access");
+    expect(shown).toContain("Expires: 2026-12-10T06:00:00.000Z");
+    expect(shown).toContain(
+      "Revoked OAuth connector grant-1. It must authorize again to reconnect."
+    );
+    expect(shown).toContain("No OAuth connector grant has id missing.");
+  });
+
+  it("explains how to enable OAuth connectors when /connections is unavailable", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+    });
+
+    await handleSlash("/connections");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(shown).toContain("THEBE_OAUTH_ISSUER");
+  });
+
   it("prompts through agent and shows reply", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "**ok**" }]);

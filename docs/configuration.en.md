@@ -212,6 +212,10 @@ complete the authorization flow again. Scoped `/mcp` tokens get
 `403 token_scope` on both routes, and the internet-facing MCP gateway does not
 expose them.
 
+From the local TUI, use `/connections` (alias `/grants`) to list the same grants
+and `/connections revoke <grantId>` to revoke one. Core advertises `mcp-oauth`
+in `GET /v1/health` capabilities while this gateway is configured.
+
 The authorization server uses Authorization Code + PKCE, exact redirect URI
 matching, Resource Indicators bound to `/mcp`, and PS256 JWT access tokens.
 Access tokens last 15 minutes. A request with `offline_access` and

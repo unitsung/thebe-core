@@ -90,4 +90,10 @@ startThebeTui({
         resource: oauth.resource,
       })
     : undefined,
+  oauthConnectors: oauth
+    ? {
+        list: () => oauth.listConnections(),
+        revoke: (id) => oauth.revokeConnection(id),
+      }
+    : undefined,
 });

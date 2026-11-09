@@ -62,6 +62,7 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
         ...options,
         caller,
         deviceRegistry,
+        mcpOAuth: options.oauth !== undefined,
       });
 
       const oauthPublic = options.oauth?.publicResponse(request);

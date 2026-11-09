@@ -49,6 +49,22 @@ function request(method: "GET" | "POST", token?: string): Request {
 }
 
 describe("OAuth pairing route", () => {
+  it("advertises the MCP OAuth capability in health", async () => {
+    const handler = pairingHandler({
+      verify: (received) =>
+        received === "full" ? { name: "Thebe App" } : undefined,
+    });
+    const response = await handler.handle(
+      new Request("http://127.0.0.1:8787/v1/health", {
+        headers: { authorization: "Bearer full" },
+      })
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      capabilities: ["mcp-oauth"],
+    });
+  });
+
   it("requires a full-access token and returns a short-lived code", async () => {
     let issued = 0;
     const handler = pairingHandler({

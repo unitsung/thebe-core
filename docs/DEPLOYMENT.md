@@ -416,6 +416,8 @@ The list reports the client name, scopes, timestamps, and whether a refresh toke
 the grant and invalidates its access tokens, refresh tokens, and unredeemed authorization codes immediately.
 That connector must authorize again. These management routes require the full-access token, refuse a scoped
 `/mcp` token with `403 token_scope`, and remain unavailable through the internet-facing MCP port.
+The local TUI provides the same management with `/connections` (alias `/grants`) and
+`/connections revoke <grantId>`.
 
 Core stores signing keys, provider state, and pairing-code hashes in `oauth-keys.json`, `oauth-state.json`,
 and `oauth-pairing.json` under the config directory (modes `0600`). The key file is bound to the issuer.

@@ -38,6 +38,7 @@ describe("slash command menu", () => {
       "skills",
       "mcp",
       "pair",
+      "connections",
       "subagent",
       "quit",
     ]);
@@ -55,8 +56,9 @@ describe("slash command menu", () => {
     ).toBe("Choose whether risky tools ask before running");
     expect(resolveSlashName("oauth")).toBe("pair");
     expect(resolveSlashName("connector")).toBe("pair");
-    expect(SLASH_COMMANDS.slice(-5, -1).map((command) => command.name)).toEqual(
-      ["skills", "mcp", "pair", "subagent"]
+    expect(resolveSlashName("grants")).toBe("connections");
+    expect(SLASH_COMMANDS.slice(-6, -1).map((command) => command.name)).toEqual(
+      ["skills", "mcp", "pair", "connections", "subagent"]
     );
   });
 
