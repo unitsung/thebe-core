@@ -60,7 +60,7 @@ function open(
       body: (await res.json()) as Record<string, any>,
     };
   };
-  return { app, call };
+  return { app, call, fake };
 }
 
 const newGoal = {
@@ -73,6 +73,22 @@ describe("tickets", () => {
     const { call } = open();
     expect((await call("/v1/tickets")).body).toEqual({ tickets: [] });
     expect((await call("/v1/health")).body.capabilities).toContain("tickets");
+  });
+
+  it("documents Ticket reads, reply and Goal controls", async () => {
+    const { call } = open();
+    const spec = await call("/openapi.json");
+    expect(spec.body.paths).toMatchObject({
+      "/v1/tickets": {
+        get: expect.any(Object),
+        post: expect.any(Object),
+      },
+      "/v1/tickets/{id}": { get: expect.any(Object) },
+      "/v1/tickets/{id}/reply": { post: expect.any(Object) },
+      "/v1/tickets/{id}/pause": { post: expect.any(Object) },
+      "/v1/tickets/{id}/resume": { post: expect.any(Object) },
+      "/v1/tickets/{id}/stop": { post: expect.any(Object) },
+    });
   });
 
   it("makes an explicit, direct Ticket for a task the person asks for, and links it from the task", async () => {
@@ -272,6 +288,107 @@ describe("tickets", () => {
     ).toBe(200);
   });
 
+  it("pauses and stops a Ticket before its worker has registered", async () => {
+    const { app, call } = open(undefined, [{ kind: "hang" }]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Wait for the library scan",
+        idempotencyKey: "http-control",
+      }),
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+    expect(app.agent.getGoal(goalId)?.executor).toBe("ticket");
+
+    const paused = await call(`/v1/tickets/${ticketId}/pause`, {
+      method: "POST",
+    });
+    expect(paused.status).toBe(200);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "paused",
+    });
+    expect(
+      (
+        await call(`/v1/tickets/${ticketId}/pause`, {
+          method: "POST",
+        })
+      ).body.code
+    ).toBe("invalid_transition");
+    const stopped = await call(`/v1/tickets/${ticketId}/stop`, {
+      method: "POST",
+    });
+    expect(stopped.status).toBe(200);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+  });
+
+  it("resumes a paused Ticket and stops its running Goal", async () => {
+    const { app, call, fake } = open(undefined, [{ kind: "hang" }]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Resume the library scan",
+        idempotencyKey: "http-control-resume",
+      }),
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+    await vi.waitFor(() => {
+      expect(app.agent.getGoal(goalId)?.activeSubagent).toMatchObject({
+        profileName: "ticket-worker",
+        status: "running",
+      });
+    });
+    await call(`/v1/tickets/${ticketId}/pause`, { method: "POST" });
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "paused",
+    });
+
+    fake.queueTurns([
+      { kind: "text", text: "The library scan finished." },
+      pass,
+    ]);
+    const resumed = await call(`/v1/tickets/${ticketId}/resume`, {
+      method: "POST",
+    });
+    expect(resumed.status).toBe(200);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "completed",
+    });
+    expect(
+      (
+        await call(`/v1/tickets/${ticketId}/stop`, {
+          method: "POST",
+        })
+      ).body.code
+    ).toBe("invalid_transition");
+
+    fake.queueTurns([{ kind: "hang" }]);
+    const second = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Wait for the second scan",
+        idempotencyKey: "http-control-stop",
+      }),
+    });
+    await vi.waitFor(() => {
+      expect(
+        app.agent.getGoal(second.body.goal.id as string)?.activeSubagent
+          ?.profileName
+      ).toBe("ticket-worker");
+    });
+    const stopped = await call(
+      `/v1/tickets/${second.body.ticket.id as string}/stop`,
+      { method: "POST" }
+    );
+    expect(stopped.status).toBe(200);
+    await expect(
+      app.agent.waitGoal(second.body.goal.id as string)
+    ).resolves.toMatchObject({ status: "cancelled" });
+  });
+
   it("validates Ticket commands and refuses writes while quiesced", async () => {
     const { app, call } = open();
     const invalid = await call("/v1/tickets", {
@@ -295,6 +412,10 @@ describe("tickets", () => {
       body: JSON.stringify({ attentionId: "attention" }),
     });
     expect(blockedReply.status).toBe(503);
+    const blockedControl = await call(`/v1/tickets/${"0".repeat(32)}/stop`, {
+      method: "POST",
+    });
+    expect(blockedControl.status).toBe(503);
   });
 
   it("resolves one pending worker permission by Ticket id", async () => {

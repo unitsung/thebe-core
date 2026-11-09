@@ -516,6 +516,11 @@ export interface ThebeAgent {
   ): Promise<TicketTaskView & { reused: boolean }>;
   /** Answer or review a Ticket's Attention, or resolve one of its pending worker permissions. */
   replyTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
+  /** Pause, resume, or stop the Goal carrying out a Ticket. */
+  controlTicket(input: {
+    ticketId: string;
+    action: "pause" | "resume" | "stop";
+  }): Promise<TicketTaskView>;
   /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
   getPolicy(): Promise<Policy & { modes: string[] }>;
   setPolicy(input: {

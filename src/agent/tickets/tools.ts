@@ -2,12 +2,14 @@ export const TICKET_LIST_TOOL_NAME = "ticket_list" as const;
 export const TICKET_GET_TOOL_NAME = "ticket_get" as const;
 export const TICKET_DELEGATE_TOOL_NAME = "ticket_delegate" as const;
 export const TICKET_REPLY_TOOL_NAME = "ticket_reply" as const;
+export const TICKET_CONTROL_TOOL_NAME = "ticket_control" as const;
 
 export const TICKET_TOOL_NAMES = [
   TICKET_LIST_TOOL_NAME,
   TICKET_GET_TOOL_NAME,
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
+  TICKET_CONTROL_TOOL_NAME,
 ] as const;
 
 export type TicketToolName = (typeof TICKET_TOOL_NAMES)[number];
@@ -15,6 +17,7 @@ export type TicketToolName = (typeof TICKET_TOOL_NAMES)[number];
 export const TICKET_TOOL_WRITE_NAMES: ReadonlySet<string> = new Set([
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
+  TICKET_CONTROL_TOOL_NAME,
 ]);
 
 export const TICKET_TOOL_SCHEMAS: Record<
@@ -130,6 +133,25 @@ export const TICKET_TOOL_SCHEMAS: Record<
     required: ["ticketId"],
     additionalProperties: false,
   },
+  [TICKET_CONTROL_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      ticketId: {
+        type: "string",
+        pattern: "^[a-f0-9]{32}$",
+        description:
+          "The Ticket id returned by ticket_delegate or ticket_list.",
+      },
+      action: {
+        type: "string",
+        enum: ["pause", "resume", "stop"],
+        description:
+          "Pause after the current checkpoint, resume paused work, or stop it.",
+      },
+    },
+    required: ["ticketId", "action"],
+    additionalProperties: false,
+  },
 };
 
 export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
@@ -141,4 +163,6 @@ export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
     "Delegate one long-running task to Thebe and return its durable Ticket.",
   [TICKET_REPLY_TOOL_NAME]:
     "Answer a Ticket attention or approve/deny one pending worker permission.",
+  [TICKET_CONTROL_TOOL_NAME]:
+    "Pause, resume, or stop the Goal carrying out a Ticket.",
 };

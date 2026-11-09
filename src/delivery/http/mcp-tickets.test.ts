@@ -122,6 +122,7 @@ describe("/mcp Ticket tools", () => {
     expect(reader).toContain("ticket_get");
     expect(reader).not.toContain("ticket_delegate");
     expect(reader).not.toContain("ticket_reply");
+    expect(reader).not.toContain("ticket_control");
 
     const writer = await listTools(writeToken);
     expect(writer).toEqual(
@@ -130,6 +131,7 @@ describe("/mcp Ticket tools", () => {
         "ticket_get",
         "ticket_delegate",
         "ticket_reply",
+        "ticket_control",
       ])
     );
   });
@@ -154,6 +156,43 @@ describe("/mcp Ticket tools", () => {
     );
     expect(hostRefusal.result?.isError).toBe(true);
     expect(text(hostRefusal)).toContain("THEBE_MCP_WRITES");
+  });
+
+  it("pauses and stops a Ticket through ticket_control", async () => {
+    const { agent, fake, call } = await setup();
+    fake.queueTurns([{ kind: "hang" }]);
+    const delegated = await call(
+      "ticket_delegate",
+      {
+        task: "Wait for the library scan",
+        idempotencyKey: "control-library",
+      },
+      writeToken
+    );
+    const created = JSON.parse(text(delegated)) as {
+      ticket: { id: string };
+      goal: { id: string };
+    };
+
+    const paused = await call(
+      "ticket_control",
+      { ticketId: created.ticket.id, action: "pause" },
+      writeToken
+    );
+    expect(paused.result?.isError).toBeUndefined();
+    await expect(agent.waitGoal(created.goal.id)).resolves.toMatchObject({
+      status: "paused",
+    });
+
+    const stopped = await call(
+      "ticket_control",
+      { ticketId: created.ticket.id, action: "stop" },
+      writeToken
+    );
+    expect(stopped.result?.isError).toBeUndefined();
+    await expect(agent.waitGoal(created.goal.id)).resolves.toMatchObject({
+      status: "cancelled",
+    });
   });
 
   it("keeps Ticket reads available while quiesced and refuses new delegation", async () => {
