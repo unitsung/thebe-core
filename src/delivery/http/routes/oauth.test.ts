@@ -6,6 +6,8 @@ import type { TokenCaller } from "../token-store.ts";
 function pairingHandler(options: {
   verify(received: string): TokenCaller | undefined;
   issuePairingCode?: OAuthHttpIntegration["issuePairingCode"];
+  listConnections?: OAuthHttpIntegration["listConnections"];
+  revokeConnection?: OAuthHttpIntegration["revokeConnection"];
 }) {
   const oauth: OAuthHttpIntegration = {
     verify: async () => undefined,
@@ -17,12 +19,25 @@ function pairingHandler(options: {
         code: "ABCDE-23456",
         expiresAt: "2026-11-09T10:05:00.000Z",
       })),
+    listConnections: options.listConnections ?? (async () => []),
+    revokeConnection: options.revokeConnection ?? (async () => false),
     resource: "https://home.example/mcp",
   };
   return createThebeHttpHandler({
     version: "t",
     token: { verify: options.verify },
     oauth,
+  });
+}
+
+function connectionRequest(
+  method: "GET" | "DELETE" | "POST",
+  suffix = "",
+  token?: string
+): Request {
+  return new Request(`http://127.0.0.1:8787/v1/oauth/connections${suffix}`, {
+    method,
+    headers: token ? { authorization: `Bearer ${token}` } : {},
   });
 }
 
@@ -85,5 +100,78 @@ describe("OAuth pairing route", () => {
     expect(response.status).toBe(405);
     expect(response.headers.get("allow")).toBe("POST");
     expect(issued).toBe(0);
+  });
+
+  it("lists and revokes connector grants with a full-access token", async () => {
+    const revoked: string[] = [];
+    const handler = pairingHandler({
+      verify: (received) =>
+        received === "full"
+          ? { name: "Thebe App" }
+          : received === "scoped"
+            ? { name: "External agent", scopes: ["mcp:read"] }
+            : undefined,
+      listConnections: async () => [
+        {
+          id: "grant-1",
+          clientId: "test-client",
+          clientName: "Test client",
+          scopes: ["mcp:read", "offline_access"],
+          createdAt: "2026-11-10T06:00:00.000Z",
+          expiresAt: "2026-12-10T06:00:00.000Z",
+          refreshToken: true,
+        },
+      ],
+      revokeConnection: async (grantId) => {
+        revoked.push(grantId);
+        return grantId === "grant-1";
+      },
+    });
+
+    const listed = await handler.handle(connectionRequest("GET", "", "full"));
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    await expect(listed.json()).resolves.toMatchObject({
+      connections: [
+        {
+          id: "grant-1",
+          clientName: "Test client",
+          scopes: ["mcp:read", "offline_access"],
+        },
+      ],
+    });
+    expect(
+      (await handler.handle(connectionRequest("GET", "", "scoped"))).status
+    ).toBe(403);
+    expect(
+      (await handler.handle(connectionRequest("DELETE", "/grant-1", "scoped")))
+        .status
+    ).toBe(403);
+    expect(revoked).toEqual([]);
+
+    const wrongListMethod = await handler.handle(
+      connectionRequest("POST", "", "full")
+    );
+    expect(wrongListMethod.status).toBe(405);
+    expect(wrongListMethod.headers.get("allow")).toBe("GET");
+    const wrongDeleteMethod = await handler.handle(
+      connectionRequest("GET", "/grant-1", "full")
+    );
+    expect(wrongDeleteMethod.status).toBe(405);
+    expect(wrongDeleteMethod.headers.get("allow")).toBe("DELETE");
+
+    const deleted = await handler.handle(
+      connectionRequest("DELETE", "/grant-1", "full")
+    );
+    expect(deleted.status).toBe(200);
+    await expect(deleted.json()).resolves.toEqual({
+      ok: true,
+      id: "grant-1",
+    });
+    expect(revoked).toEqual(["grant-1"]);
+    expect(
+      (await handler.handle(connectionRequest("DELETE", "/missing", "full")))
+        .status
+    ).toBe(404);
   });
 });

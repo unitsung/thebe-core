@@ -9,6 +9,7 @@ import { createThebeHttpHandler } from "../handler.ts";
 import { listenThebeHttp } from "../listen.ts";
 import { createMcpOnlyHandler } from "../mcp-only.ts";
 import { resolveOAuthConfig } from "./config.ts";
+import { createOAuthAdapter } from "./adapter.ts";
 import { oauthKeysPath } from "./keys.ts";
 import { createThebeOAuth } from "./service.ts";
 
@@ -326,6 +327,99 @@ describe("OAuth service", () => {
         }),
       });
       expect(afterRevoke.status).toBe(401);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("lists and revokes a connector grant, including its active tokens", async () => {
+    const fixture = await oauthFixture();
+    try {
+      const grant = new fixture.oauth.provider.Grant({
+        accountId: "thebe-owner",
+        clientId: "test-client",
+      });
+      grant.addOIDCScope(["offline_access"]);
+      grant.addResourceScope(fixture.config.resource, [
+        "mcp:read",
+        "mcp:write",
+      ]);
+      const grantId = await grant.save();
+
+      const Adapter = createOAuthAdapter(fixture.configDir);
+      await new Adapter("AccessToken").upsert("managed-access", {
+        jti: "managed-access",
+        kind: "AccessToken",
+        clientId: "test-client",
+        grantId,
+        scope: "mcp:read mcp:write",
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 60,
+      });
+      await new Adapter("RefreshToken").upsert("managed-refresh", {
+        jti: "managed-refresh",
+        kind: "RefreshToken",
+        clientId: "test-client",
+        grantId,
+        scope: "mcp:read mcp:write",
+        iat: Math.floor(Date.now() / 1000),
+        exp: Math.floor(Date.now() / 1000) + 3600,
+      });
+
+      await expect(fixture.oauth.listConnections()).resolves.toEqual([
+        expect.objectContaining({
+          id: grantId,
+          clientId: "test-client",
+          clientName: "Test client",
+          scopes: expect.arrayContaining([
+            "mcp:read",
+            "mcp:write",
+            "offline_access",
+          ]),
+          refreshToken: true,
+        }),
+      ]);
+      await expect(fixture.oauth.revokeConnection(grantId)).resolves.toBe(true);
+      await expect(fixture.oauth.listConnections()).resolves.toEqual([]);
+      await expect(
+        fixture.oauth.provider.AccessToken.find("managed-access")
+      ).resolves.toBeUndefined();
+      await expect(
+        fixture.oauth.provider.RefreshToken.find("managed-refresh")
+      ).resolves.toBeUndefined();
+      await expect(fixture.oauth.revokeConnection(grantId)).resolves.toBe(
+        false
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("uses dynamically registered client metadata for a connection name", async () => {
+    const fixture = await oauthFixture();
+    try {
+      const Adapter = createOAuthAdapter(fixture.configDir);
+      await new Adapter("Client").upsert("dynamic-client", {
+        client_id: "dynamic-client",
+        client_name: "Dynamic connector",
+        redirect_uris: [`${fixture.baseUrl}/dynamic-callback`],
+        grant_types: ["authorization_code"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none",
+      });
+      const grant = new fixture.oauth.provider.Grant({
+        accountId: "thebe-owner",
+        clientId: "dynamic-client",
+      });
+      grant.addResourceScope(fixture.config.resource, ["mcp:read"]);
+      await grant.save();
+
+      await expect(fixture.oauth.listConnections()).resolves.toEqual([
+        expect.objectContaining({
+          clientId: "dynamic-client",
+          clientName: "Dynamic connector",
+        }),
+      ]);
     } finally {
       await fixture.close();
     }

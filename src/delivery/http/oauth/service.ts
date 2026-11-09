@@ -8,7 +8,7 @@ import Provider, {
 } from "oidc-provider";
 import { jwtVerify } from "jose";
 import type { OAuthConfig } from "./config.ts";
-import { createOAuthAdapter } from "./adapter.ts";
+import { createOAuthAdapter, listOAuthAdapterPayloads } from "./adapter.ts";
 import { loadOrCreateOAuthKeys, type OAuthKeyMaterial } from "./keys.ts";
 import {
   MCP_OAUTH_SCOPES,
@@ -48,7 +48,19 @@ export type OAuthHttpIntegration = {
   isPublicPath(path: string): boolean;
   publicResponse(request: Request): Response | undefined;
   issuePairingCode(): IssuedPairingCode;
+  listConnections(): Promise<OAuthConnection[]>;
+  revokeConnection(grantId: string): Promise<boolean>;
   resource: string;
+};
+
+export type OAuthConnection = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  refreshToken: boolean;
 };
 
 export type ThebeOAuthService = OAuthHttpIntegration & {
@@ -147,6 +159,77 @@ export async function createThebeOAuth(options: {
     issuePairingCode() {
       return pairing.issue();
     },
+    async listConnections() {
+      const grants = (
+        await Promise.all(
+          listOAuthAdapterPayloads(options.configDir, "Grant")
+            .map((payload) => payload.jti)
+            .filter((id): id is string => typeof id === "string")
+            .map((id) => provider.Grant.find(id))
+        )
+      ).filter((grant): grant is InstanceType<typeof provider.Grant> =>
+        Boolean(grant)
+      );
+      const refreshTokens = listOAuthAdapterPayloads(
+        options.configDir,
+        "RefreshToken"
+      );
+      const clientNames = new Map(options.config.clientNames);
+      const missingClientIds = [
+        ...new Set(
+          grants
+            .map((grant) => grant.clientId)
+            .filter(
+              (clientId): clientId is string =>
+                typeof clientId === "string" && !clientNames.has(clientId)
+            )
+        ),
+      ];
+      await Promise.all(
+        missingClientIds.map(async (clientId) => {
+          const client = await provider.Client.find(clientId);
+          clientNames.set(clientId, client?.clientName ?? clientId);
+        })
+      );
+      return grants
+        .map((grant): OAuthConnection => {
+          const scopes = new Set(
+            grant
+              .getResourceScope(options.config.resource)
+              .split(/\s+/)
+              .filter(Boolean)
+          );
+          if (grant.getOIDCScope().split(/\s+/).includes("offline_access")) {
+            scopes.add("offline_access");
+          }
+          return {
+            id: grant.jti,
+            clientId: grant.clientId ?? "unknown",
+            clientName:
+              clientNames.get(grant.clientId ?? "") ??
+              grant.clientId ??
+              "Unknown connector",
+            scopes: [...scopes],
+            createdAt: epochIso(grant.iat) ?? new Date(0).toISOString(),
+            ...(epochIso(grant.exp) ? { expiresAt: epochIso(grant.exp)! } : {}),
+            refreshToken: refreshTokens.some(
+              (payload) => payload.grantId === grant.jti
+            ),
+          };
+        })
+        .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    },
+    async revokeConnection(grantId) {
+      const grant = await provider.Grant.find(grantId);
+      if (!grant) return false;
+      await Promise.all([
+        provider.AccessToken.revokeByGrantId(grantId),
+        provider.RefreshToken.revokeByGrantId(grantId),
+        provider.AuthorizationCode.revokeByGrantId(grantId),
+      ]);
+      await grant.destroy();
+      return true;
+    },
     async verify(received) {
       return verifyAccessToken(received, {
         provider,
@@ -194,6 +277,12 @@ export async function createThebeOAuth(options: {
     },
   };
   return service;
+}
+
+function epochIso(value: unknown): string | undefined {
+  return typeof value === "number" && Number.isFinite(value)
+    ? new Date(value * 1000).toISOString()
+    : undefined;
 }
 
 function providerConfiguration(options: {
