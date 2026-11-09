@@ -95,11 +95,16 @@ export function createMainSessionApi(dependencies: MainSessionDependencies) {
         input && typeof input === "object" && !Array.isArray(input)
           ? (input as Record<string, unknown>)
           : {};
-      const result = await tickets.invoke(name, args, {
-        name: "main-session",
-        writes: true,
-        irreversible: true,
-      });
+      const result = await tickets.invoke(
+        name,
+        args,
+        {
+          name: "main-session",
+          writes: true,
+          irreversible: true,
+        },
+        "main-session"
+      );
       return {
         content: [{ type: "text" as const, text: JSON.stringify(result) }],
         details: {},
