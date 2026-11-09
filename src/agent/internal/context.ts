@@ -1204,6 +1204,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     sessionPermissionMode,
     cancelAutoSummary: autoSummary.cancel,
     openSession: registry.openSession,
+    readMessages: registry.readMessages,
     reapIdleSessions: registry.reapIdleSessions,
     get active() {
       return registry.active;
