@@ -10,6 +10,7 @@ import {
 import type {
   GoalRun,
   GoalRunStatus,
+  MandateDenial,
   SubagentRun,
   SubagentUpdate,
 } from "../types.ts";
@@ -19,6 +20,7 @@ export type GoalSubagentApi = {
     profileName: string;
     taskPrompt: string;
     parentSessionId: string;
+    background?: boolean;
   }): Promise<SubagentRun>;
   waitSubagent(runId: string): Promise<SubagentRun>;
   subscribeSubagent(
@@ -26,6 +28,7 @@ export type GoalSubagentApi = {
     listener: (update: SubagentUpdate) => void
   ): () => void;
   cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun>;
+  takeMandateDenial(parentSessionId: string): MandateDenial | undefined;
 };
 
 export type BufferedGoalEvent = {
@@ -36,6 +39,12 @@ export type BufferedGoalEvent = {
 export type ManagedGoal = GoalRun & {
   stopRequested: boolean;
   pauseRequested: boolean;
+  watchdogRetryRequested?: {
+    runId: string;
+    role: "worker" | "reviewer";
+    at: string;
+  };
+  personNoticeId?: string;
   finished: Promise<GoalRun>;
   resolveFinished: (result: GoalRun) => void;
   listeners: Set<(event: GoalEvent) => void>;
@@ -122,31 +131,53 @@ export async function executeGoal(
         deps.reportInbox.open(run.thebeSessionId, {
           allowAsk: Boolean(run.allowAsk),
         });
-        const worker = await deps.subagents.spawnSubagent({
-          // Observe mode is enforced by the profile's tool list, not by asking the model nicely.
-          profileName: run.observe
-            ? "goal-observer"
-            : run.executor === "ticket"
-              ? "ticket-worker"
-              : "goal-worker",
-          taskPrompt: prompt,
-          parentSessionId: run.thebeSessionId,
-        });
-        run.subagentRunIds.push(worker.runId);
-        deps.emitChild(run, iteration, "worker", { run: worker });
-        const workerUnsubscribe = deps.subagents.subscribeSubagent(
-          worker.runId,
-          (update) => deps.emitChild(run, iteration, "worker", update)
-        );
-        let workerResult: SubagentRun;
-        try {
-          workerResult = await deps.subagents.waitSubagent(worker.runId);
-        } finally {
-          workerUnsubscribe();
+        let workerResult: SubagentRun | undefined;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const worker = await deps.subagents.spawnSubagent({
+            // Observe mode is enforced by the profile's tool list, not by asking the model nicely.
+            profileName: run.observe
+              ? "goal-observer"
+              : run.executor === "ticket"
+                ? "ticket-worker"
+                : "goal-worker",
+            taskPrompt: prompt,
+            parentSessionId: run.thebeSessionId,
+            background: true,
+          });
+          run.subagentRunIds.push(worker.runId);
+          deps.emitChild(run, iteration, "worker", { run: worker });
+          const workerUnsubscribe = deps.subagents.subscribeSubagent(
+            worker.runId,
+            (update) => deps.emitChild(run, iteration, "worker", update)
+          );
+          try {
+            workerResult = await deps.subagents.waitSubagent(worker.runId);
+          } finally {
+            workerUnsubscribe();
+          }
+          deps.emitChild(run, iteration, "worker", { run: workerResult });
+          const watchdogRetry =
+            workerResult.status === "cancelled" &&
+            attempt === 0 &&
+            run.watchdogRetryRequested?.runId === worker.runId &&
+            run.watchdogRetryRequested.role === "worker";
+          if (watchdogRetry) {
+            run.watchdogRetryRequested = undefined;
+            continue;
+          }
+          break;
         }
-        deps.emitChild(run, iteration, "worker", { run: workerResult });
+        if (!workerResult) {
+          throw new GoalChildFailure("worker", "worker did not start");
+        }
+        const mandateDenial = deps.subagents.takeMandateDenial(
+          run.thebeSessionId
+        );
         if (run.stopRequested) throw new GoalControlError("cancel");
         if (run.pauseRequested) throw new GoalControlError("pause");
+        if (mandateDenial) {
+          throw new GoalReportStop("blocked", mandateDenial.detail);
+        }
         // A failed run is an infrastructure error; retrying burns every checkpoint on the same cause.
         if (workerResult.status === "failed") {
           throw new GoalChildFailure(
@@ -203,43 +234,58 @@ export async function executeGoal(
           .filter(Boolean)
           .join("\n");
 
-        const reviewer = await deps.subagents.spawnSubagent({
-          profileName:
-            run.executor === "ticket" ? "ticket-reviewer" : "goal-reviewer",
-          taskPrompt: buildGoalVerifierPrompt(
-            {
-              goal: run.goal,
-              criteria: run.criteria,
-              maxIterations: run.maxIterations,
-            },
-            workerText
-          ),
-          parentSessionId: run.thebeSessionId,
-        });
-        run.subagentRunIds.push(reviewer.runId);
-        deps.emitChild(run, iteration, "reviewer", { run: reviewer });
-        const reviewerUnsubscribe = deps.subagents.subscribeSubagent(
-          reviewer.runId,
-          (update) => deps.emitChild(run, iteration, "reviewer", update)
-        );
-        try {
-          const reviewerResult = await deps.subagents.waitSubagent(
-            reviewer.runId
+        let reviewerResult: SubagentRun | undefined;
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const reviewer = await deps.subagents.spawnSubagent({
+            profileName:
+              run.executor === "ticket" ? "ticket-reviewer" : "goal-reviewer",
+            taskPrompt: buildGoalVerifierPrompt(
+              {
+                goal: run.goal,
+                criteria: run.criteria,
+                maxIterations: run.maxIterations,
+              },
+              workerText
+            ),
+            parentSessionId: run.thebeSessionId,
+            background: true,
+          });
+          run.subagentRunIds.push(reviewer.runId);
+          deps.emitChild(run, iteration, "reviewer", { run: reviewer });
+          const reviewerUnsubscribe = deps.subagents.subscribeSubagent(
+            reviewer.runId,
+            (update) => deps.emitChild(run, iteration, "reviewer", update)
           );
+          try {
+            reviewerResult = await deps.subagents.waitSubagent(reviewer.runId);
+          } finally {
+            reviewerUnsubscribe();
+          }
           run.finalReport = childReport(reviewerResult);
           deps.emitChild(run, iteration, "reviewer", { run: reviewerResult });
-          if (reviewerResult.status === "failed") {
-            throw new GoalChildFailure(
-              "reviewer",
-              failureDetail(reviewerResult.error, "reviewer")
-            );
+          const watchdogRetry =
+            reviewerResult.status === "cancelled" &&
+            attempt === 0 &&
+            run.watchdogRetryRequested?.runId === reviewer.runId &&
+            run.watchdogRetryRequested.role === "reviewer";
+          if (watchdogRetry) {
+            run.watchdogRetryRequested = undefined;
+            continue;
           }
-          if (run.stopRequested) throw new GoalControlError("cancel");
-          if (run.pauseRequested) throw new GoalControlError("pause");
-          return reviewerResult.result ?? "";
-        } finally {
-          reviewerUnsubscribe();
+          break;
         }
+        if (!reviewerResult) {
+          throw new GoalChildFailure("reviewer", "reviewer did not start");
+        }
+        if (reviewerResult.status === "failed") {
+          throw new GoalChildFailure(
+            "reviewer",
+            failureDetail(reviewerResult.error, "reviewer")
+          );
+        }
+        if (run.stopRequested) throw new GoalControlError("cancel");
+        if (run.pauseRequested) throw new GoalControlError("pause");
+        return reviewerResult.result ?? "";
       },
       reviewEvaluator: async (goal, criteria, output) =>
         reviewGoalEvidence(goal, criteria, output),
@@ -323,6 +369,7 @@ export async function executeGoal(
       error instanceof Error ? error.message : String(error)
     );
   } finally {
+    deps.subagents.takeMandateDenial(run.thebeSessionId);
     deps.reportInbox.close(run.thebeSessionId);
   }
 }

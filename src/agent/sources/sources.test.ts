@@ -7,9 +7,14 @@ import type {
   ContainerState,
 } from "../capabilities/containers.ts";
 import { createContainerHealthSource } from "./container-health.ts";
+import { createDownloadCompletedSource } from "./download-completed.ts";
 import { createSourceRunner } from "./runner.ts";
 import { createTriggerStore } from "./store.ts";
 import type { Source } from "./types.ts";
+import type {
+  DownloadItem,
+  DownloadProvider,
+} from "../capabilities/pipeline.ts";
 
 function docker(initial: Record<string, ContainerState>) {
   const states = { ...initial };
@@ -115,6 +120,114 @@ describe("container-health source", () => {
   });
 });
 
+function download(
+  phase: DownloadItem["phase"],
+  overrides: Partial<DownloadItem> = {}
+): DownloadItem {
+  return {
+    hash: "a".repeat(40),
+    name: "Example",
+    engine: "qbittorrent",
+    id: "a".repeat(40),
+    phase,
+    badges: [],
+    capabilities: [],
+    state:
+      phase === "completed" ? "seeding" : phase === "queued" ? "queued" : phase,
+    progress: phase === "completed" ? 1 : 0.5,
+    ...overrides,
+  };
+}
+
+function downloads(items: DownloadItem[]): DownloadProvider {
+  return {
+    service: "downloads",
+    add: async () => ({ submitted: 0 }),
+    list: async () => items.map((item) => ({ ...item })),
+    get: async (hash) => items.find((item) => item.hash === hash),
+  };
+}
+
+describe("download-completed source", () => {
+  it("takes a baseline and reports a download entering completed once", async () => {
+    const items = [download("downloading")];
+    const source = createDownloadCompletedSource({
+      downloads: downloads(items),
+      now: clock(),
+    });
+    let cursor = (await source.read(undefined)).cursor;
+
+    items[0] = download("completed", {
+      completedAt: "2026-11-06T10:01:00.000Z",
+      contentPath: "/downloads/Example",
+      sizeBytes: 2048,
+    });
+    const completed = await source.read(cursor);
+    cursor = completed.cursor;
+    expect(completed.triggers).toHaveLength(1);
+    expect(completed.triggers[0]).toMatchObject({
+      source: "download-completed",
+      kind: "download.completed",
+      threads: [`resource:download:qbittorrent:${"a".repeat(40)}`],
+      resource: {
+        kind: "download",
+        id: `qbittorrent:${"a".repeat(40)}`,
+      },
+      payload: {
+        engine: "qbittorrent",
+        hash: "a".repeat(40),
+        from: "downloading",
+        to: "completed",
+        contentPath: "/downloads/Example",
+      },
+    });
+
+    expect((await source.read(cursor)).triggers).toEqual([]);
+  });
+
+  it("does not announce completed downloads that were already there at startup", async () => {
+    const source = createDownloadCompletedSource({
+      downloads: downloads([download("completed")]),
+      now: clock(),
+    });
+    const baseline = await source.read(undefined);
+    expect(baseline.triggers).toEqual([]);
+    expect((await source.read(baseline.cursor)).triggers).toEqual([]);
+  });
+
+  it("uses a stable id when the same transition is read from the same cursor", async () => {
+    const items = [download("downloading")];
+    const source = createDownloadCompletedSource({
+      downloads: downloads(items),
+      now: clock(),
+    });
+    const baseline = await source.read(undefined);
+    items[0] = download("completed", {
+      completedAt: "2026-11-06T10:01:00.000Z",
+    });
+    const first = await source.read(baseline.cursor);
+    const again = await source.read(baseline.cursor);
+    expect(again.triggers[0]?.id).toBe(first.triggers[0]?.id);
+  });
+
+  it("fails the read instead of advancing a partial multi-engine cursor", async () => {
+    const provider: DownloadProvider = {
+      ...downloads([download("downloading")]),
+      listWithProblems: async () => ({
+        downloads: [download("completed")],
+        unreachable: ["aria2: offline"],
+      }),
+    };
+    const source = createDownloadCompletedSource({
+      downloads: provider,
+      now: clock(),
+    });
+    await expect(source.read(undefined)).rejects.toThrow(
+      "partial download listing"
+    );
+  });
+});
+
 describe("runner", () => {
   it("stores each Trigger once and does not replay after a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-sources-"));
@@ -196,6 +309,54 @@ describe("runner", () => {
     });
     expect((await runner.pollOnce()).map((t) => t.source)).toEqual(["good"]);
     expect(errors).toEqual(["bad"]);
+  });
+
+  it("counts consecutive failures and clears them on a successful read", async () => {
+    let failing = true;
+    const source: Source = {
+      id: "flaky",
+      scope: "test source",
+      read: async () => {
+        if (failing) throw new Error("provider unavailable");
+        return { cursor: "ok", triggers: [] };
+      },
+    };
+    const runner = createSourceRunner({
+      sources: [source],
+      store: createTriggerStore({}),
+      now: clock(),
+    });
+    expect(runner.health()).toEqual([
+      {
+        id: "flaky",
+        scope: "test source",
+        state: "starting",
+        consecutiveFailures: 0,
+      },
+    ]);
+
+    await runner.pollOnce();
+    await runner.pollOnce();
+    expect(runner.health()).toEqual([
+      expect.objectContaining({
+        id: "flaky",
+        state: "failing",
+        consecutiveFailures: 2,
+        lastError: "provider unavailable",
+      }),
+    ]);
+
+    failing = false;
+    await runner.pollOnce();
+    expect(runner.health()).toEqual([
+      expect.objectContaining({
+        id: "flaky",
+        state: "healthy",
+        consecutiveFailures: 0,
+        lastSuccessAt: expect.any(String),
+      }),
+    ]);
+    expect(runner.health()[0]).not.toHaveProperty("lastError");
   });
 
   it("does not overlap a slow read with the next tick, and stop() ends the timer", async () => {

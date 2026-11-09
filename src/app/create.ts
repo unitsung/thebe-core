@@ -26,6 +26,7 @@ import type { AgentMemoryStore } from "../agent/memory/store.ts";
 import type { ArtifactStore } from "../agent/artifacts/store.ts";
 import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
 import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/product.ts";
+import type { OAuthHttpIntegration } from "../delivery/http/oauth/service.ts";
 
 export type ThebeAppPrompt = (
   text: string
@@ -41,15 +42,30 @@ export function createThebeApp(options: {
   token?:
     | string
     | import("../delivery/http/token-store.ts").TokenSource
-    | import("../delivery/http/token-store.ts").TokenVerifier;
+    | import("../delivery/http/token-store.ts").TokenVerifier
+    | import("../delivery/http/token-store.ts").AsyncTokenVerifier;
   auditPath?: string;
   agentStoreDir?: string;
   /** Sources Core watches for events; see `CreateThebeAgentOptions.sources`. Off unless given. */
-  sources?: { containerHealth?: boolean; intervalMs?: number };
+  sources?: {
+    containerHealth?: boolean;
+    downloadCompleted?: boolean;
+    intervalMs?: number;
+  };
   /** Eval's hourly limit on questions to the model; see `CreateThebeAgentOptions.evalMaxPerHour`. */
   evalMaxPerHour?: number;
+  /** Deterministic stuck-task thresholds; see `CreateThebeAgentOptions.watchdog`. */
+  watchdog?: {
+    intervalMs?: number;
+    goalFirstMs?: number;
+    goalSecondMs?: number;
+    workerFirstMs?: number;
+    workerSecondMs?: number;
+  };
   /** The Push Relay events are sent to. Unset: Core registers devices but sends no push. */
   pushRelayUrl?: string;
+  /** Replaces `fetch` for calls to the Push Relay; tests use it to stand in for the relay. */
+  pushFetch?: typeof fetch;
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -82,6 +98,7 @@ export function createThebeApp(options: {
   immich?: PhotoLibraryProvider;
   backgroundTaskProviders?: readonly ProductBackgroundTaskProvider[];
   serviceAPIProviders?: readonly ServiceAPIProvider[];
+  oauth?: OAuthHttpIntegration;
 }): {
   agent: ThebeAgent;
   prompt: ThebeAppPrompt;
@@ -103,6 +120,9 @@ export function createThebeApp(options: {
           relayUrl,
           identity: pushIdentity,
           devices: deviceRegistry,
+          dir: deviceDir,
+          fetch: options.pushFetch,
+          now: options.now,
         })
       : undefined;
   // Quiet hours only delay the push; the approval itself is already waiting.
@@ -127,12 +147,34 @@ export function createThebeApp(options: {
           });
         }
       : undefined,
+    onGoalNeedsPerson: notifier
+      ? (notice) =>
+          notifier.notify({
+            category: "thebe.activity",
+            title: "Thebe",
+            body: notice.message,
+            deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
+            id: notice.id,
+            ticket: notice.ticketId ?? notice.goalId,
+          })
+      : undefined,
+    onEvalUnavailable: notifier
+      ? (notice) =>
+          notifier.notify({
+            category: "thebe.activity",
+            title: "Thebe",
+            body: notice.message,
+            deepLink: "thebe://core",
+            id: notice.id,
+          })
+      : undefined,
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
     sources: options.sources,
     evalMaxPerHour: options.evalMaxPerHour,
+    watchdog: options.watchdog,
     now: options.now,
     callerId: options.callerId,
     model: options.model,
@@ -185,7 +227,9 @@ export function createThebeApp(options: {
         ? { publicKey: pushIdentity.publicKey, relayUrl }
         : undefined,
     quietHours,
+    pushOutbox: pushNotifier,
     workspacePath: options.workspacePath,
+    oauth: options.oauth,
   });
   return { agent, prompt, send: prompt, handler };
 }

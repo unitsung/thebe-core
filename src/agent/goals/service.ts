@@ -7,6 +7,8 @@ import {
 import type {
   GoalRun,
   GoalRunStatus,
+  GoalWatchdogReason,
+  GoalWatchdogState,
   SubagentRun,
   SubagentUpdate,
 } from "../types.ts";
@@ -15,16 +17,46 @@ import { createGoalReportInbox, type GoalReportInbox } from "./report.ts";
 import type { StoredGoalEvent } from "../store.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
+import { hashParameters } from "../security/audit/audit-log.ts";
+import type { MandateRevalidation } from "../tickets/mandate.ts";
+import {
+  buildGoalStatusCheckPrompt,
+  createGoalWatchdog,
+  type GoalWatchdogTarget,
+  type WatchdogDecision,
+} from "../watchdog/service.ts";
 
 const MAX_GOAL_EVENTS = 50;
 /** Longest answer or review note accepted; it goes into every later checkpoint prompt. */
 const MAX_ANSWER_CHARS = 4000;
 
+export type GoalNeedsPersonNotice = {
+  id: string;
+  goalId: string;
+  ticketId?: string;
+  reason: "answer" | "review" | "blocked" | "stalled";
+  message: string;
+};
+
+export type GoalApiOptions = {
+  watchdog?: {
+    intervalMs?: number;
+    goalFirstMs?: number;
+    goalSecondMs?: number;
+    workerFirstMs?: number;
+    workerSecondMs?: number;
+  };
+  getTicketIdForGoal?: (goalId: string) => Promise<string | undefined>;
+  revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
+  onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
+};
+
 export function createGoalApi(
   ctx: AgentContext,
   subagents: GoalSubagentApi,
   artifactStore?: ArtifactStore,
-  reportInbox: GoalReportInbox = createGoalReportInbox(ctx.now)
+  reportInbox: GoalReportInbox = createGoalReportInbox(ctx.now),
+  options: GoalApiOptions = {}
 ) {
   const runs = new Map<string, ManagedGoal>();
   const persistChains = new Map<string, Promise<void>>();
@@ -38,6 +70,7 @@ export function createGoalApi(
     status: run.status,
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
+    progressAt: run.progressAt,
     subagentRunIds: run.subagentRunIds.slice(),
     activeSubagent: run.activeSubagent ? { ...run.activeSubagent } : undefined,
     lastReview: run.lastReview
@@ -59,13 +92,19 @@ export function createGoalApi(
     ...(run.allowAsk ? { allowAsk: true } : {}),
     ...(run.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
     ...(run.guidance?.length ? { guidance: run.guidance.slice() } : {}),
+    ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
   });
 
   const RECOVERY_MESSAGE =
     "Goal recovered as paused after Core restart; resume it to continue.";
 
-  function broadcast(run: ManagedGoal, event: GoalEvent): void {
+  function broadcast(
+    run: ManagedGoal,
+    event: GoalEvent,
+    progress = false
+  ): void {
     const at = ctx.now().toISOString();
+    if (progress) run.progressAt = at;
     run.updatedAt = at;
     run.events.push({ event, at });
     if (run.events.length > MAX_GOAL_EVENTS) {
@@ -79,17 +118,39 @@ export function createGoalApi(
     for (const listener of run.listeners) listener(event);
   }
 
+  async function notifyNeedsPerson(run: ManagedGoal): Promise<void> {
+    if (!options.onNeedsPerson) return;
+    const notice = personNotice(run);
+    if (!notice || run.personNoticeId === notice.id) return;
+    run.personNoticeId = notice.id;
+    try {
+      const ticketId = await options.getTicketIdForGoal?.(run.thebeSessionId);
+      await options.onNeedsPerson({
+        ...notice,
+        ...(ticketId ? { ticketId } : {}),
+      });
+    } catch {
+      // A notification adapter must not change Goal state.
+    }
+  }
+
   async function setTerminal(
     run: ManagedGoal,
     status: Exclude<GoalRunStatus, "running" | "pausing">,
     summary?: string,
     error?: string
   ): Promise<GoalRun> {
+    const finalSummary =
+      status === "paused" && run.watchdog?.state === "waiting_for_person"
+        ? (run.watchdog.summary ??
+          `Paused by Watchdog: ${watchdogReasonText(run.watchdog.reason)}. It needs you to decide how to continue.`)
+        : summary;
     run.status = status;
-    run.summary = summary;
+    run.summary = finalSummary;
     run.error = error;
     run.finishedAt = ctx.now().toISOString();
     run.updatedAt = run.finishedAt;
+    run.progressAt = run.finishedAt;
     if (
       status !== "paused" &&
       artifactStore &&
@@ -115,7 +176,7 @@ export function createGoalApi(
       // authoritative GoalRun snapshot and renders paused separately.
       status: status === "paused" ? "cancelled" : status,
       totalIterations: run.iteration,
-      summary: summary ?? `Goal ${status}.`,
+      summary: finalSummary ?? `Goal ${status}.`,
     });
     const result = snapshot(run);
     await queueGoalPersistence(
@@ -123,6 +184,7 @@ export function createGoalApi(
       run.thebeSessionId,
       storedGoalEvents(run.events)
     );
+    await notifyNeedsPerson(run);
     run.resolveFinished(result);
     return result;
   }
@@ -143,7 +205,11 @@ export function createGoalApi(
         remainingTasks: event.remainingTasks?.slice(),
       };
     }
-    broadcast(run, event);
+    broadcast(
+      run,
+      event,
+      event.type !== "goal_status" || event.status === "running"
+    );
   }
 
   function resetFinished(run: ManagedGoal): void {
@@ -225,6 +291,8 @@ export function createGoalApi(
     run.createdAt = persisted.createdAt;
     run.updatedAt =
       persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
+    run.progressAt =
+      persisted.progressAt ?? persisted.updatedAt ?? persisted.createdAt;
     run.subagentRunIds = persisted.subagentRunIds.slice();
     run.activeSubagent = persisted.activeSubagent
       ? { ...persisted.activeSubagent }
@@ -253,6 +321,7 @@ export function createGoalApi(
     run.error = interrupted
       ? "The previous Goal process ended before its active checkpoint completed."
       : persisted.error;
+    if (persisted.watchdog) run.watchdog = { ...persisted.watchdog };
     if (interrupted) {
       const recoveredAt = ctx.now().toISOString();
       run.updatedAt = recoveredAt;
@@ -284,14 +353,26 @@ export function createGoalApi(
     role: "worker" | "reviewer",
     update: SubagentUpdate
   ): void {
+    const progress =
+      update.run.status !== "cancelled" &&
+      (Boolean(update.event && update.event.type !== "interrupted") ||
+        update.run.status === "completed" ||
+        update.run.status === "failed");
+    if (progress && run.watchdog?.state !== "waiting_for_person") {
+      run.watchdog = undefined;
+    }
     run.activeSubagent = update.run;
-    broadcast(run, {
-      type: "goal_subagent_update",
-      iteration,
-      role,
-      run: update.run,
-      event: update.event,
-    });
+    broadcast(
+      run,
+      {
+        type: "goal_subagent_update",
+        iteration,
+        role,
+        run: update.run,
+        event: update.event,
+      },
+      progress
+    );
   }
 
   function runManagedGoal(
@@ -338,6 +419,7 @@ export function createGoalApi(
       status: "running",
       createdAt,
       updatedAt: createdAt,
+      progressAt: createdAt,
       subagentRunIds: [],
       stopRequested: false,
       pauseRequested: false,
@@ -351,8 +433,61 @@ export function createGoalApi(
     return run;
   }
 
+  async function auditMandateRevalidation(
+    run: ManagedGoal,
+    reason: string,
+    result: "denied" | "error"
+  ): Promise<void> {
+    try {
+      await ctx.audit?.append({
+        method: "ticket.mandate_revalidate",
+        parameterHash: hashParameters({
+          goalId: run.thebeSessionId,
+          reason,
+        }),
+        summary: `Ticket Mandate revalidation ${result}: ${reason}`,
+        responseBytes: 0,
+        budgetConsumed: 0,
+        redactionFired: false,
+        result,
+        sessionId: run.thebeSessionId,
+        source: "ticket",
+      });
+    } catch {
+      // A write failure must never turn a denied recovery into an allowed one.
+    }
+  }
+
+  /** Refuses recovery when an Eval-created Ticket no longer follows from the current Policy. */
+  async function revalidateBeforeContinue(run: ManagedGoal): Promise<void> {
+    if (run.executor !== "ticket" || !options.revalidateMandate) return;
+    let result: MandateRevalidation;
+    try {
+      result = await options.revalidateMandate(run.thebeSessionId);
+    } catch (error: unknown) {
+      const reason = error instanceof Error ? error.message : String(error);
+      await auditMandateRevalidation(run, reason, "error");
+      throw httpError(
+        409,
+        `Could not revalidate this task's Ticket: ${reason}`,
+        "ticket_mandate_revalidation_failed"
+      );
+    }
+    if (result.allowed) return;
+    await auditMandateRevalidation(run, result.reason, "denied");
+    throw httpError(
+      409,
+      `The current Policy no longer authorizes this task to continue: ${result.reason}.`,
+      "ticket_mandate_invalid"
+    );
+  }
+
   /** Starts the next checkpoint of a paused Goal; the one way a paused run goes back to running. */
-  async function continueGoal(run: ManagedGoal): Promise<GoalRun> {
+  async function continueGoal(
+    run: ManagedGoal,
+    mandateChecked = false
+  ): Promise<GoalRun> {
+    if (!mandateChecked) await revalidateBeforeContinue(run);
     run.status = "running";
     resetFinished(run);
     run.finishedAt = undefined;
@@ -360,7 +495,11 @@ export function createGoalApi(
     run.finalReport = undefined;
     run.artifactId = undefined;
     run.error = undefined;
-    run.updatedAt = ctx.now().toISOString();
+    run.progressAt = ctx.now().toISOString();
+    run.updatedAt = run.progressAt;
+    run.watchdog = undefined;
+    run.watchdogRetryRequested = undefined;
+    run.personNoticeId = undefined;
     run.pauseRequested = false;
     run.stopRequested = false;
     await queueGoalPersistence(
@@ -376,6 +515,226 @@ export function createGoalApi(
     void runManagedGoal(run, run.iteration);
     return snapshot(run);
   }
+
+  function watchdogTarget(run: ManagedGoal): GoalWatchdogTarget {
+    return {
+      goalId: run.thebeSessionId,
+      goal: run.goal,
+      iteration: run.iteration,
+      ...(run.executor ? { executor: run.executor } : {}),
+      status: run.status,
+      createdAt: run.createdAt,
+      updatedAt: run.updatedAt ?? run.createdAt,
+      progressAt: run.progressAt ?? run.updatedAt ?? run.createdAt,
+      ...(run.report ? { report: { ...run.report } } : {}),
+      ...(run.attention ? { attention: { ...run.attention } } : {}),
+      ...(run.activeSubagent
+        ? { activeSubagent: { ...run.activeSubagent } }
+        : {}),
+      ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
+    };
+  }
+
+  async function auditWatchdog(
+    run: ManagedGoal,
+    state: GoalWatchdogState,
+    result: "ok" | "error" = "ok"
+  ): Promise<void> {
+    await ctx.audit?.append({
+      method: `watchdog.${state.action}`,
+      parameterHash: hashParameters({
+        goalId: run.thebeSessionId,
+        reason: state.reason,
+        since: state.since,
+        runId: run.activeSubagent?.runId,
+      }),
+      summary: `Watchdog ${state.action}: ${watchdogReasonText(state.reason)}`,
+      responseBytes: 0,
+      budgetConsumed: 0,
+      redactionFired: false,
+      result,
+      sessionId: run.thebeSessionId,
+      source: "watchdog",
+    });
+  }
+
+  async function recordWatchdog(
+    run: ManagedGoal,
+    state: GoalWatchdogState
+  ): Promise<void> {
+    run.watchdog = state;
+    broadcast(run, {
+      type: "goal_watchdog",
+      action: state.action,
+      reason: state.reason,
+      message: state.summary,
+    });
+    await auditWatchdog(run, state);
+  }
+
+  async function statusCheckFromWatchdog(
+    decision: Extract<WatchdogDecision, { type: "status_check" }>
+  ): Promise<void> {
+    const run = runs.get(decision.target.goalId);
+    if (
+      !run ||
+      run.status !== "running" ||
+      (run.progressAt ?? run.updatedAt) !== decision.target.progressAt
+    ) {
+      return;
+    }
+    const at = ctx.now().toISOString();
+    const state: GoalWatchdogState = {
+      state: "checking",
+      reason: decision.reason,
+      action: "status_check",
+      since: decision.target.progressAt,
+      at,
+      summary:
+        "Watchdog started one bounded, read-only status check because this task stopped making progress.",
+    };
+    await recordWatchdog(run, state);
+    try {
+      const child = await subagents.spawnSubagent({
+        profileName:
+          run.executor === "ticket" ? "ticket-observer" : "goal-observer",
+        taskPrompt: buildGoalStatusCheckPrompt(
+          decision.target,
+          decision.inactivityMs
+        ),
+        parentSessionId: run.thebeSessionId,
+        background: true,
+      });
+      void subagents.waitSubagent(child.runId).then(async (result) => {
+        const current = runs.get(run.thebeSessionId);
+        if (
+          !current ||
+          current.watchdog?.state !== "checking" ||
+          current.watchdog.at !== at
+        ) {
+          return;
+        }
+        const detail = (result.result ?? result.responseText ?? "").trim();
+        current.watchdog.summary = detail
+          ? `Watchdog status check: ${boundedText(detail, 1000)}`
+          : `Watchdog status check ended ${result.status}; no further evidence was returned.`;
+        current.updatedAt = ctx.now().toISOString();
+        await queueGoalPersistence(
+          snapshot(current),
+          current.thebeSessionId,
+          storedGoalEvents(current.events)
+        );
+      });
+    } catch (error) {
+      await auditWatchdog(run, state, "error");
+      throw error;
+    }
+  }
+
+  async function retryWorkerFromWatchdog(
+    decision: Extract<WatchdogDecision, { type: "retry_worker" }>
+  ): Promise<void> {
+    const run = runs.get(decision.target.goalId);
+    const active = run?.activeSubagent;
+    if (
+      !run ||
+      run.status !== "running" ||
+      !active ||
+      active.runId !== decision.run.runId
+    ) {
+      return;
+    }
+    const at = ctx.now().toISOString();
+    const activity =
+      active.activity?.at(-1)?.at ?? active.startedAt ?? active.createdAt;
+    const state: GoalWatchdogState = {
+      state: "retrying",
+      reason: decision.reason,
+      action: "retry_worker",
+      since: activity,
+      at,
+      summary:
+        decision.reason === "reviewer_inactivity"
+          ? "Watchdog is retrying the unresponsive reviewer once."
+          : "Watchdog is retrying the unresponsive worker once.",
+    };
+    run.watchdogRetryRequested = {
+      runId: active.runId,
+      role: decision.reason === "reviewer_inactivity" ? "reviewer" : "worker",
+      at,
+    };
+    await recordWatchdog(run, state);
+    try {
+      await subagents.cancelSubagent(active.runId, run.thebeSessionId);
+    } catch (error) {
+      run.watchdogRetryRequested = undefined;
+      await auditWatchdog(run, state, "error");
+      throw error;
+    }
+  }
+
+  async function requestPause(
+    run: ManagedGoal,
+    message: string
+  ): Promise<GoalRun> {
+    if (run.status !== "running") return snapshot(run);
+    run.pauseRequested = true;
+    run.status = "pausing";
+    broadcast(run, {
+      type: "goal_status",
+      status: "pausing",
+      message,
+    });
+    const active = run.activeSubagent;
+    if (active && (active.status === "queued" || active.status === "running")) {
+      await subagents.cancelSubagent(active.runId, run.thebeSessionId);
+    }
+    return snapshot(run);
+  }
+
+  async function pauseFromWatchdog(
+    decision: Extract<WatchdogDecision, { type: "pause" }>
+  ): Promise<void> {
+    const run = runs.get(decision.target.goalId);
+    if (!run || run.status !== "running") return;
+    const at = ctx.now().toISOString();
+    const state: GoalWatchdogState = {
+      state: "waiting_for_person",
+      reason: decision.reason,
+      action: "pause",
+      since:
+        decision.reason === "goal_no_progress"
+          ? decision.target.progressAt
+          : (decision.target.activeSubagent?.activity?.at(-1)?.at ??
+            decision.target.activeSubagent?.startedAt ??
+            decision.target.updatedAt),
+      at,
+      summary: watchdogPauseMessage(decision.reason),
+    };
+    await recordWatchdog(run, state);
+    await requestPause(run, state.summary!);
+  }
+
+  const watchdog = createGoalWatchdog({
+    listTargets: () =>
+      [...runs.values()]
+        .filter((run) => run.status === "running")
+        .map(watchdogTarget),
+    execute: async (decision) => {
+      if (decision.type === "status_check") {
+        await statusCheckFromWatchdog(decision);
+      } else if (decision.type === "retry_worker") {
+        await retryWorkerFromWatchdog(decision);
+      } else {
+        await pauseFromWatchdog(decision);
+      }
+    },
+    onError: () => {
+      // The next deterministic tick only resumes watching; an intervention is never repeated blindly.
+    },
+    ...options.watchdog,
+    now: ctx.now,
+  });
 
   return {
     async startGoal(input: {
@@ -481,22 +840,10 @@ export function createGoalApi(
     async pauseGoal(thebeSessionId: string): Promise<GoalRun> {
       const run = runs.get(thebeSessionId);
       if (!run) throw new Error("no goal found for this session");
-      if (run.status !== "running") return snapshot(run);
-      run.pauseRequested = true;
-      run.status = "pausing";
-      broadcast(run, {
-        type: "goal_status",
-        status: "pausing",
-        message: "Stopping the active checkpoint before pausing.",
-      });
-      const active = run.activeSubagent;
-      if (
-        active &&
-        (active.status === "queued" || active.status === "running")
-      ) {
-        await subagents.cancelSubagent(active.runId, run.thebeSessionId);
-      }
-      return snapshot(run);
+      return requestPause(
+        run,
+        "Stopping the active checkpoint before pausing."
+      );
     },
 
     async resumeGoal(thebeSessionId: string): Promise<GoalRun> {
@@ -577,11 +924,13 @@ export function createGoalApi(
             "invalid_body"
           );
         }
+        await revalidateBeforeContinue(run);
         (run.guidance ??= []).push(`Review feedback: ${text}`);
       } else {
         if (!text) {
           throw httpError(400, "answer cannot be empty", "invalid_body");
         }
+        await revalidateBeforeContinue(run);
         (run.guidance ??= []).push(
           `Your question was "${attention.question}". The person answered: ${text}`
         );
@@ -590,7 +939,7 @@ export function createGoalApi(
       // An answer that lands on the last checkpoint needs one more to be used at all.
       if (run.iteration >= run.maxIterations)
         run.maxIterations = run.iteration + 1;
-      return continueGoal(run);
+      return continueGoal(run, true);
     },
 
     async stopGoal(thebeSessionId: string): Promise<GoalRun> {
@@ -626,6 +975,7 @@ export function createGoalApi(
       run.listeners.clear();
       void queueGoalPersistence(undefined, thebeSessionId);
     },
+    watchdog,
   };
 }
 
@@ -705,6 +1055,16 @@ function toStoredGoalEvent(row: {
           message: event.message,
         },
       };
+    case "goal_watchdog":
+      return {
+        at: row.at,
+        event: {
+          type: event.type,
+          action: event.action,
+          reason: event.reason,
+          message: event.message,
+        },
+      };
   }
 }
 
@@ -755,6 +1115,57 @@ function restoreEvent(
 
 function boundedText(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit)}…`;
+}
+
+function personNotice(
+  run: ManagedGoal
+): Omit<GoalNeedsPersonNotice, "ticketId"> | undefined {
+  if (run.status === "paused" && run.watchdog?.state === "waiting_for_person") {
+    return {
+      id: `${run.thebeSessionId}:watchdog:${run.watchdog.at}`,
+      goalId: run.thebeSessionId,
+      reason: "stalled",
+      message:
+        run.watchdog.summary ?? "A task stopped making progress and needs you.",
+    };
+  }
+  if (run.status === "paused" && run.attention) {
+    return {
+      id: run.attention.id,
+      goalId: run.thebeSessionId,
+      reason: run.attention.kind,
+      message:
+        run.attention.kind === "review"
+          ? "A task finished and is ready for your review."
+          : "A task has a question for you.",
+    };
+  }
+  if (run.status === "failed" && run.blocked) {
+    return {
+      id: `${run.thebeSessionId}:blocked:${run.finishedAt ?? run.createdAt}`,
+      goalId: run.thebeSessionId,
+      reason: "blocked",
+      message: run.error
+        ? `A task is blocked and needs you: ${boundedText(run.error, 300)}`
+        : "A task is blocked and needs you.",
+    };
+  }
+  return undefined;
+}
+
+function watchdogReasonText(reason: GoalWatchdogReason): string {
+  switch (reason) {
+    case "worker_inactivity":
+      return "the worker stopped reporting activity";
+    case "reviewer_inactivity":
+      return "the reviewer stopped reporting activity";
+    case "goal_no_progress":
+      return "the task stopped making progress";
+  }
+}
+
+function watchdogPauseMessage(reason: GoalWatchdogReason): string {
+  return `Paused by Watchdog after ${watchdogReasonText(reason)}. It needs you to decide how to continue.`;
 }
 
 function clampIterations(value: number | undefined): number {

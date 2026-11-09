@@ -18,6 +18,8 @@ export function directEvalId(input: {
   triggerId: string;
   kind: string;
   at: string;
+  /** A stable request key replaces time in the id, so retrying a delegated request is idempotent. */
+  idempotencyKey?: string;
 }): string {
   return key(
     "eval",
@@ -25,10 +27,21 @@ export function directEvalId(input: {
     "direct",
     input.triggerId,
     input.kind,
-    input.at
+    input.idempotencyKey ?? input.at
   );
 }
 
 export function ticketIdFor(evalId: string): string {
   return key("ticket", evalId);
+}
+
+/** The Ticket a delegated request would create, before any execution state exists. */
+export function directTicketId(input: {
+  thread: string;
+  triggerId: string;
+  kind: string;
+  at: string;
+  idempotencyKey: string;
+}): string {
+  return ticketIdFor(directEvalId(input));
 }

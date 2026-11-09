@@ -14,6 +14,7 @@ describe("built-in subagent profiles", () => {
       "goal-observer",
       "goal-reviewer",
       "ticket-worker",
+      "ticket-observer",
       "ticket-reviewer",
     ]);
     expect(RESERVED_SUBAGENT_TOOLS).toContain("run_subagent");
@@ -68,7 +69,7 @@ describe("built-in subagent profiles", () => {
     }
   });
 
-  it("gives a Ticket's executor every home tool and no shell or file editing, and its reviewer only the ones that change nothing", () => {
+  it("gives a Ticket's executor every home tool and no shell or file editing, and its observers only the ones that change nothing", () => {
     const worker = BUILTIN_SUBAGENT_PROFILES["ticket-worker"]!;
     // `*` is every home tool; which writes it may make is the permission layer's call, under the Mandate.
     expect(worker.tools).toContain("*");
@@ -76,6 +77,12 @@ describe("built-in subagent profiles", () => {
     expect(worker.allowWrites).toBe(true);
     for (const forbidden of ["bash", "edit", "write"]) {
       expect(worker.tools).not.toContain(forbidden);
+    }
+    const observer = BUILTIN_SUBAGENT_PROFILES["ticket-observer"]!;
+    expect(observer.readOnly).toBe(true);
+    expect(observer.allowWrites).toBeFalsy();
+    for (const forbidden of ["bash", "edit", "write", "goal_report"]) {
+      expect(observer.tools).not.toContain(forbidden);
     }
     const reviewer = BUILTIN_SUBAGENT_PROFILES["ticket-reviewer"]!;
     expect(reviewer.readOnly).toBe(true);

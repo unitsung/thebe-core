@@ -42,6 +42,14 @@ import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbit
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
 import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
+import {
+  oauthPublicHosts,
+  resolveOAuthConfig,
+} from "../delivery/http/oauth/config.ts";
+import {
+  createThebeOAuth,
+  type ThebeOAuthService,
+} from "../delivery/http/oauth/service.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -63,6 +71,7 @@ export type ThebeBootstrap = {
    * library (see `architecture.test.ts`).
    */
   disposeSandboxVms: () => Promise<void>;
+  oauth?: ThebeOAuthService;
 };
 
 export type BootstrapOptions = {
@@ -107,6 +116,18 @@ export async function bootstrapThebe(
   const outputDirectory = outputDirectoryValue
     ? resolveConfiguredPath(outputDirectoryValue)
     : join(workspacePath, ".thebe", "outputs");
+  const oauthConfig = resolveOAuthConfig({ configDir });
+  const allowedHosts = mergeAllowedHosts(
+    options?.allowedHosts,
+    oauthConfig ? oauthPublicHosts(oauthConfig) : []
+  );
+  const oauth = oauthConfig
+    ? await createThebeOAuth({
+        configDir,
+        config: oauthConfig,
+        allowedHosts,
+      })
+    : undefined;
 
   const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
@@ -201,6 +222,7 @@ export async function bootstrapThebe(
     agentStoreDir,
     sources: parseSources(process.env),
     evalMaxPerHour: parseEvalMaxPerHour(process.env),
+    watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
@@ -213,7 +235,7 @@ export async function bootstrapThebe(
     maxSubagentsPerParent: userConfig.maxSubagentsPerParent,
     workspacePath,
     outputDirectory,
-    allowedHosts: options?.allowedHosts,
+    allowedHosts,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     memoryStore: createJsonMemoryStore(join(configDir, "memory.json")),
     strmRepairProvider,
@@ -254,6 +276,7 @@ export async function bootstrapThebe(
         ? [openListBackgroundTaskProvider]
         : []),
     ],
+    oauth,
   });
 
   return {
@@ -270,7 +293,15 @@ export async function bootstrapThebe(
     tokenGenerated: tokenResolution.generated,
     tokenPath: tokenResolution.path,
     disposeSandboxVms: disposeOsSandbox,
+    ...(oauth ? { oauth } : {}),
   };
+}
+
+function mergeAllowedHosts(
+  configured: string[] | undefined,
+  publicHosts: string[]
+): string[] {
+  return [...new Set([...(configured ?? []), ...publicHosts])];
 }
 
 function failEnv(message: string, fromDir: string): never {
@@ -330,12 +361,17 @@ function readPackageVersion(fromDir: string): string {
 }
 
 /**
- * `THEBE_SOURCES` is a comma list of the Sources Core watches (today: `container-health`). Unset or empty
- * means none, so nothing is read in the background. `THEBE_SOURCE_INTERVAL_MS` sets the poll interval.
+ * `THEBE_SOURCES` is a comma list of the Sources Core watches: `container-health`,
+ * `download-completed`. Unset or empty means none, so nothing is read in the background.
+ * `THEBE_SOURCE_INTERVAL_MS` sets the poll interval.
  */
-export function parseSources(
-  env: NodeJS.ProcessEnv
-): { containerHealth: boolean; intervalMs?: number } | undefined {
+export function parseSources(env: NodeJS.ProcessEnv):
+  | {
+      containerHealth: boolean;
+      downloadCompleted: boolean;
+      intervalMs?: number;
+    }
+  | undefined {
   const names = (env.THEBE_SOURCES ?? "")
     .split(",")
     .map((name) => name.trim().toLowerCase())
@@ -344,6 +380,7 @@ export function parseSources(
   const interval = Number(env.THEBE_SOURCE_INTERVAL_MS);
   return {
     containerHealth: names.includes("container-health"),
+    downloadCompleted: names.includes("download-completed"),
     ...(Number.isFinite(interval) && interval >= 1000
       ? { intervalMs: interval }
       : {}),

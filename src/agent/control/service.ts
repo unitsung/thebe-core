@@ -79,6 +79,13 @@ import {
   irreversibleReason,
   irreversibleRefusal,
 } from "../security/irreversible.ts";
+import type { TicketControlApi } from "../tickets/control.ts";
+import {
+  TICKET_REPLY_TOOL_NAME,
+  TICKET_TOOL_NAMES,
+  TICKET_TOOL_WRITE_NAMES,
+  type TicketToolName,
+} from "../tickets/tools.ts";
 
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL = `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 const RUNTIME_APPROVAL_REQUIRED =
@@ -90,6 +97,7 @@ export function createControlApi(
   deps: {
     /** The approved-action path; a restart over `/mcp` goes through it so it gets a receipt. */
     executeAction?: (request: ActionRequest) => Promise<ActionReceipt>;
+    tickets?: TicketControlApi;
   } = {}
 ) {
   const {
@@ -219,6 +227,25 @@ export function createControlApi(
     args: unknown
   ): Promise<{ text: string; isError: boolean }> {
     const ok = (text: string) => ({ text, isError: false });
+    const ticketTool = asTicketToolName(name);
+    if (ticketTool) {
+      if (!deps.tickets) {
+        throw httpError(503, "Ticket control is unavailable");
+      }
+      const params =
+        args && typeof args === "object" && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : {};
+      return ok(
+        JSON.stringify(
+          await deps.tickets.invoke(ticketTool, params, {
+            name: "agent",
+            writes: true,
+            irreversible: true,
+          })
+        )
+      );
+    }
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
     }
@@ -441,7 +468,13 @@ export function createControlApi(
     args: unknown,
     caller: McpCaller
   ): Promise<{ text: string; isError: boolean }> {
-    if (!(await isMcpWrite(name))) return invokeToolDetailed(name, args);
+    const ticketTool = asTicketToolName(name);
+    if (!ticketTool && !(await isMcpWrite(name))) {
+      return invokeToolDetailed(name, args);
+    }
+    if (ticketTool && !TICKET_TOOL_WRITE_NAMES.has(ticketTool)) {
+      return invokeTicketTool(ticketTool, args, caller);
+    }
     if (!ctx.mcpWritesAllowed) {
       throw httpError(
         403,
@@ -472,6 +505,7 @@ export function createControlApi(
         );
       }
     }
+    if (ticketTool) return invokeTicketTool(ticketTool, args, caller);
     if (name === CONTAINER_RESTART_ACTION_ID) {
       if (!deps.executeAction) {
         throw httpError(503, "container actions are not available");
@@ -506,6 +540,61 @@ export function createControlApi(
     }
     if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
     return invokeToolDetailed(name, args);
+  }
+
+  async function invokeTicketTool(
+    name: TicketToolName,
+    args: unknown,
+    caller: McpCaller
+  ): Promise<{ text: string; isError: boolean }> {
+    if (!deps.tickets) {
+      throw httpError(503, "Ticket control is unavailable");
+    }
+    const params =
+      args && typeof args === "object" && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : {};
+    if (
+      name === TICKET_REPLY_TOOL_NAME &&
+      params.permissionDecision === "allow" &&
+      !caller.irreversible
+    ) {
+      const ticket = await deps.tickets.get(String(params.ticketId ?? ""));
+      const pending = ticket?.pendingPermissions.find(
+        (item) => item.id === params.permissionId
+      );
+      if (pending) {
+        const callArgs =
+          pending.input &&
+          typeof pending.input === "object" &&
+          !Array.isArray(pending.input)
+            ? (pending.input as Record<string, unknown>)
+            : {};
+        const { sends, ...context } = await irreversibleContext(
+          pending.toolName,
+          callArgs
+        );
+        const reason =
+          pending.toolName === "bash"
+            ? "runs an arbitrary shell command"
+            : irreversibleReason({
+                name: pending.toolName,
+                args: { ...callArgs, ...sends },
+                ...context,
+              });
+        if (reason) {
+          throw httpError(
+            403,
+            irreversibleRefusal(pending.toolName, reason),
+            "mcp_irreversible_required"
+          );
+        }
+      }
+    }
+    return {
+      text: JSON.stringify(await deps.tickets.invoke(name, params, caller)),
+      isError: false,
+    };
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
@@ -1234,6 +1323,12 @@ function asStrmRepairRequest(value: unknown): StrmRepairRequest {
         ? (resource as Record<string, unknown>)
         : undefined,
   };
+}
+
+function asTicketToolName(name: string): TicketToolName | undefined {
+  return (TICKET_TOOL_NAMES as readonly string[]).includes(name)
+    ? (name as TicketToolName)
+    : undefined;
 }
 
 function resourceRef(

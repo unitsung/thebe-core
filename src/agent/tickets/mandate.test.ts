@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Trigger } from "../sources/types.ts";
-import { inferScope, mandateAllows, serviceOfTool } from "./mandate.ts";
+import {
+  inferScope,
+  mandateAllows,
+  mandateRefusal,
+  revalidateMandate,
+  serviceOfTool,
+} from "./mandate.ts";
 
 const trigger = (kind?: string): Trigger => ({
   id: "t",
@@ -36,6 +42,84 @@ describe("the scope a Ticket is accepted with", () => {
     expect(inferScope([trigger("download")], servicesFor)).toEqual([
       "download:write",
     ]);
+  });
+});
+
+describe("revalidating a Ticket before recovery", () => {
+  const mandate = {
+    decidedBy: "eval" as const,
+    requester: "container-health",
+    matchedRuleIds: ["rule-1"],
+    scope: ["docker:write"],
+  };
+  const policy = {
+    acceptMode: "auto" as const,
+    rules: [{ id: "rule-1", text: "Restart a stopped media server." }],
+  };
+  const valid = {
+    mandate,
+    subscriptions: ["resource:container:emby"],
+    policy,
+    servicesForResource: (kind: string) =>
+      kind === "container" ? ["docker"] : [],
+    enabledSources: ["container-health"],
+  };
+
+  it("keeps an inferred Ticket when its Policy, Source and resource wiring still support it", () => {
+    expect(revalidateMandate(valid)).toEqual({ allowed: true });
+  });
+
+  it("never widens the original scope when resource wiring gains another service", () => {
+    expect(
+      revalidateMandate({
+        ...valid,
+        servicesForResource: () => ["arcane", "docker"],
+      })
+    ).toEqual({ allowed: true });
+  });
+
+  it.each([
+    {
+      name: "automatic acceptance is off",
+      change: { policy: { ...policy, acceptMode: "observe" as const } },
+      reason: "acceptMode is observe",
+    },
+    {
+      name: "a matched rule was removed",
+      change: { policy: { ...policy, rules: [] } },
+      reason: "no longer contains matched rule(s) rule-1",
+    },
+    {
+      name: "the Source was disabled",
+      change: { enabledSources: [] },
+      reason: "container-health Source is not enabled",
+    },
+    {
+      name: "the subscribed resource vanished",
+      change: { subscriptions: [] },
+      reason: "no resource Thread",
+    },
+    {
+      name: "the service no longer looks after the resource",
+      change: { servicesForResource: () => [] },
+      reason: "no longer authorizes docker",
+    },
+  ])("refuses recovery when $name", ({ change, reason }) => {
+    expect(revalidateMandate({ ...valid, ...change })).toMatchObject({
+      allowed: false,
+      reason: expect.stringContaining(reason),
+    });
+  });
+
+  it("does not make a person's direct Ticket depend on the current Policy", () => {
+    expect(
+      revalidateMandate({
+        ...valid,
+        mandate: { ...mandate, decidedBy: "direct" },
+        policy: { acceptMode: "off", rules: [] },
+        enabledSources: [],
+      })
+    ).toEqual({ allowed: true });
   });
 });
 
@@ -141,5 +225,25 @@ describe("what a Mandate covers, call by call", () => {
         path: "/api/v3/movie/1",
       })
     ).toBe(false);
+  });
+
+  it("explains a refusal with the tool and the service boundary", () => {
+    expect(
+      mandateRefusal({ scope: ["download:write"] }, "service_write", {
+        service: "radarr",
+        method: "POST",
+      })
+    ).toBe("service_write acts on radarr, outside this Ticket's Mandate.");
+    expect(
+      mandateRefusal({ scope: ["radarr:write"] }, "service_write", {
+        service: "radarr",
+        method: "DELETE",
+      })
+    ).toContain("sends an HTTP DELETE");
+    expect(
+      mandateRefusal({ scope: ["container:write"] }, "container_restart", {
+        name: "emby",
+      })
+    ).toBeUndefined();
   });
 });

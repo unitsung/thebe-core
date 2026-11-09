@@ -22,6 +22,7 @@ const {
   tokenPath,
   workspacePath,
   disposeSandboxVms,
+  oauth,
 } = await bootstrapThebe({
   fromDir: here,
   allowedHosts: listen.allowedHosts,
@@ -38,6 +39,12 @@ if (isolation.sandbox.reason) {
 const { server, url, bind } = await listenThebeHttp(app, {
   host: listen.host,
   port: listen.port,
+  ...(oauth
+    ? {
+        nodeMiddleware: (request, response) =>
+          oauth.handleNode(request, response),
+      }
+    : {}),
 });
 console.log(`THEBE_LISTEN ${url} (${version}) bind=${bind}`);
 console.log(`THEBE_DOCS ${url}/docs`);
@@ -45,6 +52,12 @@ const gateway = listen.mcpPort
   ? await listenThebeHttp(createMcpOnlyHandler(app), {
       host: listen.mcpHost,
       port: listen.mcpPort,
+      ...(oauth
+        ? {
+            nodeMiddleware: (request, response) =>
+              oauth.handleNode(request, response),
+          }
+        : {}),
     })
   : undefined;
 if (gateway) {

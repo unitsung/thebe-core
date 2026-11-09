@@ -68,9 +68,11 @@ export function pushEventMessage(event: {
   title: string;
   body: string;
   deepLink: string;
+  ticket?: string;
+  seq?: number;
 }): string {
   return JSON.stringify([
-    "thebe-push-v1",
+    "thebe-push-v2",
     event.relayDeviceId,
     event.id,
     event.ts,
@@ -78,5 +80,7 @@ export function pushEventMessage(event: {
     event.title,
     event.body,
     event.deepLink,
+    event.ticket ?? null,
+    event.seq ?? null,
   ]);
 }

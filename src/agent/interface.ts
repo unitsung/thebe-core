@@ -63,7 +63,9 @@ import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
 import type { Ticket } from "./tickets/types.ts";
 import type { Trigger } from "./sources/types.ts";
+import type { SourceHealth } from "./sources/runner.ts";
 import type { Decision, Policy } from "./eval/types.ts";
+import type { EvalUnavailableNotice } from "./eval/service.ts";
 import type {
   AgentArtifact,
   ArtifactContent,
@@ -114,6 +116,7 @@ export type CreateThebeAgentOptions = {
    */
   sources?: {
     containerHealth?: boolean;
+    downloadCompleted?: boolean;
     intervalMs?: number;
   };
   /**
@@ -125,6 +128,20 @@ export type CreateThebeAgentOptions = {
   onPendingApproval?: (
     record: import("./activity/types.ts").ActivityRecord
   ) => void;
+  /** Called once when a Goal enters `person`: a question, review, blocker, or Watchdog escalation. */
+  onGoalNeedsPerson?: (
+    notice: import("./goals/service.ts").GoalNeedsPersonNotice
+  ) => Promise<void> | void;
+  /** Called once when assessment fails and again only after a successful assessment. */
+  onEvalUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
+  /** Deterministic stuck-task thresholds. Defaults: 60 s scan; Goal 30/60 min; worker/reviewer 10/10 min. */
+  watchdog?: {
+    intervalMs?: number;
+    goalFirstMs?: number;
+    goalSecondMs?: number;
+    workerFirstMs?: number;
+    workerSecondMs?: number;
+  };
   now?: () => Date;
   callerId?: string;
   maxToolCalls?: number;
@@ -491,8 +508,10 @@ export interface ThebeAgent {
     limit?: number;
   }): Promise<Decision[]>;
   getDecision(id: string): Promise<Decision | undefined>;
-  /** Events the enabled Sources observed, newest first. Recorded for audit; nothing acts on them yet. */
+  /** Events the enabled Sources observed, newest first. They feed fan-out and Eval. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
+  /** Read health for each enabled Source, including consecutive failures and the latest error. */
+  sourceHealth?(): SourceHealth[];
   /** Records the Ticket for a Goal the person asked for. Idempotent. */
   recordGoalTicket(
     run: GoalRun,

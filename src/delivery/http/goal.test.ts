@@ -213,6 +213,15 @@ describe("Goal HTTP", () => {
     expect(properties.currentRun).toEqual({
       $ref: "#/components/schemas/ProductGoalRun",
     });
+    expect(properties.watchdog).toEqual({
+      $ref: "#/components/schemas/GoalWatchdog",
+    });
+    expect(schemas.GoalWatchdog).toEqual(
+      expect.objectContaining({
+        type: "object",
+        required: ["state", "reason", "action", "since", "at"],
+      })
+    );
     expect(schemas.ProductGoalRun).toEqual(
       expect.objectContaining({
         type: "object",

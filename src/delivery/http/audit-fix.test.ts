@@ -564,7 +564,7 @@ describe("audit remediation", () => {
     expect(child.thebeSessionId).not.toBe(parent.thebeSessionId);
   });
 
-  it("quiesce blocks remaining auth writes including DELETE /v1/auth", async () => {
+  it("quiesce blocks auth and MCP writes but leaves MCP reads available", async () => {
     const fake = createFakeRuntime();
     const app = createThebeApp({
       runtime: fake.runtime,
@@ -586,7 +586,7 @@ describe("audit remediation", () => {
       })
     );
     expect(key.status).toBe(503);
-    const mcp = await app.handler.handle(
+    const mcpRead = await app.handler.handle(
       new Request("http://127.0.0.1:8787/mcp", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -598,6 +598,22 @@ describe("audit remediation", () => {
         }),
       })
     );
-    expect(mcp.status).toBe(503);
+    expect(mcpRead.status).toBe(200);
+    const mcpWrite = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: {
+            name: "container_restart",
+            arguments: { id: "emby" },
+          },
+        }),
+      })
+    );
+    expect(mcpWrite.status).toBe(503);
   });
 });

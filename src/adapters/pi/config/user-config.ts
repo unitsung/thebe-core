@@ -6,14 +6,24 @@ import { join } from "node:path";
 export const DEFAULT_COMPACTION_RESERVE_TOKENS = 16_384;
 
 export function thebeUserConfigPath(): string {
-  return join(process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe"), "config.json");
+  return join(
+    process.env.THEBE_CONFIG_DIR ?? join(process.env.HOME ?? ".", ".thebe"),
+    "config.json"
+  );
 }
 
 /** API-managed providers live in models.json. Remove the obsolete startup override. */
-export function removeLegacyProviderOverride(path: string, providerId: string): void {
+export function removeLegacyProviderOverride(
+  path: string,
+  providerId: string
+): void {
   let config: Record<string, any>;
-  try { config = JSON.parse(readFileSync(path, "utf8")); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  try {
+    config = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
   if (!config.providers || !Object.hasOwn(config.providers, providerId)) return;
   delete config.providers[providerId];
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -29,6 +39,13 @@ export function loadThebeUserConfig(): {
   permissionMode?: string;
   maxSubagentConcurrency?: number;
   maxSubagentsPerParent?: number;
+  watchdog?: {
+    intervalMs?: number;
+    goalFirstMs?: number;
+    goalSecondMs?: number;
+    workerFirstMs?: number;
+    workerSecondMs?: number;
+  };
   workspacePath?: string;
   outputDirectory?: string;
   providers?: Record<string, { baseUrl?: string }>;
@@ -42,6 +59,13 @@ export function loadThebeUserConfig(): {
       permissionMode?: string;
       maxSubagentConcurrency?: number;
       maxSubagentsPerParent?: number;
+      watchdog?: {
+        intervalMs?: number;
+        goalFirstMs?: number;
+        goalSecondMs?: number;
+        workerFirstMs?: number;
+        workerSecondMs?: number;
+      };
       workspacePath?: string;
       outputDirectory?: string;
       providers?: Record<string, { baseUrl?: string }>;

@@ -63,6 +63,8 @@ export type ProductGoal = {
   attention?: GoalAttention;
   /** What the worker last reported through `goal_report`. */
   report?: GoalReport;
+  /** The Watchdog's latest bounded intervention. */
+  watchdog?: GoalRun["watchdog"];
   /** The Ticket that authorises this task, when one was recorded. Added by the HTTP layer. */
   ticketId?: string;
 };
@@ -86,6 +88,11 @@ export type ProductGoalEvent = {
   message?: string;
   summary?: string;
   totalIterations?: number;
+  watchdogAction?: "status_check" | "retry_worker" | "pause";
+  watchdogReason?:
+    | "goal_no_progress"
+    | "worker_inactivity"
+    | "reviewer_inactivity";
 };
 
 const CRITIQUE_LIMIT = 400;
@@ -160,6 +167,7 @@ export function toProductGoal(run: GoalRun): ProductGoal {
     },
     ...(run.attention ? { attention: { ...run.attention } } : {}),
     ...(run.report ? { report: { ...run.report } } : {}),
+    ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
   };
 }
 
@@ -241,6 +249,16 @@ export function toProductGoalEvent(
           status: event.run.status,
           title: event.run.profileName,
         },
+      };
+    case "goal_watchdog":
+      return {
+        id,
+        type: event.type,
+        goalId,
+        at,
+        watchdogAction: event.action,
+        watchdogReason: event.reason,
+        message: event.message,
       };
   }
 }

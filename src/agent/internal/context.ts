@@ -1,4 +1,8 @@
-import { isUnattended, mandateAllows } from "../tickets/mandate.ts";
+import {
+  isUnattended,
+  mandateAllows,
+  mandateRefusal,
+} from "../tickets/mandate.ts";
 import type { TicketMandate } from "../tickets/types.ts";
 import { join, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
@@ -480,6 +484,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       ),
     unattended: async (thebeSessionId) =>
       isUnattended(await mandateLookup?.(thebeSessionId)),
+    mandateRefusal: async (thebeSessionId, request) =>
+      mandateRefusal(
+        await mandateLookup?.(thebeSessionId),
+        request.toolName,
+        request.args
+      ),
     preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,
     lookupRemembered,
@@ -1197,6 +1207,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     runPrompt,
     pipelineAdvancer,
     lookupRemembered,
+    takeMandateDenial: permissions.takeMandateDenial,
     registerSubagentParentCanceller,
     cancelSubagentsForParent,
   };

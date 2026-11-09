@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createQuietHoursStore } from "../../delivery/http/quiet-hours.ts";
 import { createQuietHoursNotifier } from "./quiet-notifier.ts";
-import type { PushNotice } from "./notifier.ts";
+import type { DurablePushNotifier, PushNotice } from "./notifier.ts";
 
 const night = { start: "23:00", end: "07:00", timeZone: "UTC" };
 const notice = (id: string): PushNotice => ({
@@ -25,8 +25,14 @@ async function setup(
   const sent: string[] = [];
   const quiet = createQuietHoursStore({ dir: options.dir });
   await quiet.set(night);
+  const inner: DurablePushNotifier = {
+    notify: async (notice) => void sent.push(notice.id),
+    flush: async () => undefined,
+    status: () => ({ pending: 0, consecutiveFailures: 0, dropped: 0 }),
+    close: () => undefined,
+  };
   const notifier = createQuietHoursNotifier({
-    inner: { notify: async (n) => void sent.push(n.id) },
+    inner,
     quiet,
     dir: options.dir,
     now: () => clock.now,

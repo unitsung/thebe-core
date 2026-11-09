@@ -44,6 +44,8 @@ export type TicketInput = {
 export type TicketLinks = {
   /** The Goal that carries the work out. Its id is the session id. */
   legacyGoalId?: string;
+  /** The caller's stable key for a delegated request. */
+  requestId?: string;
   sessionIds: string[];
   /** The Decision that took the work on. */
   decisionId?: string;

@@ -10,11 +10,20 @@ export async function handleHealthEventsCompatibility(
 ): Promise<Response | undefined> {
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
-    // What this Core can do beyond the basics: list Tickets, hold a Policy, and keep Decisions.
+    const sources = context.agent?.sourceHealth?.() ?? [];
     return json({
       ok: true,
       version: context.version,
-      capabilities: context.agent ? ["tickets", "policy", "decisions"] : [],
+      capabilities: context.agent
+        ? [
+            "tickets",
+            "policy",
+            "decisions",
+            ...(sources.length > 0 ? ["sources"] : []),
+          ]
+        : [],
+      ...(sources.length > 0 ? { sources } : {}),
+      ...(context.pushOutbox ? { push: context.pushOutbox.status() } : {}),
     });
   }
   if (

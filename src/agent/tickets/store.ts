@@ -30,6 +30,8 @@ export type TicketStore = {
     kind: string;
     /** When the request happened. Part of the id, so a retry of the same request must pass the same time. */
     at: string;
+    /** Replaces time in the derived id when a caller supplies a stable retry key. */
+    idempotencyKey?: string;
     title: string;
     requester: string;
     goalId?: string;
@@ -154,6 +156,9 @@ export function createTicketStore(options: {
           triggerId: input.triggerId,
           kind: input.kind,
           at: input.at,
+          ...(input.idempotencyKey
+            ? { idempotencyKey: input.idempotencyKey }
+            : {}),
         });
         const id = ticketIdFor(evalId);
         const existing = memory.get(id);
@@ -173,6 +178,9 @@ export function createTicketStore(options: {
           inputs: [],
           links: {
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
+            ...(input.idempotencyKey
+              ? { requestId: input.idempotencyKey }
+              : {}),
             sessionIds: input.sessionIds ?? [],
           },
           createdAt: input.at,

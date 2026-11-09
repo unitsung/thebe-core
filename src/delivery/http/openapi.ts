@@ -120,7 +120,14 @@ const operations: Operation[] = [
     parameters: [idParameter()],
     responseSchema: "GoalSchedule",
   },
-  { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
+  {
+    method: "get",
+    path: "/v1/health",
+    summary:
+      "Health check, including Source read health and durable push state when enabled",
+    tag: "system",
+    responseSchema: "Health",
+  },
   {
     method: "get",
     path: "/v1/events",
@@ -793,7 +800,7 @@ const operations: Operation[] = [
     method: "post",
     path: "/v1/goals/{id}/resume",
     summary:
-      "Resume a paused Goal (409 attention_open while it waits on an answer or review: use /answer)",
+      "Resume a paused Goal (409 attention_open while it waits on an answer or review: use /answer; 409 ticket_mandate_invalid when the current Policy no longer authorizes an Eval Ticket)",
     tag: "goal",
     parameters: [idParameter()],
     responseSchema: "ProductGoal",
@@ -802,7 +809,7 @@ const operations: Operation[] = [
     method: "post",
     path: "/v1/goals/{id}/answer",
     summary:
-      "Answer the question a paused Goal is waiting on, or accept / send back a result waiting for review",
+      "Answer the question a paused Goal is waiting on, or accept / send back a result waiting for review (409 ticket_mandate_invalid when continuing an Eval Ticket no longer follows the current Policy)",
     tag: "goal",
     parameters: [idParameter()],
     requestBody: { required: true },
@@ -1223,6 +1230,14 @@ const operations: Operation[] = [
   },
   {
     method: "post",
+    path: "/v1/oauth/pairing-code",
+    summary: "Issue a short-lived one-time OAuth pairing code",
+    tag: "mcp",
+    response: 201,
+    responseSchema: "OAuthPairingCode",
+  },
+  {
+    method: "post",
     path: "/mcp",
     summary: "MCP JSON-RPC endpoint",
     tag: "mcp",
@@ -1236,13 +1251,17 @@ function schemaRef(name?: string): Record<string, unknown> {
 
 /**
  * Where an Activity item stands for the person, derived on every read and never stored. `person` needs
- * them now (`reason` approval: a write waits for their yes; failed: it did not finish in the last 24
- * hours), `working` is queued or running, `idle` is paused, `ended` is history. The stages never
+ * them now (`reason` approval: a write waits for their yes; stalled: Watchdog exhausted its bounded
+ * self-help; failed: it did not finish in the last 24 hours), `working` is queued or running, `idle`
+ * is a plain pause, `ended` is history. The stages never
  * overlap and cover every item; `GET /v1/activity?stage=person` is the list Home counts.
  */
 const ACTIVITY_STAGE_PROPERTIES = {
   stage: { type: "string", enum: ["person", "working", "idle", "ended"] },
-  reason: { type: "string", enum: ["approval", "failed"] },
+  reason: {
+    type: "string",
+    enum: ["approval", "failed", "blocked", "answer", "review", "stalled"],
+  },
 } as const;
 
 /** A count with the median and 95th percentile of what was counted. */
@@ -1429,6 +1448,60 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           properties: { ok: { type: "boolean" } },
         },
+        Health: {
+          type: "object",
+          required: ["ok", "version", "capabilities"],
+          properties: {
+            ok: { type: "boolean" },
+            version: { type: "string" },
+            capabilities: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sources: {
+              type: "array",
+              items: { $ref: "#/components/schemas/SourceHealth" },
+            },
+            push: { $ref: "#/components/schemas/PushOutboxStatus" },
+          },
+        },
+        SourceHealth: {
+          type: "object",
+          required: ["id", "scope", "state", "consecutiveFailures"],
+          properties: {
+            id: { type: "string" },
+            scope: { type: "string" },
+            state: {
+              type: "string",
+              enum: ["starting", "healthy", "failing"],
+            },
+            consecutiveFailures: { type: "integer", minimum: 0 },
+            lastAttemptAt: { type: "string", format: "date-time" },
+            lastSuccessAt: { type: "string", format: "date-time" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            lastError: { type: "string" },
+          },
+        },
+        PushOutboxStatus: {
+          type: "object",
+          required: ["pending", "consecutiveFailures", "dropped"],
+          properties: {
+            pending: { type: "integer", minimum: 0 },
+            consecutiveFailures: { type: "integer", minimum: 0 },
+            dropped: { type: "integer", minimum: 0 },
+            lastError: { type: "string" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            lastDrop: {
+              type: "object",
+              required: ["id", "reason", "at"],
+              properties: {
+                id: { type: "string" },
+                reason: { type: "string" },
+                at: { type: "string", format: "date-time" },
+              },
+            },
+          },
+        },
         OAuthAuthorizeRequest: {
           type: "object",
           properties: {
@@ -1450,6 +1523,15 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             url: { type: "string", format: "uri" },
             instructions: { type: "string" },
             deviceCode: { type: "object", additionalProperties: true },
+          },
+        },
+        OAuthPairingCode: {
+          type: "object",
+          required: ["ok", "code", "expiresAt"],
+          properties: {
+            ok: { type: "boolean" },
+            code: { type: "string" },
+            expiresAt: { type: "string", format: "date-time" },
           },
         },
         AuditRecord: {
@@ -2074,6 +2156,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             registrationId: { type: "string" },
             platform: { type: "string", enum: ["ios"] },
             deviceId: { type: "string" },
+            relayDeviceId: { type: "string" },
             categories: { type: "array", items: { type: "string" } },
             registeredAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
@@ -3091,6 +3174,36 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 at: { type: "string" },
               },
             },
+            watchdog: {
+              $ref: "#/components/schemas/GoalWatchdog",
+            },
+          },
+        },
+        GoalWatchdog: {
+          type: "object",
+          description:
+            "The Watchdog's latest bounded intervention. `waiting_for_person` is a paused Goal in Activity's person/stalled stage.",
+          required: ["state", "reason", "action", "since", "at"],
+          properties: {
+            state: {
+              type: "string",
+              enum: ["checking", "retrying", "waiting_for_person"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "goal_no_progress",
+                "worker_inactivity",
+                "reviewer_inactivity",
+              ],
+            },
+            action: {
+              type: "string",
+              enum: ["status_check", "retry_worker", "pause"],
+            },
+            since: { type: "string", format: "date-time" },
+            at: { type: "string", format: "date-time" },
+            summary: { type: "string" },
           },
         },
         GoalAnswerRequest: {

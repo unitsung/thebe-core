@@ -3,27 +3,33 @@ import type { createThebeHttpHandler } from "./handler.ts";
 
 export const MAX_HTTP_BODY_BYTES = 10 * 1024 * 1024;
 
+export type ThebeNodeMiddleware = (
+  request: IncomingMessage,
+  response: import("node:http").ServerResponse
+) => boolean | Promise<boolean>;
+
 export type ThebeListenOptions = {
   host?: string;
   port?: number;
+  /** Handles protocol-specific Node requests before conversion to the fetch API. */
+  nodeMiddleware?: ThebeNodeMiddleware;
 };
 
 export async function listenThebeHttp(
   app: ReturnType<typeof createThebeHttpHandler>,
-  options: ThebeListenOptions = {},
+  options: ThebeListenOptions = {}
 ): Promise<{ server: Server; url: string; bind: string }> {
   const host = options.host ?? "127.0.0.1";
   const port = options.port ?? 8787;
   const server = createServer((req, res) => {
-    void handleNode(app, req, res);
+    void handleNode(app, req, res, options.nodeMiddleware);
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => resolve());
   });
   const address = server.address();
-  const bound =
-    address && typeof address === "object" ? address.port : port;
+  const bound = address && typeof address === "object" ? address.port : port;
   const wildcard = host === "0.0.0.0" || host === "::";
   const urlHost = wildcard ? "127.0.0.1" : host;
   const bind = `${host}:${bound}`;
@@ -34,8 +40,10 @@ async function handleNode(
   app: ReturnType<typeof createThebeHttpHandler>,
   req: IncomingMessage,
   res: import("node:http").ServerResponse,
+  nodeMiddleware?: ThebeNodeMiddleware
 ): Promise<void> {
   try {
+    if (await nodeMiddleware?.(req, res)) return;
     const request = await toRequest(req);
     const response = await app.handle(request);
     const headers: Record<string, string> = {};
@@ -79,7 +87,7 @@ async function handleNode(
       JSON.stringify({
         ok: false,
         error: error instanceof Error ? error.message : String(error),
-      }),
+      })
     );
     req.destroy();
   }
@@ -112,7 +120,9 @@ async function toRequest(req: IncomingMessage): Promise<Request> {
     const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buf.length;
     if (size > MAX_HTTP_BODY_BYTES) {
-      const error = new Error("Payload Too Large") as Error & { status: number };
+      const error = new Error("Payload Too Large") as Error & {
+        status: number;
+      };
       error.status = 413;
       throw error;
     }

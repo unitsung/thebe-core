@@ -138,6 +138,7 @@ describe("Thebe HTTP handler", () => {
     expect(
       body.paths["/v1/session/{id}/background-task/stop-all"]
     ).toBeDefined();
+    expect(body.paths["/v1/oauth/pairing-code"]).toBeDefined();
     const parserInput = body as unknown as Parameters<
       typeof SwaggerParser.validate
     >[0];

@@ -732,6 +732,42 @@ describe("Thebe agent service (fake runtime)", () => {
     ).resolves.toHaveLength(3);
   });
 
+  it("refuses to resume a Ticket executor when its Ticket is missing", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "missing-ticket" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Carry out an unattended Ticket",
+      maxIterations: 2,
+      executor: "ticket",
+    } as Parameters<typeof agent.startGoal>[0]);
+    await vi.waitFor(() => {
+      expect(
+        agent.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await agent.pauseGoal(session.thebeSessionId);
+    await agent.waitGoal(session.thebeSessionId);
+    const before = await agent.listSubagents(session.thebeSessionId);
+
+    await expect(
+      agent.resumeGoal(session.thebeSessionId)
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ticket_mandate_invalid",
+      message: expect.stringContaining("Ticket is missing"),
+    });
+    expect(agent.getGoal(session.thebeSessionId)?.status).toBe("paused");
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(before.length);
+  });
+
   it("registers Pi built-ins together with container tools", () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({

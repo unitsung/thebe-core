@@ -76,6 +76,13 @@ export EDITOR=vim
   "permissionMode": "manual",
   "maxSubagentConcurrency": 3,
   "maxSubagentsPerParent": 2,
+  "watchdog": {
+    "intervalMs": 60000,
+    "goalFirstMs": 1800000,
+    "goalSecondMs": 3600000,
+    "workerFirstMs": 600000,
+    "workerSecondMs": 600000
+  },
   "enabledResources": [
     {
       "kind": "skill",
@@ -99,7 +106,9 @@ export EDITOR=vim
 
 `permissionMode` 是新会话的默认权限模式：`plan`、`manual`、`acceptEdits` 或 `bypassPermissions`（见下文“权限模式”）。只认这四个名字。运行中也可以使用 `/permissions` 或设置菜单修改。
 
-`maxSubagentConcurrency` 和 `maxSubagentsPerParent` 分别控制全局 child 并发数和单个父会话的并发数；它们只限制一次性 in-memory subagent，不影响普通会话。数值会被限制在 1–16，单个 profile 的 `maxTurns` 另行限制在 1–50。
+`maxSubagentConcurrency` 和 `maxSubagentsPerParent` 分别控制全局 child 并发数和单个父会话的并发数；它们只限制一次性 in-memory subagent，不影响普通会话。数值会被限制在 1–16，单个 profile 的 `maxTurns` 另行限制在 1–50。总并发大于 1 时，Core 固定保留 1 个槽位给人工请求，后台 Goal worker/reviewer 最多使用其余槽位；总并发为 1 时没有单独的后台容量。
+
+`watchdog` 的五个字段都以毫秒计，非正数会回退到默认值。默认每 60 秒扫描一次；Goal 30 分钟没有语义进展时先做一次只读状态检查，60 分钟仍无进展则暂停并进入 `person / stalled`。worker 或 reviewer 10 分钟没有活动时取消并重试一次，之后再过 10 分钟仍无活动就暂停。每次介入都写入 `watchdog.status_check`、`watchdog.retry_worker` 或 `watchdog.pause` 审计记录，并把最后状态放在 Goal 的 `watchdog` 字段中。`goalSecondMs` 不会小于 `goalFirstMs`。
 
 `workspacePath` 是 Thebe 的强制工作区授权边界；启动 TUI/服务前必须在配置文件或 `THEBE_WORKSPACE_DIR` 中明确设置，Thebe 不会把进程启动目录自动当成工作区。绝对路径按原值使用；相对路径固定相对于 Thebe 配置目录解析，不随启动位置变化。`read`、`ls`、`find`、`grep` 在配置工作区内不会重复询问，工作区外的读取会要求确认。`AGENT.md`、`AGENTS.md`、`CLAUDE.md` 如果位于工作区内，和其他工作区文件一样可以读取；如果位于工作区外，则按越界读取要求确认。`bash`、`write`、`edit` 仍按权限模式处理。`outputDirectory` 只作为用户明确要求保存生成文档时的默认目录；普通回答直接显示在消息中，不会为了展示答案自动创建文档。
 
@@ -124,8 +133,8 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
 - `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
 - Eval 的 `auto` 不是环境变量，是策略里的接单模式：默认 `observe`，只记录「本来会做什么」，不动手；选了 `auto` 才行动。规则就是授权，没有名单：规则判断「值得」，Core 就生成一张工单（Ticket），交给执行器（能用 Core 的全部家庭运维工具，不带 shell 和文件编辑，怎么做自己规划；它的 reviewer 只拿不改东西的工具）。工单的范围（Mandate）从事件涉及的资源推出，不是模型说了算。写操作逐次判断：落在范围内的服务上、且不是不可逆（`DELETE`、`deleteFiles` 之类，用网关同一个分类器）就直接执行，否则立刻被拒、工单转给你，不会挂起等审批。能改策略的只有 App 和你自己的令牌，`/mcp` 令牌够不到。
-- `auto` 有三道保险，用来防止无人值守时失控，不是调优参数，数字也没有实测依据：同一条线程 1 小时内最多接单 3 次（第 4 次只在「观察」页记「本来会接单」，原因 `thread_limit`）；Eval 每小时最多问模型 60 次，超过后每个事件仍记一条 Decision，原因 `assessment_limit`，`THEBE_EVAL_MAX_PER_HOUR` 可改，`0` 不限；重启后只评估 24 小时内的事件。
-- `THEBE_SOURCES` 是 Core 在后台观察的来源（Source）清单，逗号分隔；**默认不设，即什么都不观察、不起任何定时器。** 目前只有 `container-health`：按 `THEBE_SOURCE_INTERVAL_MS`（默认 30000，不小于 1000）读取容器状态，状态变化时记一条触发（Trigger），线程为 `resource:container:<容器名>`。第一次读取只记基线，不会把已经停着的容器当作新消息；读取位置会保存，重启不重放。目前触发只被记录，没有东西读它们，也不会因此产生工单。容器接口不提供 Docker 自带的 healthcheck，所以「不健康」指状态变了，而不是健康检查失败。
+- `auto` 有三道保险，用来防止无人值守时失控，不是调优参数，数字也没有实测依据：同一条线程 1 小时内最多接单 3 次（第 4 次只在「观察」页记「本来会接单」，原因 `thread_limit`）；Eval 每小时最多问模型 60 次，超过后每个事件仍记一条 Decision，原因 `assessment_limit`，`THEBE_EVAL_MAX_PER_HOUR` 可改，`0` 不限；重启后只评估 24 小时内的事件。模型不可用、回复无法解析或达到小时上限时，Decision 记为 `unavailable`；同一次故障只推送一次，直到之后有一次成功的 Assessment 才重新允许提示。
+- `THEBE_SOURCES` 是 Core 在后台观察的来源（Source）清单，逗号分隔；**默认不设，即什么都不观察、不起任何定时器。** 按 `THEBE_SOURCE_INTERVAL_MS`（默认 30000，不小于 1000）轮询。`container-health` 在容器状态变化时记 `container.went_down`、`container.recovered`、`container.appeared`、`container.removed` 或 `container.state_changed`，线程为 `resource:container:<容器名>`。`download-completed` 需要先配置下载引擎；它从非 `completed` 进入 `completed` 时记 `download.completed`，线程为 `resource:download:<engine>:<hash>`。两种 Source 的第一次读取都只建立基线，读取位置会保存，重启不重放；多引擎下载列表只要有一个引擎不可达，本次读取就不推进游标。`GET /v1/health` 会在启用 Source 时返回 `sources`，每个 Source 带 `state`（`starting`、`healthy`、`failing`）、`consecutiveFailures` 和最近的错误；成功读取后连续失败数清零。请求了 `download-completed` 却没有下载 provider 时也会显示为 `failing`，不会静默消失。容器接口不提供 Docker 自带的 healthcheck，所以「不健康」指状态变了，而不是健康检查失败。
 - `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
@@ -165,6 +174,74 @@ Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBitto
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
+
+## MCP OAuth 网关
+
+OAuth 默认关闭，只有 `THEBE_OAUTH_ISSUER` 指向授权服务器稳定的公网 origin
+时才启用。它用于让支持 OAuth 的 claude.ai / ChatGPT connector 连接 `/mcp`，
+不必手工填入 bearer token。
+
+```dotenv
+THEBE_MCP_PORT=8788
+THEBE_OAUTH_ISSUER=https://thebe.example.com
+THEBE_MCP_RESOURCE_URL=https://thebe.example.com/mcp
+THEBE_OAUTH_CLIENTS_FILE=oauth-clients.json
+THEBE_OAUTH_PAIRING_TTL_SECONDS=300
+```
+
+- `THEBE_OAUTH_ISSUER` 必须是带 scheme 的纯 origin，不能带路径。除 loopback
+  外必须使用 HTTPS；签名密钥生成后不能再改这个值。
+- `THEBE_MCP_RESOURCE_URL` 是 OAuth 唯一允许签发的资源，默认是 issuer 加
+  `/mcp`，路径必须正好是 `/mcp`。
+- `THEBE_OAUTH_CLIENTS_FILE` 指向预登记 client 文件；相对路径从配置目录解析，
+  默认 `$THEBE_CONFIG_DIR/oauth-clients.json`。也可用 `THEBE_OAUTH_CLIENTS`
+  直接放同格式的 JSON。
+- `THEBE_OAUTH_DYNAMIC_REGISTRATION` 默认关闭。只有 connector 无法使用预登记
+  client 时才设为 `true`；若同时设置 `THEBE_OAUTH_REGISTRATION_TOKEN`，
+  `/oauth/register` 要求该值作为 initial access token。
+- `THEBE_OAUTH_PAIRING_TTL_SECONDS` 默认 300 秒，范围 60–900。
+
+client 文件示例：
+
+```json
+{
+  "clients": [
+    {
+      "clientId": "home-connector",
+      "clientName": "Claude connector",
+      "clientSecret": "optional-secret",
+      "redirectUris": ["https://client.example/callback"],
+      "scopes": ["mcp:read", "offline_access"]
+    }
+  ]
+}
+```
+
+字段也接受 `client_id`、`client_name`、`client_secret`、`redirect_uris`，并可用
+`scope` 代替 `scopes`。redirect URI 必须精确匹配，除 loopback 外必须使用
+HTTPS；不设 secret 的 client 是 public client，必须使用 PKCE。默认 scope 是
+`mcp:read` 和 `offline_access`；支持 `mcp:read`、`mcp:write`、
+`mcp:irreversible`、`offline_access`。
+
+授权页需要一次性配对码。用 App 的完整权限 token 从主 API 端口生成：
+
+```bash
+curl -fsS -X POST \
+  -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/pairing-code
+```
+
+在 `expiresAt` 之前把响应里的 `code` 输入浏览器；每个码只能用一次。只有
+`/mcp` scope 的 token 不能调用 pairing API。Core API 和浏览器授权流程已经实现；
+TUI 目前没有专门的 pairing-code 命令。
+
+授权服务器使用 Authorization Code + PKCE、精确 redirect URI 匹配、绑定
+`/mcp` 的 Resource Indicators，以及 PS256 JWT access token。access token
+有效 15 分钟；带 `offline_access` 和 `prompt=consent` 时签发 30 天轮换的
+refresh token，吊销 refresh token 后，相关 access token 在下一次 `/mcp`
+请求时立即失效。issuer、签名密钥、授权服务状态、配对码哈希和 grant 都保存在
+配置目录，备份时应一起保存。公网监听与反向代理配置见
+[DEPLOYMENT.md](DEPLOYMENT.md#412-oauth-for-claudeai-and-chatgpt-connectors)。
 
 ## MCP 服务器
 

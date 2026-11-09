@@ -31,6 +31,8 @@ import {
 import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
 import { createRateLimiter, mcpRateLimitFromEnv } from "./rate-limit.ts";
 import type { TokenCaller } from "./token-store.ts";
+import type { OAuthHttpIntegration } from "./oauth/service.ts";
+import { handleOAuthRoutes } from "./routes/oauth.ts";
 
 export type ThebeHttpRouterOptions = {
   version: string;
@@ -38,10 +40,12 @@ export type ThebeHttpRouterOptions = {
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
   pushIdentity?: ThebeHttpContext["pushIdentity"];
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: ThebeHttpContext["quietHours"];
   workspacePath?: string;
   /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
   mcpRateLimit?: number;
+  oauth?: OAuthHttpIntegration;
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
@@ -58,6 +62,9 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
         caller,
         deviceRegistry,
       });
+
+      const oauthPublic = options.oauth?.publicResponse(request);
+      if (oauthPublic) return oauthPublic;
 
       if (request.method === "GET" && context.path === "/openapi.json") {
         return json(createOpenApiDocument(options.version), 200, {
@@ -86,6 +93,8 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (healthResponse) {
         return healthResponse;
       }
+      const oauthResponse = await handleOAuthRoutes(context, options.oauth);
+      if (oauthResponse) return oauthResponse;
       const systemResponse = await handleSystemRoutes(context);
       if (systemResponse) {
         return systemResponse;

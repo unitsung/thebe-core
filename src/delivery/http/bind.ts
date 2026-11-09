@@ -9,7 +9,7 @@ export const DEFAULT_THEBE_PORT = 8787;
 export type ThebeListenConfig = {
   host: string;
   port: number;
-  /** A second port that serves `/mcp` and nothing else, for exposing to the internet. Off when unset. */
+  /** A second port for `/mcp` and the public OAuth routes; `/v1` and docs stay unreachable. */
   mcpPort?: number;
   mcpHost: string;
   token?: string;

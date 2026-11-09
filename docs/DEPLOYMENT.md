@@ -8,7 +8,8 @@ possible for development, but the container is the supported release shape.
 > 中文速览：Core 以单个容器交付；所有持久状态在 `deploy/data`（配置、Pi agent、
 > 会话元数据、输出），工作区默认挂 `./workspace` 到 `/workspace`；token 首次启动
 > 自动生成并打印，本机 / 私网 / `.local` / Tailscale `.ts.net` 的 Host 自动放行；
-> 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；升级 = 换镜像
+> 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；需要接
+> claude.ai / ChatGPT connector 时，在网关端口启用 OAuth；升级 = 换镜像
 >
 > - 保留 `data/`；发布前跑 `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
 
@@ -132,17 +133,22 @@ enable it by default. This never pushes.
 
 ## 3. Production configuration
 
-| Variable                                                                           | Required                 | Meaning                                                                                                                                                                                 |
-| ---------------------------------------------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                                 |
-| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                                      |
-| `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                       |
-| `THEBE_MCP_PORT` / `THEBE_MCP_HOST`                                                | no (off)                 | A second listener that serves `/mcp` only (`/v1`, `/openapi.json`, `/docs` answer `404`). Expose this one, not `THEBE_PORT`, to the internet; `THEBE_MCP_HOST` defaults to `THEBE_HOST` |
-| `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                               |
-| `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check)        |
-| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                                  |
-| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                                 |
-| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`                                                                                                                                                                           |
+| Variable                                                                           | Required                 | Meaning                                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                                                             |
+| `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                                                                  |
+| `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                                                   |
+| `THEBE_MCP_PORT` / `THEBE_MCP_HOST`                                                | no (off)                 | A second listener for `/mcp` and, when OAuth is enabled, its public protocol endpoints (`/v1`, `/openapi.json`, `/docs` answer `404`). Expose this one, not `THEBE_PORT`; `THEBE_MCP_HOST` defaults to `THEBE_HOST` |
+| `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                                                           |
+| `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check)                                    |
+| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                                                              |
+| `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                                                             |
+| `THEBE_OAUTH_ISSUER`                                                               | no (OAuth off)           | Stable public origin of the embedded authorization server, with no path. Enables OAuth; HTTPS is required except on loopback                                                                                        |
+| `THEBE_MCP_RESOURCE_URL`                                                           | no (`${issuer}/mcp`)     | Public OAuth resource identifier; its path must be exactly `/mcp`, and it must use HTTPS outside loopback                                                                                                           |
+| `THEBE_OAUTH_CLIENTS`, `THEBE_OAUTH_CLIENTS_FILE`                                  | until a client exists    | Inline JSON or a file of pre-registered clients. The default file is `$THEBE_CONFIG_DIR/oauth-clients.json`; a relative custom path is resolved there                                                               |
+| `THEBE_OAUTH_DYNAMIC_REGISTRATION` / `THEBE_OAUTH_REGISTRATION_TOKEN`              | no                       | Dynamic Client Registration is off unless the first is true. The optional registration token becomes its initial access token                                                                                       |
+| `THEBE_OAUTH_PAIRING_TTL_SECONDS`                                                  | no (300)                 | Lifetime of a one-time pairing code, constrained to 60–900 seconds                                                                                                                                                  |
+| Provider credentials (`ARCANE_BASE_URL`, `ARCANE_API_KEY`, …)                      | per provider             | `deploy/.env`                                                                                                                                                                                                       |
 
 Request contract (verified by `scripts/smoke.mjs`):
 
@@ -176,6 +182,75 @@ signed, minimal event (a generic line, a category and a `thebe://` deep link) fo
 each approval that starts waiting. A device registers its APNs token with the relay
 using that public key, and the relay delivers only events signed by it. Unset, Core
 sends nothing and behaves as before. A relay that is down never fails a request.
+
+Notices go through a durable outbox kept next to the device state
+(`push-outbox.json`), so none is lost when the relay is down or Core restarts.
+The notices for one Ticket to one device are sent in order, one at a time, each
+with a signed sequence number (`seq`) and the Ticket id the client can sort by.
+If the relay cannot be reached, the head notice is retried with back-off from 5
+to 300 seconds and the ones behind it wait; nothing is given up on while the
+relay is unreachable. If the relay answers with a transient error (usually APNs
+refused the notice), the head is recorded as dropped after three attempts and
+the queue moves on. A permanent refusal (bad signature, unknown device,
+malformed event) drops it at once. The reason for each drop is recorded and
+`GET /v1/health` shows `push.pending`, `push.consecutiveFailures`,
+`push.dropped`, and the latest failure or drop.
+
+A retry keeps the notice's id. The relay remembers successfully delivered ids
+for 24 hours across its own restarts and passes the id to APNs as the collapse
+id, so a device shows the notice once. Upgrade the relay before Core: event
+signatures are now `thebe-push-v2` and sign `ticket` and `seq` as well as the
+visible message. Keep the relay's `RELAY_DATA_DIR` across upgrades so its
+`registrations.json` and `seen.json` survive.
+
+### 3.2 Background Sources, Eval, and the Goal Watchdog
+
+Sources are off unless `THEBE_SOURCES` names them. Use a comma-separated list;
+`THEBE_SOURCE_INTERVAL_MS` sets the poll interval (default 30000, minimum 1000):
+
+```bash
+export THEBE_SOURCES=container-health,download-completed
+```
+
+`container-health` emits container state Triggers. `download-completed` requires
+the same download provider configuration as the media pipeline, establishes a
+baseline on its first read, and emits `download.completed` when a download moves
+into `completed`. If any engine in a multi-engine listing is unreachable, Core
+does not advance that Source's cursor. A requested download Source with no
+provider configured stays visible as failing rather than being omitted.
+
+`GET /v1/health` reports `capabilities: [..., "sources"]` and a `sources` array
+while Sources are enabled. Each entry has `state` (`starting`, `healthy`, or
+`failing`), `consecutiveFailures`, and the latest timestamps/error. Alert on a
+Source that remains `failing`; one failed read is retried on the next interval.
+The core process remains live and other Sources continue to run.
+
+Eval uses `THEBE_EVAL_MAX_PER_HOUR` (default 60, `0` for no limit) for its model
+questions. Provider failures, unusable replies, and the hourly limit are kept as
+`Decision.outcome: "unavailable"` rather than a silent no. Core sends one
+Activity push for an assessment outage and does not send another until a later
+assessment succeeds.
+
+The Watchdog is configured in `config.json`; every value is milliseconds:
+
+```json
+{
+  "watchdog": {
+    "intervalMs": 60000,
+    "goalFirstMs": 1800000,
+    "goalSecondMs": 3600000,
+    "workerFirstMs": 600000,
+    "workerSecondMs": 600000
+  }
+}
+```
+
+Defaults give a Goal one read-only status check after 30 minutes without semantic
+progress and pause it into `person / stalled` after 60. An inactive worker or
+reviewer is cancelled and retried once after 10 minutes; another 10 minutes
+without activity pauses the Goal. Every intervention writes an audit method
+under `watchdog.*`, and the latest state survives on the Goal as `watchdog`.
+These actions never expand its Mandate or inject work into a running worker.
 
 ## 4. Network exposure and client connections
 
@@ -250,9 +325,88 @@ and do not forward the port from your router. Use a TLS path above for anything 
 ### 4.1.1 Gateway port for an agent on the internet
 
 `deploy/docker-compose.yml` already maps host port 8788 (on loopback unless `THEBE_MCP_BIND` says otherwise), but
-nothing listens on it until you set `THEBE_MCP_PORT=8788` in `deploy/.env`. That listener serves `/mcp` and
-nothing else, so a tunnel or reverse proxy pointed at it cannot reach `/v1`, `/openapi.json` or `/docs`. Give each
-external agent its own scoped token (below) and watch `GET /v1/audit?identity=<name>`.
+nothing listens on it until you set `THEBE_MCP_PORT=8788` in `deploy/.env`. The listener serves `/mcp`; when
+OAuth is enabled it also serves the OAuth discovery, authorization, token, revocation, registration, and
+interaction endpoints needed by a connector. A tunnel or reverse proxy pointed at it still cannot reach
+`/v1`, `/openapi.json`, or `/docs`. Give each bearer-token agent its own scoped token (below) and watch
+`GET /v1/audit?identity=<name>`.
+
+### 4.1.2 OAuth for claude.ai and ChatGPT connectors
+
+OAuth is off unless a stable public issuer is configured. Use the gateway with a trusted HTTPS certificate;
+the issuer must be the exact public origin the connector reaches, without a path. `localhost` may use HTTP
+for development.
+
+```dotenv
+THEBE_MCP_PORT=8788
+THEBE_OAUTH_ISSUER=https://thebe.example.com
+THEBE_MCP_RESOURCE_URL=https://thebe.example.com/mcp
+```
+
+`THEBE_MCP_RESOURCE_URL` is optional when it is the issuer followed by `/mcp`, but setting it explicitly makes
+the resource contract visible. Do not point it at `/v1` or another path.
+
+Pre-register each client in `$THEBE_CONFIG_DIR/oauth-clients.json`. In the container this is
+`/data/config/oauth-clients.json`; keep it private and back it up with the rest of `/data`:
+
+```json
+{
+  "clients": [
+    {
+      "clientId": "home-connector",
+      "clientName": "Claude connector",
+      "redirectUris": ["https://client.example/callback"],
+      "scopes": ["mcp:read", "offline_access"]
+    }
+  ]
+}
+```
+
+Use the exact redirect URI supplied by the connector. `clientSecret` is optional; when present Core uses
+`client_secret_basic`, and without it the client is public and relies on PKCE. `scopes` defaults to
+`["mcp:read", "offline_access"]`. Supported scopes are `mcp:read`, `mcp:write`, `mcp:irreversible`, and
+`offline_access`. The authorization page can narrow the requested MCP scopes but cannot grant a scope that
+the registered client does not contain.
+
+The alternative variables are `THEBE_OAUTH_CLIENTS` (inline JSON using the same shape) and
+`THEBE_OAUTH_CLIENTS_FILE` (a path, relative to the config directory unless absolute). If no client exists,
+Core refuses to start instead of leaving a half-configured authorization server. Dynamic registration is
+disabled by default. To enable it only when a connector cannot accept manual registration:
+
+```dotenv
+THEBE_OAUTH_DYNAMIC_REGISTRATION=true
+THEBE_OAUTH_REGISTRATION_TOKEN=replace-with-a-long-random-value
+```
+
+When set, `THEBE_OAUTH_REGISTRATION_TOKEN` is required by `/oauth/register` as the initial access token.
+Enabling dynamic registration without one lets anyone who reaches `/oauth/register` create a client, so use
+it only behind deliberate network access controls.
+
+Start the connector login with the shared/App token, then enter the returned one-time code on Core's
+authorization page:
+
+```bash
+curl -fsS -X POST \
+  -H "X-Thebe-Token: $THEBE_TOKEN" \
+  http://127.0.0.1:8787/v1/oauth/pairing-code
+```
+
+The response contains `code` and `expiresAt`; the default lifetime is five minutes and the code works once.
+The pairing API is available on the main App/API listener only. A scoped `/mcp` token gets
+`403 token_scope`. Core exposes the API and authorization page now; the TUI does not yet have a dedicated
+pairing-code command, so use the App endpoint or the request above until one is added.
+
+The connector flow is Authorization Code + PKCE. Redirect URIs match exactly, the only accepted resource is
+the configured `/mcp` URL, and access tokens are audience-bound PS256 JWTs valid for 15 minutes.
+`offline_access` with `prompt=consent` yields a 30-day rotating refresh token/grant. A client can revoke its
+refresh token at `/oauth/revoke`; revocation also invalidates the related access token on the next request.
+The token endpoint is rate-limited, and the pairing interaction limits repeated attempts by request and by
+remote address.
+
+Core stores signing keys, provider state, and pairing-code hashes in `oauth-keys.json`, `oauth-state.json`,
+and `oauth-pairing.json` under the config directory (modes `0600`). The key file is bound to the issuer.
+Changing `THEBE_OAUTH_ISSUER` against an existing key file makes startup fail; choose the final issuer before
+connecting clients and do not edit or rotate these files by hand.
 
 ### 4.2 Managing tokens
 
@@ -281,7 +435,8 @@ Every `/mcp` call is audited under the token's name: `GET /v1/audit?identity=Cla
 did and what it was refused (`result: "denied"`). A scoped token may make 120 calls a minute; past that a call fails
 at once with `429 rate_limited` (`THEBE_MCP_RATE_LIMIT` changes it, `0` turns it off). To put the gateway on the
 internet, set `THEBE_MCP_PORT=8788` and expose only that port (Tailscale Funnel, a tunnel or a reverse proxy):
-it serves `/mcp` and nothing else, so `/v1`, `/openapi.json` and `/docs` cannot be reached through it.
+it serves `/mcp` and, when configured, the OAuth protocol endpoints, while `/v1`, `/openapi.json` and
+`/docs` cannot be reached through it.
 
 A delete that cannot be undone needs `mcp:irreversible`, judged per call: `download_delete` with
 `deleteFiles: true`, `navidrome_playlist_delete`, a service API call that sends an HTTP `DELETE` or sets a
@@ -395,9 +550,13 @@ tar -xzf thebe-core-YYYYMMDD.tgz -C deploy      # recreates deploy/data
 docker compose up -d
 ```
 
-The archive contains `config.json`, Pi agent credentials under `data/agent`, and
-session metadata, so treat it as a secret (`chmod 600`). Restoring without the
-agent directory would silently log the agent out.
+The archive contains `config.json`, Pi agent credentials under `data/agent`,
+session metadata, and when OAuth is enabled `data/config/oauth-keys.json`,
+`oauth-state.json`, and `oauth-pairing.json`, so treat it as a secret
+(`chmod 600`). Restoring without the agent directory would silently log the
+agent out. Restoring OAuth state without its matching issuer preserves existing
+clients and grants; restoring only the key file can make every persisted grant
+unreadable, so keep the OAuth files together.
 
 ## 9. Data-directory compatibility policy
 
@@ -448,15 +607,18 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 
 ## 11. Troubleshooting
 
-| Symptom                                               | Cause                                                           | Fix                                                                                                                                       |
-| ----------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `401` on every route                                  | Missing/incorrect `X-Thebe-Token`                               | Send the token from `deploy/.env`; `/docs` is the only token-free route                                                                   |
-| `403` with `token_scope` on a route other than `/mcp` | The token was made with `--scope`, which limits it to `/mcp`    | Use a token made without `--scope` for `/v1`; keep scoped tokens for agents on `/mcp`                                                     |
-| `403` on writes, reads fine                           | `Host` header not in the allowlist and not a local/private name | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
-| Client needs the token                                | First start generated one                                       | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token`                                                           |
-| `docker build` fails with `--mount requires BuildKit` | Legacy (pre-BuildKit) builder                                   | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build`                                                                            |
-| `Could not find @earendil-works/pi-ai dist`           | Pruned install lost the nested copy                             | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs`                                                         |
-| Agent cannot write files                              | `/workspace` not writable by uid 1000                           | `chown 1000:1000` the host folder, or grant group write                                                                                   |
+| Symptom                                                  | Cause                                                                     | Fix                                                                                                                                       |
+| -------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `401` on every route                                     | Missing/incorrect `X-Thebe-Token`                                         | Send the token from `deploy/.env`; `/docs` is the only token-free route                                                                   |
+| `403` with `token_scope` on a route other than `/mcp`    | The token was made with `--scope`, which limits it to `/mcp`              | Use a token made without `--scope` for `/v1`; keep scoped tokens for agents on `/mcp`                                                     |
+| `403` on writes, reads fine                              | `Host` header not in the allowlist and not a local/private name           | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
+| Client needs the token                                   | First start generated one                                                 | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token`                                                           |
+| `docker build` fails with `--mount requires BuildKit`    | Legacy (pre-BuildKit) builder                                             | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build`                                                                            |
+| `Could not find @earendil-works/pi-ai dist`              | Pruned install lost the nested copy                                       | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs`                                                         |
+| Agent cannot write files                                 | `/workspace` not writable by uid 1000                                     | `chown 1000:1000` the host folder, or grant group write                                                                                   |
+| OAuth startup says no pre-registered client              | Issuer is set without clients and DCR is off                              | Create `$THEBE_CONFIG_DIR/oauth-clients.json`, set `THEBE_OAUTH_CLIENTS`, or deliberately enable DCR                                      |
+| OAuth rejects the issuer or redirect URI                 | Public URLs need HTTPS, the issuer needs no path, redirects match exactly | Use the connector's exact callback and a stable HTTPS origin; HTTP is accepted only on loopback                                           |
+| Connector shows the authorization page but no code works | Pairing codes are one-time and expire                                     | Issue a new code from the main listener and enter it before `expiresAt`                                                                   |
 
 ## 12. What has been verified on this checkout
 
@@ -465,6 +627,10 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
   Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
   including SIGTERM exit `0` and a settings write surviving a Core restart).
 - `scripts/check-pi-resolution.mjs` resolves pi-ai in the current install.
+- OAuth directional tests pass locally, including PKCE, scope narrowing, JWT
+  issuer/audience checks, restart persistence, and immediate invalidation after
+  refresh-token revocation. No real claude.ai or ChatGPT connector/device
+  acceptance run has been completed on this checkout.
 - The container builds and runs. The optimized image (490 MB on disk, 104 MB
   compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
   `scripts/check-pi-resolution.mjs` and `scripts/smoke.mjs` (8/8) inside the

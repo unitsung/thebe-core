@@ -50,6 +50,12 @@ import {
   STRM_REPAIR_SCHEMA,
   type StrmRepairProvider,
 } from "../capabilities/strm.ts";
+import {
+  TICKET_TOOL_DESCRIPTIONS,
+  TICKET_TOOL_NAMES,
+  TICKET_TOOL_SCHEMAS,
+  TICKET_TOOL_WRITE_NAMES,
+} from "../tickets/tools.ts";
 
 export const HOMELAB_CAPABILITY_CATEGORIES = [
   "files",
@@ -389,6 +395,28 @@ export function listCoreMcpTools(
   } = {}
 ): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
+  for (const name of TICKET_TOOL_NAMES) {
+    const write = TICKET_TOOL_WRITE_NAMES.has(name);
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: TICKET_TOOL_DESCRIPTIONS[name],
+        inputSchema: TICKET_TOOL_SCHEMAS[name],
+        category: "automation",
+        permission: write ? "confirm" : "read",
+        effect: write ? "write" : "read",
+        risk: "low",
+        approval: "none",
+        service: "tickets",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        execution: "goal",
+        background: false,
+        destructive: write,
+      })
+    );
+  }
   if (options.musicResearch)
     tools.push(
       withProductMetadata({

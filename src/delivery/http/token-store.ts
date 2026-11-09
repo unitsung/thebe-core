@@ -119,6 +119,11 @@ export type TokenVerifier = {
   verify(received: string): TokenCaller | undefined;
 };
 
+/** A verifier that needs cryptography or storage I/O, such as JWT/JWKS validation. */
+export type AsyncTokenVerifier = {
+  verify(received: string): Promise<TokenCaller | undefined>;
+};
+
 export type DeviceToken = {
   name: string;
   hash: string;

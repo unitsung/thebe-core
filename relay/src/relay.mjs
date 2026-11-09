@@ -7,11 +7,13 @@ const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const MAX_BODY = 8 * 1024;
 const MAX_SKEW_SECONDS = 300;
 const EVENTS_PER_MINUTE = 30;
+/** How long a delivered event id is remembered. Core retries one notice under one id. */
+const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Must match `pushEventMessage` in Core's `src/app/push/identity.ts`. */
 export function eventMessage(event) {
   return JSON.stringify([
-    "thebe-push-v1",
+    "thebe-push-v2",
     event.relayDeviceId,
     event.id,
     event.ts,
@@ -19,6 +21,8 @@ export function eventMessage(event) {
     event.title,
     event.body,
     event.deepLink,
+    event.ticket ?? null,
+    event.seq ?? null,
   ]);
 }
 
@@ -29,8 +33,9 @@ export function eventMessage(event) {
  */
 export function createRelay({ dataDir, apns, now = () => Date.now() }) {
   const file = join(dataDir, "registrations.json");
+  const seenFile = join(dataDir, "seen.json");
   let registrations = load();
-  const seen = new Map();
+  const seen = loadSeen();
   const recent = new Map();
 
   function load() {
@@ -42,15 +47,37 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     }
   }
 
-  function persist() {
+  function write(target, value) {
     mkdirSync(dataDir, { recursive: true });
-    const temporary = `${file}.${process.pid}.tmp`;
-    writeFileSync(
-      temporary,
-      JSON.stringify(Object.fromEntries(registrations)),
-      { mode: 0o600 }
-    );
-    renameSync(temporary, file);
+    const temporary = `${target}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+    renameSync(temporary, target);
+  }
+
+  function persist() {
+    write(file, Object.fromEntries(registrations));
+  }
+
+  /** Delivered event ids survive a restart, so a retry after one is still sent once. */
+  function loadSeen() {
+    try {
+      const parsed = JSON.parse(readFileSync(seenFile, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return new Map();
+      }
+      return new Map(
+        Object.entries(parsed).filter(
+          ([, expires]) =>
+            typeof expires === "number" && Number.isFinite(expires)
+        )
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
+  function persistSeen() {
+    write(seenFile, Object.fromEntries(seen));
   }
 
   const idFor = (token, publicKey) =>
@@ -138,6 +165,13 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
       return [400, { error: "malformed event" }];
     if (!isText(event.deepLink, 512) || !event.deepLink.startsWith("thebe://"))
       return [400, { error: "deepLink must be a thebe:// route" }];
+    if (event.ticket !== undefined && !isText(event.ticket, 128))
+      return [400, { error: "malformed event" }];
+    if (
+      event.seq !== undefined &&
+      !(Number.isInteger(event.seq) && event.seq > 0)
+    )
+      return [400, { error: "malformed event" }];
     if (!isText(event.signature, 200))
       return [400, { error: "unsigned event" }];
     const entry = registrations.get(event.relayDeviceId);
@@ -151,11 +185,15 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     if (seen.has(replayKey)) return [200, { ok: true, duplicate: true }];
     if (!underRateLimit(event.relayDeviceId))
       return [429, { error: "too many events" }];
-    seen.set(replayKey, now() + 2 * MAX_SKEW_SECONDS * 1000);
 
     const result = await apns.send({
       token: entry.apnsToken,
       environment: entry.environment,
+      // The device shows one notice per id even if APNs is handed it twice.
+      collapseId: createHash("sha256")
+        .update(event.id)
+        .digest("hex")
+        .slice(0, 32),
       payload: {
         aps: {
           alert: { title: event.title, body: event.body },
@@ -163,6 +201,9 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
           category: event.category,
         },
         deepLink: event.deepLink,
+        id: event.id,
+        ...(event.ticket === undefined ? {} : { ticket: event.ticket }),
+        ...(event.seq === undefined ? {} : { seq: event.seq }),
       },
     });
     if (
@@ -174,9 +215,14 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
       persist();
       return [410, { error: "device token is no longer valid" }];
     }
-    return result.status === 200
-      ? [200, { ok: true }]
-      : [502, { error: "APNs refused the notice", reason: result.reason }];
+    if (result.status === 200) {
+      for (const [key, expires] of seen) if (expires < now()) seen.delete(key);
+      seen.set(replayKey, now() + SEEN_TTL_MS);
+      persistSeen();
+      return [200, { ok: true }];
+    }
+    // APNs did not deliver it: leave the id unclaimed so Core can retry under the same id.
+    return [502, { error: "APNs refused the notice", reason: result.reason }];
   }
 
   async function route(request, body) {

@@ -17,6 +17,7 @@ export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
   "container.recovered",
   "container.removed",
   "container.appeared",
+  "download.completed",
 ]);
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -35,6 +36,16 @@ export type EvalService = {
   idle(): Promise<void>;
   stop(): void;
   start(): void;
+};
+
+export type EvalUnavailableNotice = {
+  /** Stable for this Decision, so the push outbox and relay deduplicate a retry. */
+  id: string;
+  decisionId: string;
+  thread: string;
+  at: string;
+  unavailableReason: string;
+  message: string;
 };
 
 export function createEvalService(options: {
@@ -66,6 +77,11 @@ export function createEvalService(options: {
   /** How often one thread may be taken on in an hour. 0 is no limit. */
   maxAcceptsPerThreadPerHour?: number;
   backlogAgeMs?: number;
+  /**
+   * Called for the first failed assessment in an outage. A later successful assessment ends the
+   * outage, so another failure after recovery is announced once again.
+   */
+  onUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
   onError?: (error: unknown) => void;
 }): EvalService {
   // A limit of 0 (or less) turns the breaker off; unset keeps the default.
@@ -141,6 +157,17 @@ export function createEvalService(options: {
     const record = (
       rest: Pick<Decision, "outcome" | "reason"> & Partial<Decision>
     ) => options.decisions.add({ matchedRuleIds: [], ...base, ...rest });
+    const recordUnavailable = async (
+      reason: string,
+      unavailableReason: string
+    ) => {
+      const decision = await record({
+        outcome: "unavailable",
+        reason,
+        unavailableReason,
+      });
+      await notifyUnavailable(decision);
+    };
 
     // Gate: deterministic, no model.
     if (policy.acceptMode === "off") {
@@ -174,12 +201,13 @@ export function createEvalService(options: {
     while (assessedAt.length > 0 && assessedAt[0]! < hourAgo)
       assessedAt.shift();
     if (assessedAt.length >= maxPerHour) {
-      await record({
+      const decision = await record({
         outcome: "unavailable",
         gate: true,
         reason: "too many assessments this hour",
         unavailableReason: "assessment_limit",
       });
+      await notifyUnavailable(decision);
       return;
     }
 
@@ -194,23 +222,20 @@ export function createEvalService(options: {
         policy.model
       );
     } catch (error) {
-      await record({
-        outcome: "unavailable",
-        reason: "the assessment could not be made",
-        unavailableReason:
-          error instanceof Error
-            ? error.message.slice(0, MAX_REASON_CHARS)
-            : "assessment failed",
-      });
+      await recordUnavailable(
+        "the assessment could not be made",
+        error instanceof Error
+          ? error.message.slice(0, MAX_REASON_CHARS)
+          : "assessment failed"
+      );
       return;
     }
     const verdict = parseAssessment(reply, policy.rules);
     if (!verdict) {
-      await record({
-        outcome: "unavailable",
-        reason: "the model did not answer in the agreed form",
-        unavailableReason: "unparseable_reply",
-      });
+      await recordUnavailable(
+        "the model did not answer in the agreed form",
+        "unparseable_reply"
+      );
       return;
     }
     const wouldAccept = verdict.decision === "accept";
@@ -275,6 +300,27 @@ export function createEvalService(options: {
     });
   }
 
+  async function notifyUnavailable(decision: Decision): Promise<void> {
+    if (!options.onUnavailable) return;
+    try {
+      const rows = await options.decisions.list();
+      const previous = rows.find(
+        (row) => row.id !== decision.id && isAssessmentAttempt(row)
+      );
+      if (previous?.outcome === "unavailable") return;
+      await options.onUnavailable({
+        id: `eval-unavailable-${decision.id}`,
+        decisionId: decision.id,
+        thread: decision.thread,
+        at: decision.decidedAt,
+        unavailableReason: decision.unavailableReason ?? "assessment failed",
+        message: unavailableMessage(decision),
+      });
+    } catch (error) {
+      options.onError?.(error);
+    }
+  }
+
   return {
     enqueue: queue,
     recover(triggers) {
@@ -300,4 +346,21 @@ export function createEvalService(options: {
       stopped = false;
     },
   };
+}
+
+function isAssessmentAttempt(decision: Decision): boolean {
+  // Deterministic gates say nothing about whether the model recovered. The hourly limit does.
+  return !decision.gate || decision.unavailableReason === "assessment_limit";
+}
+
+function unavailableMessage(decision: Decision): string {
+  const reason = decision.unavailableReason ?? "assessment failed";
+  if (reason === "assessment_limit") {
+    return "Automatic event checks reached their hourly limit. They will try again after the hour.";
+  }
+  if (reason === "unparseable_reply") {
+    return "The model did not return a usable assessment, so automatic event checks need attention.";
+  }
+  const detail = reason.length <= 300 ? reason : `${reason.slice(0, 300)}...`;
+  return `Automatic event checks could not reach the model provider: ${detail}`;
 }

@@ -26,6 +26,7 @@ export function createSubagentApi(
     systemPrompt,
     now,
     rejectPendingPermission,
+    takeMandateDenial,
     registerSubagentParentCanceller,
     workspacePath,
     persist,
@@ -180,6 +181,7 @@ export function createSubagentApi(
       profileName: string;
       taskPrompt: string;
       parentSessionId: string;
+      background?: boolean;
     }): Promise<SubagentRun> {
       checkNotQuiesced();
       const profiles = await discoverSubagentProfiles({ cwd: workspacePath });
@@ -193,6 +195,7 @@ export function createSubagentApi(
         profile,
         task: spawn.taskPrompt,
         parentSessionId: spawn.parentSessionId,
+        background: spawn.background,
       });
       if (run.status === "queued") {
         await persistSubagentSnapshot(run);
@@ -241,6 +244,9 @@ export function createSubagentApi(
       parentSessionId?: string
     ): Promise<SubagentRun> {
       return subagentRuns.cancel(runId, parentSessionId);
+    },
+    takeMandateDenial(parentSessionId: string) {
+      return takeMandateDenial(parentSessionId);
     },
   };
 }
