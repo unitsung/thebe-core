@@ -190,8 +190,9 @@ curl -fsS -X POST \
 ```
 
 Enter `code` in the browser before `expiresAt`. The code works once. A scoped
-`/mcp` token cannot call the pairing API. The Core API and browser flow are
-implemented; the TUI does not yet have a dedicated pairing-code command.
+`/mcp` token cannot call the pairing API. The local TUI can also run `/pair`
+(aliases `/oauth` and `/connector`) to issue a one-time code and show its
+issuer, resource, and expiry.
 
 The authorization server uses Authorization Code + PKCE, exact redirect URI
 matching, Resource Indicators bound to `/mcp`, and PS256 JWT access tokens.

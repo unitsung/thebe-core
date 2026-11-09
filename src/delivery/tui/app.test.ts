@@ -568,6 +568,53 @@ describe("Thebe TUI agent slash commands", () => {
     expect(sessionText).toContain(meta.thebeSessionId);
   });
 
+  it("issues a one-time connector pairing code through /pair", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const issueOAuthPairingCode = vi.fn(async () => ({
+      code: "ABCDE-23456",
+      expiresAt: "2026-11-10T06:15:00.000Z",
+      issuer: "https://home.example",
+      resource: "https://home.example/mcp",
+    }));
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+      issueOAuthPairingCode,
+    });
+
+    await handleSlash("/pair");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(issueOAuthPairingCode).toHaveBeenCalledOnce();
+    expect(shown).toContain("OAuth pairing code: ABCDE-23456");
+    expect(shown).toContain("Expires: 2026-11-10T06:15:00.000Z");
+    expect(shown).toContain("Issuer: https://home.example");
+    expect(shown).toContain("Resource: https://home.example/mcp");
+  });
+
+  it("explains how to enable OAuth when /pair is unavailable", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+    });
+
+    await handleSlash("/pair");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(shown).toContain("THEBE_OAUTH_ISSUER");
+  });
+
   it("prompts through agent and shows reply", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "text", text: "**ok**" }]);

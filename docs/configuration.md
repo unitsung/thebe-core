@@ -232,8 +232,8 @@ curl -fsS -X POST \
 ```
 
 在 `expiresAt` 之前把响应里的 `code` 输入浏览器；每个码只能用一次。只有
-`/mcp` scope 的 token 不能调用 pairing API。Core API 和浏览器授权流程已经实现；
-TUI 目前没有专门的 pairing-code 命令。
+`/mcp` scope 的 token 不能调用 pairing API。本地 TUI 也可以运行 `/pair`
+（别名 `/oauth`、`/connector`）直接生成一次性码，并显示 issuer、resource 和过期时间。
 
 授权服务器使用 Authorization Code + PKCE、精确 redirect URI 匹配、绑定
 `/mcp` 的 Resource Indicators，以及 PS256 JWT access token。access token

@@ -1,7 +1,12 @@
 import type { SlashCommand } from "../rendering/adapter.ts";
 import type { ThinkingLevel } from "../../../agent/index.ts";
 
-export type SlashCategory = "Session" | "Agent" | "Provider" | "System" | "Thebe";
+export type SlashCategory =
+  | "Session"
+  | "Agent"
+  | "Provider"
+  | "System"
+  | "Thebe";
 
 export type ThebeSlashCommand = SlashCommand & {
   category: SlashCategory;
@@ -16,35 +21,172 @@ export type ThebeSlashCommand = SlashCommand & {
  * Thebe-specific integrations stay at the end.
  */
 export const SLASH_COMMANDS: ThebeSlashCommand[] = [
-  { name: "help", category: "System", description: "Show all commands grouped by purpose" },
-  { name: "new", category: "Session", description: "Start a fresh conversation" },
-  { name: "resume", category: "Session", aliases: ["sessions", "continue"], description: "Browse and switch to a saved conversation" },
-  { name: "model", category: "Agent", aliases: ["models", "mo"], description: "Choose the model for the current conversation" },
-  { name: "agents", category: "Agent", aliases: ["agent"], description: "View active agents and their status" },
-  { name: "thinking", category: "Agent", description: "Set the reasoning depth for the current conversation" },
-  { name: "goal", category: "Agent", description: "Run a durable objective until its verification condition is met" },
-  { name: "compact", category: "Session", aliases: ["summarize"], description: "Compact the current context immediately" },
-  { name: "summary", category: "Session", description: "View the latest automatic task summary" },
-  { name: "history", category: "Session", aliases: ["messages", "message"], description: "Inspect current conversation messages without switching sessions" },
-  { name: "clear", category: "Session", description: "Clear the visible conversation view" },
-  { name: "revert", category: "Session", aliases: ["undo"], description: "Revert the latest user turn" },
-  { name: "fork", category: "Session", description: "Create a new conversation branch from a user turn" },
-  { name: "tree", category: "Session", description: "Browse and switch between conversation branches" },
-  { name: "session", category: "Session", aliases: ["usage", "status"], description: "Show current session details and token usage" },
-  { name: "export", category: "Session", description: "Save the current conversation as HTML and JSONL" },
-  { name: "copy", category: "Session", description: "Copy the latest assistant response" },
-  { name: "name", category: "Session", aliases: ["rename"], description: "Rename the current conversation" },
-  { name: "delete", category: "Session", description: "Delete a saved conversation and its transcript" },
-  { name: "settings", category: "System", description: "Open interactive Thebe settings" },
-  { name: "permissions", category: "System", aliases: ["permission", "access"], description: "Choose whether risky tools ask before running" },
-  { name: "config", category: "System", description: "Open the user configuration file" },
-  { name: "hotkeys", category: "System", description: "Show keyboard shortcuts" },
-  { name: "login", category: "Provider", aliases: ["connect"], description: "Connect a model provider" },
-  { name: "logout", category: "Provider", description: "Disconnect a model provider" },
-  { name: "skills", category: "Thebe", aliases: ["skill"], description: "Browse and manage installed skills" },
-  { name: "mcp", category: "Thebe", description: "Browse configured MCP servers and tools" },
-  { name: "subagent", category: "Thebe", aliases: ["subagents"], description: "Run isolated one-shot subagents" },
-  { name: "quit", category: "System", aliases: ["exit", "q"], description: "Exit Thebe" },
+  {
+    name: "help",
+    category: "System",
+    description: "Show all commands grouped by purpose",
+  },
+  {
+    name: "new",
+    category: "Session",
+    description: "Start a fresh conversation",
+  },
+  {
+    name: "resume",
+    category: "Session",
+    aliases: ["sessions", "continue"],
+    description: "Browse and switch to a saved conversation",
+  },
+  {
+    name: "model",
+    category: "Agent",
+    aliases: ["models", "mo"],
+    description: "Choose the model for the current conversation",
+  },
+  {
+    name: "agents",
+    category: "Agent",
+    aliases: ["agent"],
+    description: "View active agents and their status",
+  },
+  {
+    name: "thinking",
+    category: "Agent",
+    description: "Set the reasoning depth for the current conversation",
+  },
+  {
+    name: "goal",
+    category: "Agent",
+    description:
+      "Run a durable objective until its verification condition is met",
+  },
+  {
+    name: "compact",
+    category: "Session",
+    aliases: ["summarize"],
+    description: "Compact the current context immediately",
+  },
+  {
+    name: "summary",
+    category: "Session",
+    description: "View the latest automatic task summary",
+  },
+  {
+    name: "history",
+    category: "Session",
+    aliases: ["messages", "message"],
+    description:
+      "Inspect current conversation messages without switching sessions",
+  },
+  {
+    name: "clear",
+    category: "Session",
+    description: "Clear the visible conversation view",
+  },
+  {
+    name: "revert",
+    category: "Session",
+    aliases: ["undo"],
+    description: "Revert the latest user turn",
+  },
+  {
+    name: "fork",
+    category: "Session",
+    description: "Create a new conversation branch from a user turn",
+  },
+  {
+    name: "tree",
+    category: "Session",
+    description: "Browse and switch between conversation branches",
+  },
+  {
+    name: "session",
+    category: "Session",
+    aliases: ["usage", "status"],
+    description: "Show current session details and token usage",
+  },
+  {
+    name: "export",
+    category: "Session",
+    description: "Save the current conversation as HTML and JSONL",
+  },
+  {
+    name: "copy",
+    category: "Session",
+    description: "Copy the latest assistant response",
+  },
+  {
+    name: "name",
+    category: "Session",
+    aliases: ["rename"],
+    description: "Rename the current conversation",
+  },
+  {
+    name: "delete",
+    category: "Session",
+    description: "Delete a saved conversation and its transcript",
+  },
+  {
+    name: "settings",
+    category: "System",
+    description: "Open interactive Thebe settings",
+  },
+  {
+    name: "permissions",
+    category: "System",
+    aliases: ["permission", "access"],
+    description: "Choose whether risky tools ask before running",
+  },
+  {
+    name: "config",
+    category: "System",
+    description: "Open the user configuration file",
+  },
+  {
+    name: "hotkeys",
+    category: "System",
+    description: "Show keyboard shortcuts",
+  },
+  {
+    name: "login",
+    category: "Provider",
+    aliases: ["connect"],
+    description: "Connect a model provider",
+  },
+  {
+    name: "logout",
+    category: "Provider",
+    description: "Disconnect a model provider",
+  },
+  {
+    name: "skills",
+    category: "Thebe",
+    aliases: ["skill"],
+    description: "Browse and manage installed skills",
+  },
+  {
+    name: "mcp",
+    category: "Thebe",
+    description: "Browse configured MCP servers and tools",
+  },
+  {
+    name: "pair",
+    category: "Thebe",
+    aliases: ["oauth", "connector"],
+    description: "Issue a one-time code for an MCP OAuth connector",
+  },
+  {
+    name: "subagent",
+    category: "Thebe",
+    aliases: ["subagents"],
+    description: "Run isolated one-shot subagents",
+  },
+  {
+    name: "quit",
+    category: "System",
+    aliases: ["exit", "q"],
+    description: "Exit Thebe",
+  },
 ];
 
 const SLASH_ALIAS_TO_NAME = new Map<string, string>();

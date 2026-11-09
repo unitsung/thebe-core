@@ -393,8 +393,8 @@ curl -fsS -X POST \
 
 The response contains `code` and `expiresAt`; the default lifetime is five minutes and the code works once.
 The pairing API is available on the main App/API listener only. A scoped `/mcp` token gets
-`403 token_scope`. Core exposes the API and authorization page now; the TUI does not yet have a dedicated
-pairing-code command, so use the App endpoint or the request above until one is added.
+`403 token_scope`. A local TUI can issue the same code with `/pair` (aliases `/oauth` and `/connector`);
+the App can also use the endpoint above.
 
 The connector flow is Authorization Code + PKCE. Redirect URIs match exactly, the only accepted resource is
 the configured `/mcp` URL, and access tokens are audience-bound PS256 JWTs valid for 15 minutes.

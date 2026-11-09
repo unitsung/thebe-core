@@ -19,9 +19,7 @@ if (flags.kind === "help") {
 }
 
 const sessionId =
-  flags.kind === "tui" || flags.kind === "print"
-    ? flags.sessionId
-    : undefined;
+  flags.kind === "tui" || flags.kind === "print" ? flags.sessionId : undefined;
 const continueLast = flags.kind === "tui" ? flags.continueLast : false;
 const title =
   flags.kind === "tui" || flags.kind === "print" ? flags.title : undefined;
@@ -30,7 +28,7 @@ const userConfig = await loadThebeConfig();
 const tuiMode =
   flags.kind === "tui" && flags.tuiMode
     ? flags.tuiMode
-    : userConfig.tuiMode ?? "regular";
+    : (userConfig.tuiMode ?? "regular");
 
 const {
   agent,
@@ -38,14 +36,15 @@ const {
   model: bootModel,
   workspacePath,
   disposeSandboxVms,
+  oauth,
 } = await bootstrapThebe({ fromDir: here });
 
 const defaultModelRef =
-  flags.kind === "tui" && flags.model
-    ? flags.model
-    : bootModel;
+  flags.kind === "tui" && flags.model ? flags.model : bootModel;
 
-const modelRef = defaultModelRef ? `${defaultModelRef.providerId}/${defaultModelRef.modelId}` : undefined;
+const modelRef = defaultModelRef
+  ? `${defaultModelRef.providerId}/${defaultModelRef.modelId}`
+  : undefined;
 
 let resolvedSessionId = sessionId;
 if (continueLast && !resolvedSessionId) {
@@ -64,7 +63,7 @@ if (resolvedSessionId) {
 if (resolvedSessionId && typeof userConfig.autoCompact === "boolean") {
   await agent.setAutoCompactionEnabled(
     resolvedSessionId,
-    userConfig.autoCompact,
+    userConfig.autoCompact
   );
 }
 if (typeof userConfig.autoSummary === "boolean") {
@@ -84,4 +83,11 @@ startThebeTui({
   theme: userConfig.theme,
   cwd: workspacePath,
   disposeSandboxVms,
+  issueOAuthPairingCode: oauth
+    ? () => ({
+        ...oauth.issuePairingCode(),
+        issuer: oauth.issuer,
+        resource: oauth.resource,
+      })
+    : undefined,
 });
