@@ -11,6 +11,21 @@ export type ThebeOAuthPairingCode = {
   resource?: string;
 };
 
+export type ThebeOAuthConnection = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  refreshToken: boolean;
+};
+
+export type ThebeOAuthConnectorAdmin = {
+  list(): Promise<ThebeOAuthConnection[]>;
+  revoke(id: string): Promise<boolean>;
+};
+
 export type ThebeTuiOptions = {
   agent?: ThebeAgent;
   sessionId?: string;
@@ -29,6 +44,8 @@ export type ThebeTuiOptions = {
   issueOAuthPairingCode?: () =>
     | ThebeOAuthPairingCode
     | Promise<ThebeOAuthPairingCode>;
+  /** Lists and revokes authorised MCP OAuth connectors when the gateway is enabled. */
+  oauthConnectors?: ThebeOAuthConnectorAdmin;
   /**
    * Stops the OS-sandbox proxies. The host that bootstrapped Core supplies it;
    * delivery never imports the sandbox library (see `architecture.test.ts`).

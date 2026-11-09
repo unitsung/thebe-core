@@ -176,6 +176,12 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
     description: "Issue a one-time code for an MCP OAuth connector",
   },
   {
+    name: "connections",
+    category: "Thebe",
+    aliases: ["grants"],
+    description: "List or revoke authorised MCP OAuth connectors",
+  },
+  {
     name: "subagent",
     category: "Thebe",
     aliases: ["subagents"],

@@ -250,6 +250,10 @@ refresh token。吊销会立即使相关 access token、refresh token 和尚未�
 authorization code 失效，connector 必须重新走授权流程。只有 `/mcp` scope 的
 token 调用这两个路由都会得到 `403 token_scope`；公网 MCP 网关不暴露它们。
 
+本地 TUI 可用 `/connections`（别名 `/grants`）查看同一批 grant，并用
+`/connections revoke <grantId>` 吊销其中一个。OAuth 网关启用时，
+`GET /v1/health` 的 `capabilities` 会包含 `mcp-oauth`。
+
 授权服务器使用 Authorization Code + PKCE、精确 redirect URI 匹配、绑定
 `/mcp` 的 Resource Indicators，以及 PS256 JWT access token。access token
 有效 15 分钟；带 `offline_access` 和 `prompt=consent` 时签发 30 天轮换的

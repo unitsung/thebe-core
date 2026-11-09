@@ -14,15 +14,13 @@ export async function handleHealthEventsCompatibility(
     return json({
       ok: true,
       version: context.version,
-      capabilities: context.agent
-        ? [
-            "tickets",
-            "main-session",
-            "policy",
-            "decisions",
-            ...(sources.length > 0 ? ["sources"] : []),
-          ]
-        : [],
+      capabilities: [
+        ...(context.agent
+          ? ["tickets", "main-session", "policy", "decisions"]
+          : []),
+        ...(context.mcpOAuth ? ["mcp-oauth"] : []),
+        ...(sources.length > 0 ? ["sources"] : []),
+      ],
       ...(sources.length > 0 ? { sources } : {}),
       ...(context.pushOutbox ? { push: context.pushOutbox.status() } : {}),
     });

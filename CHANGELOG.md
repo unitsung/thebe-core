@@ -53,6 +53,13 @@ All notable changes to Thebe Core are documented here. The format is based on
   `POST /v1/tickets/{id}/reply` answers or reviews its Attention or resolves
   one pending worker permission. Both routes are refused while Core is
   quiesced. The Ticket still wraps the Goal instead of copying its state.
+- MCP OAuth connector administration. `GET /v1/oauth/connections` lists each
+  connector grant's client, scopes, lifetime and refresh-token presence;
+  `DELETE /v1/oauth/connections/{grantId}` revokes the grant, its access and
+  refresh tokens, and unredeemed authorization codes. The TUI exposes the same
+  local management through `/connections` (alias `/grants`) and
+  `/connections revoke <grantId>`, and `GET /v1/health` advertises `mcp-oauth`
+  when the gateway is configured.
 - OAuth 2.1 for the public MCP gateway, off until `THEBE_OAUTH_ISSUER` is set.
   Clients use Authorization Code + PKCE with exact redirect matching, Resource
   Indicators bound to the configured `/mcp` URL, PS256 JWT access tokens, and

@@ -23,6 +23,8 @@ export type ThebeHttpContext = {
   pushOutbox?: { status(): PushOutboxStatus };
   /** The daily window in which Core holds its pushes. */
   quietHours?: QuietHoursStore;
+  /** Whether the optional MCP OAuth authorization server is configured. */
+  mcpOAuth?: boolean;
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
@@ -47,6 +49,7 @@ export function createThebeHttpContext(
     pushIdentity?: { publicKey: string; relayUrl: string };
     pushOutbox?: ThebeHttpContext["pushOutbox"];
     quietHours?: QuietHoursStore;
+    mcpOAuth?: boolean;
     workspacePath?: string;
   }
 ): ThebeHttpContext {
@@ -64,6 +67,7 @@ export function createThebeHttpContext(
     pushIdentity: options.pushIdentity,
     pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
+    mcpOAuth: options.mcpOAuth,
     workspacePath: options.workspacePath,
   };
 }
