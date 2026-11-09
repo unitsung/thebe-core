@@ -84,6 +84,20 @@ type SessionPort = {
   ): Promise<void>;
 };
 
+type DelegationOrigin = {
+  requester: string;
+  requestIdNamespace: string;
+  ticketKind: string;
+  labelNamespace: "mcp" | "http";
+};
+
+const HTTP_DELEGATION_ORIGIN: DelegationOrigin = {
+  requester: "http",
+  requestIdNamespace: "http-ticket-delegate",
+  ticketKind: "http-delegate",
+  labelNamespace: "http",
+};
+
 export function createTicketControlApi(options: {
   store: TicketStore;
   goals: GoalPort;
@@ -191,9 +205,9 @@ export function createTicketControlApi(options: {
     return Promise.all(tickets.map(async (ticket) => (await get(ticket.id))!));
   }
 
-  async function delegate(
+  async function delegateFrom(
     input: Record<string, unknown>,
-    caller: McpCaller
+    origin: DelegationOrigin
   ): Promise<TicketTaskView & { reused: boolean }> {
     const task = typeof input.task === "string" ? input.task.trim() : "";
     if (!task) throw httpError(400, "task cannot be empty", "invalid_body");
@@ -219,15 +233,13 @@ export function createTicketControlApi(options: {
       );
     }
     const criteria = parseCriteria(input.criteria);
-    const requester = caller.name?.trim()
-      ? `mcp:${caller.name.trim()}`
-      : "mcp:anonymous";
-    const requestId = key("mcp-ticket-delegate", requester, idempotencyKey);
+    const requester = origin.requester;
+    const requestId = key(origin.requestIdNamespace, requester, idempotencyKey);
     const createdAt = options.now().toISOString();
     const ticketId = directTicketId({
       thread: requester,
       triggerId: requestId,
-      kind: "mcp-delegate",
+      kind: origin.ticketKind,
       at: createdAt,
       idempotencyKey: requestId,
     });
@@ -243,8 +255,10 @@ export function createTicketControlApi(options: {
         title: task.slice(0, 80),
         labels: {
           kind: "goal",
-          mcpRequester: requester,
-          mcpRequestId: requestId,
+          ticketRequester: requester,
+          ticketRequestId: requestId,
+          [`${origin.labelNamespace}Requester`]: requester,
+          [`${origin.labelNamespace}RequestId`]: requestId,
         },
       });
       const run = await options.goals.startGoal({
@@ -262,7 +276,7 @@ export function createTicketControlApi(options: {
       const ticket = await options.store.recordDirect({
         thread: requester,
         triggerId: requestId,
-        kind: "mcp-delegate",
+        kind: origin.ticketKind,
         at: createdAt,
         idempotencyKey: requestId,
         title: task.slice(0, 120),
@@ -279,6 +293,27 @@ export function createTicketControlApi(options: {
     } finally {
       delegateFlights.delete(ticketId);
     }
+  }
+
+  async function delegate(
+    input: Record<string, unknown>,
+    caller: McpCaller
+  ): Promise<TicketTaskView & { reused: boolean }> {
+    const requester = caller.name?.trim()
+      ? `mcp:${caller.name.trim()}`
+      : "mcp:anonymous";
+    return delegateFrom(input, {
+      requester,
+      requestIdNamespace: "mcp-ticket-delegate",
+      ticketKind: "mcp-delegate",
+      labelNamespace: "mcp",
+    });
+  }
+
+  async function delegateHttp(
+    input: Record<string, unknown>
+  ): Promise<TicketTaskView & { reused: boolean }> {
+    return delegateFrom(input, HTTP_DELEGATION_ORIGIN);
   }
 
   async function reply(
@@ -381,6 +416,7 @@ export function createTicketControlApi(options: {
     get,
     list,
     delegate,
+    delegateHttp,
     reply,
   };
 }
