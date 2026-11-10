@@ -308,8 +308,9 @@ Core recreation keep the same identity and runtime transcript.
 The main Session has no shell, file, or edit tools and does not run a Goal
 directly. Its read-only `session_search` tool browses earlier person-facing Core
 Sessions, finds messages by exact keywords, and reads a bounded message window
-without making the inspected Session active. Hidden and internal assessment
-Sessions are excluded, as is the current main Session. The other tools are
+without making the inspected Session active. Hidden Sessions and every Session
+carrying an internal `purpose` label are excluded, as is the current main
+Session. The other tools are
 `ticket_list`, `ticket_get`, `ticket_delegate`, `ticket_reply`, and
 `ticket_control`. The three Ticket writes use the normal `/v1/permissions`
 approval flow. Recalled Session
