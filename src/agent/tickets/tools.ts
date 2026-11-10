@@ -14,6 +14,19 @@ export const TICKET_TOOL_NAMES = [
 
 export type TicketToolName = (typeof TICKET_TOOL_NAMES)[number];
 
+export const TICKET_STAGE_VALUES = [
+  "unassigned",
+  "running",
+  "attention",
+  "paused",
+  "completed",
+  "blocked",
+  "failed",
+  "cancelled",
+] as const;
+
+export type TicketStage = (typeof TICKET_STAGE_VALUES)[number];
+
 export const TICKET_TOOL_WRITE_NAMES: ReadonlySet<string> = new Set([
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
@@ -32,7 +45,13 @@ export const TICKET_TOOL_SCHEMAS: Record<
         minimum: 1,
         maximum: 50,
         default: 20,
-        description: "Newest Tickets to return.",
+        description: "Tickets to return, most recently active first.",
+      },
+      stage: {
+        type: "string",
+        enum: TICKET_STAGE_VALUES,
+        description:
+          "Only return Tickets at this derived stage. Use attention for work waiting on the person.",
       },
     },
     additionalProperties: false,
@@ -156,7 +175,7 @@ export const TICKET_TOOL_SCHEMAS: Record<
 
 export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
   [TICKET_LIST_TOOL_NAME]:
-    "List recent durable Tickets with their current Goal stage.",
+    "List durable Tickets by latest activity with their current Goal stage, optionally filtered by stage.",
   [TICKET_GET_TOOL_NAME]:
     "Read one Ticket with its Goal report, receipt, open attention, and pending permissions.",
   [TICKET_DELEGATE_TOOL_NAME]:

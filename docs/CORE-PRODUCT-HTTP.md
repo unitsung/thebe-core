@@ -312,7 +312,9 @@ without making the inspected Session active. Hidden Sessions and every Session
 carrying an internal `purpose` label are excluded, as is the current main
 Session. The other tools are
 `ticket_list`, `ticket_get`, `ticket_delegate`, `ticket_reply`, and
-`ticket_control`. The three Ticket writes use the normal `/v1/permissions`
+`ticket_control`. `ticket_list` returns Tickets by latest Goal activity, not
+creation time, and accepts `stage: "attention"` so an older task waiting on the
+person is not hidden by newer completed work. The three Ticket writes use the normal `/v1/permissions`
 approval flow. Recalled Session
 text, Ticket text, reports, events, and tool output remain untrusted data and
 cannot authorize a wider action. `POST /v1/main-session/interrupt` interrupts
@@ -334,7 +336,7 @@ defines `MainSession`, `MainSessionPromptRequest`, and
 
 - `tools/list` returns each tool with standard `annotations`: `readOnlyHint` and `destructiveHint` come from Core's own `effect`/`risk` classification (never from a remote server's claims), and `openWorldHint` is true for external or public-web tools. Thebe extras are namespaced under `_meta`: `thebe/category`, `thebe/resourceKinds`, `thebe/approval`. No `outputSchema` is advertised yet.
 - `tools/call` returns text `content` (the universal fallback) and, when the result is a JSON object, the same data as `structuredContent`.
-- Ticket tools form the long-task delegation surface. `ticket_list` and `ticket_get` are read-only. `ticket_delegate` creates one direct Ticket and Goal from `{task, idempotencyKey, criteria?, maxIterations?, observe?, allowAsk?, reviewBeforeDone?}`; the same caller and key always return the same assignment. `ticket_get` includes the Goal report, terminal receipt, open Attention and pending permissions. `ticket_reply` answers or reviews the Attention, or resolves one pending permission; `ticket_control` pauses, resumes or stops the linked Goal. Delegation, reply and control need `mcp:write`; approving arbitrary `bash` or an irreversible call needs `mcp:irreversible`.
+- Ticket tools form the long-task delegation surface. `ticket_list` and `ticket_get` are read-only. `ticket_list` orders by the latest Goal activity and can filter by derived `stage`, including `attention`; filtering happens before its limit. `ticket_delegate` creates one direct Ticket and Goal from `{task, idempotencyKey, criteria?, maxIterations?, observe?, allowAsk?, reviewBeforeDone?}`; the same caller and key always return the same assignment. `ticket_get` includes the Goal report, terminal receipt, open Attention and pending permissions. `ticket_reply` answers or reviews the Attention, or resolves one pending permission; `ticket_control` pauses, resumes or stops the linked Goal. Delegation, reply and control need `mcp:write`; approving arbitrary `bash` or an irreversible call needs `mcp:irreversible`.
 - A tool that ran and failed, or rejected its input (including writes that need runtime approval), returns `result.isError: true` with the message as text. Only a failure of the request itself is a JSON-RPC error: `-32602` for an unknown tool, `-32000` when no agent service is attached, `-32003` for a write while quiesced. Read-only tool calls remain available while quiesced so clients can inspect the state that work stopped in.
 
 ## Owner instructions (2026-10-14)

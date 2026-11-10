@@ -11,6 +11,8 @@ import {
   TICKET_LIST_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
   TICKET_CONTROL_TOOL_NAME,
+  TICKET_STAGE_VALUES,
+  type TicketStage,
   type TicketToolName,
 } from "./tools.ts";
 import type { Ticket } from "./types.ts";
@@ -19,16 +21,6 @@ const DEFAULT_TICKET_LIST_LIMIT = 20;
 const MAX_TICKET_LIST_LIMIT = 50;
 const MAX_TASK_CHARS = 16_000;
 const MAX_IDEMPOTENCY_KEY_CHARS = 256;
-
-export type TicketStage =
-  | "unassigned"
-  | "running"
-  | "attention"
-  | "paused"
-  | "completed"
-  | "blocked"
-  | "failed"
-  | "cancelled";
 
 export type TicketReceipt = {
   state: TicketStage;
@@ -256,13 +248,33 @@ export function createTicketControlApi(options: {
     input: Record<string, unknown> = {}
   ): Promise<TicketTaskView[]> {
     await backfillGoals();
+    const stage = parseTicketStage(input.stage);
     const requested =
       typeof input.limit === "number" && Number.isFinite(input.limit)
         ? Math.floor(input.limit)
         : DEFAULT_TICKET_LIST_LIMIT;
     const limit = Math.max(1, Math.min(MAX_TICKET_LIST_LIMIT, requested));
-    const tickets = (await options.store.list()).slice(0, limit);
-    return Promise.all(tickets.map(async (ticket) => (await get(ticket.id))!));
+    const [tickets, goals, pendingPermissions] = await Promise.all([
+      options.store.list(),
+      options.goals.listGoals(),
+      options.sessions.listPendingPermissions(),
+    ]);
+    const goalsById = new Map(goals.map((goal) => [goal.thebeSessionId, goal]));
+    return tickets
+      .map((ticket) => {
+        const goal = ticket.links.legacyGoalId
+          ? goalsById.get(ticket.links.legacyGoalId)
+          : undefined;
+        const pending = goal
+          ? pendingPermissions.filter(
+              (permission) => permission.sessionId === goal.thebeSessionId
+            )
+          : [];
+        return view(ticket, goal, pending);
+      })
+      .filter((ticket) => !stage || ticket.stage === stage)
+      .sort(compareByActivity)
+      .slice(0, limit);
   }
 
   async function delegateFrom(
@@ -583,4 +595,34 @@ function parseCriteria(value: unknown): string[] | undefined {
     criteria.push(item.trim());
   }
   return criteria.length > 0 ? criteria : undefined;
+}
+
+function parseTicketStage(value: unknown): TicketStage | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value === "string" &&
+    TICKET_STAGE_VALUES.includes(value as TicketStage)
+  ) {
+    return value as TicketStage;
+  }
+  throw httpError(
+    400,
+    `stage must be one of ${TICKET_STAGE_VALUES.join(", ")}`,
+    "invalid_body"
+  );
+}
+
+function compareByActivity(
+  left: TicketTaskView,
+  right: TicketTaskView
+): number {
+  const leftAt = activityTime(left);
+  const rightAt = activityTime(right);
+  if (leftAt !== rightAt) return rightAt - leftAt;
+  return right.ticket.createdAt.localeCompare(left.ticket.createdAt);
+}
+
+function activityTime(ticket: TicketTaskView): number {
+  const parsed = Date.parse(ticket.goal?.updatedAt ?? ticket.ticket.createdAt);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
