@@ -98,11 +98,11 @@ export function createGoalApi(
   const RECOVERY_MESSAGE =
     "Goal recovered as paused after Core restart; resume it to continue.";
 
-  function broadcast(
+  function publish(
     run: ManagedGoal,
     event: GoalEvent,
     progress = false
-  ): void {
+  ): Promise<void> {
     const at = ctx.now().toISOString();
     if (progress) run.progressAt = at;
     run.updatedAt = at;
@@ -110,12 +110,21 @@ export function createGoalApi(
     if (run.events.length > MAX_GOAL_EVENTS) {
       run.events.splice(0, run.events.length - MAX_GOAL_EVENTS);
     }
-    void queueGoalPersistence(
+    const persisted = queueGoalPersistence(
       snapshot(run),
       run.thebeSessionId,
       storedGoalEvents(run.events)
     );
     for (const listener of run.listeners) listener(event);
+    return persisted;
+  }
+
+  function broadcast(
+    run: ManagedGoal,
+    event: GoalEvent,
+    progress = false
+  ): void {
+    void publish(run, event, progress);
   }
 
   async function notifyNeedsPerson(run: ManagedGoal): Promise<void> {
@@ -421,6 +430,7 @@ export function createGoalApi(
       updatedAt: createdAt,
       progressAt: createdAt,
       subagentRunIds: [],
+      guidance: [],
       stopRequested: false,
       pauseRequested: false,
       finished: new Promise<GoalRun>((resolve) => {
@@ -940,6 +950,55 @@ export function createGoalApi(
       if (run.iteration >= run.maxIterations)
         run.maxIterations = run.iteration + 1;
       return continueGoal(run, true);
+    },
+
+    async addGoalGuidance(
+      thebeSessionId: string,
+      note: string
+    ): Promise<GoalRun> {
+      const run = runs.get(thebeSessionId);
+      if (!run) throw new Error("no goal found for this session");
+      ctx.checkNotQuiesced();
+      const text = note.trim();
+      if (!text) {
+        throw httpError(400, "guidance cannot be empty", "invalid_body");
+      }
+      if (text.length > MAX_ANSWER_CHARS) {
+        throw httpError(
+          400,
+          `guidance is longer than ${MAX_ANSWER_CHARS} characters`,
+          "invalid_body"
+        );
+      }
+      if (
+        run.status !== "running" &&
+        run.status !== "pausing" &&
+        run.status !== "paused"
+      ) {
+        throw httpError(
+          409,
+          "this task is already finished",
+          "invalid_transition"
+        );
+      }
+      if (run.attention) {
+        throw httpError(
+          409,
+          "this task is waiting for a reply; answer its attention instead",
+          "attention_open"
+        );
+      }
+      (run.guidance ??= []).push(text);
+      // A note that lands on the last checkpoint needs one more to be used at all.
+      if (run.iteration >= run.maxIterations) {
+        run.maxIterations = run.iteration + 1;
+      }
+      await publish(run, {
+        type: "goal_status",
+        status: run.status,
+        message: "Guidance added for the next worker checkpoint.",
+      });
+      return snapshot(run);
     },
 
     async stopGoal(thebeSessionId: string): Promise<GoalRun> {

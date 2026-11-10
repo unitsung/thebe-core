@@ -30,6 +30,7 @@ const WRITES = [
   "strm_repair",
   "ticket_control",
   "ticket_delegate",
+  "ticket_note",
   "ticket_reply",
 ];
 

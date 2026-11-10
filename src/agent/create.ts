@@ -435,6 +435,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async replyTicket(input) {
       return ticketControl.reply(input);
     },
+    async noteTicket(input) {
+      return ticketControl.note(input);
+    },
     async controlTicket(input) {
       return ticketControl.control(input);
     },
