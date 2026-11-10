@@ -46,6 +46,34 @@ export async function handleEvalRoutes(
     );
   }
 
+  const isAcceptDecision =
+    context.parts.length === 4 &&
+    context.parts[1] === "decisions" &&
+    context.parts[3] === "accept";
+  if (isAcceptDecision) {
+    if (request.method !== "POST") {
+      return json(
+        {
+          ok: false,
+          error: "Use POST to accept a Decision",
+          code: "method_not_allowed",
+        },
+        405
+      );
+    }
+    const blocked = quiescedWrite(context);
+    if (blocked) return blocked;
+    const decisionId = context.parts[2];
+    if (!decisionId) {
+      return json(
+        { ok: false, error: "decision not found", code: "not_found" },
+        404
+      );
+    }
+    const accepted = await agent.acceptDecision(decisionId);
+    return json(accepted, accepted.reused ? 200 : 201);
+  }
+
   if (request.method !== "GET") {
     return json(
       {

@@ -749,6 +749,23 @@ const operations: Operation[] = [
     responseSchema: "Decision",
   },
   {
+    method: "post",
+    path: "/v1/decisions/{id}/accept",
+    summary:
+      "Accept a positive Eval candidate as an explicit Ticket without rewriting the Decision",
+    tag: "ticket",
+    parameters: [idParameter()],
+    response: 201,
+    responseSchema: "TicketTask",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "This Decision already has its Ticket",
+        schema: "TicketTask",
+      },
+    ],
+  },
+  {
     method: "get",
     path: "/v1/tickets",
     summary: "List Tickets, newest first",
@@ -3187,6 +3204,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "string",
               description:
                 "auto, accepted: the Goal that carries the Ticket out.",
+            },
+            acceptedTicketId: {
+              type: "string",
+              description:
+                "Derived when any Ticket links this Decision, including a candidate a person accepted.",
             },
             notTakenOn: {
               type: "string",

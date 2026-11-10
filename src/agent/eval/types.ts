@@ -85,6 +85,8 @@ export type Decision = {
   ticketId?: string;
   /** `auto`, accepted: the Goal that carries the Ticket out. */
   goalId?: string;
+  /** Derived on product reads when any Ticket, including a person-accepted one, links this Decision. */
+  acceptedTicketId?: string;
   /**
    * `auto`, a positive assessment that was not taken on, and why: `thread_limit` (the cap on how often one
    * thread is taken on in an hour), `quiesced`, `no_executor`, or `accept_failed`.
