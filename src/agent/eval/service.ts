@@ -42,7 +42,7 @@ export type EvalService = {
   /** Weighs one recorded Trigger again for an explicit human requeue. */
   requeue(trigger: Trigger, requeueId: string): void;
   /** After a start: weigh recorded Triggers that no Decision covers yet. */
-  recover(triggers: readonly Trigger[]): void;
+  recover(triggers: readonly Trigger[]): Promise<void>;
   /** Resolves when everything queued so far has been decided. */
   idle(): Promise<void>;
   stop(): void;
@@ -441,18 +441,15 @@ export function createEvalService(options: {
     requeue(trigger, requeueId) {
       queue([trigger], new Map([[trigger.id, [requeueId]]]));
     },
-    recover(triggers) {
+    async recover(triggers) {
       const cutoff = options.now().getTime() - backlogAgeMs;
-      void options.decisions.decidedTriggerIds().then((decided) => {
-        queue(
-          triggers
-            .filter(
-              (row) => !decided.has(row.id) && Date.parse(row.at) >= cutoff
-            )
-            .sort((a, b) => (a.at < b.at ? -1 : 1))
-            .slice(-maxPerHour)
-        );
-      });
+      const decided = await options.decisions.decidedTriggerIds();
+      queue(
+        triggers
+          .filter((row) => !decided.has(row.id) && Date.parse(row.at) >= cutoff)
+          .sort((a, b) => (a.at < b.at ? -1 : 1))
+          .slice(-maxPerHour)
+      );
     },
     async idle() {
       while (draining) await draining;

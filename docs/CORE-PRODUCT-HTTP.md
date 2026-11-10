@@ -362,6 +362,18 @@ a wider action.
 `ticket_control` also accepts `action: "retry"` for failed, blocked, or
 checkpoint-limited work; it keeps the same Ticket and Mandate and refuses
 completed or person-stopped work.
+After the Session is initialized, Core also uses it for autonomous Source
+events. Triggers that no open Ticket claimed are held in a durable inbox,
+coalesced into a short batch, and delivered only after Eval has recorded its
+Decision. Trigger ids are de-duplicated across Core recreation, and a restart
+also asks the Session to inspect open Tickets. These background turns use the
+same tools and approval handler as a person's message, count against the
+background token budget, and leave the batch pending when the budget is spent.
+A person's message pauses and aborts a background turn before it runs, so chat
+is never queued behind autonomous work. A background turn may attach an event
+only to exactly one open Ticket already subscribed to its Thread, with no
+contradicting evidence; accepting, dismissing and requeueing still need person
+intent.
 `POST /v1/main-session/interrupt` interrupts
 an initialized Session and returns `404` rather than creating one.
 `ticket_delegate` creates the same direct Ticket and Goal as a person-facing

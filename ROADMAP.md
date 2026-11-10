@@ -115,11 +115,11 @@ Work named for the first beta, not yet complete in this checkout.
   recovery, executor tools disabled, approval-gated Decision/routing/Ticket
   writes, the generic Session routes available for inspection, and Recall
   through both conversational `session_search` and typed `recall` references.
-  The native Ask Thebe client already targets the same `thebe-main`
-  conversation, with local client and Core integration coverage for lazy
-  creation, reuse, recovery, delegation requester evidence and Recall. Still
-  required are resident event pickup and batching under the Main Session,
-  daily-budget enforcement, live deployment acceptance, and real
+  Resident Source-event pickup, batching, restart recovery and daily-budget
+  enforcement are also in place. The native Ask Thebe client already targets
+  the same `thebe-main` conversation, with local client and Core integration
+  coverage for lazy creation, reuse, recovery, delegation requester evidence
+  and Recall. Still required are live deployment acceptance and real
   external-agent/connector acceptance; those are not claims made by the local
   tests.
 

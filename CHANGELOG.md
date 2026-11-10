@@ -31,13 +31,21 @@ All notable changes to Thebe Core are documented here. The format is based on
 ### Added
 
 - A durable daily token budget for autonomous work. Eval Assessments and
-  background Goal workers/reviewers count input, output and cache writes in a
-  UTC-day ledger; personal chat is excluded and cache reads are reported but
-  not charged. At the default 1,000,000-token limit Core still runs the
-  deterministic Gate, records `unavailable` / `daily_budget`, accepts no new
-  Ticket and sends one notice. `GET /v1/usage/summary`,
+  self-initiated Main Session turns plus background Goal workers/reviewers
+  count input, output and cache writes in a UTC-day ledger; personal chat is
+  excluded and cache reads are reported but not charged. At the default
+  1,000,000-token limit Core still runs the deterministic Gate, records
+  `unavailable` / `daily_budget`, accepts no new Ticket and sends one notice.
+  `GET /v1/usage/summary`,
   `PUT /v1/usage/budget` and the one-time 15-day p95 suggestion give clients
   the usage, estimated cost, pause state and an explicit accept/ignore path.
+- The initialized Main Session now receives Source events in durable batches.
+  Triggers that no open Ticket claimed are coalesced after Eval settles,
+  delivered through the existing restricted tool set, and acknowledged only
+  after the turn returns. Trigger ids survive Core recreation, already handled
+  events are not replayed, and a restart also resumes open-Ticket inspection.
+  Autonomous turns use the background budget; a person's message pauses and
+  aborts them first.
 - The main Session has a read-only `recall` tool for exact Ticket, Artifact,
   Resource and Session references. It returns a bounded summary, current state
   and related ids without transcript text or Artifact content, and answers an
