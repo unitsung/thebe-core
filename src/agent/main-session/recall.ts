@@ -148,7 +148,7 @@ function searchableSessions(
       (session) =>
         session.thebeSessionId !== currentSessionId &&
         !session.inPlace &&
-        session.labels?.purpose !== "eval-assessment"
+        !session.labels?.purpose
     )
     .sort((left, right) => activityTime(right) - activityTime(left));
 }

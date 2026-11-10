@@ -19,6 +19,10 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Fixed
 
+- Main Session recall now excludes every internal workflow Session carrying a
+  `purpose` label, including container diagnosis, instead of exposing only the
+  Eval assessment Session. A direct read of an internal Session is refused just
+  like a search result.
 - An Eval-created Ticket is revalidated against the current Policy before paused work resumes: automatic acceptance, matched rules, the Source, and the inferred service scope must still hold. A denied check leaves the Goal paused, returns `409 ticket_mandate_invalid`, records `ticket.mandate_revalidate` as denied in the audit log, and starts no worker. Direct Tickets are unaffected.
 - An unattended Ticket worker's first Mandate refusal is now carried from permission control to the Goal instead of ending as an ordinary tool error. The Goal stops before the worker's completion claim reaches the reviewer, ends `failed` plus `blocked`, appears in Activity as `person` / `blocked`, and sends one push notice. This covers both a write on a service outside the inferred scope and an irreversible `DELETE` on a covered service.
 - A service connection with no readable OpenAPI description was reported to the model as a failed discovery ("No JSON OpenAPI found"), and a real model then gave up without trying `service_write`, which needs no description. Discovery now says the service has no description and how to call it anyway (a method and a path from its own documentation), and `service_read` works on such a service for the methods the operator listed in `readMethods`. A Ticket's task also says how the Mandate's service is named in a call.

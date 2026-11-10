@@ -40,6 +40,9 @@ function harness() {
     message("user", "Find the last movie we discussed."),
     message("assistant", "We discussed Arrival."),
   ];
+  const diagnosisMessages = [
+    message("assistant", "restic diagnosis internal evidence"),
+  ];
   const sessions = [
     session("thebe-main", "Thebe", "2026-11-10T04:00:00Z", []),
     session("backup", "Backup plan", "2026-11-09T04:00:00Z", backupMessages),
@@ -50,6 +53,13 @@ function harness() {
       "2026-11-10T02:00:00Z",
       [message("assistant", "restic internal assessment")],
       { labels: { purpose: "eval-assessment" } }
+    ),
+    session(
+      "diagnosis",
+      "Container diagnosis",
+      "2026-11-10T03:00:00Z",
+      diagnosisMessages,
+      { labels: { purpose: "container-diagnosis" } }
     ),
   ];
   const messages = new Map(
@@ -66,6 +76,7 @@ function harness() {
   function messagesFor(row: AgentSessionMeta): RuntimeMessage[] {
     if (row.thebeSessionId === "backup") return backupMessages;
     if (row.thebeSessionId === "media") return mediaMessages;
+    if (row.thebeSessionId === "diagnosis") return diagnosisMessages;
     return [];
   }
 }
@@ -99,7 +110,7 @@ describe("main Session recall", () => {
     });
   });
 
-  it("falls back to any matching keyword and skips internal assessment Sessions", async () => {
+  it("falls back to any matching keyword and skips internal workflow Sessions", async () => {
     const { dependencies } = harness();
 
     const result = await runSessionSearch(
@@ -117,8 +128,12 @@ describe("main Session recall", () => {
     expect(result.results).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ sessionId: "assessment" }),
+        expect.objectContaining({ sessionId: "diagnosis" }),
       ])
     );
+    await expect(
+      runSessionSearch({ sessionId: "diagnosis" }, dependencies)
+    ).rejects.toThrow("person-facing");
   });
 
   it("reads a bounded window around a numbered message", async () => {
