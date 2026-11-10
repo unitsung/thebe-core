@@ -45,6 +45,13 @@ export type TicketTaskView = {
 
 export type TicketControlAction = "pause" | "resume" | "stop" | "retry";
 
+export type TicketRelationshipQuery = {
+  sessionIds?: readonly string[];
+  decisionIds?: readonly string[];
+  artifactIds?: readonly string[];
+  subscriptions?: readonly string[];
+};
+
 export type TicketControlApi = ReturnType<typeof createTicketControlApi>;
 
 type GoalPort = {
@@ -258,27 +265,52 @@ export function createTicketControlApi(options: {
         ? Math.floor(input.limit)
         : DEFAULT_TICKET_LIST_LIMIT;
     const limit = Math.max(1, Math.min(MAX_TICKET_LIST_LIMIT, requested));
-    const [tickets, goals, pendingPermissions] = await Promise.all([
-      options.store.list(),
+    return (await viewsFor(await options.store.list()))
+      .filter((ticket) => !stage || ticket.stage === stage)
+      .sort(compareByActivity)
+      .slice(0, limit);
+  }
+
+  async function related(
+    query: TicketRelationshipQuery
+  ): Promise<TicketTaskView[]> {
+    await backfillGoals();
+    const sessionIds = new Set(query.sessionIds ?? []);
+    const decisionIds = new Set(query.decisionIds ?? []);
+    const artifactIds = new Set(query.artifactIds ?? []);
+    const subscriptions = new Set(query.subscriptions ?? []);
+    return (await viewsFor(await options.store.list()))
+      .filter(
+        (view) =>
+          sessionIdsOf(view).some((id) => sessionIds.has(id)) ||
+          (view.ticket.links.decisionId !== undefined &&
+            decisionIds.has(view.ticket.links.decisionId)) ||
+          (view.receipt.artifactId !== undefined &&
+            artifactIds.has(view.receipt.artifactId)) ||
+          view.ticket.subscriptions.some((thread) => subscriptions.has(thread))
+      )
+      .sort(compareByActivity);
+  }
+
+  async function viewsFor(
+    tickets: readonly Ticket[]
+  ): Promise<TicketTaskView[]> {
+    const [goals, pendingPermissions] = await Promise.all([
       options.goals.listGoals(),
       options.sessions.listPendingPermissions(),
     ]);
     const goalsById = new Map(goals.map((goal) => [goal.thebeSessionId, goal]));
-    return tickets
-      .map((ticket) => {
-        const goal = ticket.links.legacyGoalId
-          ? goalsById.get(ticket.links.legacyGoalId)
-          : undefined;
-        const pending = goal
-          ? pendingPermissions.filter(
-              (permission) => permission.sessionId === goal.thebeSessionId
-            )
-          : [];
-        return view(ticket, goal, pending);
-      })
-      .filter((ticket) => !stage || ticket.stage === stage)
-      .sort(compareByActivity)
-      .slice(0, limit);
+    return tickets.map((ticket) => {
+      const goal = ticket.links.legacyGoalId
+        ? goalsById.get(ticket.links.legacyGoalId)
+        : undefined;
+      const pending = goal
+        ? pendingPermissions.filter(
+            (permission) => permission.sessionId === goal.thebeSessionId
+          )
+        : [];
+      return view(ticket, goal, pending);
+    });
   }
 
   async function delegateFrom(
@@ -626,6 +658,7 @@ export function createTicketControlApi(options: {
     invoke,
     get,
     list,
+    related,
     delegate,
     delegateHttp,
     reply,
@@ -688,6 +721,17 @@ function compareByActivity(
   const rightAt = activityTime(right);
   if (leftAt !== rightAt) return rightAt - leftAt;
   return right.ticket.createdAt.localeCompare(left.ticket.createdAt);
+}
+
+function sessionIdsOf(view: TicketTaskView): string[] {
+  return [
+    ...new Set([
+      ...view.ticket.links.sessionIds,
+      ...(view.ticket.links.legacyGoalId
+        ? [view.ticket.links.legacyGoalId]
+        : []),
+    ]),
+  ];
 }
 
 function activityTime(ticket: TicketTaskView): number {

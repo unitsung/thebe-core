@@ -114,11 +114,14 @@ Work named for the first beta, not yet complete in this checkout.
   Session is in place behind `/v1/main-session`, with lazy creation, restart
   recovery, executor tools disabled, approval-gated Decision/routing/Ticket
   writes, the generic Session routes available for inspection, and Recall
-  through `session_search`. Local integration coverage checks the delegation
-  requester evidence. Still required are adoption by every Ask Thebe entry
-  point, cross-client acceptance against the same `thebe-main` conversation,
-  and real external-agent/connector acceptance; the latter two need clients,
-  live connectors or a deployment and are not claims made by the local tests.
+  through both conversational `session_search` and typed `recall` references.
+  The native Ask Thebe client already targets the same `thebe-main`
+  conversation, with local client and Core integration coverage for lazy
+  creation, reuse, recovery, delegation requester evidence and Recall. Still
+  required are resident event pickup and batching under the Main Session,
+  daily-budget enforcement, live deployment acceptance, and real
+  external-agent/connector acceptance; those are not claims made by the local
+  tests.
 
 ## Later
 

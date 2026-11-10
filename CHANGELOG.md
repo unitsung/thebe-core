@@ -30,6 +30,10 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- The main Session has a read-only `recall` tool for exact Ticket, Artifact,
+  Resource and Session references. It returns a bounded summary, current state
+  and related ids without transcript text or Artifact content, and answers an
+  unknown reference with a clear `found: false` result.
 - A durable main Session at `GET /v1/main-session` and
   `POST /v1/main-session/messages`. It starts lazily under the stable
   `thebe-main` id, resumes the same runtime transcript after Core recreation,

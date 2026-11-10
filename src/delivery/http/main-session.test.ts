@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import type { McpRegistry } from "../../agent/extensions/mcp.ts";
 import type { EnabledResource } from "../../agent/runtime/interface.ts";
+import { createArtifactStore } from "../../agent/artifacts/store.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
@@ -29,6 +30,7 @@ function open(
   extra: {
     mcp?: McpRegistry;
     enabledResources?: EnabledResource[];
+    artifactStore?: ReturnType<typeof createArtifactStore>;
   } = {}
 ) {
   const app = createThebeApp({
@@ -110,6 +112,7 @@ describe("main Session", () => {
     expect(state.enabledResources).toEqual([]);
     expect(state.tools.map((tool) => tool.name)).toEqual([
       "session_search",
+      "recall",
       "decision_list",
       "decision_get",
       "decision_accept",
@@ -195,6 +198,63 @@ describe("main Session", () => {
     expect(recalled?.text).toContain(previous.body.thebeSessionId);
     expect(recalled?.text).toContain("Use restic nightly.");
     expect(app.agent.lastThebeSessionId()).toBe("thebe-main");
+  });
+
+  it("recalls a durable Ticket through the main Session tool without returning its transcript", async () => {
+    const artifacts = createArtifactStore({
+      now: () => new Date("2026-11-10T05:00:00Z"),
+    });
+    const { app, fake, call } = open(undefined, undefined, {
+      artifactStore: artifacts,
+    });
+    fake.queueTurns([
+      { kind: "text", text: "GOAL_STATUS: complete" },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: checked it\nREMAINING: none",
+      },
+    ]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Verify the backup set",
+        idempotencyKey: "main-session-recall",
+      }),
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+    await app.agent.waitGoal(goalId);
+    const artifact = await artifacts.create({
+      kind: "report",
+      title: "Backup verification report",
+      content: "TOOL_LOG_SECRET must stay out of recall",
+      sessionId: goalId,
+    });
+
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [{ name: "recall", args: { kind: "ticket", id: ticketId } }],
+      },
+      { kind: "text", text: "The backup was verified." },
+    ]);
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "What happened with that backup task?" }),
+    });
+    expect(prompted.status).toBe(200);
+    expect(prompted.body.tools).toContain("recall");
+
+    const info = await call("/v1/main-session");
+    const state = fake.snapshot(info.body.session.runtimeSessionId);
+    const recalled = state.messages.find(
+      (message) => message.role === "tool" && message.toolName === "recall"
+    );
+    expect(recalled?.text).toContain(ticketId);
+    expect(recalled?.text).toContain(artifact.artifactId);
+    expect(recalled?.text).toContain('"state":"completed"');
+    expect(recalled?.text).not.toContain("TOOL_LOG_SECRET");
+    expect(recalled?.text).not.toContain("GOAL_STATUS");
   });
 
   it("applies model and thinking selections to the first main Session turn", async () => {
@@ -408,6 +468,7 @@ describe("main Session", () => {
     expect(resumedState.builtinTools).toEqual([]);
     expect(resumedState.tools.map((tool) => tool.name)).toEqual([
       "session_search",
+      "recall",
       "decision_list",
       "decision_get",
       "decision_accept",

@@ -326,7 +326,11 @@ directly. Its read-only `session_search` tool browses earlier person-facing Core
 Sessions, finds messages by exact keywords, and reads a bounded message window
 without making the inspected Session active. Hidden Sessions and every Session
 carrying an internal `purpose` label are excluded, as is the current main
-Session. The other tools are `decision_list`, `decision_get`, `decision_accept`,
+Session. The read-only `recall` tool resolves one exact Ticket, Artifact,
+Resource or Session reference and returns a bounded summary, current state and
+related ids. It never returns a transcript or Artifact content; an unknown
+reference returns `found: false` with a clear error. The other tools are
+`decision_list`, `decision_get`, `decision_accept`,
 `decision_attach`, `decision_dismiss`, `trigger_requeue`,
 `thread_unsubscribe`, `ticket_list`, `ticket_get`, `ticket_delegate`,
 `ticket_reply`, `ticket_note`, and `ticket_control`. `decision_list` reads recent Eval Decisions and can return
