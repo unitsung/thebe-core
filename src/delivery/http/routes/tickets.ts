@@ -79,7 +79,8 @@ export async function handleTicketRoutes(
       context.parts.length === 4 &&
       (context.parts[3] === PRODUCT_HTTP_SEGMENT.pause ||
         context.parts[3] === PRODUCT_HTTP_SEGMENT.resume ||
-        context.parts[3] === PRODUCT_HTTP_SEGMENT.stop)
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.stop ||
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.retry)
     ) {
       if (request.method !== "POST") return methodNotAllowed();
       const blocked = quiescedWrite(context);

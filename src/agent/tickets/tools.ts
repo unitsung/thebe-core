@@ -188,9 +188,9 @@ export const TICKET_TOOL_SCHEMAS: Record<
       },
       action: {
         type: "string",
-        enum: ["pause", "resume", "stop"],
+        enum: ["pause", "resume", "stop", "retry"],
         description:
-          "Pause after the current checkpoint, resume paused work, or stop it.",
+          "Pause after the current checkpoint, resume paused work, stop it, or retry work that failed or blocked.",
       },
     },
     required: ["ticketId", "action"],
@@ -210,5 +210,5 @@ export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
   [TICKET_NOTE_TOOL_NAME]:
     "Add durable guidance to a live Ticket. The worker sees it at its next checkpoint without interrupting the active one.",
   [TICKET_CONTROL_TOOL_NAME]:
-    "Pause, resume, or stop the Goal carrying out a Ticket.",
+    "Pause, resume, stop, or retry the Goal carrying out a Ticket. Retry keeps the same Ticket and Mandate and is only valid after failed or blocked work.",
 };

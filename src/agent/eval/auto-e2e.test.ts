@@ -277,6 +277,93 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     await app.agent.quiesce();
   });
 
+  it("revalidates an Eval Ticket's Mandate before retrying blocked work", async () => {
+    const { app, d, fake } = await start("auto", "accept", [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "blocked",
+              blocker: "The Docker connection needs repair",
+            },
+          },
+        ],
+      },
+      { kind: "text", text: "Blocked until Docker is reachable." },
+    ]);
+    d.set("emby", "exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () =>
+      expect(await decisionsOf(app)).toHaveLength(1)
+    );
+
+    const [decision] = await decisionsOf(app);
+    const goalId = decision!.goalId!;
+    const ticketId = decision!.ticketId!;
+    await vi.waitFor(() =>
+      expect(app.agent.getGoal(goalId)).toMatchObject({
+        status: "failed",
+        blocked: true,
+      })
+    );
+
+    await app.agent.setPolicy({ rules: [] });
+    const denied = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/tickets/${ticketId}/retry`, {
+        method: "POST",
+      })
+    );
+    expect(denied.status).toBe(409);
+    expect(await denied.json()).toMatchObject({
+      code: "ticket_mandate_invalid",
+      error: expect.stringContaining("matched rule"),
+    });
+    expect(app.agent.getGoal(goalId)).toMatchObject({
+      status: "failed",
+      blocked: true,
+    });
+    expect(
+      (
+        await app.agent.listAudit({
+          method: "ticket.mandate_revalidate",
+          sessionId: goalId,
+        })
+      ).entries
+    ).toEqual([
+      expect.objectContaining({
+        result: "denied",
+        source: "ticket",
+        summary: expect.stringContaining("matched rule"),
+      }),
+    ]);
+
+    await app.agent.setPolicy({
+      rules: ["If a media server stops, it is worth restarting it."],
+    });
+    fake.queueTurns([
+      { kind: "text", text: WORKER_DONE },
+      { kind: "text", text: REVIEW_PASS },
+    ]);
+    const retried = await app.handler.handle(
+      new Request(`http://127.0.0.1:8787/v1/tickets/${ticketId}/retry`, {
+        method: "POST",
+      })
+    );
+    expect(retried.status).toBe(200);
+    expect(await retried.json()).toMatchObject({
+      ticket: { id: ticketId },
+      stage: "running",
+      goal: { id: goalId, status: "running" },
+    });
+    await vi.waitFor(() =>
+      expect(app.agent.getGoal(goalId)?.status).toBe("completed")
+    );
+    expect(await app.agent.listTickets()).toHaveLength(1);
+    await app.agent.quiesce();
+  });
+
   it("makes no Ticket and restarts nothing in observe, and still shows what it would have done", async () => {
     const { app, d } = await start("observe");
     d.set("emby", "exited");

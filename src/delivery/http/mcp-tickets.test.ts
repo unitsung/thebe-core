@@ -197,6 +197,64 @@ describe("/mcp Ticket tools", () => {
     });
   });
 
+  it("retries blocked work through ticket_control", async () => {
+    const { agent, fake, call } = await setup();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "blocked",
+              blocker: "The library is read-only",
+            },
+          },
+        ],
+      },
+      { kind: "text", text: "Blocked." },
+    ]);
+    const delegated = await call(
+      "ticket_delegate",
+      {
+        task: "Move the library",
+        idempotencyKey: "retry-blocked",
+      },
+      writeToken
+    );
+    const created = JSON.parse(text(delegated)) as {
+      ticket: { id: string };
+      goal: { id: string };
+    };
+    await expect(agent.waitGoal(created.goal.id)).resolves.toMatchObject({
+      status: "failed",
+      blocked: true,
+    });
+
+    fake.queueTurns([
+      { kind: "text", text: "Finished." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: checked it\nREMAINING: none",
+      },
+    ]);
+    const retried = await call(
+      "ticket_control",
+      { ticketId: created.ticket.id, action: "retry" },
+      writeToken
+    );
+    expect(retried.result?.isError).toBeUndefined();
+    expect(JSON.parse(text(retried))).toMatchObject({
+      ticket: { id: created.ticket.id },
+      stage: "running",
+      goal: { id: created.goal.id, status: "running" },
+    });
+    await expect(agent.waitGoal(created.goal.id)).resolves.toMatchObject({
+      status: "completed",
+      iteration: 2,
+    });
+  });
+
   it("adds durable guidance through ticket_note only for writers", async () => {
     const { agent, fake, call } = await setup();
     fake.queueTurns([{ kind: "hang" }]);

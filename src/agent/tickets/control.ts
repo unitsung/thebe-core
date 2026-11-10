@@ -43,7 +43,7 @@ export type TicketTaskView = {
   receipt: TicketReceipt;
 };
 
-export type TicketControlAction = "pause" | "resume" | "stop";
+export type TicketControlAction = "pause" | "resume" | "stop" | "retry";
 
 export type TicketControlApi = ReturnType<typeof createTicketControlApi>;
 
@@ -72,6 +72,7 @@ type GoalPort = {
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
+  retryGoal(thebeSessionId: string): Promise<GoalRun>;
 };
 
 type SessionPort = {
@@ -516,11 +517,12 @@ export function createTicketControlApi(options: {
     if (
       input.action !== "pause" &&
       input.action !== "resume" &&
-      input.action !== "stop"
+      input.action !== "stop" &&
+      input.action !== "retry"
     ) {
       throw httpError(
         400,
-        "action must be pause, resume, or stop",
+        "action must be pause, resume, stop, or retry",
         "invalid_body"
       );
     }
@@ -556,12 +558,27 @@ export function createTicketControlApi(options: {
     ) {
       throw httpError(409, "ticket is already finished", "invalid_transition");
     }
+    if (
+      input.action === "retry" &&
+      goal.status !== "failed" &&
+      goal.status !== "max_iterations"
+    ) {
+      throw httpError(
+        409,
+        goal.status === "cancelled"
+          ? "a person stopped this Ticket; it cannot be retried"
+          : "ticket can only be retried after it has failed or blocked",
+        goal.status === "cancelled" ? "ticket_stopped" : "invalid_transition"
+      );
+    }
     if (input.action === "pause")
       await options.goals.pauseGoal(goal.thebeSessionId);
     if (input.action === "resume")
       await options.goals.resumeGoal(goal.thebeSessionId);
     if (input.action === "stop")
       await options.goals.stopGoal(goal.thebeSessionId);
+    if (input.action === "retry")
+      await options.goals.retryGoal(goal.thebeSessionId);
     return (await get(ticketId))!;
   }
 

@@ -865,6 +865,15 @@ const operations: Operation[] = [
     responseSchema: "TicketTask",
   },
   {
+    method: "post",
+    path: "/v1/tickets/{id}/retry",
+    summary:
+      "Start a fresh checkpoint under the same Ticket after failed or blocked work",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
     method: "get",
     path: PRODUCT_HTTP_PATH.mainSession,
     summary:
