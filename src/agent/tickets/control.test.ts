@@ -108,6 +108,81 @@ describe("Ticket listing", () => {
       code: "invalid_body",
     });
   });
+
+  it("finds old relationships without widening the model-facing list limit", async () => {
+    const store = createTicketStore({});
+    const thread = "resource:container:backup-agent";
+    const related = await store.recordDirect({
+      thread,
+      triggerId: "old-related",
+      kind: "goal-start",
+      at: "2026-11-01T00:00:00.000Z",
+      title: "Old backup work",
+      requester: "chat",
+      goalId: "goal-old-related",
+    });
+    for (let index = 0; index < 51; index += 1) {
+      await store.recordDirect({
+        thread: "chat",
+        triggerId: `newer-${index}`,
+        kind: "goal-start",
+        at: new Date(Date.UTC(2026, 10, 2, 0, index)).toISOString(),
+        title: `Newer work ${index}`,
+        requester: "chat",
+      });
+    }
+    const run = goal(
+      "goal-old-related",
+      "completed",
+      "2026-11-01T00:05:00.000Z"
+    );
+    const api = createTicketControlApi({
+      store,
+      goals: {
+        startGoal: async () => {
+          throw new Error("unused");
+        },
+        getGoal: () => run,
+        listGoals: async () => [run],
+        answerGoal: async () => {
+          throw new Error("unused");
+        },
+        addGoalGuidance: async () => {
+          throw new Error("unused");
+        },
+        pauseGoal: async () => {
+          throw new Error("unused");
+        },
+        resumeGoal: async () => {
+          throw new Error("unused");
+        },
+        stopGoal: async () => {
+          throw new Error("unused");
+        },
+        retryGoal: async () => {
+          throw new Error("unused");
+        },
+      },
+      sessions: {
+        createSession: async () => {
+          throw new Error("unused");
+        },
+        listPendingPermissions: () => [],
+        resolvePendingPermission: async () => {
+          throw new Error("unused");
+        },
+      },
+      now: () => new Date("2026-11-10T01:00:00.000Z"),
+    });
+
+    const recent = await api.list({ limit: 50 });
+    expect(recent.map((view) => view.ticket.id)).not.toContain(related.id);
+    await expect(
+      api.related({ subscriptions: [thread] })
+    ).resolves.toMatchObject([
+      { ticket: { id: related.id }, stage: "completed" },
+    ]);
+  });
 });
 
 describe("Ticket guidance", () => {

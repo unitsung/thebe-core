@@ -429,6 +429,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     candidates,
     routing: evalRouting,
     tickets: ticketControl,
+    artifacts: artifactStore,
     sessions,
     prompts,
     model: options.mainSessionModel,
