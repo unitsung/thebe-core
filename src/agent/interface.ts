@@ -538,6 +538,14 @@ export interface ThebeAgent {
     limit?: number;
   }): Promise<Decision[]>;
   getDecision(id: string): Promise<Decision | undefined>;
+  /** Accept a positive Eval candidate as an explicit Ticket. The original Decision stays immutable. */
+  acceptDecision(decisionId: string): Promise<
+    TicketTaskView & {
+      decisionId: string;
+      candidate: false;
+      reused: boolean;
+    }
+  >;
   /** Events the enabled Sources observed, newest first. They feed fan-out and Eval. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   /** Read health for each enabled Source, including consecutive failures and the latest error. */

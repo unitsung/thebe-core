@@ -135,16 +135,42 @@ describe("decisions over HTTP", () => {
       (await call("/v1/decisions", { method: "POST", body: "{}" })).status
     ).toBe(405);
     expect((await call("/v1/decisions/" + "0".repeat(32))).status).toBe(404);
+    expect(
+      (
+        await call(`/v1/decisions/${"0".repeat(32)}/accept`, {
+          method: "POST",
+        })
+      ).status
+    ).toBe(404);
     expect((await call("/v1/decisions/..%2Fx")).status).toBe(404);
   });
 
   it("lists capabilities for a Core that has them", async () => {
-    expect((await open().call("/v1/health")).body.capabilities).toEqual([
+    const { call } = open();
+    expect((await call("/v1/health")).body.capabilities).toEqual([
       "tickets",
       "main-session",
       "policy",
       "decisions",
     ]);
+    expect((await call("/openapi.json")).body.paths).toMatchObject({
+      "/v1/decisions/{id}/accept": { post: expect.any(Object) },
+    });
+  });
+
+  it("refuses Candidate acceptance while quiesced and on the wrong method", async () => {
+    const { app, call } = open();
+    expect((await call(`/v1/decisions/${"0".repeat(32)}/accept`)).status).toBe(
+      405
+    );
+    await app.agent.quiesce();
+    expect(
+      (
+        await call(`/v1/decisions/${"0".repeat(32)}/accept`, {
+          method: "POST",
+        })
+      ).status
+    ).toBe(503);
   });
 });
 
@@ -166,6 +192,7 @@ describe("a container going down, end to end", () => {
         text: JSON.stringify({
           decision: "accept",
           matched: [ruleId],
+          intent: "restart the emby container",
           reason: "emby stopped",
         }),
       },
@@ -198,6 +225,76 @@ describe("a container going down, end to end", () => {
         (s) => s.labels?.purpose === "eval-assessment"
       )
     ).toEqual([]);
+    await app.agent.quiesce();
+  });
+
+  it("accepts the observed candidate as one explicit Ticket, without rewriting the Decision", async () => {
+    vi.useFakeTimers();
+    const d = docker("running");
+    const { app, fake, call, put } = open({
+      watch: true,
+      provider: d.provider,
+    });
+    const { body: policy } = await put({
+      rules: ["Restart a media server that stopped"],
+    });
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          decision: "accept",
+          matched: [policy.rules[0]!.id],
+          intent: "restart the emby container",
+          reason: "emby stopped",
+        }),
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    d.set("exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      expect((await call("/v1/decisions")).body.decisions).toHaveLength(1);
+    });
+    const [decision] = (await call("/v1/decisions")).body.decisions;
+
+    const accepted = await call(`/v1/decisions/${decision.id}/accept`, {
+      method: "POST",
+    });
+    expect(accepted.status).toBe(201);
+    expect(accepted.body).toMatchObject({
+      decisionId: decision.id,
+      candidate: false,
+      reused: false,
+      ticket: {
+        title: "restart the emby container",
+        mandate: {
+          strength: "explicit",
+          decidedBy: "direct",
+          requester: "chat",
+        },
+        links: { decisionId: decision.id },
+      },
+    });
+    const ticketId = accepted.body.ticket.id as string;
+    const again = await call(`/v1/decisions/${decision.id}/accept`, {
+      method: "POST",
+    });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({
+      ticket: { id: ticketId },
+      reused: true,
+    });
+    expect((await call(`/v1/decisions/${decision.id}`)).body).toMatchObject({
+      outcome: "ignore",
+      wouldAccept: true,
+      acceptedTicketId: ticketId,
+    });
+    expect((await call("/v1/tickets")).body.tickets).toHaveLength(1);
+    const goalId = accepted.body.ticket.links.legacyGoalId as string;
+    await app.agent.stopGoal(goalId);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
     await app.agent.quiesce();
   });
 

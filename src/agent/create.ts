@@ -15,7 +15,7 @@ import { createTriggerStore } from "./sources/store.ts";
 import type { Trigger } from "./sources/types.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
-import type { Policy } from "./eval/types.ts";
+import type { Decision, Policy } from "./eval/types.ts";
 import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
 import { createCandidateApi } from "./eval/candidates.ts";
 import { executorTask } from "./eval/executor-task.ts";
@@ -402,6 +402,20 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     prompts,
     model: options.mainSessionModel,
   });
+  async function projectDecisions(rows: Decision[]): Promise<Decision[]> {
+    const tickets = await ticketStore.list();
+    const byDecision = new Map(
+      tickets.flatMap((ticket) =>
+        ticket.links.decisionId
+          ? [[ticket.links.decisionId, ticket.id] as const]
+          : []
+      )
+    );
+    return rows.map((decision) => {
+      const acceptedTicketId = byDecision.get(decision.id);
+      return acceptedTicketId ? { ...decision, acceptedTicketId } : decision;
+    });
+  }
   return {
     runtime: options.runtime,
     workspacePath: ctx.workspacePath,
@@ -424,10 +438,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return withModes(await policyStore.set(input));
     },
     async listDecisions(query) {
-      return decisionStore.list(query);
+      return projectDecisions(await decisionStore.list(query));
     },
     async getDecision(id) {
-      return decisionStore.get(id);
+      const decision = await decisionStore.get(id);
+      if (!decision) return undefined;
+      return (await projectDecisions([decision]))[0];
+    },
+    async acceptDecision(decisionId) {
+      return candidates.accept(decisionId);
     },
     async listTriggers(query) {
       return triggerStore.list(query);
