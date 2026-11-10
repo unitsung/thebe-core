@@ -107,14 +107,18 @@ Work named for the first beta, not yet complete in this checkout.
   pairing flow, scope narrowing, JWT validation, persistence, revocation and
   listener isolation have local integration coverage. A real claude.ai and
   ChatGPT connector login through the public HTTPS listener is still required.
-- **Main Session and the remaining continuity work.** The long-task delegation
+- **Main Session continuity and external acceptance.** The local long-task
   slice is in place over both `/mcp` and HTTP: callers can list and inspect
-  Tickets, idempotently delegate a Goal, answer its Attention, and approve or
-  deny a pending worker permission. The persistent main Session is also in
-  place behind `/v1/main-session`, with lazy creation, restart recovery,
-  Ticket-only tools, and the generic Session routes available for inspection.
-  Ask Thebe clients, Recall, cross-entry continuity and real external-agent
-  acceptance remain.
+  Tickets, idempotently delegate a Goal, answer its Attention, approve or deny a
+  pending worker permission, and recover failed work. The persistent main
+  Session is in place behind `/v1/main-session`, with lazy creation, restart
+  recovery, executor tools disabled, approval-gated Decision/routing/Ticket
+  writes, the generic Session routes available for inspection, and Recall
+  through `session_search`. Local integration coverage checks the delegation
+  requester evidence. Still required are adoption by every Ask Thebe entry
+  point, cross-client acceptance against the same `thebe-main` conversation,
+  and real external-agent/connector acceptance; the latter two need clients,
+  live connectors or a deployment and are not claims made by the local tests.
 
 ## Later
 
