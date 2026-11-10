@@ -89,6 +89,7 @@ describe("tickets", () => {
       "/v1/tickets/{id}/pause": { post: expect.any(Object) },
       "/v1/tickets/{id}/resume": { post: expect.any(Object) },
       "/v1/tickets/{id}/stop": { post: expect.any(Object) },
+      "/v1/tickets/{id}/retry": { post: expect.any(Object) },
     });
   });
 
@@ -430,6 +431,98 @@ describe("tickets", () => {
     await expect(
       app.agent.waitGoal(second.body.goal.id as string)
     ).resolves.toMatchObject({ status: "cancelled" });
+  });
+
+  it("retries blocked work under the same Ticket and Goal", async () => {
+    const { app, call, fake } = open(undefined, [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "blocked",
+              blocker: "The library is read-only",
+            },
+          },
+        ],
+      },
+      { kind: "text", text: "Blocked until storage is writable." },
+    ]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "http-retry-blocked",
+      }),
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "failed",
+      blocked: true,
+    });
+    expect(app.agent.getGoal(goalId)?.error).toBe("The library is read-only");
+
+    fake.queueTurns([{ kind: "text", text: "Finished." }, pass]);
+    const retried = await call(`/v1/tickets/${ticketId}/retry`, {
+      method: "POST",
+    });
+    expect(retried.status).toBe(200);
+    expect(retried.body).toMatchObject({
+      ticket: { id: ticketId },
+      stage: "running",
+      goal: {
+        id: goalId,
+        status: "running",
+      },
+    });
+    const completed = await app.agent.waitGoal(goalId);
+    expect(completed).toMatchObject({
+      status: "completed",
+      iteration: 2,
+    });
+    expect(completed.blocked).toBeUndefined();
+    expect(app.agent.getGoal(goalId)?.status).toBe("completed");
+  });
+
+  it("refuses retry after completion or a person stop", async () => {
+    const { app, call } = open();
+    const completed = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Complete once",
+        idempotencyKey: "http-retry-completed",
+      }),
+    });
+    await app.agent.waitGoal(completed.body.goal.id);
+    const completedRetry = await call(
+      `/v1/tickets/${completed.body.ticket.id}/retry`,
+      { method: "POST" }
+    );
+    expect(completedRetry.status).toBe(409);
+    expect(completedRetry.body.code).toBe("invalid_transition");
+
+    const stopped = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Stop before finishing",
+        idempotencyKey: "http-retry-stopped",
+      }),
+    });
+    const goalId = stopped.body.goal.id as string;
+    await call(`/v1/tickets/${stopped.body.ticket.id}/stop`, {
+      method: "POST",
+    });
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    const stoppedRetry = await call(
+      `/v1/tickets/${stopped.body.ticket.id}/retry`,
+      { method: "POST" }
+    );
+    expect(stoppedRetry.status).toBe(409);
+    expect(stoppedRetry.body.code).toBe("ticket_stopped");
   });
 
   it("validates Ticket commands and refuses writes while quiesced", async () => {

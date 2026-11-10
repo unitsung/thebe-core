@@ -75,6 +75,9 @@ describe("Ticket listing", () => {
         stopGoal: async () => {
           throw new Error("unused");
         },
+        retryGoal: async () => {
+          throw new Error("unused");
+        },
       },
       sessions: {
         createSession: async () => {
@@ -142,6 +145,9 @@ describe("Ticket guidance", () => {
         stopGoal: async () => {
           throw new Error("unused");
         },
+        retryGoal: async () => {
+          throw new Error("unused");
+        },
       },
       sessions: {
         createSession: async () => {
@@ -185,5 +191,102 @@ describe("Ticket guidance", () => {
       api.note({ ticketId: ticket.id, note: "Use Movies." })
     ).rejects.toMatchObject({ status: 409, code: "invalid_transition" });
     expect(addGoalGuidance).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Ticket retry", () => {
+  it("retries failed work but refuses completed, active, and person-stopped Tickets", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect({
+      thread: "chat",
+      triggerId: "retry",
+      kind: "goal-start",
+      at: "2026-11-10T00:00:00.000Z",
+      title: "Move the library",
+      requester: "chat",
+      goalId: "goal-retry",
+    });
+    let current = goal("goal-retry", "failed", "2026-11-10T00:01:00.000Z");
+    const retryGoal = vi.fn(async () => {
+      current = goal("goal-retry", "running", "2026-11-10T00:02:00.000Z");
+      return current;
+    });
+    const api = createTicketControlApi({
+      store,
+      goals: {
+        startGoal: async () => {
+          throw new Error("unused");
+        },
+        getGoal: () => current,
+        listGoals: async () => [current],
+        answerGoal: async () => {
+          throw new Error("unused");
+        },
+        addGoalGuidance: async () => {
+          throw new Error("unused");
+        },
+        pauseGoal: async () => {
+          throw new Error("unused");
+        },
+        resumeGoal: async () => {
+          throw new Error("unused");
+        },
+        stopGoal: async () => {
+          throw new Error("unused");
+        },
+        retryGoal,
+      },
+      sessions: {
+        createSession: async () => {
+          throw new Error("unused");
+        },
+        listPendingPermissions: () => [],
+        resolvePendingPermission: async () => {
+          throw new Error("unused");
+        },
+      },
+      now: () => new Date("2026-11-10T01:00:00.000Z"),
+    });
+
+    await expect(
+      api.control({ ticketId: ticket.id, action: "retry" })
+    ).resolves.toMatchObject({
+      ticket: { id: ticket.id },
+      stage: "running",
+    });
+    expect(retryGoal).toHaveBeenCalledWith("goal-retry");
+
+    current = goal("goal-retry", "max_iterations", "2026-11-10T00:02:30.000Z");
+    await expect(
+      api.control({ ticketId: ticket.id, action: "retry" })
+    ).resolves.toMatchObject({
+      ticket: { id: ticket.id },
+      stage: "running",
+    });
+
+    current = goal("goal-retry", "completed", "2026-11-10T00:03:00.000Z");
+    await expect(
+      api.control({ ticketId: ticket.id, action: "retry" })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "invalid_transition",
+    });
+
+    current = goal("goal-retry", "cancelled", "2026-11-10T00:04:00.000Z");
+    await expect(
+      api.control({ ticketId: ticket.id, action: "retry" })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ticket_stopped",
+    });
+
+    current = goal("goal-retry", "running", "2026-11-10T00:05:00.000Z");
+    await expect(
+      api.control({ ticketId: ticket.id, action: "retry" })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "invalid_transition",
+    });
+    expect(retryGoal).toHaveBeenCalledTimes(2);
   });
 });

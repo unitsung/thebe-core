@@ -403,6 +403,8 @@ export interface ThebeAgent {
   waitGoal(thebeSessionId: string): Promise<GoalRun>;
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
+  /** Retry failed, blocked, or checkpoint-limited work under the same Goal and Mandate. */
+  retryGoal(thebeSessionId: string): Promise<GoalRun>;
   /** Answer the one open question on a paused Goal, or accept / send back a result waiting for review. */
   answerGoal(
     thebeSessionId: string,
@@ -520,10 +522,10 @@ export interface ThebeAgent {
   replyTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
   /** Add guidance for the next checkpoint of a live Ticket. */
   noteTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
-  /** Pause, resume, or stop the Goal carrying out a Ticket. */
+  /** Pause, resume, stop, or retry the Goal carrying out a Ticket. */
   controlTicket(input: {
     ticketId: string;
-    action: "pause" | "resume" | "stop";
+    action: "pause" | "resume" | "stop" | "retry";
   }): Promise<TicketTaskView>;
   /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
   getPolicy(): Promise<Policy & { modes: string[] }>;

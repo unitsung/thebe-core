@@ -131,6 +131,15 @@ describe("main Session", () => {
         "ticket_control",
       ])
     );
+    expect(
+      state.tools.find((tool) => tool.name === "ticket_control")?.parameters
+    ).toMatchObject({
+      properties: {
+        action: {
+          enum: ["pause", "resume", "stop", "retry"],
+        },
+      },
+    });
     expect(state.tools.map((tool) => tool.name)).not.toContain("bash");
     expect(state.tools.map((tool) => tool.name)).not.toContain("write");
     expect(state.tools.map((tool) => tool.name)).not.toContain("edit");

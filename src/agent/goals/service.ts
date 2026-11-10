@@ -62,6 +62,7 @@ export function createGoalApi(
 ) {
   const runs = new Map<string, ManagedGoal>();
   const persistChains = new Map<string, Promise<void>>();
+  const retryFlights = new Map<string, Promise<GoalRun>>();
 
   const snapshot = (run: ManagedGoal): GoalRun => ({
     thebeSessionId: run.thebeSessionId,
@@ -533,6 +534,41 @@ export function createGoalApi(
     return snapshot(run);
   }
 
+  /** Clears terminal product state, then starts a fresh recovery checkpoint. */
+  async function startFreshTerminalCheckpoint(
+    run: ManagedGoal
+  ): Promise<GoalRun> {
+    run.blocked = undefined;
+    run.attention = undefined;
+    run.report = undefined;
+    run.lastReviewResult = undefined;
+    run.personNoticeId = undefined;
+    if (run.iteration >= run.maxIterations) {
+      run.maxIterations = run.iteration + 1;
+    }
+    return continueGoal(run, true);
+  }
+
+  function assertRetryable(run: ManagedGoal): void {
+    if (run.status === "failed" || run.status === "max_iterations") return;
+    if (run.status === "cancelled") {
+      throw httpError(
+        409,
+        "a person stopped this Ticket; it cannot be retried",
+        "ticket_stopped"
+      );
+    }
+    throw httpError(
+      409,
+      run.status === "completed"
+        ? "ticket is already completed"
+        : run.status === "paused"
+          ? "ticket is paused; resume it instead"
+          : "ticket is already active",
+      "invalid_transition"
+    );
+  }
+
   function watchdogTarget(run: ManagedGoal): GoalWatchdogTarget {
     return {
       goalId: run.thebeSessionId,
@@ -903,15 +939,34 @@ export function createGoalApi(
       }
       ctx.checkNotQuiesced();
       await revalidateBeforeContinue(run);
-      run.blocked = undefined;
-      run.attention = undefined;
-      run.report = undefined;
-      run.lastReviewResult = undefined;
-      run.personNoticeId = undefined;
-      if (run.iteration >= run.maxIterations) {
-        run.maxIterations = run.iteration + 1;
+      return startFreshTerminalCheckpoint(run);
+    },
+
+    /**
+     * Starts a fresh checkpoint after machinery failure, a blocker, or the checkpoint limit. The Ticket
+     * and its Mandate stay the same; completed work and a person's stop are never undone. Concurrent retry
+     * requests share one recovery flight, so a retry cannot start two workers.
+     */
+    async retryGoal(thebeSessionId: string): Promise<GoalRun> {
+      const pending = retryFlights.get(thebeSessionId);
+      if (pending) return pending;
+      const flight = (async () => {
+        const run = runs.get(thebeSessionId);
+        if (!run) throw new Error("no goal found for this session");
+        assertRetryable(run);
+        ctx.checkNotQuiesced();
+        await revalidateBeforeContinue(run);
+        assertRetryable(run);
+        return startFreshTerminalCheckpoint(run);
+      })();
+      retryFlights.set(thebeSessionId, flight);
+      try {
+        return await flight;
+      } finally {
+        if (retryFlights.get(thebeSessionId) === flight) {
+          retryFlights.delete(thebeSessionId);
+        }
       }
-      return continueGoal(run, true);
     },
 
     /**

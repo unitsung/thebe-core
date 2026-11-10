@@ -2,6 +2,13 @@
 
 Date: 2026-10-06.
 
+Ticket recovery is available through `POST /v1/tickets/{id}/retry`. It starts
+a fresh checkpoint under the same Ticket and Goal after machinery failure, a
+blocked worker, or the checkpoint limit, and revalidates an inferred Ticket's
+Mandate first. Completed work is refused; a person-stopped Ticket returns
+`409 ticket_stopped`. The same operation is `ticket_control` with
+`action: "retry"` for the main Session and raw `/mcp`.
+
 ## Runtime loading updates (2026-10-08)
 
 Service tools and MCP schemas are registered with deferred exposure. Sessions
@@ -329,6 +336,9 @@ an older task waiting on the person is not hidden by newer completed work.
 `/v1/permissions` approval flow. Recalled Session text, Decision text, Ticket
 text, reports, events, and tool output remain untrusted data and cannot authorize
 a wider action.
+`ticket_control` also accepts `action: "retry"` for failed, blocked, or
+checkpoint-limited work; it keeps the same Ticket and Mandate and refuses
+completed or person-stopped work.
 `POST /v1/main-session/interrupt` interrupts
 an initialized Session and returns `404` rather than creating one.
 `ticket_delegate` creates the same direct Ticket and Goal as a person-facing
@@ -349,6 +359,7 @@ defines `MainSession`, `MainSessionPromptRequest`, and
 - `tools/list` returns each tool with standard `annotations`: `readOnlyHint` and `destructiveHint` come from Core's own `effect`/`risk` classification (never from a remote server's claims), and `openWorldHint` is true for external or public-web tools. Thebe extras are namespaced under `_meta`: `thebe/category`, `thebe/resourceKinds`, `thebe/approval`. No `outputSchema` is advertised yet.
 - `tools/call` returns text `content` (the universal fallback) and, when the result is a JSON object, the same data as `structuredContent`.
 - Ticket tools form the long-task delegation surface. `ticket_list` and `ticket_get` are read-only. `ticket_list` orders by the latest Goal activity and can filter by derived `stage`, including `attention`; filtering happens before its limit. `ticket_delegate` creates one direct Ticket and Goal from `{task, idempotencyKey, criteria?, maxIterations?, observe?, allowAsk?, reviewBeforeDone?}`; the same caller and key always return the same assignment. `ticket_get` includes the Goal report, terminal receipt, open Attention and pending permissions. `ticket_reply` answers or reviews the Attention, or resolves one pending permission; `ticket_note` adds durable guidance for the next worker checkpoint without interrupting the active one; `ticket_control` pauses, resumes or stops the linked Goal. Delegation, reply, note and control need `mcp:write`; approving arbitrary `bash` or an irreversible call needs `mcp:irreversible`.
+- `ticket_control` also accepts `action: "retry"` after machinery failure, a blocker, or the checkpoint limit. It starts one fresh checkpoint under the same Ticket and Mandate, revalidates an inferred Ticket first, and refuses completed or person-stopped work.
 - A tool that ran and failed, or rejected its input (including writes that need runtime approval), returns `result.isError: true` with the message as text. Only a failure of the request itself is a JSON-RPC error: `-32602` for an unknown tool, `-32000` when no agent service is attached, `-32003` for a write while quiesced. Read-only tool calls remain available while quiesced so clients can inspect the state that work stopped in.
 
 ## Owner instructions (2026-10-14)
