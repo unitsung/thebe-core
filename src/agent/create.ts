@@ -101,6 +101,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
           enabledSources,
         });
       },
+      ticketInputs: async (goalId) =>
+        (await ticketStore.getByGoal(goalId))?.inputs ?? [],
       onNeedsPerson: options.onGoalNeedsPerson,
     }
   );

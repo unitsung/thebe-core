@@ -259,7 +259,11 @@ export function createTicketStore(options: {
           ) ?? options.trigger.threads[0]!;
         const input: TicketInput = {
           triggerId: options.trigger.id,
-          seq: target.inputs.length + 1,
+          seq:
+            target.inputs.reduce(
+              (highest, item) => Math.max(highest, item.seq),
+              0
+            ) + 1,
           source: options.trigger.source,
           kind: options.trigger.kind,
           thread: matchingThread,

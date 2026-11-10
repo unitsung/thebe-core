@@ -1,6 +1,7 @@
 import type { GoalEvent } from "../goals/runner.ts";
 import {
   executeGoal,
+  type GoalCheckpointInput,
   type GoalSubagentApi,
   type ManagedGoal,
 } from "./execution.ts";
@@ -48,6 +49,7 @@ export type GoalApiOptions = {
   };
   getTicketIdForGoal?: (goalId: string) => Promise<string | undefined>;
   revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
+  ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
   onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
 };
 
@@ -92,6 +94,7 @@ export function createGoalApi(
     ...(run.allowAsk ? { allowAsk: true } : {}),
     ...(run.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
     ...(run.guidance?.length ? { guidance: run.guidance.slice() } : {}),
+    ...(run.ticketInputSeq ? { ticketInputSeq: run.ticketInputSeq } : {}),
     ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
   });
 
@@ -295,6 +298,9 @@ export function createGoalApi(
     if (persisted.report) run.report = { ...persisted.report };
     if (persisted.attention) run.attention = { ...persisted.attention };
     if (persisted.guidance?.length) run.guidance = persisted.guidance.slice();
+    if (persisted.ticketInputSeq) {
+      run.ticketInputSeq = persisted.ticketInputSeq;
+    }
     run.iteration = persisted.iteration;
     run.status = interrupted ? "paused" : persisted.status;
     run.createdAt = persisted.createdAt;
@@ -396,6 +402,7 @@ export function createGoalApi(
         onEvent: onGoalEvent,
         setTerminal,
         reportInbox,
+        ticketInputs: options.ticketInputs,
         now: ctx.now,
       },
       initialIteration,
