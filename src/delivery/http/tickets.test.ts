@@ -85,6 +85,7 @@ describe("tickets", () => {
       },
       "/v1/tickets/{id}": { get: expect.any(Object) },
       "/v1/tickets/{id}/reply": { post: expect.any(Object) },
+      "/v1/tickets/{id}/note": { post: expect.any(Object) },
       "/v1/tickets/{id}/pause": { post: expect.any(Object) },
       "/v1/tickets/{id}/resume": { post: expect.any(Object) },
       "/v1/tickets/{id}/stop": { post: expect.any(Object) },
@@ -324,6 +325,48 @@ describe("tickets", () => {
     });
   });
 
+  it("adds guidance to a live Ticket for its next checkpoint", async () => {
+    const { app, call } = open(undefined, [{ kind: "hang" }]);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "http-note",
+      }),
+    });
+    const ticketId = created.body.ticket.id as string;
+    const goalId = created.body.goal.id as string;
+
+    const noted = await call(`/v1/tickets/${ticketId}/note`, {
+      method: "POST",
+      body: JSON.stringify({ note: "  Put it in Movies.  " }),
+    });
+    expect(noted.status).toBe(200);
+    expect(noted.body).toMatchObject({
+      ticket: { id: ticketId },
+      stage: "running",
+    });
+    expect(app.agent.getGoal(goalId)).toMatchObject({
+      guidance: ["Put it in Movies."],
+    });
+
+    const empty = await call(`/v1/tickets/${ticketId}/note`, {
+      method: "POST",
+      body: JSON.stringify({ note: " " }),
+    });
+    expect(empty.status).toBe(400);
+    expect(empty.body.code).toBe("invalid_body");
+
+    await call(`/v1/tickets/${ticketId}/stop`, { method: "POST" });
+    await app.agent.waitGoal(goalId);
+    const ended = await call(`/v1/tickets/${ticketId}/note`, {
+      method: "POST",
+      body: JSON.stringify({ note: "Use Movies." }),
+    });
+    expect(ended.status).toBe(409);
+    expect(ended.body.code).toBe("invalid_transition");
+  });
+
   it("resumes a paused Ticket and stops its running Goal", async () => {
     const { app, call, fake } = open(undefined, [{ kind: "hang" }]);
     const created = await call("/v1/tickets", {
@@ -412,6 +455,11 @@ describe("tickets", () => {
       body: JSON.stringify({ attentionId: "attention" }),
     });
     expect(blockedReply.status).toBe(503);
+    const blockedNote = await call(`/v1/tickets/${"0".repeat(32)}/note`, {
+      method: "POST",
+      body: JSON.stringify({ note: "Use Movies." }),
+    });
+    expect(blockedNote.status).toBe(503);
     const blockedControl = await call(`/v1/tickets/${"0".repeat(32)}/stop`, {
       method: "POST",
     });
