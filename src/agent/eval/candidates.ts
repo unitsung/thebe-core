@@ -4,12 +4,14 @@ import type { Trigger } from "../sources/types.ts";
 import type { TicketTaskView } from "../tickets/control.ts";
 import { inferScope } from "../tickets/mandate.ts";
 import type { TicketStore } from "../tickets/store.ts";
+import { MAX_TICKET_NOTE_CHARS } from "../tickets/tools.ts";
 import type { Ticket } from "../tickets/types.ts";
 import { httpError } from "../types.ts";
 import type { DecisionStore } from "./decision-store.ts";
 import { executorTask } from "./executor-task.ts";
 import {
   DECISION_ACCEPT_TOOL_NAME,
+  DECISION_ATTACH_TOOL_NAME,
   DECISION_GET_TOOL_NAME,
   DECISION_LIST_TOOL_NAME,
   type DecisionToolName,
@@ -28,11 +30,19 @@ export type CandidateView = Decision & {
   candidate: boolean;
   /** Present when this Decision is linked to a Ticket, including one accepted by a person. */
   acceptedTicketId?: string;
+  /** Present when at least one of this Decision's Triggers was explicitly attached to a Ticket. */
+  attachedTicketId?: string;
 };
 
 export type AcceptedCandidate = TicketTaskView & {
   decisionId: string;
   candidate: false;
+  reused: boolean;
+};
+
+export type AttachedCandidate = TicketTaskView & {
+  decisionId: string;
+  attachedTicketId: string;
   reused: boolean;
 };
 
@@ -43,6 +53,8 @@ type GoalPort = {
     criteria?: string[];
     executor?: "ticket";
   }): Promise<unknown>;
+  /** Reopens one terminal Ticket Goal for a fresh checkpoint after a person attached an event. */
+  reopenGoal?(thebeSessionId: string): Promise<unknown>;
 };
 
 type SessionPort = {
@@ -58,7 +70,11 @@ export function createCandidateApi(options: {
   decisions: Pick<DecisionStore, "get" | "list">;
   tickets: Pick<
     TicketStore,
-    "list" | "get" | "getByDecision" | "recordDecisionAccepted"
+    | "list"
+    | "get"
+    | "getByDecision"
+    | "recordDecisionAccepted"
+    | "attachToTicket"
   >;
   ticketView: (ticketId: string) => Promise<TicketTaskView | undefined>;
   triggers: Pick<TriggerStore, "list">;
@@ -69,16 +85,23 @@ export function createCandidateApi(options: {
   now: () => Date;
 }) {
   const acceptFlights = new Map<string, Promise<AcceptedCandidate>>();
+  const attachFlights = new Map<string, Promise<AttachedCandidate>>();
 
-  function candidateView(decision: Decision, ticket?: Ticket): CandidateView {
+  function candidateView(
+    decision: Decision,
+    ticket?: Ticket,
+    attachedTicketId?: string
+  ): CandidateView {
     const acceptedTicketId = ticket?.id ?? decision.ticketId;
     return {
       ...decision,
       candidate:
         decision.wouldAccept === true &&
         decision.outcome !== "accept" &&
-        !acceptedTicketId,
+        !acceptedTicketId &&
+        !attachedTicketId,
       ...(acceptedTicketId ? { acceptedTicketId } : {}),
+      ...(attachedTicketId ? { attachedTicketId } : {}),
     };
   }
 
@@ -90,6 +113,65 @@ export function createCandidateApi(options: {
       if (byId) return byId;
     }
     return options.tickets.getByDecision(decision.id);
+  }
+
+  function latestAttachments(
+    tickets: readonly Ticket[]
+  ): Map<string, { ticketId: string; attachedAt: string }> {
+    const attachments = new Map<
+      string,
+      { ticketId: string; attachedAt: string }
+    >();
+    for (const ticket of tickets) {
+      for (const input of ticket.inputs) {
+        const current = attachments.get(input.triggerId);
+        if (!current || current.attachedAt < input.attachedAt) {
+          attachments.set(input.triggerId, {
+            ticketId: ticket.id,
+            attachedAt: input.attachedAt,
+          });
+        }
+      }
+    }
+    return attachments;
+  }
+
+  function attachmentFor(
+    decision: Decision,
+    attachments: ReadonlyMap<string, { ticketId: string; attachedAt: string }>
+  ): { ticketId: string; attachedAt: string } | undefined {
+    return decision.triggerIds
+      .flatMap((id) => {
+        const attachment = attachments.get(id);
+        return attachment ? [attachment] : [];
+      })
+      .sort((left, right) =>
+        right.attachedAt.localeCompare(left.attachedAt)
+      )[0];
+  }
+
+  async function project(
+    decisions: readonly Decision[]
+  ): Promise<CandidateView[]> {
+    const tickets = await options.tickets.list();
+    const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+    const ticketsByDecision = new Map(
+      tickets.flatMap((ticket) =>
+        ticket.links.decisionId
+          ? [[ticket.links.decisionId, ticket] as const]
+          : []
+      )
+    );
+    const attachments = latestAttachments(tickets);
+    return decisions.map((decision) => {
+      const attached = attachmentFor(decision, attachments);
+      return candidateView(
+        decision,
+        (decision.ticketId ? ticketsById.get(decision.ticketId) : undefined) ??
+          ticketsByDecision.get(decision.id),
+        attached?.ticketId
+      );
+    });
   }
 
   async function list(
@@ -110,25 +192,10 @@ export function createCandidateApi(options: {
     ) {
       throw httpError(400, "candidateOnly must be a boolean", "invalid_body");
     }
-    const [decisions, tickets] = await Promise.all([
-      options.decisions.list(thread ? { thread } : undefined),
-      options.tickets.list(),
-    ]);
-    const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]));
-    const ticketsByDecision = new Map(
-      tickets.flatMap((ticket) =>
-        ticket.links.decisionId
-          ? [[ticket.links.decisionId, ticket] as const]
-          : []
-      )
+    const decisions = await options.decisions.list(
+      thread ? { thread } : undefined
     );
-    const rows = decisions.map((decision) =>
-      candidateView(
-        decision,
-        (decision.ticketId ? ticketsById.get(decision.ticketId) : undefined) ??
-          ticketsByDecision.get(decision.id)
-      )
-    );
+    const rows = await project(decisions);
     return rows
       .filter((decision) => input.candidateOnly !== true || decision.candidate)
       .slice(0, limit);
@@ -137,7 +204,7 @@ export function createCandidateApi(options: {
   async function get(decisionId: string): Promise<CandidateView | undefined> {
     const decision = await options.decisions.get(decisionId);
     if (!decision) return undefined;
-    return candidateView(decision, await existingTicket(decision));
+    return (await project([decision]))[0];
   }
 
   async function triggersFor(decision: Decision): Promise<Trigger[]> {
@@ -204,6 +271,17 @@ export function createCandidateApi(options: {
           candidate: false as const,
           reused: true,
         };
+      }
+      const attached = attachmentFor(
+        decision,
+        latestAttachments(await options.tickets.list())
+      );
+      if (attached) {
+        throw httpError(
+          409,
+          "this Decision was attached to a Ticket; attach it to another Ticket or leave it as context",
+          "already_attached"
+        );
       }
       if (decision.outcome === "accept") {
         throw httpError(
@@ -278,6 +356,103 @@ export function createCandidateApi(options: {
     }
   }
 
+  async function attach(input: {
+    decisionId: string;
+    ticketId: string;
+    note?: string;
+  }): Promise<AttachedCandidate> {
+    const decisionId = input.decisionId.trim();
+    const ticketId = input.ticketId.trim();
+    if (!decisionId) {
+      throw httpError(400, "decisionId is required", "invalid_body");
+    }
+    if (!ticketId) {
+      throw httpError(400, "ticketId is required", "invalid_body");
+    }
+    const note = input.note?.trim();
+    if (note && note.length > MAX_TICKET_NOTE_CHARS) {
+      throw httpError(
+        400,
+        `note is longer than ${MAX_TICKET_NOTE_CHARS} characters`,
+        "invalid_body"
+      );
+    }
+    const flightKey = `${decisionId}\0${ticketId}`;
+    const pending = attachFlights.get(flightKey);
+    if (pending) return pending;
+    const flight = (async () => {
+      const decision = await options.decisions.get(decisionId);
+      if (!decision) {
+        throw httpError(404, "decision not found", "not_found");
+      }
+      const ticket = await options.tickets.get(ticketId);
+      if (!ticket) {
+        throw httpError(404, "ticket not found", "not_found");
+      }
+      const before = await options.ticketView(ticket.id);
+      if (!before) {
+        throw httpError(404, "ticket not found", "not_found");
+      }
+      if (before.stage === "unassigned") {
+        throw httpError(
+          409,
+          "this Ticket has no Goal to carry out the attached event",
+          "ticket_unassigned"
+        );
+      }
+      if (before.stage === "cancelled") {
+        throw httpError(
+          409,
+          "a person stopped this Ticket; attach the event to another Ticket or accept it as new work",
+          "ticket_stopped"
+        );
+      }
+      if (!ticket.links.legacyGoalId || !options.goals.reopenGoal) {
+        throw httpError(
+          409,
+          "this Ticket has no Goal to carry out the attached event",
+          "ticket_unassigned"
+        );
+      }
+      if (decision.outcome === "accept" || (await existingTicket(decision))) {
+        throw httpError(
+          409,
+          "this Decision already became a Ticket; attach the event to another Ticket",
+          "already_accepted"
+        );
+      }
+      const triggers = await triggersFor(decision);
+      const attached = await options.tickets.attachToTicket({
+        ticketId: ticket.id,
+        triggers,
+        ...(note ? { note } : {}),
+        attachedAt: options.now().toISOString(),
+      });
+      if (!attached) {
+        throw httpError(404, "ticket not found", "not_found");
+      }
+      // Reopening is also the retry path when an Input was written but Core stopped before its
+      // terminal Goal resumed. A live or paused Goal treats this call as a no-op.
+      await options.goals.reopenGoal(ticket.links.legacyGoalId);
+      const view = await options.ticketView(ticket.id);
+      if (!view) {
+        throw httpError(500, "the Ticket could not be read", "ticket_missing");
+      }
+      return {
+        ...view,
+        decisionId: decision.id,
+        attachedTicketId: ticket.id,
+        reused: attached.reused,
+      };
+    })();
+    attachFlights.set(flightKey, flight);
+    try {
+      return await flight;
+    } finally {
+      attachFlights.delete(flightKey);
+    }
+  }
+
   async function invoke(
     name: DecisionToolName,
     input: Record<string, unknown>,
@@ -313,6 +488,30 @@ export function createCandidateApi(options: {
         }
         return accept(decisionId);
       }
+      case DECISION_ATTACH_TOOL_NAME: {
+        if (!caller.writes) {
+          throw httpError(
+            403,
+            "attaching a Decision needs write permission",
+            "mcp_write_required"
+          );
+        }
+        const decisionId =
+          typeof input.decisionId === "string" ? input.decisionId.trim() : "";
+        const ticketId =
+          typeof input.ticketId === "string" ? input.ticketId.trim() : "";
+        if (!decisionId) {
+          throw httpError(400, "decisionId is required", "invalid_body");
+        }
+        if (!ticketId) {
+          throw httpError(400, "ticketId is required", "invalid_body");
+        }
+        return attach({
+          decisionId,
+          ticketId,
+          ...(typeof input.note === "string" ? { note: input.note } : {}),
+        });
+      }
     }
   }
 
@@ -321,5 +520,7 @@ export function createCandidateApi(options: {
     list,
     get,
     accept,
+    attach,
+    project,
   };
 }

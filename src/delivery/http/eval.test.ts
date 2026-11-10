@@ -155,6 +155,7 @@ describe("decisions over HTTP", () => {
     ]);
     expect((await call("/openapi.json")).body.paths).toMatchObject({
       "/v1/decisions/{id}/accept": { post: expect.any(Object) },
+      "/v1/decisions/{id}/attach": { post: expect.any(Object) },
     });
   });
 
@@ -163,11 +164,22 @@ describe("decisions over HTTP", () => {
     expect((await call(`/v1/decisions/${"0".repeat(32)}/accept`)).status).toBe(
       405
     );
+    expect((await call(`/v1/decisions/${"0".repeat(32)}/attach`)).status).toBe(
+      405
+    );
     await app.agent.quiesce();
     expect(
       (
         await call(`/v1/decisions/${"0".repeat(32)}/accept`, {
           method: "POST",
+        })
+      ).status
+    ).toBe(503);
+    expect(
+      (
+        await call(`/v1/decisions/${"0".repeat(32)}/attach`, {
+          method: "POST",
+          body: JSON.stringify({ ticketId: "1".repeat(32) }),
         })
       ).status
     ).toBe(503);
@@ -292,6 +304,108 @@ describe("a container going down, end to end", () => {
     expect((await call("/v1/tickets")).body.tickets).toHaveLength(1);
     const goalId = accepted.body.ticket.links.legacyGoalId as string;
     await app.agent.stopGoal(goalId);
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    await app.agent.quiesce();
+  });
+
+  it("attaches a Decision to an explicitly named ended Ticket and resumes it without another Eval", async () => {
+    vi.useFakeTimers();
+    const d = docker("running");
+    const { app, fake, call, put } = open({
+      watch: true,
+      provider: d.provider,
+    });
+    const { body: policy } = await put({
+      rules: ["Restart a media server that stopped"],
+    });
+
+    fake.queueTurns([
+      { kind: "text", text: "The task finished." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: current state checked\nREMAINING: none",
+      },
+    ]);
+    const delegated = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Keep the media task durable",
+        idempotencyKey: "attach-decision-target",
+        maxIterations: 1,
+      }),
+    });
+    expect(delegated.status).toBe(201);
+    const ticketId = delegated.body.ticket.id as string;
+    const goalId = delegated.body.ticket.links.legacyGoalId as string;
+    await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
+      status: "completed",
+    });
+
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          decision: "accept",
+          matched: [policy.rules[0]!.id],
+          intent: "restart the emby container",
+          reason: "emby stopped",
+        }),
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    d.set("exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      expect((await call("/v1/decisions")).body.decisions).toHaveLength(1);
+    });
+    const [decision] = (await call("/v1/decisions")).body.decisions;
+
+    const attached = await call(`/v1/decisions/${decision.id}/attach`, {
+      method: "POST",
+      body: JSON.stringify({
+        ticketId,
+        note: "Use this failure as context for the remaining media work.",
+      }),
+    });
+    expect(attached.status).toBe(201);
+    expect(attached.body).toMatchObject({
+      decisionId: decision.id,
+      attachedTicketId: ticketId,
+      reused: false,
+      stage: "running",
+      ticket: {
+        id: ticketId,
+        subscriptions: expect.arrayContaining(["resource:container:emby"]),
+        inputs: [
+          {
+            triggerId: decision.triggerIds[0],
+            note: "Use this failure as context for the remaining media work.",
+          },
+        ],
+      },
+    });
+    expect((await call(`/v1/decisions/${decision.id}`)).body).toMatchObject({
+      candidate: false,
+      attachedTicketId: ticketId,
+    });
+    await expect(app.agent.listDecisions()).resolves.toHaveLength(1);
+
+    const again = await call(`/v1/decisions/${decision.id}/attach`, {
+      method: "POST",
+      body: JSON.stringify({ ticketId }),
+    });
+    expect(again.status).toBe(200);
+    expect(again.body).toMatchObject({
+      attachedTicketId: ticketId,
+      reused: true,
+    });
+    expect(await app.agent.getTicket(ticketId)).toMatchObject({
+      inputs: [expect.objectContaining({ triggerId: decision.triggerIds[0] })],
+    });
+
+    await call(`/v1/tickets/${ticketId}/stop`, { method: "POST" });
     await expect(app.agent.waitGoal(goalId)).resolves.toMatchObject({
       status: "cancelled",
     });

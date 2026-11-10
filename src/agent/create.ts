@@ -386,7 +386,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     ticketView: ticketControl.get,
     triggers: triggerStore,
     policy: policyStore,
-    goals,
+    goals: {
+      startGoal: goals.startGoal,
+      reopenGoal: goals.reopenGoalForInput,
+    },
     sessions,
     servicesForResource,
     now: ctx.now,
@@ -403,18 +406,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     model: options.mainSessionModel,
   });
   async function projectDecisions(rows: Decision[]): Promise<Decision[]> {
-    const tickets = await ticketStore.list();
-    const byDecision = new Map(
-      tickets.flatMap((ticket) =>
-        ticket.links.decisionId
-          ? [[ticket.links.decisionId, ticket.id] as const]
-          : []
-      )
-    );
-    return rows.map((decision) => {
-      const acceptedTicketId = byDecision.get(decision.id);
-      return acceptedTicketId ? { ...decision, acceptedTicketId } : decision;
-    });
+    return candidates.project(rows);
   }
   return {
     runtime: options.runtime,
@@ -447,6 +439,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async acceptDecision(decisionId) {
       return candidates.accept(decisionId);
+    },
+    async attachDecision(input) {
+      return candidates.attach(input);
     },
     async listTriggers(query) {
       return triggerStore.list(query);

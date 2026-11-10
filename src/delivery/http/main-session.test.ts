@@ -113,6 +113,7 @@ describe("main Session", () => {
       "decision_list",
       "decision_get",
       "decision_accept",
+      "decision_attach",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",
@@ -123,6 +124,7 @@ describe("main Session", () => {
     expect(state.toolsRequiringApproval).toEqual(
       expect.arrayContaining([
         "decision_accept",
+        "decision_attach",
         "ticket_delegate",
         "ticket_reply",
         "ticket_note",
@@ -394,6 +396,7 @@ describe("main Session", () => {
       "decision_list",
       "decision_get",
       "decision_accept",
+      "decision_attach",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",

@@ -235,6 +235,53 @@ describe("ticket fan-out and inputs", () => {
     expect((await store.get(ticket.id))?.inputs).toHaveLength(1);
   });
 
+  it("attaches explicitly to one Ticket with its Thread subscription and routing note", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect(request(1));
+    const first = await store.attachToTicket({
+      ticketId: ticket.id,
+      triggers: [trigger(1)],
+      note: "This belongs to the media cleanup.",
+      attachedAt: "2026-11-10T11:00:00.000Z",
+    });
+    expect(first).toMatchObject({
+      reused: false,
+      addedTriggerIds: [trigger(1).id],
+      ticket: {
+        subscriptions: ["chat:s1", "resource:container:emby"],
+        inputs: [
+          {
+            triggerId: trigger(1).id,
+            seq: 1,
+            note: "This belongs to the media cleanup.",
+            attachedAt: "2026-11-10T11:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    const again = await store.attachToTicket({
+      ticketId: ticket.id,
+      triggers: [trigger(1)],
+      note: "A retry must not duplicate the event.",
+    });
+    expect(again).toMatchObject({
+      reused: true,
+      addedTriggerIds: [],
+    });
+    expect((await store.get(ticket.id))?.inputs).toHaveLength(1);
+  });
+
+  it("returns no attachment for an unknown explicit Ticket", async () => {
+    const store = createTicketStore({});
+    await expect(
+      store.attachToTicket({
+        ticketId: "f".repeat(32),
+        triggers: [trigger(1)],
+      })
+    ).resolves.toBeUndefined();
+  });
+
   it("persists inputs across a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tickets-inputs-"));
     const firstStore = createTicketStore({ dir });
