@@ -794,6 +794,17 @@ const operations: Operation[] = [
   },
   {
     method: "post",
+    path: "/v1/tickets/{id}/note",
+    summary:
+      "Add guidance for a live Ticket's next worker checkpoint without interrupting it",
+    tag: "ticket",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "TicketNoteRequest",
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
     path: "/v1/tickets/{id}/pause",
     summary: "Pause a running Ticket after the current checkpoint",
     tag: "ticket",
@@ -3313,6 +3324,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "string",
               enum: ["allow", "deny"],
               description: "The decision for permissionId.",
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketNoteRequest: {
+          type: "object",
+          required: ["note"],
+          properties: {
+            note: {
+              type: "string",
+              minLength: 1,
+              maxLength: 4000,
+              description:
+                "Guidance for the next worker checkpoint. It does not interrupt the active checkpoint.",
             },
           },
           additionalProperties: false,

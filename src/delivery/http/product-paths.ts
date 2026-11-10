@@ -27,6 +27,7 @@ export const PRODUCT_HTTP_SEGMENT = {
   cancel: "cancel",
   resolve: "resolve",
   reply: "reply",
+  note: "note",
   pause: "pause",
   resume: "resume",
   stop: "stop",
