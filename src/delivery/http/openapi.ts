@@ -3153,6 +3153,24 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
             wouldAccept: { type: "boolean" },
             matchedRuleIds: { type: "array", items: { type: "string" } },
+            matchedRules: {
+              type: "array",
+              description:
+                "The matched Policy rules as they read when the Decision was made, so a person can later accept a candidate after a Policy edit.",
+              items: {
+                type: "object",
+                required: ["id", "text"],
+                properties: {
+                  id: { type: "string" },
+                  text: { type: "string" },
+                },
+              },
+            },
+            intent: {
+              type: "string",
+              description:
+                "The Assessment's one-sentence description of the work proposed by a positive Decision.",
+            },
             reason: { type: "string" },
             unavailableReason: { type: "string" },
             gate: {

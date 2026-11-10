@@ -277,6 +277,10 @@ export function createEvalService(options: {
       const positive = {
         wouldAccept: true,
         matchedRuleIds: verdict.matchedRuleIds,
+        matchedRules: policy.rules.filter((rule) =>
+          verdict.matchedRuleIds.includes(rule.id)
+        ),
+        ...(verdict.intent ? { intent: verdict.intent } : {}),
         reason: verdict.reason,
       };
       // A positive assessment that is not taken on stays a "would have", and says why.
@@ -331,6 +335,10 @@ export function createEvalService(options: {
       outcome: "ignore",
       wouldAccept,
       matchedRuleIds: verdict.matchedRuleIds,
+      matchedRules: policy.rules.filter((rule) =>
+        verdict.matchedRuleIds.includes(rule.id)
+      ),
+      ...(verdict.intent ? { intent: verdict.intent } : {}),
       reason: verdict.reason,
     });
   }

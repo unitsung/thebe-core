@@ -53,7 +53,7 @@ function open(
 }
 
 describe("main Session", () => {
-  it("starts lazily and exposes only the Ticket control tools", async () => {
+  it("starts lazily and exposes only Decision and Ticket tools", async () => {
     const mcp: McpRegistry = {
       listTools: async () => [],
       listServers: async () => [],
@@ -110,6 +110,9 @@ describe("main Session", () => {
     expect(state.enabledResources).toEqual([]);
     expect(state.tools.map((tool) => tool.name)).toEqual([
       "session_search",
+      "decision_list",
+      "decision_get",
+      "decision_accept",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",
@@ -119,6 +122,7 @@ describe("main Session", () => {
     ]);
     expect(state.toolsRequiringApproval).toEqual(
       expect.arrayContaining([
+        "decision_accept",
         "ticket_delegate",
         "ticket_reply",
         "ticket_note",
@@ -260,6 +264,39 @@ describe("main Session", () => {
     });
   });
 
+  it("lets the main Session inspect Eval candidates", async () => {
+    const { fake, call } = open();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "decision_list",
+            args: { candidateOnly: true },
+          },
+        ],
+      },
+      { kind: "text", text: "There are no candidates." },
+    ]);
+    const prompted = await call("/v1/main-session/messages", {
+      method: "POST",
+      body: JSON.stringify({ text: "Is there anything you would act on?" }),
+    });
+    expect(prompted.status).toBe(200);
+    expect(prompted.body).toMatchObject({
+      text: "There are no candidates.",
+      tools: ["decision_list"],
+    });
+    const info = await call("/v1/main-session");
+    const state = fake.snapshot(info.body.session.runtimeSessionId);
+    const result = state.messages.find(
+      (message) =>
+        message.role === "tool" && message.toolName === "decision_list"
+    );
+    expect(result?.text).toContain(JSON.stringify({ decisions: [] }));
+    expect(result?.text).toContain('<tool_output tool="decision_list">');
+  });
+
   it("attributes a delegated Ticket to the person, not to an MCP caller", async () => {
     const { app, fake, call } = open();
     fake.queueTurns([
@@ -354,6 +391,9 @@ describe("main Session", () => {
     expect(resumedState.builtinTools).toEqual([]);
     expect(resumedState.tools.map((tool) => tool.name)).toEqual([
       "session_search",
+      "decision_list",
+      "decision_get",
+      "decision_accept",
       "ticket_list",
       "ticket_get",
       "ticket_delegate",

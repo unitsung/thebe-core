@@ -1,0 +1,79 @@
+export const DECISION_LIST_TOOL_NAME = "decision_list" as const;
+export const DECISION_GET_TOOL_NAME = "decision_get" as const;
+export const DECISION_ACCEPT_TOOL_NAME = "decision_accept" as const;
+
+export const DECISION_TOOL_NAMES = [
+  DECISION_LIST_TOOL_NAME,
+  DECISION_GET_TOOL_NAME,
+  DECISION_ACCEPT_TOOL_NAME,
+] as const;
+
+export type DecisionToolName = (typeof DECISION_TOOL_NAMES)[number];
+
+export const DECISION_TOOL_WRITE_NAMES: ReadonlySet<string> = new Set([
+  DECISION_ACCEPT_TOOL_NAME,
+]);
+
+export const DECISION_TOOL_SCHEMAS: Record<
+  DecisionToolName,
+  Record<string, unknown>
+> = {
+  [DECISION_LIST_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      thread: {
+        type: "string",
+        description:
+          "Only return Decisions about this Thread, for example resource:container:emby.",
+      },
+      candidateOnly: {
+        type: "boolean",
+        default: false,
+        description:
+          "When true, return only positive Decisions that no Ticket has accepted yet.",
+      },
+      limit: {
+        type: "integer",
+        minimum: 1,
+        maximum: 50,
+        default: 20,
+        description: "Decisions to return, newest first.",
+      },
+    },
+    additionalProperties: false,
+  },
+  [DECISION_GET_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      decisionId: {
+        type: "string",
+        pattern: "^[a-f0-9]{32}$",
+        description: "The Decision id returned by decision_list.",
+      },
+    },
+    required: ["decisionId"],
+    additionalProperties: false,
+  },
+  [DECISION_ACCEPT_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      decisionId: {
+        type: "string",
+        pattern: "^[a-f0-9]{32}$",
+        description:
+          "A positive candidate from decision_list that has no accepted Ticket yet.",
+      },
+    },
+    required: ["decisionId"],
+    additionalProperties: false,
+  },
+};
+
+export const DECISION_TOOL_DESCRIPTIONS: Record<DecisionToolName, string> = {
+  [DECISION_LIST_TOOL_NAME]:
+    "List Eval Decisions newest first. A candidate is a positive decision with no accepted Ticket yet.",
+  [DECISION_GET_TOOL_NAME]:
+    "Read one Eval Decision and whether it is still an actionable candidate.",
+  [DECISION_ACCEPT_TOOL_NAME]:
+    "Accept one positive candidate as an explicit Ticket after the person approves. The original Decision is never rewritten.",
+};

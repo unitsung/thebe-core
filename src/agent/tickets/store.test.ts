@@ -127,6 +127,40 @@ describe("a Ticket for work Eval took on", () => {
   });
 });
 
+describe("a Ticket for a person-accepted Decision", () => {
+  it("is explicit, links the unchanged Decision, and is found by either id", async () => {
+    const store = createTicketStore({});
+    const input = {
+      evalId: key("eval", "candidate"),
+      decisionId: key("decision", "candidate"),
+      thread: "resource:container:emby",
+      at: "2026-11-10T10:00:00.000Z",
+      title: "Restart emby",
+      requester: "chat",
+      goalId: "goal-candidate",
+    };
+    const ticket = await store.recordDecisionAccepted(input);
+    expect(ticket).toMatchObject({
+      title: "Restart emby",
+      mandate: {
+        strength: "explicit",
+        decidedBy: "direct",
+        evalId: input.evalId,
+        requester: "chat",
+      },
+      subscriptions: [input.thread],
+      links: {
+        decisionId: input.decisionId,
+        legacyGoalId: input.goalId,
+        sessionIds: [input.goalId],
+      },
+    });
+    expect((await store.getByDecision(input.decisionId))?.id).toBe(ticket.id);
+    expect((await store.getByGoal(input.goalId))?.id).toBe(ticket.id);
+    expect(await store.recordDecisionAccepted(input)).toEqual(ticket);
+  });
+});
+
 describe("ticket fan-out and inputs", () => {
   it("attaches a trigger to an active subscribed ticket", async () => {
     const store = createTicketStore({});
