@@ -189,6 +189,8 @@ export type GoalRun = {
   reviewBeforeDone?: boolean;
   /** The person's answers and review notes so far, given to every later checkpoint. */
   guidance?: string[];
+  /** Highest sequence of a later Ticket event already included in a worker checkpoint. */
+  ticketInputSeq?: number;
   /** Last semantic progress observed by the Watchdog. Audit events do not move this clock. */
   progressAt?: string;
   /** Set while Watchdog is checking, retrying, or waiting for the person. */

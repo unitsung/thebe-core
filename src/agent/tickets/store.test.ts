@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { key } from "./ids.ts";
-import { createTicketStore } from "./store.ts";
+import { createTicketStore, MAX_INPUTS_PER_TICKET } from "./store.ts";
 
 const request = (n: number) => ({
   thread: `chat:s${n}`,
@@ -216,5 +216,23 @@ describe("ticket fan-out and inputs", () => {
     const loaded = await secondStore.get(ticket.id);
     expect(loaded?.inputs).toHaveLength(1);
     expect(loaded?.inputs[0]?.triggerId).toBe(trigger(1).id);
+  });
+
+  it("keeps input sequence monotonic after pruning the oldest event", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    for (let index = 1; index <= MAX_INPUTS_PER_TICKET + 1; index += 1) {
+      await store.attachTrigger({
+        trigger: trigger(index),
+        isLive: () => true,
+      });
+    }
+    const inputs = (await store.get(ticket.id))?.inputs ?? [];
+    expect(inputs).toHaveLength(MAX_INPUTS_PER_TICKET);
+    expect(inputs[0]?.seq).toBe(2);
+    expect(inputs.at(-1)?.seq).toBe(MAX_INPUTS_PER_TICKET + 1);
   });
 });

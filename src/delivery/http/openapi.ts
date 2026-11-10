@@ -3234,7 +3234,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: { $ref: "#/components/schemas/TicketInput" },
               description:
-                "Later events on subscribed threads attached to the ticket without a new assessment.",
+                "Later events on subscribed threads attached to the ticket without a new assessment. Fresh inputs reach the worker's next checkpoint as untrusted data.",
             },
             links: {
               type: "object",
