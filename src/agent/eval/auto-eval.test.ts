@@ -41,6 +41,7 @@ async function setup(
     earlier?: { title: string; at: string; state: string }[];
     prepare?: () => Promise<SpeculativePreparation | undefined>;
     preparationTimeoutMs?: number;
+    budgetExhausted?: () => boolean;
   } = {}
 ) {
   const clock = options.clock ?? { now: T0 + 60_000 };
@@ -69,6 +70,13 @@ async function setup(
     sources: "container-health",
     now,
     maxAcceptsPerThreadPerHour: options.maxAccepts,
+    ...(options.budgetExhausted
+      ? {
+          backgroundBudget: {
+            exhausted: async () => options.budgetExhausted!(),
+          },
+        }
+      : {}),
     accept: options.withAccept === false ? undefined : accept,
     threadTickets: async () => options.earlier ?? [],
     ...(options.prepare ? { prepare: options.prepare } : {}),
@@ -167,6 +175,22 @@ describe("auto in Eval: a positive assessment becomes a Ticket", () => {
       outcome: "ignore",
       wouldAccept: true,
       notTakenOn: "quiesced",
+    });
+    expect(s.accepted).toEqual([]);
+  });
+
+  it("accepts no Ticket when the assessment spends the last background tokens", async () => {
+    let exhausted = false;
+    const s = await setup({
+      budgetExhausted: () => exhausted,
+      whileAssessing: () => {
+        exhausted = true;
+      },
+    });
+    expect(await run(s)).toMatchObject({
+      outcome: "unavailable",
+      unavailableReason: "daily_budget",
+      wouldAccept: true,
     });
     expect(s.accepted).toEqual([]);
   });

@@ -222,6 +222,7 @@ export async function bootstrapThebe(
     agentStoreDir,
     sources: parseSources(process.env),
     evalMaxPerHour: parseEvalMaxPerHour(process.env),
+    dailyBackgroundTokenBudget: parseDailyBackgroundTokenBudget(process.env),
     watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
@@ -398,4 +399,17 @@ export function parseEvalMaxPerHour(
   if (!raw) return undefined;
   const value = Number(raw);
   return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `THEBE_BACKGROUND_TOKEN_BUDGET`: autonomous input + output + cache-write tokens per UTC day.
+ * Unset or invalid keeps one million; `0` pauses autonomous model work.
+ */
+export function parseDailyBackgroundTokenBudget(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_BACKGROUND_TOKEN_BUDGET?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }

@@ -10,13 +10,15 @@ import { discoverSubagentProfiles, type SubagentProfile } from "./catalog.ts";
 import { createSubagentRunManager } from "./service.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
 
 const SUBAGENT_WRITE_TOOLS = new Set(["edit", "write"]);
 
 export function createSubagentApi(
   ctx: AgentContext,
   artifactStore?: ArtifactStore,
-  reportInbox?: GoalReportInbox
+  reportInbox?: GoalReportInbox,
+  backgroundBudget?: BackgroundBudgetService
 ) {
   const {
     options,
@@ -145,6 +147,14 @@ export function createSubagentApi(
     },
     rejectPendingPermission,
     onSnapshot: persistSubagentSnapshot,
+    captureUsage: async (run, session) => {
+      if (!run.background || !backgroundBudget) return;
+      const context = await session.getContextUsage();
+      await backgroundBudget.recordSession({
+        id: `subagent:${run.runId}`,
+        context,
+      });
+    },
     beforeTerminal: async (run) => {
       if (
         artifactStore &&
@@ -191,6 +201,13 @@ export function createSubagentApi(
       if (!spawn.taskPrompt.trim())
         throw new Error("subagent task cannot be empty");
       await lookup(spawn.parentSessionId);
+      if (spawn.background && (await backgroundBudget?.exhausted())) {
+        throw httpError(
+          409,
+          "today's background token budget is spent",
+          "background_budget_spent"
+        );
+      }
       const run = subagentRuns.spawn({
         profile,
         task: spawn.taskPrompt,

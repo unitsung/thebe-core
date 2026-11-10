@@ -6,6 +6,7 @@ import { redactToolOutput } from "../security/redaction.ts";
 import type { ThebeAgent } from "../interface.ts";
 import type { GoalSchedule, GoalScheduleInput } from "./types.ts";
 import { isValidTimeZone, nextCronRun, parseCron } from "./cron.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
 
 type GoalPort = Pick<ThebeAgent, "createSession" | "startGoal" | "listGoals">;
 
@@ -17,6 +18,7 @@ export function createScheduleApi(options: {
   goals: GoalPort;
   checkWritable: () => void;
   isQuiesced: () => boolean;
+  backgroundBudget?: Pick<BackgroundBudgetService, "exhausted">;
 }) {
   let rows: GoalSchedule[] = [];
   let loaded = false;
@@ -95,6 +97,14 @@ export function createScheduleApi(options: {
 
   async function dispatch(row: GoalSchedule, manual = false) {
     options.checkWritable();
+    if (!manual && (await options.backgroundBudget?.exhausted())) {
+      await save({
+        ...advance(row),
+        lastError:
+          "Occurrence skipped because today's background token budget is spent.",
+      });
+      return;
+    }
     const previous = row.lastSessionId
       ? (await options.goals.listGoals()).find(
           (goal) => goal.thebeSessionId === row.lastSessionId

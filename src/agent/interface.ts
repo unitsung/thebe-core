@@ -72,6 +72,10 @@ import type { SourceHealth } from "./sources/runner.ts";
 import type { Decision, Policy } from "./eval/types.ts";
 import type { EvalUnavailableNotice } from "./eval/service.ts";
 import type {
+  BackgroundBudgetNotice,
+  BackgroundBudgetSummary,
+} from "./usage/budget.ts";
+import type {
   AgentArtifact,
   ArtifactContent,
   ArtifactQuery,
@@ -139,6 +143,12 @@ export type CreateThebeAgentOptions = {
   ) => Promise<void> | void;
   /** Called once when assessment fails and again only after a successful assessment. */
   onEvalUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
+  /** Called once per UTC day when autonomous model work exhausts its token budget. */
+  onBackgroundBudgetPaused?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Tokens autonomous work may use per UTC day. Default: one million; zero pauses it. */
+  dailyBackgroundTokenBudget?: number;
   /** Deterministic stuck-task thresholds. Defaults: 60 s scan; Goal 30/60 min; worker/reviewer 10/10 min. */
   watchdog?: {
     intervalMs?: number;
@@ -599,6 +609,16 @@ export interface ThebeAgent {
   getAudit(id: string): Promise<AuditRecord | undefined>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
+  /** Today's autonomous token usage, durable budget and the 15-day budget suggestion. */
+  getBackgroundBudgetSummary(): Promise<BackgroundBudgetSummary>;
+  /** Set the autonomous token budget. The owner's normal chat never uses this budget. */
+  setDailyBackgroundTokenBudget(
+    dailyTokens: number
+  ): Promise<BackgroundBudgetSummary>;
+  /** Accept or ignore the one-time budget suggestion. */
+  resolveBackgroundBudgetSuggestion(
+    action: "accept" | "ignore"
+  ): Promise<BackgroundBudgetSummary>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;
   listBackgroundTasks(thebeSessionId: string): Promise<ProductBackgroundTask[]>;
   listAllBackgroundTasks(): Promise<ProductBackgroundTask[]>;

@@ -247,6 +247,31 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.usageSummary,
+    summary: "Read today's autonomous token usage and durable daily budget",
+    tag: "metrics",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "put",
+    path: PRODUCT_HTTP_PATH.backgroundBudget,
+    summary: "Set the autonomous daily token budget",
+    tag: "metrics",
+    requestBody: { required: true },
+    requestSchema: "BackgroundBudgetUpdate",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "post",
+    path: PRODUCT_HTTP_PATH.backgroundBudgetSuggestion,
+    summary: "Accept or ignore the one-time 15-day budget suggestion",
+    tag: "metrics",
+    requestBody: { required: true },
+    requestSchema: "BackgroundBudgetSuggestionDecision",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.audit,
     summary: "Read the redacted append-only audit log",
     tag: "audit",
@@ -1833,6 +1858,116 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
+          },
+        },
+        BackgroundBudgetUpdate: {
+          type: "object",
+          required: ["dailyTokens"],
+          properties: {
+            dailyTokens: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "Autonomous input + output + cache-write tokens per UTC day. Zero pauses autonomous work.",
+            },
+          },
+        },
+        BackgroundBudgetSuggestionDecision: {
+          type: "object",
+          required: ["action"],
+          properties: {
+            action: { type: "string", enum: ["accept", "ignore"] },
+          },
+        },
+        BackgroundUsageTokens: {
+          type: "object",
+          required: [
+            "input",
+            "output",
+            "cacheWrite",
+            "cacheRead",
+            "counted",
+            "cost",
+          ],
+          properties: {
+            input: { type: "integer" },
+            output: { type: "integer" },
+            cacheWrite: { type: "integer" },
+            cacheRead: {
+              type: "integer",
+              description: "Reported but not counted against the budget.",
+            },
+            counted: {
+              type: "integer",
+              description: "input + output + cacheWrite.",
+            },
+            cost: {
+              type: "number",
+              description: "Estimated USD cost reported by the runtime.",
+            },
+          },
+        },
+        BackgroundBudgetSummary: {
+          type: "object",
+          required: ["generatedAt", "day", "budget", "usage", "history"],
+          properties: {
+            generatedAt: { type: "string", format: "date-time" },
+            day: { type: "string", format: "date" },
+            budget: {
+              type: "object",
+              required: [
+                "dailyTokens",
+                "remainingTokens",
+                "paused",
+                "resetsAt",
+              ],
+              properties: {
+                dailyTokens: { type: "integer" },
+                remainingTokens: { type: "integer" },
+                paused: { type: "boolean" },
+                resetsAt: { type: "string", format: "date-time" },
+                pausedNotice: { type: "string" },
+              },
+            },
+            usage: { $ref: "#/components/schemas/BackgroundUsageTokens" },
+            history: {
+              type: "array",
+              items: {
+                allOf: [
+                  { $ref: "#/components/schemas/BackgroundUsageTokens" },
+                  {
+                    type: "object",
+                    required: ["day"],
+                    properties: {
+                      day: { type: "string", format: "date" },
+                    },
+                  },
+                ],
+              },
+            },
+            suggestion: {
+              type: "object",
+              required: [
+                "id",
+                "status",
+                "basedOnDays",
+                "p95Tokens",
+                "dailyTokens",
+                "createdAt",
+              ],
+              properties: {
+                id: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "accepted", "ignored"],
+                },
+                basedOnDays: { type: "integer" },
+                p95Tokens: { type: "integer" },
+                dailyTokens: { type: "integer" },
+                createdAt: { type: "string", format: "date-time" },
+                resolvedAt: { type: "string", format: "date-time" },
+              },
+            },
           },
         },
         MetricsSummary: {

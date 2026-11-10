@@ -17,7 +17,7 @@ const input = {
   goal: "Check services without changing anything",
   startAt: "2026-10-06T01:00:00Z",
 };
-function fixture(dir?: string) {
+function fixture(dir?: string, options: { budgetExhausted?: boolean } = {}) {
   let time = new Date("2026-10-06T01:00:00Z");
   let quiesced = false;
   const runs: GoalRun[] = [];
@@ -50,6 +50,9 @@ function fixture(dir?: string) {
     isQuiesced: () => quiesced,
     checkWritable() {
       if (quiesced) throw new Error("quiesced");
+    },
+    backgroundBudget: {
+      exhausted: async () => options.budgetExhausted === true,
     },
   });
   return {
@@ -99,6 +102,23 @@ describe("durable Goal schedules", () => {
     await g.api.createSchedule({ ...input, acceptMode: "auto" });
     await g.api.tick();
     expect(g.startGoal.mock.calls[0]![0]).not.toHaveProperty("observe");
+  });
+  it("skips an automatic occurrence at the background budget but still allows a manual run", async () => {
+    const f = fixture(undefined, { budgetExhausted: true });
+    const schedule = await f.api.createSchedule({
+      ...input,
+      intervalMinutes: 60,
+    });
+    await f.api.tick();
+    expect(f.startGoal).not.toHaveBeenCalled();
+    expect(await f.api.getSchedule(schedule.id)).toMatchObject({
+      enabled: true,
+      lastError:
+        "Occurrence skipped because today's background token budget is spent.",
+    });
+
+    await f.api.runSchedule(schedule.id);
+    expect(f.startGoal).toHaveBeenCalledTimes(1);
   });
   it("refuses an unknown accept mode, and keeps the mode when a schedule is edited", async () => {
     const f = fixture();

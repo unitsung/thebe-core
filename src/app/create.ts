@@ -54,6 +54,8 @@ export function createThebeApp(options: {
   };
   /** Eval's hourly limit on questions to the model; see `CreateThebeAgentOptions.evalMaxPerHour`. */
   evalMaxPerHour?: number;
+  /** Autonomous model tokens per UTC day; see `CreateThebeAgentOptions.dailyBackgroundTokenBudget`. */
+  dailyBackgroundTokenBudget?: number;
   /** Deterministic stuck-task thresholds; see `CreateThebeAgentOptions.watchdog`. */
   watchdog?: {
     intervalMs?: number;
@@ -169,12 +171,23 @@ export function createThebeApp(options: {
             id: notice.id,
           })
       : undefined,
+    onBackgroundBudgetPaused: notifier
+      ? (notice) =>
+          notifier.notify({
+            category: "thebe.activity",
+            title: "Background work paused",
+            body: notice.message,
+            deepLink: "thebe://usage",
+            id: notice.id,
+          })
+      : undefined,
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
     sources: options.sources,
     evalMaxPerHour: options.evalMaxPerHour,
+    dailyBackgroundTokenBudget: options.dailyBackgroundTokenBudget,
     watchdog: options.watchdog,
     now: options.now,
     callerId: options.callerId,

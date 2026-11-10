@@ -29,7 +29,7 @@ const MAX_RETAINED_RUNS = 100;
 export const SUBAGENT_RUN_INTERRUPTED_ERROR =
   "Subagent run interrupted when Core restarted.";
 
-type MutableRun = SubagentExecutionRun & { background?: boolean };
+type MutableRun = SubagentExecutionRun;
 export type { SubagentSessionFactory } from "./execution.ts";
 
 export type SubagentRunManager = ReturnType<typeof createSubagentRunManager>;
@@ -52,6 +52,10 @@ export function createSubagentRunManager(options: {
   onSnapshot?: (run: SubagentRun) => void | Promise<void>;
   beforeTerminal?: (run: SubagentExecutionRun) => void | Promise<void>;
   onTerminal?: (run: SubagentRun) => void | Promise<void>;
+  captureUsage?: (
+    run: SubagentExecutionRun,
+    session: RuntimeSession
+  ) => Promise<void> | void;
 }) {
   const now = options.now ?? (() => new Date());
   const maxConcurrent = normalizeAgentSubagentLimit(
@@ -97,7 +101,6 @@ export function createSubagentRunManager(options: {
       cancelRequested: _cancelRequested,
       profile: _profile,
       nextActivityId: _nextActivityId,
-      background: _background,
       ...publicRun
     } = run;
     return {
@@ -223,6 +226,7 @@ export function createSubagentRunManager(options: {
         appendActivity: appendRunActivity,
         recordEvent: recordRunEvent,
         notify,
+        captureUsage: options.captureUsage,
         finish,
         onSnapshot: (child) => options.onSnapshot?.(snapshot(child)),
         onFinished: () => {

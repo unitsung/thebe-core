@@ -145,6 +145,12 @@ export type {
 } from "./runtime/interface.ts";
 export type { PermissionMode } from "./runtime/interface.ts";
 export type {
+  BackgroundBudgetNotice,
+  BackgroundBudgetSuggestion,
+  BackgroundBudgetSummary,
+  BackgroundUsageTokens,
+} from "./usage/budget.ts";
+export type {
   AgentSettingKey,
   AgentSettingSource,
   AgentSettings,

@@ -97,7 +97,8 @@ let lastFake: ReturnType<typeof createFakeRuntime> | undefined;
 async function start(
   mode: "auto" | "observe",
   verdict: "accept" | "ignore" = "accept",
-  turns?: Parameters<ReturnType<typeof createFakeRuntime>["queueTurns"]>[0]
+  turns?: Parameters<ReturnType<typeof createFakeRuntime>["queueTurns"]>[0],
+  dailyBackgroundTokenBudget?: number
 ) {
   vi.useFakeTimers();
   const auditDir = await mkdtemp(join(tmpdir(), "auto-audit-"));
@@ -112,6 +113,7 @@ async function start(
     auditPath: join(auditDir, "audit.jsonl"),
     agentStoreDir: auditDir,
     sources: { containerHealth: true, intervalMs: 1000 },
+    dailyBackgroundTokenBudget,
     pushRelayUrl: "https://relay.example",
     pushFetch: (async (_url: string, init: RequestInit) => {
       pushes.push(JSON.parse(init.body as string) as Record<string, unknown>);
@@ -191,6 +193,10 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
       subscriptions: ["resource:container:emby"],
       links: { decisionId: decision!.id, legacyGoalId: decision!.goalId },
     });
+    const usage = await app.agent.getBackgroundBudgetSummary();
+    expect(usage.usage.counted).toBeGreaterThan(0);
+    expect(usage.usage.cost).toBeGreaterThan(0);
+    const countedAfterAssessment = usage.usage.counted;
 
     // The executor did the work: one restart, a plain call on the service connection, covered by the
     // Mandate (nobody was there to ask).
@@ -205,9 +211,40 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     await vi.waitFor(() =>
       expect(app.agent.getGoal(decision!.goalId!)?.status).toBe("completed")
     );
+    await vi.waitFor(async () =>
+      expect(
+        (await app.agent.getBackgroundBudgetSummary()).usage.counted
+      ).toBeGreaterThan(countedAfterAssessment)
+    );
     // Nothing else was restarted, and the same Eval made no second Ticket.
     expect(d.requests).toEqual(["POST /containers/emby/restart"]);
     expect(await app.agent.listTickets()).toHaveLength(1);
+    await app.agent.quiesce();
+  });
+
+  it("pauses autonomous work at the daily budget without limiting the owner's chat", async () => {
+    const { app, d } = await start("auto", "accept", undefined, 0);
+    d.set("emby", "exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () =>
+      expect(await decisionsOf(app)).toHaveLength(1)
+    );
+
+    expect((await decisionsOf(app))[0]).toMatchObject({
+      outcome: "unavailable",
+      unavailableReason: "daily_budget",
+    });
+    expect(await app.agent.listTickets()).toHaveLength(0);
+    expect(await app.agent.getBackgroundBudgetSummary()).toMatchObject({
+      budget: { dailyTokens: 0, paused: true },
+      usage: { counted: 0, cost: 0 },
+    });
+
+    const chat = await app.agent.askMainSession("hello");
+    expect(chat.text).toContain('"decision":"accept"');
+    expect((await app.agent.getBackgroundBudgetSummary()).usage.counted).toBe(
+      0
+    );
     await app.agent.quiesce();
   });
 

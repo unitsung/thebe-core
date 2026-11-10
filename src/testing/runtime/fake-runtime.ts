@@ -33,6 +33,8 @@ export type FakeRuntimeHarness = {
   compactInstructions(): Array<string | undefined>;
   inboundToolResults(): FakeInboundToolResult[];
   snapshot(id: string): FakeSessionState;
+  /** Fix the token counts and cost a fake session reports. */
+  setUsage(id: string, usage: NonNullable<FakeSessionState["usage"]>): void;
 };
 
 export function createFakeRuntime(
@@ -257,6 +259,9 @@ export function createFakeRuntime(
     },
     inboundToolResults(): FakeInboundToolResult[] {
       return inboundToolResults.slice();
+    },
+    setUsage(id, usage): void {
+      getState(id).usage = { ...usage };
     },
     snapshot(id: string): FakeSessionState {
       return getState(id);

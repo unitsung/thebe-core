@@ -24,6 +24,7 @@ import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
 import { handleMetricsRoutes } from "./routes/metrics.ts";
+import { handleUsageRoutes } from "./routes/usage.ts";
 import {
   createOpenApiDocument,
   swaggerUiAsset,
@@ -104,6 +105,10 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       const metricsResponse = await handleMetricsRoutes(context);
       if (metricsResponse) {
         return metricsResponse;
+      }
+      const usageResponse = await handleUsageRoutes(context);
+      if (usageResponse) {
+        return usageResponse;
       }
 
       const diagnosisResponse = await handleDiagnosisRoutes(context);

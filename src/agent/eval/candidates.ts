@@ -116,6 +116,7 @@ export function createCandidateApi(options: {
       ...decision,
       candidate:
         decision.wouldAccept === true &&
+        decision.outcome !== "unavailable" &&
         decision.outcome !== "accept" &&
         !acceptedTicketId &&
         !attachedTicketId,
