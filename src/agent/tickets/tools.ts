@@ -2,6 +2,7 @@ export const TICKET_LIST_TOOL_NAME = "ticket_list" as const;
 export const TICKET_GET_TOOL_NAME = "ticket_get" as const;
 export const TICKET_DELEGATE_TOOL_NAME = "ticket_delegate" as const;
 export const TICKET_REPLY_TOOL_NAME = "ticket_reply" as const;
+export const TICKET_NOTE_TOOL_NAME = "ticket_note" as const;
 export const TICKET_CONTROL_TOOL_NAME = "ticket_control" as const;
 
 export const TICKET_TOOL_NAMES = [
@@ -9,10 +10,13 @@ export const TICKET_TOOL_NAMES = [
   TICKET_GET_TOOL_NAME,
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
+  TICKET_NOTE_TOOL_NAME,
   TICKET_CONTROL_TOOL_NAME,
 ] as const;
 
 export type TicketToolName = (typeof TICKET_TOOL_NAMES)[number];
+
+export const MAX_TICKET_NOTE_CHARS = 4000;
 
 export const TICKET_STAGE_VALUES = [
   "unassigned",
@@ -30,6 +34,7 @@ export type TicketStage = (typeof TICKET_STAGE_VALUES)[number];
 export const TICKET_TOOL_WRITE_NAMES: ReadonlySet<string> = new Set([
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
+  TICKET_NOTE_TOOL_NAME,
   TICKET_CONTROL_TOOL_NAME,
 ]);
 
@@ -152,6 +157,26 @@ export const TICKET_TOOL_SCHEMAS: Record<
     required: ["ticketId"],
     additionalProperties: false,
   },
+  [TICKET_NOTE_TOOL_NAME]: {
+    type: "object",
+    properties: {
+      ticketId: {
+        type: "string",
+        pattern: "^[a-f0-9]{32}$",
+        description:
+          "The Ticket id returned by ticket_delegate or ticket_list.",
+      },
+      note: {
+        type: "string",
+        minLength: 1,
+        maxLength: MAX_TICKET_NOTE_CHARS,
+        description:
+          "Person-authored guidance for the worker. It does not interrupt the current checkpoint.",
+      },
+    },
+    required: ["ticketId", "note"],
+    additionalProperties: false,
+  },
   [TICKET_CONTROL_TOOL_NAME]: {
     type: "object",
     properties: {
@@ -182,6 +207,8 @@ export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
     "Delegate one long-running task to Thebe and return its durable Ticket.",
   [TICKET_REPLY_TOOL_NAME]:
     "Answer a Ticket attention or approve/deny one pending worker permission.",
+  [TICKET_NOTE_TOOL_NAME]:
+    "Add durable guidance to a live Ticket. The worker sees it at its next checkpoint without interrupting the active one.",
   [TICKET_CONTROL_TOOL_NAME]:
     "Pause, resume, or stop the Goal carrying out a Ticket.",
 };

@@ -9,6 +9,8 @@ import {
   TICKET_DELEGATE_TOOL_NAME,
   TICKET_GET_TOOL_NAME,
   TICKET_LIST_TOOL_NAME,
+  MAX_TICKET_NOTE_CHARS,
+  TICKET_NOTE_TOOL_NAME,
   TICKET_REPLY_TOOL_NAME,
   TICKET_CONTROL_TOOL_NAME,
   TICKET_STAGE_VALUES,
@@ -66,6 +68,7 @@ type GoalPort = {
       decision?: "accept" | "reject";
     }
   ): Promise<GoalRun>;
+  addGoalGuidance(thebeSessionId: string, note: string): Promise<GoalRun>;
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
@@ -457,6 +460,51 @@ export function createTicketControlApi(options: {
     return (await get(ticketId))!;
   }
 
+  async function note(input: Record<string, unknown>): Promise<TicketTaskView> {
+    const ticketId =
+      typeof input.ticketId === "string" ? input.ticketId.trim() : "";
+    if (!ticketId) {
+      throw httpError(400, "ticketId is required", "invalid_body");
+    }
+    const text = typeof input.note === "string" ? input.note.trim() : "";
+    if (!text) {
+      throw httpError(400, "note cannot be empty", "invalid_body");
+    }
+    if (text.length > MAX_TICKET_NOTE_CHARS) {
+      throw httpError(
+        400,
+        `note is longer than ${MAX_TICKET_NOTE_CHARS} characters`,
+        "invalid_body"
+      );
+    }
+    const ticket = await options.store.get(ticketId);
+    if (!ticket) throw httpError(404, "ticket not found", "not_found");
+    const goal = await goalFor(ticket);
+    if (!goal) {
+      throw httpError(
+        409,
+        "ticket has no running assignment",
+        "ticket_unassigned"
+      );
+    }
+    if (
+      goal.status !== "running" &&
+      goal.status !== "pausing" &&
+      goal.status !== "paused"
+    ) {
+      throw httpError(409, "ticket is already finished", "invalid_transition");
+    }
+    if (goal.attention) {
+      throw httpError(
+        409,
+        "ticket is waiting for a reply; answer its attention instead",
+        "attention_open"
+      );
+    }
+    await options.goals.addGoalGuidance(goal.thebeSessionId, text);
+    return (await get(ticketId))!;
+  }
+
   async function control(input: {
     ticketId: string;
     action: TicketControlAction;
@@ -544,6 +592,8 @@ export function createTicketControlApi(options: {
           : delegate(input, caller);
       case TICKET_REPLY_TOOL_NAME:
         return reply(input);
+      case TICKET_NOTE_TOOL_NAME:
+        return note(input);
       case TICKET_CONTROL_TOOL_NAME: {
         const ticketId =
           typeof input.ticketId === "string" ? input.ticketId.trim() : "";
@@ -562,6 +612,7 @@ export function createTicketControlApi(options: {
     delegate,
     delegateHttp,
     reply,
+    note,
     control,
     recordGoal,
     backfillGoals,

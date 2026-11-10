@@ -412,6 +412,8 @@ export interface ThebeAgent {
       decision?: "accept" | "reject";
     }
   ): Promise<GoalRun>;
+  /** Add durable guidance for the Goal's next worker checkpoint without interrupting it. */
+  addGoalGuidance(thebeSessionId: string, note: string): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
   clearGoal(thebeSessionId: string): void;
 
@@ -516,6 +518,8 @@ export interface ThebeAgent {
   ): Promise<TicketTaskView & { reused: boolean }>;
   /** Answer or review a Ticket's Attention, or resolve one of its pending worker permissions. */
   replyTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
+  /** Add guidance for the next checkpoint of a live Ticket. */
+  noteTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
   /** Pause, resume, or stop the Goal carrying out a Ticket. */
   controlTicket(input: {
     ticketId: string;

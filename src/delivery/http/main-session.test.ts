@@ -114,12 +114,14 @@ describe("main Session", () => {
       "ticket_get",
       "ticket_delegate",
       "ticket_reply",
+      "ticket_note",
       "ticket_control",
     ]);
     expect(state.toolsRequiringApproval).toEqual(
       expect.arrayContaining([
         "ticket_delegate",
         "ticket_reply",
+        "ticket_note",
         "ticket_control",
       ])
     );
@@ -356,6 +358,7 @@ describe("main Session", () => {
       "ticket_get",
       "ticket_delegate",
       "ticket_reply",
+      "ticket_note",
       "ticket_control",
     ]);
     await expect(second.app.agent.loadMessages("thebe-main")).resolves.toEqual(

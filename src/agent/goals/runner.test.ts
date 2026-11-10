@@ -80,6 +80,30 @@ describe("goal runner", () => {
     });
   });
 
+  it("applies guidance added while the goal is running at the next checkpoint", async () => {
+    const guidance: string[] = [];
+    const prompts: string[] = [];
+    const result = await runGoalLoop({
+      options: {
+        goal: "Move the library",
+        maxIterations: 2,
+        guidance,
+      },
+      execute: async (prompt) => {
+        prompts.push(prompt);
+        if (prompts.length === 1) {
+          guidance.push("Put the library in Movies.");
+          return "GOAL_STATUS: continue\nCHECKPOINT: inspected the source\nVERIFICATION: source exists\nREMAINING: move it\n";
+        }
+        return "GOAL_STATUS: complete\nCHECKPOINT: moved\nVERIFICATION: Movies contains the library\nREMAINING: none\n";
+      },
+    });
+
+    expect(prompts[0]).not.toContain("Put the library in Movies.");
+    expect(prompts[1]).toContain("Put the library in Movies.");
+    expect(result.status).toBe("completed");
+  });
+
   it("stops at the first blocker instead of spending every checkpoint on work that cannot go on", async () => {
     let runs = 0;
     const result = await runGoalLoop({

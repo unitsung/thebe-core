@@ -122,6 +122,7 @@ describe("/mcp Ticket tools", () => {
     expect(reader).toContain("ticket_get");
     expect(reader).not.toContain("ticket_delegate");
     expect(reader).not.toContain("ticket_reply");
+    expect(reader).not.toContain("ticket_note");
     expect(reader).not.toContain("ticket_control");
 
     const writer = await listTools(writeToken);
@@ -131,6 +132,7 @@ describe("/mcp Ticket tools", () => {
         "ticket_get",
         "ticket_delegate",
         "ticket_reply",
+        "ticket_note",
         "ticket_control",
       ])
     );
@@ -193,6 +195,53 @@ describe("/mcp Ticket tools", () => {
     await expect(agent.waitGoal(created.goal.id)).resolves.toMatchObject({
       status: "cancelled",
     });
+  });
+
+  it("adds durable guidance through ticket_note only for writers", async () => {
+    const { agent, fake, call } = await setup();
+    fake.queueTurns([{ kind: "hang" }]);
+    const delegated = await call(
+      "ticket_delegate",
+      {
+        task: "Move the library",
+        idempotencyKey: "note-library",
+      },
+      writeToken
+    );
+    const created = JSON.parse(text(delegated)) as {
+      ticket: { id: string };
+      goal: { id: string };
+    };
+
+    const refused = await call(
+      "ticket_note",
+      {
+        ticketId: created.ticket.id,
+        note: "Put it in Movies.",
+      },
+      readToken
+    );
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("mcp:write");
+
+    const noted = await call(
+      "ticket_note",
+      {
+        ticketId: created.ticket.id,
+        note: "  Put it in Movies.  ",
+      },
+      writeToken
+    );
+    expect(noted.result?.isError).toBeUndefined();
+    expect(agent.getGoal(created.goal.id)).toMatchObject({
+      guidance: ["Put it in Movies."],
+    });
+
+    await call(
+      "ticket_control",
+      { ticketId: created.ticket.id, action: "stop" },
+      writeToken
+    );
   });
 
   it("keeps Ticket reads available while quiesced and refuses new delegation", async () => {

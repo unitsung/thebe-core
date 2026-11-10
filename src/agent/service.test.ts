@@ -732,6 +732,53 @@ describe("Thebe agent service (fake runtime)", () => {
     ).resolves.toHaveLength(3);
   });
 
+  it("persists guidance added while a goal checkpoint is running", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-guidance-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({ title: "live guidance" });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+
+    await expect(
+      first.addGoalGuidance(
+        session.thebeSessionId,
+        "  Put it in Movies and keep the original names.  "
+      )
+    ).resolves.toMatchObject({
+      status: "running",
+      guidance: ["Put it in Movies and keep the original names."],
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await expect(first.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "cancelled" }
+    );
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "cancelled",
+      guidance: ["Put it in Movies and keep the original names."],
+    });
+  });
+
   it("refuses to resume a Ticket executor when its Ticket is missing", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);
