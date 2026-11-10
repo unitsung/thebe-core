@@ -29,7 +29,8 @@ export async function prepareForEval(
   for (let index = triggers.length - 1; index >= 0; index -= 1) {
     const trigger = triggers[index]!;
     if (
-      trigger.kind === "container.went_down" &&
+      (trigger.kind === "container.went_down" ||
+        trigger.kind === "container.unhealthy") &&
       trigger.resource?.kind === "container"
     ) {
       const preview = await dependencies.diagnosis.preview({

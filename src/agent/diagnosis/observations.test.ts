@@ -21,6 +21,7 @@ describe("diagnosis observations", () => {
         name: "emby",
         image: "emby/embyserver:latest",
         state: "exited",
+        health: "unhealthy",
         config: {
           env: [`API_TOKEN=${secret}`, "NODE_ENV=production"],
           cmd: ["/init"],
@@ -45,6 +46,13 @@ describe("diagnosis observations", () => {
     expect(result.observations.some((item) => item.kind === "state")).toBe(
       true
     );
+    expect(
+      result.observations.some(
+        (item) =>
+          item.kind === "health" &&
+          item.fact === "Docker healthcheck reports unhealthy."
+      )
+    ).toBe(true);
     expect(
       result.observations.some((item) => /no space/i.test(item.fact))
     ).toBe(true);

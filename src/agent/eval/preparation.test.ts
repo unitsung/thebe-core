@@ -222,6 +222,54 @@ describe("read-only preparation for Eval", () => {
     ).toBe(true);
     expect(preparation?.suggestions).toHaveLength(4);
   });
+
+  it("rechecks a running container that reports unhealthy", async () => {
+    const preview = vi.fn<() => Promise<DiagnosisPreview>>(async () => ({
+      resource: { kind: "container", id: "emby", provider: "unknown" },
+      observedAt: NOW.toISOString(),
+      diagnosis: {
+        code: "container_unhealthy",
+        title: "Container is unhealthy",
+        summary: "Docker healthcheck reports unhealthy.",
+        confidence: "high",
+        tokenUsed: false,
+      },
+      observations: [],
+      recommendations: [],
+    }));
+
+    const preparation = await prepareForEval(
+      [
+        {
+          ...downloadTrigger(),
+          source: "container-health",
+          kind: "container.unhealthy",
+          threads: ["resource:container:emby"],
+          resource: { kind: "container", id: "emby" },
+          payload: {
+            state: "running",
+            health: { from: "healthy", to: "unhealthy" },
+          },
+        },
+      ],
+      {
+        diagnosis: { preview },
+        now: () => NOW,
+      }
+    );
+
+    expect(preview).toHaveBeenCalledWith({
+      resource: {
+        kind: "container",
+        id: "emby",
+        provider: "unknown",
+      },
+    });
+    expect(preparation).toMatchObject({
+      source: "container-diagnosis",
+      diagnosis: { code: "container_unhealthy" },
+    });
+  });
 });
 
 describe("searchable download title", () => {

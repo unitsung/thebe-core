@@ -271,6 +271,29 @@ describe("eval service", () => {
     expect(decision).not.toHaveProperty("gate");
   });
 
+  it("weighs a running container whose healthcheck is unhealthy", async () => {
+    const s = await setup((p) =>
+      accept({ rules: [{ id: /\[(\w+)\]/.exec(p)![1]! }] })
+    );
+    s.service.enqueue([
+      trigger(1, {
+        kind: "container.unhealthy",
+        payload: {
+          state: "running",
+          health: { from: "healthy", to: "unhealthy" },
+        },
+      }),
+    ]);
+    await s.service.idle();
+
+    expect(s.prompts).toHaveLength(1);
+    expect(s.prompts[0]).toContain('"kind":"container.unhealthy"');
+    expect((await s.decisions.list())[0]).toMatchObject({
+      outcome: "ignore",
+      wouldAccept: true,
+    });
+  });
+
   it("records a plain ignore when no rule applies", async () => {
     const s = await setup(
       () => '{"decision":"ignore","matched":[],"reason":"not a media server"}'

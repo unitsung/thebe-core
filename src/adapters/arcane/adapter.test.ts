@@ -60,14 +60,16 @@ describe("ArcaneAdapter", () => {
         }
         return jsonResponse(200, {
           success: true,
-          data: [{
-            id: `id-${requests}`,
-            name: `c${requests}`,
-            image: "nginx:1.27",
-            state: "running",
-            status: "Up",
-            created: 1_700_000_000 + requests,
-          }],
+          data: [
+            {
+              id: `id-${requests}`,
+              name: `c${requests}`,
+              image: "nginx:1.27",
+              state: "running",
+              status: "Up",
+              created: 1_700_000_000 + requests,
+            },
+          ],
           pagination: { totalItems: 99, itemsPerPage: 1 },
         });
       },
@@ -135,9 +137,43 @@ describe("ArcaneAdapter", () => {
       },
     ]);
     expect(seen[0]?.key).toBe("thebe-key");
-    expect(seen[0]?.url).toContain(
-      "/api/environments/0/containers",
-    );
+    expect(seen[0]?.url).toContain("/api/environments/0/containers");
+  });
+
+  it("maps container health from a field or Docker status text", async () => {
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async () =>
+        jsonResponse(200, {
+          success: true,
+          data: [
+            {
+              id: "abc123",
+              name: "/emby",
+              image: "emby",
+              state: "running",
+              health: { status: "unhealthy" },
+              status: "Up 3 hours",
+              created: 1,
+            },
+            {
+              id: "def456",
+              name: "/web",
+              image: "web",
+              state: "running",
+              status: "Up 2 minutes (healthy)",
+              created: 2,
+            },
+          ],
+        }),
+    });
+
+    await expect(adapter.listContainers()).resolves.toMatchObject([
+      { name: "emby", health: "unhealthy" },
+      { name: "web", health: "healthy" },
+    ]);
   });
 
   it("inspects a container and maps env, cmd, and ports", async () => {
@@ -152,7 +188,10 @@ describe("ArcaneAdapter", () => {
             id: "abc123",
             name: "/nginx",
             image: "nginx:1.27",
-            state: { status: "running" },
+            state: {
+              status: "running",
+              health: { status: "unhealthy" },
+            },
             config: { env: ["NODE_ENV=production"], cmd: ["nginx"] },
             ports: [
               { ip: "0.0.0.0", publicPort: 8080, privatePort: 80, type: "tcp" },
@@ -166,6 +205,7 @@ describe("ArcaneAdapter", () => {
       name: "nginx",
       image: "nginx:1.27",
       state: "running",
+      health: "unhealthy",
       config: { env: ["NODE_ENV=production"], cmd: ["nginx"] },
       networkSettings: {
         ports: {
@@ -198,7 +238,7 @@ describe("ArcaneAdapter", () => {
     await adapter.inspectContainer("abc/def?x=1");
 
     expect(requestedURL).toBe(
-      "https://arcane.internal:3552/api/environments/0/containers/abc%2Fdef%3Fx%3D1",
+      "https://arcane.internal:3552/api/environments/0/containers/abc%2Fdef%3Fx%3D1"
     );
   });
 
@@ -227,11 +267,9 @@ describe("ArcaneAdapter", () => {
       },
     });
     await expect(adapter.getContainerLogs("abc123", 50)).resolves.toBe(
-      "line1\nline2",
+      "line1\nline2"
     );
-    expect(logsUrl).toContain(
-      "/api/environments/0/ws/containers/abc123/logs",
-    );
+    expect(logsUrl).toContain("/api/environments/0/ws/containers/abc123/logs");
     expect(logsUrl).toContain("tail=50");
     expect(logsUrl).toContain("follow=false");
     expect(logsKey).toBe("thebe-key");
@@ -304,7 +342,7 @@ describe("ArcaneAdapter", () => {
           () => {
             throw new Error(`expected ${status} to reject`);
           },
-          (error: unknown) => error,
+          (error: unknown) => error
         );
       expect(err).toMatchObject({
         name: "ProviderError",
@@ -332,7 +370,7 @@ describe("ArcaneAdapter", () => {
       () => {
         throw new Error("expected unreachable to reject");
       },
-      (error: unknown) => error,
+      (error: unknown) => error
     );
     expect(err).toMatchObject({ code: "UNREACHABLE" });
     expect(err).toBeInstanceOf(ProviderError);
@@ -362,17 +400,18 @@ describe("ArcaneAdapter", () => {
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
       environmentId: "0",
-      fetch: async () => jsonResponse(200, {
-        success: false,
-        message: "raw panel failure details",
-      }),
+      fetch: async () =>
+        jsonResponse(200, {
+          success: false,
+          message: "raw panel failure details",
+        }),
     });
 
     const error = await adapter.listContainers().then(
       () => {
         throw new Error("expected the Arcane application error to reject");
       },
-      (cause: unknown) => cause,
+      (cause: unknown) => cause
     );
 
     expect(error).toMatchObject({
