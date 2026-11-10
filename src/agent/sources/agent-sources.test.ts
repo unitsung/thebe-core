@@ -174,6 +174,64 @@ describe("watching sources", () => {
     await app.agent.quiesce();
   });
 
+  it("weighs one recorded Trigger again after an explicit requeue", async () => {
+    vi.useFakeTimers();
+    const d = docker("running");
+    const fake = createFakeRuntime();
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider: d.provider,
+      sources: { containerHealth: true, intervalMs: 1000 },
+    });
+    const policy = await app.agent.setPolicy({
+      rules: ["Diagnose a container that stopped"],
+    });
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          decision: "accept",
+          matched: [policy.rules[0]!.id],
+          reason: "first assessment",
+        }),
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+    d.set("exited");
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      expect(await app.agent.listDecisions()).toHaveLength(1);
+    });
+    const [trigger] = await app.agent.listTriggers();
+
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          decision: "ignore",
+          matched: [],
+          reason: "looked again",
+        }),
+      },
+    ]);
+    await expect(app.agent.requeueTrigger(trigger!.id)).resolves.toMatchObject({
+      queued: true,
+      triggerId: trigger!.id,
+    });
+    await vi.waitFor(async () => {
+      expect(await app.agent.listDecisions()).toHaveLength(2);
+    });
+    expect(
+      (await app.agent.listDecisions()).find(
+        (decision) => decision.requeueIds?.length
+      )
+    ).toMatchObject({
+      reason: "looked again",
+      requeueIds: [expect.stringMatching(/^[a-f0-9]{32}$/)],
+    });
+    await app.agent.quiesce();
+  });
+
   it("records a download entering completed on its resource thread", async () => {
     vi.useFakeTimers();
     const d = download("completed");

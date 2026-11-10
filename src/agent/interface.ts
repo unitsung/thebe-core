@@ -560,6 +560,27 @@ export interface ThebeAgent {
       reused: boolean;
     }
   >;
+  /** Hide one positive candidate from pending attention without rewriting its Decision. */
+  dismissDecision(input: { decisionId: string; reason?: string }): Promise<{
+    decision: Decision & {
+      candidate: boolean;
+      dismissed: boolean;
+      dismissedAt?: string;
+      dismissalReason?: string;
+    };
+    reused: boolean;
+  }>;
+  /** Ask Eval to weigh one recorded Trigger again under the current Policy. */
+  requeueTrigger(triggerId: string): Promise<{
+    queued: true;
+    triggerId: string;
+    requeueId: string;
+  }>;
+  /** Drop every Ticket subscription to one Thread without ending existing work. */
+  unsubscribeThread(thread: string): Promise<{
+    thread: string;
+    removedFrom: string[];
+  }>;
   /** Events the enabled Sources observed, newest first. They feed fan-out and Eval. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   /** Read health for each enabled Source, including consecutive failures and the latest error. */

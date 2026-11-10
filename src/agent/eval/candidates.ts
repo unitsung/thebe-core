@@ -8,10 +8,15 @@ import { MAX_TICKET_NOTE_CHARS } from "../tickets/tools.ts";
 import type { Ticket } from "../tickets/types.ts";
 import { httpError } from "../types.ts";
 import type { DecisionStore } from "./decision-store.ts";
+import type {
+  DecisionDismissal,
+  EvalDispositionStore,
+} from "./disposition-store.ts";
 import { executorTask } from "./executor-task.ts";
 import {
   DECISION_ACCEPT_TOOL_NAME,
   DECISION_ATTACH_TOOL_NAME,
+  DECISION_DISMISS_TOOL_NAME,
   DECISION_GET_TOOL_NAME,
   DECISION_LIST_TOOL_NAME,
   type DecisionToolName,
@@ -20,6 +25,7 @@ import type { Decision, Policy, PolicyRule } from "./types.ts";
 
 const DEFAULT_DECISION_LIST_LIMIT = 20;
 const MAX_DECISION_LIST_LIMIT = 50;
+const MAX_DISMISSAL_REASON_CHARS = 500;
 
 const EXECUTOR_GOAL = "Handle the event that matched the person's rules.";
 const EXECUTOR_CRITERION =
@@ -32,6 +38,10 @@ export type CandidateView = Decision & {
   acceptedTicketId?: string;
   /** Present when at least one of this Decision's Triggers was explicitly attached to a Ticket. */
   attachedTicketId?: string;
+  /** A person has hidden this candidate without changing the Decision itself. */
+  dismissed: boolean;
+  dismissedAt?: string;
+  dismissalReason?: string;
 };
 
 export type AcceptedCandidate = TicketTaskView & {
@@ -68,6 +78,10 @@ export type CandidateApi = ReturnType<typeof createCandidateApi>;
 
 export function createCandidateApi(options: {
   decisions: Pick<DecisionStore, "get" | "list">;
+  dispositions: Pick<
+    EvalDispositionStore,
+    "dismissDecision" | "getDecisionDismissal" | "listDecisionDismissals"
+  >;
   tickets: Pick<
     TicketStore,
     | "list"
@@ -86,11 +100,16 @@ export function createCandidateApi(options: {
 }) {
   const acceptFlights = new Map<string, Promise<AcceptedCandidate>>();
   const attachFlights = new Map<string, Promise<AttachedCandidate>>();
+  const dismissFlights = new Map<
+    string,
+    Promise<{ decision: CandidateView; reused: boolean }>
+  >();
 
   function candidateView(
     decision: Decision,
     ticket?: Ticket,
-    attachedTicketId?: string
+    attachedTicketId?: string,
+    dismissal?: DecisionDismissal
   ): CandidateView {
     const acceptedTicketId = ticket?.id ?? decision.ticketId;
     return {
@@ -102,6 +121,13 @@ export function createCandidateApi(options: {
         !attachedTicketId,
       ...(acceptedTicketId ? { acceptedTicketId } : {}),
       ...(attachedTicketId ? { attachedTicketId } : {}),
+      dismissed: Boolean(dismissal),
+      ...(dismissal
+        ? {
+            dismissedAt: dismissal.at,
+            ...(dismissal.reason ? { dismissalReason: dismissal.reason } : {}),
+          }
+        : {}),
     };
   }
 
@@ -153,8 +179,14 @@ export function createCandidateApi(options: {
   async function project(
     decisions: readonly Decision[]
   ): Promise<CandidateView[]> {
-    const tickets = await options.tickets.list();
+    const [tickets, dismissals] = await Promise.all([
+      options.tickets.list(),
+      options.dispositions.listDecisionDismissals(),
+    ]);
     const ticketsById = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+    const dismissalsByDecision = new Map(
+      dismissals.map((dismissal) => [dismissal.decisionId, dismissal])
+    );
     const ticketsByDecision = new Map(
       tickets.flatMap((ticket) =>
         ticket.links.decisionId
@@ -169,7 +201,8 @@ export function createCandidateApi(options: {
         decision,
         (decision.ticketId ? ticketsById.get(decision.ticketId) : undefined) ??
           ticketsByDecision.get(decision.id),
-        attached?.ticketId
+        attached?.ticketId,
+        dismissalsByDecision.get(decision.id)
       );
     });
   }
@@ -197,14 +230,71 @@ export function createCandidateApi(options: {
     );
     const rows = await project(decisions);
     return rows
-      .filter((decision) => input.candidateOnly !== true || decision.candidate)
+      .filter(
+        (decision) =>
+          input.candidateOnly !== true ||
+          (decision.candidate && !decision.dismissed)
+      )
       .slice(0, limit);
   }
 
   async function get(decisionId: string): Promise<CandidateView | undefined> {
     const decision = await options.decisions.get(decisionId);
     if (!decision) return undefined;
-    return (await project([decision]))[0];
+    const [tickets, dismissal] = await Promise.all([
+      options.tickets.list(),
+      options.dispositions.getDecisionDismissal(decisionId),
+    ]);
+    return candidateView(
+      decision,
+      await existingTicket(decision),
+      attachmentFor(decision, latestAttachments(tickets))?.ticketId,
+      dismissal
+    );
+  }
+
+  async function dismiss(
+    decisionId: string,
+    reason?: string
+  ): Promise<{ decision: CandidateView; reused: boolean }> {
+    const pending = dismissFlights.get(decisionId);
+    if (pending) return pending;
+    const flight = (async () => {
+      const before = await get(decisionId);
+      if (!before) {
+        throw httpError(404, "decision not found", "not_found");
+      }
+      if (!before.candidate) {
+        throw httpError(
+          409,
+          "only a positive candidate without a Ticket can be dismissed",
+          "not_candidate"
+        );
+      }
+      if (before.dismissed) {
+        return { decision: before, reused: true };
+      }
+      const dismissal = await options.dispositions.dismissDecision({
+        decisionId,
+        at: options.now().toISOString(),
+        ...(reason ? { reason } : {}),
+      });
+      return {
+        decision: {
+          ...before,
+          dismissed: true,
+          dismissedAt: dismissal.at,
+          ...(dismissal.reason ? { dismissalReason: dismissal.reason } : {}),
+        },
+        reused: false,
+      };
+    })();
+    dismissFlights.set(decisionId, flight);
+    try {
+      return await flight;
+    } finally {
+      dismissFlights.delete(decisionId);
+    }
   }
 
   async function triggersFor(decision: Decision): Promise<Trigger[]> {
@@ -512,6 +602,30 @@ export function createCandidateApi(options: {
           ...(typeof input.note === "string" ? { note: input.note } : {}),
         });
       }
+      case DECISION_DISMISS_TOOL_NAME: {
+        if (!caller.writes) {
+          throw httpError(
+            403,
+            "dismissing a candidate needs write permission",
+            "mcp_write_required"
+          );
+        }
+        const decisionId =
+          typeof input.decisionId === "string" ? input.decisionId.trim() : "";
+        if (!decisionId) {
+          throw httpError(400, "decisionId is required", "invalid_body");
+        }
+        const reason =
+          typeof input.reason === "string" ? input.reason.trim() : "";
+        if (reason.length > MAX_DISMISSAL_REASON_CHARS) {
+          throw httpError(
+            400,
+            `reason is longer than ${MAX_DISMISSAL_REASON_CHARS} characters`,
+            "invalid_body"
+          );
+        }
+        return dismiss(decisionId, reason || undefined);
+      }
     }
   }
 
@@ -521,6 +635,7 @@ export function createCandidateApi(options: {
     get,
     accept,
     attach,
+    dismiss,
     project,
   };
 }

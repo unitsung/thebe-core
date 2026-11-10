@@ -5,7 +5,7 @@ import {
   type ThebeHttpContext,
 } from "../context.ts";
 import { json, readJson } from "../json.ts";
-import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
+import { PRODUCT_HTTP_PATH, PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
 
 /**
  * The rules Core weighs events by, and what it decided. The policy is the person's to change; Decisions
@@ -105,6 +105,38 @@ export async function handleEvalRoutes(
       ...(typeof input.note === "string" ? { note: input.note } : {}),
     });
     return json(attached, attached.reused ? 200 : 201);
+  }
+
+  const isDismissDecision =
+    context.parts.length === 4 &&
+    context.parts[1] === "decisions" &&
+    context.parts[3] === PRODUCT_HTTP_SEGMENT.dismiss;
+  if (isDismissDecision) {
+    if (request.method !== "POST") {
+      return json(
+        {
+          ok: false,
+          error: "Use POST to dismiss a Decision",
+          code: "method_not_allowed",
+        },
+        405
+      );
+    }
+    const blocked = quiescedWrite(context);
+    if (blocked) return blocked;
+    const decisionId = context.parts[2];
+    if (!decisionId) {
+      return json(
+        { ok: false, error: "decision not found", code: "not_found" },
+        404
+      );
+    }
+    const input = await readJson(request);
+    const dismissed = await agent.dismissDecision({
+      decisionId,
+      ...(typeof input.reason === "string" ? { reason: input.reason } : {}),
+    });
+    return json(dismissed, dismissed.reused ? 200 : 201);
   }
 
   if (request.method !== "GET") {

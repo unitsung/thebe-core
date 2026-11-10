@@ -5,9 +5,11 @@ import type { TicketTaskView } from "../tickets/control.ts";
 import { createTicketStore } from "../tickets/store.ts";
 import { createCandidateApi } from "./candidates.ts";
 import { createDecisionStore } from "./decision-store.ts";
+import { createEvalDispositionStore } from "./disposition-store.ts";
 import {
   DECISION_ACCEPT_TOOL_NAME,
   DECISION_ATTACH_TOOL_NAME,
+  DECISION_DISMISS_TOOL_NAME,
   DECISION_GET_TOOL_NAME,
   DECISION_LIST_TOOL_NAME,
 } from "./tools.ts";
@@ -59,6 +61,7 @@ function decision(over: Partial<Decision> = {}): Decision {
 async function setup(candidate = decision()) {
   const decisions = createDecisionStore({});
   await decisions.add(candidate);
+  const dispositions = createEvalDispositionStore({});
   const triggers = createTriggerStore({});
   await triggers.add([trigger]);
   const tickets = createTicketStore({});
@@ -68,6 +71,7 @@ async function setup(candidate = decision()) {
   let goals = 0;
   const api = createCandidateApi({
     decisions,
+    dispositions,
     tickets,
     ticketView: async (ticketId): Promise<TicketTaskView | undefined> => {
       const ticket = await tickets.get(ticketId);
@@ -111,6 +115,7 @@ async function setup(candidate = decision()) {
     api,
     candidate,
     decisions,
+    dispositions,
     tickets,
     started,
     reopened,
@@ -205,6 +210,60 @@ describe("Decision candidates", () => {
       )
     ).rejects.toMatchObject({ status: 409, code: "not_candidate" });
     expect(s.started).toEqual([]);
+  });
+
+  it("dismisses a candidate without rewriting the Decision or hiding it from an explicit acceptance", async () => {
+    const s = await setup();
+    const caller = { writes: true, irreversible: false };
+
+    await expect(
+      s.api.invoke(
+        DECISION_DISMISS_TOOL_NAME,
+        { decisionId: DECISION_ID, reason: "Already handled manually." },
+        caller
+      )
+    ).resolves.toMatchObject({
+      reused: false,
+      decision: {
+        id: DECISION_ID,
+        candidate: true,
+        dismissed: true,
+        dismissalReason: "Already handled manually.",
+      },
+    });
+    await expect(s.decisions.get(DECISION_ID)).resolves.toEqual(s.candidate);
+    await expect(
+      s.api.invoke(DECISION_LIST_TOOL_NAME, { candidateOnly: true }, caller)
+    ).resolves.toEqual({ decisions: [] });
+    await expect(
+      s.api.invoke(DECISION_GET_TOOL_NAME, { decisionId: DECISION_ID }, caller)
+    ).resolves.toMatchObject({
+      candidate: true,
+      dismissed: true,
+    });
+    await expect(
+      s.api.invoke(
+        DECISION_DISMISS_TOOL_NAME,
+        { decisionId: DECISION_ID },
+        caller
+      )
+    ).resolves.toMatchObject({
+      reused: true,
+      decision: { dismissed: true },
+    });
+
+    await expect(
+      s.api.invoke(
+        DECISION_ACCEPT_TOOL_NAME,
+        { decisionId: DECISION_ID },
+        caller
+      )
+    ).resolves.toMatchObject({
+      decisionId: DECISION_ID,
+      candidate: false,
+      reused: false,
+    });
+    expect(s.started).toHaveLength(1);
   });
 
   it("attaches the Decision idempotently to an explicitly named live Ticket without another Eval", async () => {

@@ -81,6 +81,8 @@ export type Decision = {
   unavailableReason?: string;
   /** The Gate stopped it before any model was asked. */
   gate?: boolean;
+  /** Explicit human re-evaluations whose fresh Assessment this Decision answered. */
+  requeueIds?: string[];
   /** `auto`, accepted: the Ticket that was made. Its Mandate says what it may do. */
   ticketId?: string;
   /** `auto`, accepted: the Goal that carries the Ticket out. */
