@@ -16,6 +16,7 @@ const ID_RE = /^[a-f0-9]{32}$/;
 export type TriggerStore = {
   /** Stores each Trigger once; returns only the ones that were new. */
   add(triggers: readonly Trigger[]): Promise<Trigger[]>;
+  get(id: string): Promise<Trigger | undefined>;
   list(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   cursor(source: string): Promise<string | undefined>;
   setCursor(source: string, cursor: string): Promise<void>;
@@ -93,6 +94,10 @@ export function createTriggerStore(options: {
       }
       await prune();
       return fresh;
+    },
+    async get(id) {
+      await ensureLoaded();
+      return ID_RE.test(id) ? memory.get(id) : undefined;
     },
     async list(query) {
       await ensureLoaded();

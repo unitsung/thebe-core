@@ -428,6 +428,78 @@ describe("eval service", () => {
     expect(await s.decisions.list()).toEqual(first);
   });
 
+  it("weighs an explicitly requeued Trigger again and records the requeue once", async () => {
+    const s = await setup(() =>
+      JSON.stringify({
+        decision: "ignore",
+        matched: [],
+        reason: "looked again",
+      })
+    );
+    const row = trigger(1);
+    s.service.enqueue([row]);
+    await s.service.idle();
+    const [first] = await s.decisions.list();
+
+    const requeueId = hex(900);
+    s.service.requeue(row, requeueId);
+    s.service.requeue(row, requeueId);
+    await s.service.idle();
+
+    const decisions = await s.decisions.list();
+    expect(decisions).toHaveLength(2);
+    const requeued = decisions.find(
+      (decision) => decision.requeueIds?.[0] === requeueId
+    );
+    expect(requeued).toMatchObject({
+      requeueIds: [requeueId],
+      triggerIds: [row.id],
+    });
+    expect(requeued!.id).not.toBe(first!.id);
+    expect(s.prompts).toHaveLength(2);
+    await expect(s.decisions.decidedRequeueIds()).resolves.toEqual(
+      new Set([requeueId])
+    );
+
+    const afterRestart = createEvalService({
+      policy: s.policy,
+      decisions: s.decisions,
+      sources: "container-health",
+      now: () => new Date(T0 + 120_000),
+      assess: async () => {
+        throw new Error("a covered requeue must not be weighed again");
+      },
+    });
+    afterRestart.requeue(row, requeueId);
+    await afterRestart.idle();
+    await expect(s.decisions.list()).resolves.toHaveLength(2);
+  });
+
+  it("weighs a requeue once when one Trigger belongs to several Threads", async () => {
+    const s = await setup(() =>
+      JSON.stringify({
+        decision: "ignore",
+        matched: [],
+        reason: "looked again",
+      })
+    );
+    const row = trigger(1, {
+      threads: ["resource:container:emby", "resource:container:jellyfin"],
+    });
+    s.service.enqueue([row]);
+    await s.service.idle();
+    const requeueId = hex(901);
+    s.service.requeue(row, requeueId);
+    await s.service.idle();
+
+    expect(s.prompts).toHaveLength(2);
+    expect(
+      (await s.decisions.list())
+        .filter((decision) => decision.requeueIds?.includes(requeueId))
+        .map((decision) => decision.thread)
+    ).toHaveLength(1);
+  });
+
   it("the Decision id comes from the Triggers' times, not the clock", async () => {
     const make = async (clockMs: number) => {
       const s = await setup(
@@ -541,6 +613,7 @@ describe("decision store", () => {
     const reopened = createDecisionStore({ dir });
     expect((await reopened.list()).map((d) => d.id)).toEqual([hex(3), hex(2)]);
     expect((await reopened.decidedTriggerIds()).has(hex(203))).toBe(true);
+    expect(await reopened.decidedRequeueIds()).toEqual(new Set());
     expect(await reopened.get("../x")).toBeUndefined();
   });
 });

@@ -785,6 +785,24 @@ const operations: Operation[] = [
     ],
   },
   {
+    method: "post",
+    path: "/v1/decisions/{id}/dismiss",
+    summary: "Dismiss a positive candidate without rewriting its Decision",
+    tag: "ticket",
+    parameters: [idParameter()],
+    response: 201,
+    requestBody: { required: false },
+    requestSchema: "DecisionDismissRequest",
+    responseSchema: "DecisionDismissal",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "This candidate was already dismissed",
+        schema: "DecisionDismissal",
+      },
+    ],
+  },
+  {
     method: "get",
     path: "/v1/tickets",
     summary: "List Tickets, newest first",
@@ -3223,6 +3241,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "The deterministic Gate stopped it before any model was asked.",
             },
+            requeueIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Explicit human requeues whose fresh Assessment this Decision answered.",
+            },
             ticketId: {
               type: "string",
               description:
@@ -3248,6 +3272,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "Derived when one of this Decision's source events was explicitly attached to a Ticket.",
             },
+            dismissed: {
+              type: "boolean",
+              description:
+                "True when a person dismissed this candidate. The Decision itself remains unchanged.",
+            },
+            dismissedAt: { type: "string", format: "date-time" },
+            dismissalReason: { type: "string" },
             notTakenOn: {
               type: "string",
               description:
@@ -3274,6 +3305,30 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
           additionalProperties: false,
+        },
+        DecisionDismissRequest: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              minLength: 1,
+              maxLength: 500,
+              description:
+                "Optional person-authored explanation kept with the dismissal.",
+            },
+          },
+          additionalProperties: false,
+        },
+        DecisionDismissal: {
+          type: "object",
+          required: ["decision", "reused"],
+          properties: {
+            decision: { $ref: "#/components/schemas/Decision" },
+            reused: {
+              type: "boolean",
+              description: "True when the candidate was already dismissed.",
+            },
+          },
         },
         TicketList: {
           type: "object",

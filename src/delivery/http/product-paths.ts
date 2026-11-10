@@ -32,6 +32,7 @@ export const PRODUCT_HTTP_SEGMENT = {
   resume: "resume",
   stop: "stop",
   retry: "retry",
+  dismiss: "dismiss",
   messages: "messages",
   interrupt: "interrupt",
   servers: "servers",

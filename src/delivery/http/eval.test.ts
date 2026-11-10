@@ -156,6 +156,7 @@ describe("decisions over HTTP", () => {
     expect((await call("/openapi.json")).body.paths).toMatchObject({
       "/v1/decisions/{id}/accept": { post: expect.any(Object) },
       "/v1/decisions/{id}/attach": { post: expect.any(Object) },
+      "/v1/decisions/{id}/dismiss": { post: expect.any(Object) },
     });
   });
 
@@ -165,6 +166,9 @@ describe("decisions over HTTP", () => {
       405
     );
     expect((await call(`/v1/decisions/${"0".repeat(32)}/attach`)).status).toBe(
+      405
+    );
+    expect((await call(`/v1/decisions/${"0".repeat(32)}/dismiss`)).status).toBe(
       405
     );
     await app.agent.quiesce();
@@ -180,6 +184,14 @@ describe("decisions over HTTP", () => {
         await call(`/v1/decisions/${"0".repeat(32)}/attach`, {
           method: "POST",
           body: JSON.stringify({ ticketId: "1".repeat(32) }),
+        })
+      ).status
+    ).toBe(503);
+    expect(
+      (
+        await call(`/v1/decisions/${"0".repeat(32)}/dismiss`, {
+          method: "POST",
+          body: "{}",
         })
       ).status
     ).toBe(503);
@@ -230,6 +242,35 @@ describe("a container going down, end to end", () => {
     expect((await call(`/v1/decisions/${decision.id}`)).body.id).toBe(
       decision.id
     );
+    const dismissed = await call(`/v1/decisions/${decision.id}/dismiss`, {
+      method: "POST",
+      body: JSON.stringify({ reason: "The person already handled it." }),
+    });
+    expect(dismissed.status).toBe(201);
+    expect(dismissed.body).toMatchObject({
+      reused: false,
+      decision: {
+        id: decision.id,
+        dismissed: true,
+        dismissalReason: "The person already handled it.",
+        outcome: "ignore",
+        wouldAccept: true,
+      },
+    });
+    expect((await call(`/v1/decisions/${decision.id}`)).body).toMatchObject({
+      outcome: "ignore",
+      dismissed: true,
+    });
+    expect((await call("/v1/decisions")).body.decisions).toHaveLength(1);
+    expect((await call("/v1/decisions")).body.decisions[0].dismissed).toBe(
+      true
+    );
+    const dismissedAgain = await call(`/v1/decisions/${decision.id}/dismiss`, {
+      method: "POST",
+      body: "{}",
+    });
+    expect(dismissedAgain.status).toBe(200);
+    expect(dismissedAgain.body.reused).toBe(true);
     expect((await call("/v1/tickets")).body.tickets).toEqual([]); // observe makes no Ticket
     // The assessment session is not left behind in the person's session list.
     expect(

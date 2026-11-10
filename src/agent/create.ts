@@ -14,10 +14,12 @@ import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
 import type { Trigger } from "./sources/types.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
+import { createEvalDispositionStore } from "./eval/disposition-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
 import type { Decision, Policy } from "./eval/types.ts";
 import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
 import { createCandidateApi } from "./eval/candidates.ts";
+import { createEvalRoutingApi } from "./eval/routing.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { prepareForEval } from "./eval/preparation.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
@@ -141,6 +143,11 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const decisionStore = createDecisionStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "eval", "decisions")
+      : undefined,
+  });
+  const evalDispositions = createEvalDispositionStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "eval", "dispositions")
       : undefined,
   });
   const diagnosis = createDiagnosisApi({
@@ -294,6 +301,14 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       }
     },
   });
+  const evalRouting = createEvalRoutingApi({
+    triggers: triggerStore,
+    tickets: ticketStore,
+    dispositions: evalDispositions,
+    eval: evalService,
+    checkWritable: ctx.checkNotQuiesced,
+    now: ctx.now,
+  });
 
   async function isTicketLive(ticket: Ticket): Promise<boolean> {
     if (!ticket.links.legacyGoalId) return false;
@@ -373,6 +388,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       evalService.recover(unattached);
     });
   }
+  void evalDispositions
+    .listTriggerRequeues()
+    .then(async (requeues) => {
+      for (const requeue of requeues) {
+        const trigger = await triggerStore.get(requeue.triggerId);
+        if (trigger) evalService.requeue(trigger, requeue.id);
+      }
+    })
+    .catch(() => {
+      // A later explicit requeue retries; restart recovery must not block Core.
+    });
   sourceRunner.start();
   const ticketControl = createTicketControlApi({
     store: ticketStore,
@@ -382,6 +408,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   });
   const candidates = createCandidateApi({
     decisions: decisionStore,
+    dispositions: evalDispositions,
     tickets: ticketStore,
     ticketView: ticketControl.get,
     triggers: triggerStore,
@@ -400,6 +427,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const mainSession = createMainSessionApi({
     ctx,
     candidates,
+    routing: evalRouting,
     tickets: ticketControl,
     sessions,
     prompts,
@@ -442,6 +470,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async attachDecision(input) {
       return candidates.attach(input);
+    },
+    async dismissDecision(input) {
+      return candidates.dismiss(input.decisionId, input.reason);
+    },
+    async requeueTrigger(triggerId) {
+      return evalRouting.requeueTrigger(triggerId, "api");
+    },
+    async unsubscribeThread(thread) {
+      return evalRouting.unsubscribeThread(thread);
     },
     async listTriggers(query) {
       return triggerStore.list(query);

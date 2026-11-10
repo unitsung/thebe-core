@@ -38,6 +38,8 @@ export const DEFAULT_PREPARATION_TIMEOUT_MS = 20_000;
 export type EvalService = {
   /** Triggers just recorded. Weighed one thread at a time. Never throws. */
   enqueue(triggers: readonly Trigger[]): void;
+  /** Weighs one recorded Trigger again for an explicit human requeue. */
+  requeue(trigger: Trigger, requeueId: string): void;
   /** After a start: weigh recorded Triggers that no Decision covers yet. */
   recover(triggers: readonly Trigger[]): void;
   /** Resolves when everything queued so far has been decided. */
@@ -113,17 +115,32 @@ export function createEvalService(options: {
   const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
   const preparationTimeoutMs =
     options.preparationTimeoutMs ?? DEFAULT_PREPARATION_TIMEOUT_MS;
-  const pending = new Map<string, Trigger[]>();
+  type QueuedTrigger = {
+    trigger: Trigger;
+    requeueIds: string[];
+  };
+  const pending = new Map<string, QueuedTrigger[]>();
   const assessedAt: number[] = [];
   let draining: Promise<void> | undefined;
   let stopped = false;
 
-  function queue(triggers: readonly Trigger[]): void {
+  function queue(
+    triggers: readonly Trigger[],
+    requeueIdsByTrigger: ReadonlyMap<string, readonly string[]> = new Map()
+  ): void {
     if (stopped) return;
     for (const trigger of triggers) {
+      const requeueIds = [...(requeueIdsByTrigger.get(trigger.id) ?? [])];
       for (const thread of trigger.threads) {
         const list = pending.get(thread) ?? [];
-        if (!list.some((row) => row.id === trigger.id)) list.push(trigger);
+        const existing = list.find((row) => row.trigger.id === trigger.id);
+        if (existing) {
+          existing.requeueIds = [
+            ...new Set([...existing.requeueIds, ...requeueIds]),
+          ];
+        } else {
+          list.push({ trigger, requeueIds });
+        }
         pending.set(thread, list);
       }
     }
@@ -142,7 +159,7 @@ export function createEvalService(options: {
     while (!stopped && pending.size > 0) {
       const [thread, triggers] = pending.entries().next().value as [
         string,
-        Trigger[],
+        QueuedTrigger[],
       ];
       pending.delete(thread);
       try {
@@ -153,24 +170,52 @@ export function createEvalService(options: {
     }
   }
 
-  async function decide(thread: string, all: Trigger[]): Promise<void> {
-    const decided = await options.decisions.decidedTriggerIds();
-    const triggers = all
-      .filter((row) => !decided.has(row.id))
-      .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-    if (triggers.length === 0) return;
+  async function decide(thread: string, all: QueuedTrigger[]): Promise<void> {
+    const [decided, decidedRequeues] = await Promise.all([
+      options.decisions.decidedTriggerIds(),
+      options.decisions.decidedRequeueIds(),
+    ]);
+    const fresh = all
+      .flatMap((row) => {
+        const requeueIds = row.requeueIds.filter(
+          (id) => !decidedRequeues.has(id)
+        );
+        if (requeueIds.length === 0 && row.requeueIds.length > 0) return [];
+        if (requeueIds.length === 0 && decided.has(row.trigger.id)) return [];
+        return [{ trigger: row.trigger, requeueIds }];
+      })
+      .sort((left, right) =>
+        left.trigger.at < right.trigger.at
+          ? -1
+          : left.trigger.at > right.trigger.at
+            ? 1
+            : 0
+      );
+    if (fresh.length === 0) return;
+    const triggers = fresh.map((row) => row.trigger);
+    const requeueIds = [
+      ...new Set(fresh.flatMap((row) => row.requeueIds)),
+    ].sort();
 
     const policy = await options.policy.get();
     const version = policyVersion(policy, options.sources);
     const latest = triggers[triggers.length - 1]!.at;
     const triggerIds = triggers.map((row) => row.id);
     // Built from the Triggers' own times, never the clock: a re-run after a crash is the same Decision.
-    const evalId = key("eval", thread, version, latest, ...triggerIds);
+    const evalId = key(
+      "eval",
+      thread,
+      version,
+      latest,
+      ...triggerIds,
+      ...requeueIds.map((id) => `requeue:${id}`)
+    );
     const base = {
       id: key("decision", evalId),
       evalId,
       thread,
       triggerIds,
+      ...(requeueIds.length > 0 ? { requeueIds } : {}),
       at: latest,
       policyVersion: version,
       decidedAt: options.now().toISOString(),
@@ -366,6 +411,9 @@ export function createEvalService(options: {
 
   return {
     enqueue: queue,
+    requeue(trigger, requeueId) {
+      queue([trigger], new Map([[trigger.id, [requeueId]]]));
+    },
     recover(triggers) {
       const cutoff = options.now().getTime() - backlogAgeMs;
       void options.decisions.decidedTriggerIds().then((decided) => {

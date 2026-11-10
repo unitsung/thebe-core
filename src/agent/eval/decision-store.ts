@@ -20,6 +20,8 @@ export type DecisionStore = {
   list(query?: { thread?: string; limit?: number }): Promise<Decision[]>;
   /** Every Trigger id some Decision already covers, so a restart does not weigh the same one twice. */
   decidedTriggerIds(): Promise<Set<string>>;
+  /** Every explicit requeue already answered by a fresh Decision. */
+  decidedRequeueIds(): Promise<Set<string>>;
 };
 
 export function createDecisionStore(options: {
@@ -105,6 +107,13 @@ export function createDecisionStore(options: {
       const ids = new Set<string>();
       for (const row of memory.values())
         for (const id of row.triggerIds) ids.add(id);
+      return ids;
+    },
+    async decidedRequeueIds() {
+      await ensureLoaded();
+      const ids = new Set<string>();
+      for (const row of memory.values())
+        for (const id of row.requeueIds ?? []) ids.add(id);
       return ids;
     },
   };

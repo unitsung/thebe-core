@@ -97,6 +97,8 @@ export type TicketStore = {
       }
     | undefined
   >;
+  /** Removes every Ticket's subscription to one Thread without ending or changing its work. */
+  unsubscribeThread(thread: string): Promise<string[]>;
 };
 
 export function createTicketStore(options: {
@@ -408,6 +410,23 @@ export function createTicketStore(options: {
           addedTriggerIds,
           reused: addedTriggerIds.length === 0,
         };
+      });
+    },
+    async unsubscribeThread(thread) {
+      return serial(async () => {
+        await ensureLoaded();
+        const normalized = normalizeThread(thread);
+        const removedFrom: string[] = [];
+        for (const ticket of memory.values()) {
+          const before = ticket.subscriptions.length;
+          ticket.subscriptions = ticket.subscriptions.filter(
+            (subscription) => normalizeThread(subscription) !== normalized
+          );
+          if (ticket.subscriptions.length === before) continue;
+          removedFrom.push(ticket.id);
+          await persist(ticket);
+        }
+        return removedFrom;
       });
     },
   };
