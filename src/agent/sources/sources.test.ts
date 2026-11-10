@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type {
+  ContainerHealth,
   ContainerInfoProvider,
   ContainerState,
 } from "../capabilities/containers.ts";
@@ -16,8 +17,12 @@ import type {
   DownloadProvider,
 } from "../capabilities/pipeline.ts";
 
-function docker(initial: Record<string, ContainerState>) {
+function docker(
+  initial: Record<string, ContainerState>,
+  initialHealth: Record<string, ContainerHealth> = {}
+) {
   const states = { ...initial };
+  const health = { ...initialHealth };
   const provider = {
     listContainers: async () =>
       Object.entries(states).map(([name, state]) => ({
@@ -25,11 +30,12 @@ function docker(initial: Record<string, ContainerState>) {
         name,
         image: "img",
         state,
+        ...(health[name] ? { health: health[name] } : {}),
         status: state,
         created: 1,
       })),
   } as unknown as ContainerInfoProvider;
-  return { provider, states };
+  return { provider, states, health };
 }
 
 const clock = () => {
@@ -39,7 +45,10 @@ const clock = () => {
 
 describe("container-health source", () => {
   it("takes a baseline on its first read and reports nothing, even if something is already down", async () => {
-    const { provider } = docker({ emby: "exited", jellyfin: "running" });
+    const { provider } = docker(
+      { emby: "exited", jellyfin: "running" },
+      { jellyfin: "unhealthy" }
+    );
     const source = createContainerHealthSource({ provider, now: clock() });
     const first = await source.read(undefined);
     expect(first.triggers).toEqual([]);
@@ -66,6 +75,47 @@ describe("container-health source", () => {
     states.emby = "running";
     const up = await source.read(cursor);
     expect(up.triggers.map((t) => t.kind)).toEqual(["container.recovered"]);
+  });
+
+  it("reports an unhealthy running container once and when it becomes healthy again", async () => {
+    const { provider, health } = docker(
+      { emby: "running" },
+      { emby: "healthy" }
+    );
+    const source = createContainerHealthSource({ provider, now: clock() });
+    let cursor = (await source.read(undefined)).cursor;
+
+    health.emby = "unhealthy";
+    const unhealthy = await source.read(cursor);
+    cursor = unhealthy.cursor;
+    expect(unhealthy.triggers).toHaveLength(1);
+    expect(unhealthy.triggers[0]).toMatchObject({
+      kind: "container.unhealthy",
+      threads: ["resource:container:emby"],
+      resource: { kind: "container", id: "emby" },
+      payload: {
+        state: "running",
+        health: { from: "healthy", to: "unhealthy" },
+      },
+    });
+    expect((await source.read(cursor)).triggers).toEqual([]);
+
+    health.emby = "starting";
+    cursor = (await source.read(cursor)).cursor;
+    health.emby = "healthy";
+    const healthy = await source.read(cursor);
+    expect(healthy.triggers.map((t) => t.kind)).toEqual([
+      "container.recovered",
+    ]);
+  });
+
+  it("seeds health for a cursor written before health was tracked", async () => {
+    const { provider } = docker({ emby: "running" }, { emby: "unhealthy" });
+    const source = createContainerHealthSource({ provider, now: clock() });
+    const legacy = JSON.stringify({ n: 4, states: { emby: "running" } });
+    const migrated = await source.read(legacy);
+    expect(migrated.triggers).toEqual([]);
+    expect((await source.read(migrated.cursor)).triggers).toEqual([]);
   });
 
   it("notes a container appearing or being removed, and other state changes", async () => {

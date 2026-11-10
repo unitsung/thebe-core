@@ -6,12 +6,13 @@ import {
   type ContainerSummary,
   type HostStatusSummary,
 } from "../../agent/capabilities/containers.ts";
+import { mapDockerHealth } from "../docker-health.ts";
 
 export type ArcaneLogSocket = AsyncIterable<string>;
 
 export type OpenArcaneLogSocket = (
   url: string,
-  headers: Record<string, string>,
+  headers: Record<string, string>
 ) => Promise<ArcaneLogSocket> | ArcaneLogSocket;
 
 export type ArcaneAdapterOptions = {
@@ -73,7 +74,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     let start = 0;
     for (let page = 0; page < this.maxPages; page += 1) {
       const body = await this.requestJson(
-        `/api/environments/${this.environmentId}/containers?limit=${this.pageSize}&start=${start}&order=asc`,
+        `/api/environments/${this.environmentId}/containers?limit=${this.pageSize}&start=${start}&order=asc`
       );
       const rows = asArray(body.data).map(mapSummary);
       all.push(...rows);
@@ -86,13 +87,13 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     }
     throw new ProviderError(
       "UNKNOWN",
-      "Arcane container pagination exceeded safety limit",
+      "Arcane container pagination exceeded safety limit"
     );
   }
 
   async inspectContainer(id: string): Promise<ContainerDetail> {
     const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}`,
+      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}`
     );
     return mapDetail(asObject(body.data));
   }
@@ -118,7 +119,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
       throw new ProviderError(
         "UNREACHABLE",
         "Arcane log stream is unreachable",
-        cause,
+        cause
       );
     }
     return frames.join("\n");
@@ -127,13 +128,13 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   async restartContainer(id: string): Promise<void> {
     await this.requestJson(
       `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}/restart`,
-      { method: "POST" },
+      { method: "POST" }
     );
   }
 
   async getStatusSummary(): Promise<HostStatusSummary> {
     const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/counts`,
+      `/api/environments/${this.environmentId}/containers/counts`
     );
     const counts = asObject(body.data);
     const total = numberField(counts, "totalContainers");
@@ -153,7 +154,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
 
   private async requestJson(
     path: string,
-    init: { method?: string } = {},
+    init: { method?: string } = {}
   ): Promise<Json> {
     let response: Response;
     try {
@@ -170,7 +171,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
     if (!response.ok) {
       throw new ProviderError(
         statusToCode(response.status),
-        `Arcane HTTP ${response.status}`,
+        `Arcane HTTP ${response.status}`
       );
     }
     const text = await response.text();
@@ -238,7 +239,7 @@ function messageFromLogObject(obj: Json): string[] {
 
 async function defaultOpenLogSocket(
   url: string,
-  headers: Record<string, string>,
+  headers: Record<string, string>
 ): Promise<ArcaneLogSocket> {
   const frames: string[] = [];
   const ws = new WebSocket(url, { headers } as unknown as string[]);
@@ -267,9 +268,7 @@ async function defaultOpenLogSocket(
   })();
 }
 
-function statusToCode(
-  status: number,
-): ProviderError["code"] {
+function statusToCode(status: number): ProviderError["code"] {
   if (status === 404) return "NOT_FOUND";
   if (status === 401 || status === 403) return "UNAUTHORIZED";
   if (status === 429) return "RATE_LIMITED";
@@ -317,12 +316,15 @@ function mapSummary(row: Json): ContainerSummary {
     (Array.isArray(row.names) && typeof row.names[0] === "string"
       ? row.names[0]
       : row.id);
+  const status = String(row.status ?? "");
+  const health = mapDockerHealth(row.health ?? row.Health, status);
   return {
     id: String(row.id ?? ""),
     name: stripSlash(String(name ?? "")),
     image: String(row.image ?? ""),
     state: mapState(String(row.state ?? "created")),
-    status: String(row.status ?? ""),
+    ...(health ? { health } : {}),
+    status,
     created: typeof row.created === "number" ? row.created : 0,
   };
 }
@@ -333,6 +335,12 @@ function mapDetail(row: Json): ContainerDetail {
     typeof state === "string"
       ? state
       : String(asObject(state).status ?? "created");
+  const health = mapDockerHealth(
+    row.health ??
+      row.Health ??
+      (typeof state === "object" ? asObject(state).health : undefined),
+    stateText
+  );
   const config = asObject(row.config);
   const env = Array.isArray(config.env)
     ? config.env.map((item) => String(item))
@@ -346,13 +354,14 @@ function mapDetail(row: Json): ContainerDetail {
     name: stripSlash(String(row.name ?? row.id ?? "")),
     image: String(row.image ?? ""),
     state: stateText,
+    ...(health ? { health } : {}),
     config: { env, cmd },
     networkSettings: ports ? { ports } : undefined,
   };
 }
 
 function mapPorts(
-  raw: unknown,
+  raw: unknown
 ): Record<string, Array<{ HostIp: string; HostPort: string }>> | undefined {
   if (!Array.isArray(raw)) {
     return undefined;

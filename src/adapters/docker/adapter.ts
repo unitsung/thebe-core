@@ -6,6 +6,7 @@ import {
   type ContainerSummary,
   type HostStatusSummary,
 } from "../../agent/capabilities/containers.ts";
+import { mapDockerHealth } from "../docker-health.ts";
 
 /**
  * Docker Engine API container provider, reached through a restricted
@@ -232,12 +233,15 @@ function mapSummary(value: unknown): ContainerSummary {
   const names = Array.isArray(row.Names) ? row.Names : [];
   const name =
     (typeof names[0] === "string" && names[0]) || String(row.Id ?? "");
+  const status = String(row.Status ?? "");
+  const health = mapDockerHealth(row.Health, status);
   return {
     id: String(row.Id ?? ""),
     name: stripSlash(String(name)),
     image: String(row.Image ?? ""),
     state: mapState(String(row.State ?? "created")),
-    status: String(row.Status ?? ""),
+    ...(health ? { health } : {}),
+    status,
     created: typeof row.Created === "number" ? row.Created : 0,
   };
 }
@@ -260,11 +264,14 @@ function mapDetail(row: Json): ContainerDetail {
         )
       : undefined;
   const ports = mapPorts(asObject(row.NetworkSettings).Ports);
+  const stateStatus = String(state.Status ?? "created");
+  const health = mapDockerHealth(state.Health, stateStatus);
   return {
     id: String(row.Id ?? ""),
     name: stripSlash(String(row.Name ?? row.Id ?? "")),
     image: String(config.Image ?? ""),
-    state: String(state.Status ?? "created"),
+    state: stateStatus,
+    ...(health ? { health } : {}),
     config: { env, cmd, labels },
     networkSettings: ports ? { ports } : undefined,
   };

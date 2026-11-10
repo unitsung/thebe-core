@@ -212,12 +212,15 @@ Sources are off unless `THEBE_SOURCES` names them. Use a comma-separated list;
 export THEBE_SOURCES=container-health,download-completed
 ```
 
-`container-health` emits container state Triggers. `download-completed` requires
-the same download provider configuration as the media pipeline, establishes a
-baseline on its first read, and emits `download.completed` when a download moves
-into `completed`. If any engine in a multi-engine listing is unreachable, Core
-does not advance that Source's cursor. A requested download Source with no
-provider configured stays visible as failing rather than being omitted.
+`container-health` emits container state Triggers and emits
+`container.unhealthy` when a running container's Docker healthcheck starts
+failing; it emits `container.recovered` when that healthcheck returns to healthy.
+`download-completed` requires the same download provider configuration as the
+media pipeline, establishes a baseline on its first read, and emits
+`download.completed` when a download moves into `completed`. If any engine in a
+multi-engine listing is unreachable, Core does not advance that Source's cursor.
+A requested download Source with no provider configured stays visible as failing
+rather than being omitted.
 
 `GET /v1/health` reports `capabilities: [..., "sources"]` and a `sources` array
 while Sources are enabled. Each entry has `state` (`starting`, `healthy`, or

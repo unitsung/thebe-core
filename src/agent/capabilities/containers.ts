@@ -32,11 +32,15 @@ export type ContainerState =
   | "created"
   | "restarting";
 
+export type ContainerHealth = "starting" | "healthy" | "unhealthy";
+
 export type ContainerSummary = {
   id: string;
   name: string;
   image: string;
   state: ContainerState;
+  /** Docker healthcheck state when the provider reports one. */
+  health?: ContainerHealth;
   status: string;
   created: number;
 };
@@ -46,6 +50,8 @@ export type ContainerDetail = {
   name: string;
   image: string;
   state: string;
+  /** Docker healthcheck state when the provider reports one. */
+  health?: ContainerHealth;
   config: {
     env?: string[];
     cmd?: string[];

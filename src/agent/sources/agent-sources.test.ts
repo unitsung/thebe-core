@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
+  ContainerHealth,
   ContainerInfoProvider,
   ContainerState,
 } from "../capabilities/containers.ts";
@@ -11,9 +12,10 @@ import { createThebeApp } from "../../app/create.ts";
 import { parseEvalMaxPerHour, parseSources } from "../../app/bootstrap.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
-function docker(state: ContainerState) {
+function docker(state: ContainerState, health?: ContainerHealth) {
   const calls = { list: 0 };
   let current = state;
+  let currentHealth = health;
   const provider = {
     listContainers: async () => {
       calls.list += 1;
@@ -23,6 +25,7 @@ function docker(state: ContainerState) {
           name: "emby",
           image: "x",
           state: current,
+          ...(currentHealth ? { health: currentHealth } : {}),
           status: current,
           created: 1,
         },
@@ -45,6 +48,9 @@ function docker(state: ContainerState) {
     calls,
     set: (next: ContainerState) => {
       current = next;
+    },
+    setHealth: (next: ContainerHealth) => {
+      currentHealth = next;
     },
   };
 }
@@ -137,6 +143,34 @@ describe("watching sources", () => {
     await app.agent.unquiesce();
     await vi.advanceTimersByTimeAsync(1000);
     expect(d.calls.list).toBeGreaterThan(reads);
+    await app.agent.quiesce();
+  });
+
+  it("records a running container becoming unhealthy and recovering", async () => {
+    vi.useFakeTimers();
+    const d = docker("running", "healthy");
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: d.provider,
+      sources: { containerHealth: true, intervalMs: 1000 },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    d.setHealth("unhealthy");
+    await vi.advanceTimersByTimeAsync(1000);
+    const thread = "resource:container:emby";
+    expect(
+      (await app.agent.listTriggers({ thread })).map((t) => t.kind)
+    ).toEqual(["container.unhealthy"]);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await app.agent.listTriggers({ thread })).toHaveLength(1);
+
+    d.setHealth("healthy");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(
+      (await app.agent.listTriggers({ thread })).map((t) => t.kind)
+    ).toEqual(["container.recovered", "container.unhealthy"]);
     await app.agent.quiesce();
   });
 

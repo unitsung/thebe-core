@@ -270,9 +270,11 @@ function healthFromDetail(detail: ContainerDetail):
   const healthLabel =
     labels["health"] ?? labels["com.docker.compose.service"] ?? undefined;
   const state = detail.state.toLowerCase();
-  if (state.includes("unhealthy")) {
+  if (detail.health === "unhealthy" || state.includes("unhealthy")) {
     return {
-      fact: "Reported state includes unhealthy.",
+      fact: detail.health
+        ? "Docker healthcheck reports unhealthy."
+        : "Reported state includes unhealthy.",
       severity: "error",
     };
   }
@@ -309,6 +311,7 @@ function inspectExcerpt(detail: ContainerDetail): string {
     name: detail.name,
     image: detail.image,
     state: detail.state,
+    health: detail.health,
     cmd: detail.config.cmd?.slice(0, 8),
     envKeys: envKeys.slice(0, 20),
     labels: pickSafeLabels(detail.config.labels),

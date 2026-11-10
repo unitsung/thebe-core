@@ -80,7 +80,11 @@ function client(
           Cmd: ["/init"],
           Labels: { "com.example.role": "media" },
         },
-        State: { Status: "running", Running: true },
+        State: {
+          Status: "running",
+          Running: true,
+          Health: { Status: "healthy" },
+        },
         NetworkSettings: {
           Ports: { "8096/tcp": [{ HostIp: "0.0.0.0", HostPort: "8096" }] },
         },
@@ -124,6 +128,46 @@ describe("Docker Engine container provider", () => {
     ]);
   });
 
+  it("maps healthcheck state from Docker and falls back to status text", async () => {
+    const { adapter } = client((url) =>
+      url.endsWith("/containers/json?all=true")
+        ? Response.json([
+            {
+              Id: "abc",
+              Names: ["/emby"],
+              Image: "emby",
+              State: "running",
+              Status: "Up 3 hours",
+              Health: { Status: "unhealthy" },
+              Created: 1,
+            },
+            {
+              Id: "def",
+              Names: ["/worker"],
+              Image: "worker",
+              State: "running",
+              Status: "Up 5 seconds (health: starting)",
+              Created: 2,
+            },
+            {
+              Id: "ghi",
+              Names: ["/web"],
+              Image: "web",
+              State: "running",
+              Status: "Up 2 minutes (healthy)",
+              Created: 3,
+            },
+          ])
+        : undefined
+    );
+
+    await expect(adapter.listContainers()).resolves.toMatchObject([
+      { name: "emby", health: "unhealthy" },
+      { name: "worker", health: "starting" },
+      { name: "web", health: "healthy" },
+    ]);
+  });
+
   it("inspects one container with config and published ports", async () => {
     const { adapter } = client();
     const detail = await adapter.inspectContainer("emby");
@@ -132,6 +176,7 @@ describe("Docker Engine container provider", () => {
       name: "emby",
       image: "emby/embyserver:latest",
       state: "running",
+      health: "healthy",
       config: {
         env: ["TZ=UTC"],
         cmd: ["/init"],

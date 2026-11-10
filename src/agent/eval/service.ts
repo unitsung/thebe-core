@@ -19,6 +19,7 @@ import type {
 /** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
   "container.went_down",
+  "container.unhealthy",
   "container.recovered",
   "container.removed",
   "container.appeared",

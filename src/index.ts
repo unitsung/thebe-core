@@ -122,6 +122,7 @@ export {
 export {
   ProviderError,
   type ContainerDetail,
+  type ContainerHealth,
   type ContainerInfoProvider,
   type ContainerState,
   type ContainerSummary,
