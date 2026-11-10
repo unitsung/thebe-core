@@ -15,6 +15,7 @@ import type {
   Policy,
   SpeculativePreparation,
 } from "./types.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
 
 /** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
@@ -63,6 +64,8 @@ export function createEvalService(options: {
   decisions: DecisionStore;
   /** What the enabled Sources are, folded into the policy version. */
   sources: string;
+  /** Durable admission for autonomous model work. */
+  backgroundBudget?: Pick<BackgroundBudgetService, "exhausted">;
   /** Asks the model; returns its raw reply. Rejects on a timeout or provider failure. */
   assess: (prompt: string, model: Policy["model"]) => Promise<string>;
   now: () => Date;
@@ -263,6 +266,15 @@ export function createEvalService(options: {
       });
       return;
     }
+    if (await options.backgroundBudget?.exhausted()) {
+      await record({
+        outcome: "unavailable",
+        gate: true,
+        reason: "today's background token budget is spent",
+        unavailableReason: "daily_budget",
+      });
+      return;
+    }
     const hourAgo = options.now().getTime() - HOUR_MS;
     while (assessedAt.length > 0 && assessedAt[0]! < hourAgo)
       assessedAt.shift();
@@ -315,6 +327,21 @@ export function createEvalService(options: {
         "the model did not answer in the agreed form",
         "unparseable_reply"
       );
+      return;
+    }
+    if (await options.backgroundBudget?.exhausted()) {
+      await record({
+        outcome: "unavailable",
+        gate: true,
+        wouldAccept: verdict.decision === "accept",
+        matchedRuleIds: verdict.matchedRuleIds,
+        matchedRules: policy.rules.filter((rule) =>
+          verdict.matchedRuleIds.includes(rule.id)
+        ),
+        ...(verdict.intent ? { intent: verdict.intent } : {}),
+        reason: "today's background token budget is spent",
+        unavailableReason: "daily_budget",
+      });
       return;
     }
     const wouldAccept = verdict.decision === "accept";
@@ -473,13 +500,19 @@ function boundedPreparation(
 
 function isAssessmentAttempt(decision: Decision): boolean {
   // Deterministic gates say nothing about whether the model recovered. The hourly limit does.
-  return !decision.gate || decision.unavailableReason === "assessment_limit";
+  return (
+    (!decision.gate || decision.unavailableReason === "assessment_limit") &&
+    decision.unavailableReason !== "daily_budget"
+  );
 }
 
 function unavailableMessage(decision: Decision): string {
   const reason = decision.unavailableReason ?? "assessment failed";
   if (reason === "assessment_limit") {
     return "Automatic event checks reached their hourly limit. They will try again after the hour.";
+  }
+  if (reason === "daily_budget") {
+    return "Automatic work paused after using today's background token budget. It will resume tomorrow.";
   }
   if (reason === "unparseable_reply") {
     return "The model did not return a usable assessment, so automatic event checks need attention.";

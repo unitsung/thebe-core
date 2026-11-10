@@ -37,10 +37,19 @@ import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { canRunPipelineJobs } from "./tools/pipeline-tools.ts";
 import { createMainSessionApi } from "./main-session/service.ts";
+import { createBackgroundBudgetService } from "./usage/budget.ts";
 
 /** Authoritative composition root for the agent layer. */
 export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const ctx = createAgentContext(options);
+  const backgroundBudget = createBackgroundBudgetService({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "usage")
+      : undefined,
+    now: ctx.now,
+    initialDailyTokens: options.dailyBackgroundTokenBudget,
+    onPaused: options.onBackgroundBudgetPaused,
+  });
   const artifactStore =
     options.artifactStore ??
     createArtifactStore({
@@ -51,7 +60,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     });
   const extensions = createExtensionApi(ctx, artifactStore);
   const reportInbox = createGoalReportInbox(ctx.now);
-  const subagents = createSubagentApi(ctx, artifactStore, reportInbox);
+  const subagents = createSubagentApi(
+    ctx,
+    artifactStore,
+    reportInbox,
+    backgroundBudget
+  );
   const ticketStore = createTicketStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "tickets")
@@ -124,6 +138,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     goals: { ...sessions, ...goals },
     checkWritable: ctx.checkNotQuiesced,
     isQuiesced: () => options.runtime.isQuiesced(),
+    backgroundBudget,
   });
   schedules.start();
   goalWatchdog.start();
@@ -178,6 +193,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     policy: policyStore,
     decisions: decisionStore,
     sources: enabledSources.join(","),
+    backgroundBudget,
     maxPerHour: options.evalMaxPerHour,
     threadTickets: async (thread) => {
       // The work taken on for this thread that the Eval could still be looking at: nothing older than the
@@ -297,6 +313,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
           if (timer) clearTimeout(timer);
         }
       } finally {
+        try {
+          const opened = await ctx.openSession(session.thebeSessionId);
+          const context = await opened.session.getContextUsage();
+          await backgroundBudget.recordSession({
+            id: `eval:${context.sessionStats?.sessionId ?? session.runtimeSessionId}`,
+            context,
+          });
+        } catch {
+          // A runtime that cannot report usage must not turn a usable assessment into an outage.
+        }
         await sessions.deleteSession(session.thebeSessionId).catch(() => {});
       }
     },
@@ -458,6 +484,11 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async setPolicy(input) {
       return withModes(await policyStore.set(input));
     },
+    getBackgroundBudgetSummary: () => backgroundBudget.summary(),
+    setDailyBackgroundTokenBudget: (dailyTokens) =>
+      backgroundBudget.setDailyTokens(dailyTokens),
+    resolveBackgroundBudgetSuggestion: (action) =>
+      backgroundBudget.resolveSuggestion(action),
     async listDecisions(query) {
       return projectDecisions(await decisionStore.list(query));
     },

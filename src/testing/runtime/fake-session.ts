@@ -12,7 +12,10 @@ import {
   type ThebeSessionContext,
   type ThinkingLevel,
 } from "../../agent/runtime/interface.ts";
-import { permissionRisk, summarizeArgs } from "../../agent/security/redaction.ts";
+import {
+  permissionRisk,
+  summarizeArgs,
+} from "../../agent/security/redaction.ts";
 import {
   isInlineTextAttachment,
   renderInlineTextFile,
@@ -37,7 +40,7 @@ export type FakeSessionControls = {
 
 export function createFakeSession(
   state: FakeSessionState,
-  controls: FakeSessionControls,
+  controls: FakeSessionControls
 ): RuntimeSession {
   const listeners = new Set<(event: NormalizedEvent) => void>();
   let aborted = false;
@@ -55,7 +58,7 @@ export function createFakeSession(
     const model = controls.models.find(
       (candidate) =>
         candidate.providerId === state.model.providerId &&
-        candidate.modelId === state.model.modelId,
+        candidate.modelId === state.model.modelId
     );
     const supportsThinking = model?.supportsThinking ?? false;
     const availableLevels: ThinkingLevel[] = supportsThinking
@@ -188,7 +191,7 @@ export function createFakeSession(
           const result = await tool.execute(
             toolCallId,
             call.args ?? {},
-            ac.signal,
+            ac.signal
           );
           text = result.content.map((block) => block.text).join("\n");
           isError = Boolean(result.isError);
@@ -242,7 +245,7 @@ export function createFakeSession(
       .filter((file) => file.mode === "reference")
       .map(
         (file) =>
-          `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`,
+          `[file reference: ${file.path ?? file.filename ?? "attachment"} (${file.mediaType})]`
       )
       .join("\n");
     const lines = (prompt.files ?? [])
@@ -253,11 +256,10 @@ export function createFakeSession(
       .filter(
         (file) =>
           (!file.mode || file.mode === "inline") &&
-          !isInlineTextFile(file.mediaType),
+          !isInlineTextFile(file.mediaType)
       )
       .map(
-        (file) =>
-          `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`,
+        (file) => `[file: ${file.filename ?? "attachment"} (${file.mediaType})]`
       )
       .join("\n");
     const extra = [inlined, references, lines, otherFiles]
@@ -353,7 +355,7 @@ export function createFakeSession(
       const rows = state.messages
         .map(
           (message) =>
-            `<li><strong>${escapeHtml(message.role)}</strong><pre>${escapeHtml(message.text)}</pre></li>`,
+            `<li><strong>${escapeHtml(message.role)}</strong><pre>${escapeHtml(message.text)}</pre></li>`
         )
         .join("\n");
       return {
@@ -376,10 +378,13 @@ export function createFakeSession(
     async setModel(model): Promise<void> {
       const known = controls.models.some(
         (row) =>
-          row.providerId === model.providerId && row.modelId === model.modelId,
+          row.providerId === model.providerId && row.modelId === model.modelId
       );
       if (!known) {
-        throw httpError(404, `unknown model: ${model.providerId}/${model.modelId}`);
+        throw httpError(
+          404,
+          `unknown model: ${model.providerId}/${model.modelId}`
+        );
       }
       state.model = model;
     },
@@ -412,7 +417,7 @@ export function createFakeSession(
     async getContextUsage(): Promise<ThebeSessionContext> {
       const totalChars = state.messages.reduce(
         (sum, message) => sum + (message.text?.length ?? 0),
-        0,
+        0
       );
       const tokens = Math.ceil(totalChars / 4);
       let userMessages = 0;
@@ -446,14 +451,26 @@ export function createFakeSession(
           toolCalls,
           toolResults,
           totalMessages: state.messages.length,
-          tokens: {
-            input: tokens,
-            output: Math.ceil(tokens * 0.3),
-            cacheRead: 0,
-            cacheWrite: 0,
-            total: Math.ceil(tokens * 1.3),
-          },
-          cost: 0.001,
+          tokens: state.usage
+            ? {
+                input: state.usage.input,
+                output: state.usage.output,
+                cacheRead: state.usage.cacheRead,
+                cacheWrite: state.usage.cacheWrite,
+                total:
+                  state.usage.input +
+                  state.usage.output +
+                  state.usage.cacheRead +
+                  state.usage.cacheWrite,
+              }
+            : {
+                input: tokens,
+                output: Math.ceil(tokens * 0.3),
+                cacheRead: 0,
+                cacheWrite: 0,
+                total: Math.ceil(tokens * 1.3),
+              },
+          cost: state.usage?.cost ?? 0.001,
         },
         sessionName: (state as { title?: string }).title,
       };
@@ -480,7 +497,7 @@ export function createFakeSession(
         throw new Error("nothing to revert");
       }
       const index = state.messages.findIndex(
-        (message) => message.id === lastUser.id,
+        (message) => message.id === lastUser.id
       );
       state.reverted = state.messages.slice(index);
       state.messages = state.messages.slice(0, index);
@@ -494,7 +511,7 @@ export function createFakeSession(
     },
     async executeBash(
       command: string,
-      onChunk?: (chunk: string) => void,
+      onChunk?: (chunk: string) => void
     ): Promise<{ exitCode?: number; cancelled: boolean; output: string }> {
       const output = `fake output for ${command}\n`;
       onChunk?.(output);

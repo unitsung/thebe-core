@@ -37,6 +37,7 @@ async function setup(
     maxPerHour?: number;
     clock?: () => Date;
     onUnavailable?: (notice: EvalUnavailableNotice) => void;
+    budgetExhausted?: () => boolean;
   } = {}
 ) {
   let now = T0 + 60_000;
@@ -55,6 +56,13 @@ async function setup(
     now: clock,
     maxPerHour: opts.maxPerHour,
     onUnavailable: opts.onUnavailable,
+    ...(opts.budgetExhausted
+      ? {
+          backgroundBudget: {
+            exhausted: async () => opts.budgetExhausted!(),
+          },
+        }
+      : {}),
     assess: async (prompt) => {
       prompts.push(prompt);
       return reply(prompt);
@@ -556,6 +564,39 @@ describe("eval service", () => {
     s.service.enqueue([trigger(4, { threads: ["resource:container:c4"] })]);
     await s.service.idle();
     expect(s.prompts).toHaveLength(3);
+  });
+
+  it("skips the assessment at the daily budget and resumes on the next day", async () => {
+    let exhausted = true;
+    const s = await setup(
+      (prompt) =>
+        JSON.stringify({
+          decision: "accept",
+          matched: [/\[(\w+)\]/.exec(prompt)![1]],
+          reason: "x",
+        }),
+      { budgetExhausted: () => exhausted }
+    );
+    s.service.enqueue([trigger(1)]);
+    await s.service.idle();
+    expect(s.prompts).toHaveLength(0);
+    expect((await s.decisions.list())[0]).toMatchObject({
+      outcome: "unavailable",
+      unavailableReason: "daily_budget",
+      gate: true,
+    });
+
+    exhausted = false;
+    s.advance(86_400_000);
+    s.service.enqueue([trigger(2, { threads: ["resource:container:plex"] })]);
+    await s.service.idle();
+    expect(s.prompts).toHaveLength(1);
+    expect(
+      (await s.decisions.list({ thread: "resource:container:plex" }))[0]
+    ).toMatchObject({
+      outcome: "ignore",
+      wouldAccept: true,
+    });
   });
 
   it("after a restart weighs recorded Triggers no Decision covers, within an age bound, and not twice", async () => {

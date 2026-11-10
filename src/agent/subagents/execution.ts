@@ -5,6 +5,7 @@ import { appendActivity, type ActivityRun } from "./activity.ts";
 export type SubagentExecutionRun = ActivityRun & {
   cancelRequested: boolean;
   profile: SubagentProfile;
+  background: boolean;
   nextActivityId: number;
 };
 
@@ -29,6 +30,10 @@ export type SubagentExecutionDeps = {
   recordEvent: (run: SubagentExecutionRun, event: NormalizedEvent) => void;
   notify: (run: SubagentExecutionRun, event?: NormalizedEvent) => void;
   onSnapshot?: (run: SubagentExecutionRun) => void | Promise<void>;
+  captureUsage?: (
+    run: SubagentExecutionRun,
+    session: RuntimeSession
+  ) => Promise<void> | void;
   finish: (run: SubagentExecutionRun) => Promise<void>;
   onFinished: (run: SubagentExecutionRun) => void;
 };
@@ -99,6 +104,13 @@ export async function executeSubagentRun(
       deps.rejectPendingPermission?.(permissionId);
     deps.pendingByRun.delete(run.runId);
     deps.sessions.delete(run.runId);
+    if (session) {
+      try {
+        await deps.captureUsage?.(run, session);
+      } catch {
+        // Usage accounting must not change a child's terminal result.
+      }
+    }
     session?.dispose();
     run.finishedAt = deps.now().toISOString();
     deps.appendActivity(run, { kind: "status", title: run.status });
