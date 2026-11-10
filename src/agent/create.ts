@@ -37,6 +37,7 @@ import { createArtifactStore } from "./artifacts/store.ts";
 import { createScheduleApi } from "./schedules/service.ts";
 import { canRunPipelineJobs } from "./tools/pipeline-tools.ts";
 import { createMainSessionApi } from "./main-session/service.ts";
+import { createResidentMainSession } from "./main-session/resident.ts";
 import { createBackgroundBudgetService } from "./usage/budget.ts";
 
 /** Authoritative composition root for the agent layer. */
@@ -335,6 +336,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     checkWritable: ctx.checkNotQuiesced,
     now: ctx.now,
   });
+  let residentMainSession:
+    | ReturnType<typeof createResidentMainSession>
+    | undefined;
 
   async function isTicketLive(ticket: Ticket): Promise<boolean> {
     if (!ticket.links.legacyGoalId) return false;
@@ -365,6 +369,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     }
     if (unattached.length > 0) {
       evalService.enqueue(unattached);
+      void residentMainSession?.enqueue(unattached).catch(() => {});
     }
   }
 
@@ -397,22 +402,22 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       // A Source that cannot be read this time (for example Docker is down) is tried again next tick.
     },
   });
-  // Triggers recorded before a restart that no Decision covers are weighed now, within an age bound.
-  if (enabledSources.length > 0) {
-    void triggerStore.list().then(async (rows) => {
-      const unattached: Trigger[] = [];
-      for (const trigger of rows) {
-        const attachedTo = await ticketStore.attachTrigger({
-          trigger,
-          isLive: isTicketLive,
-          attachedAt: ctx.now().toISOString(),
-        });
-        if (attachedTo.length === 0) {
-          unattached.push(trigger);
-        }
+  async function recoverSourceTriggers(): Promise<void> {
+    if (enabledSources.length === 0) return;
+    const rows = await triggerStore.list();
+    const unattached: Trigger[] = [];
+    for (const trigger of rows) {
+      const attachedTo = await ticketStore.attachTrigger({
+        trigger,
+        isLive: isTicketLive,
+        attachedAt: ctx.now().toISOString(),
+      });
+      if (attachedTo.length === 0) {
+        unattached.push(trigger);
       }
-      evalService.recover(unattached);
-    });
+    }
+    await evalService.recover(unattached);
+    await residentMainSession?.enqueue(unattached);
   }
   void evalDispositions
     .listTriggerRequeues()
@@ -425,7 +430,6 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     .catch(() => {
       // A later explicit requeue retries; restart recovery must not block Core.
     });
-  sourceRunner.start();
   const ticketControl = createTicketControlApi({
     store: ticketStore,
     goals,
@@ -456,10 +460,61 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     routing: evalRouting,
     tickets: ticketControl,
     artifacts: artifactStore,
+    backgroundBudget,
+    usageDir: options.agentStoreDir
+      ? join(options.agentStoreDir, "main-session")
+      : undefined,
     sessions,
     prompts,
     model: options.mainSessionModel,
   });
+  residentMainSession = createResidentMainSession({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "main-session")
+      : undefined,
+    triggers: triggerStore,
+    tickets: ticketControl,
+    getMainSession: mainSession.getMainSession,
+    waitForEval: () => evalService.idle(),
+    prompt: (input) => mainSession.askResidentMainSession(input),
+    budget: backgroundBudget,
+    abort: () => ctx.requestStop(),
+    onError: () => {
+      // A failed resident turn stays pending and is retried without blocking new Source reads.
+    },
+  });
+  mainSession.setResidentWake(() => {
+    residentMainSession?.start();
+    residentMainSession?.kick();
+  });
+  mainSession.setResidentLifecycle({
+    pauseForPerson: async () => {
+      await residentMainSession?.pauseForPerson();
+    },
+    resumeAfterPerson: () => residentMainSession?.resumeAfterPerson(),
+  });
+  if (enabledSources.length > 0) {
+    residentMainSession.start();
+    void recoverSourceTriggers()
+      .then(() => residentMainSession?.enqueueRecovery())
+      .catch(() => residentMainSession?.enqueueRecovery())
+      .catch(() => {
+        // A later Source poll uses the same durable Trigger store.
+      });
+  } else {
+    void residentMainSession
+      .enqueueRecovery()
+      .then(() => mainSession.getMainSession())
+      .then(async (existing) => {
+        if (!existing) return;
+        residentMainSession?.start();
+        residentMainSession?.kick();
+      })
+      .catch(() => {
+        // A later main-Session message starts recovery.
+      });
+  }
+  sourceRunner.start();
   async function projectDecisions(rows: Decision[]): Promise<Decision[]> {
     return candidates.project(rows);
   }
@@ -564,6 +619,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       goalWatchdog.stop();
       sourceRunner.stop();
       evalService.stop();
+      await residentMainSession?.stop();
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
       await options.runtime.quiesce();
@@ -573,6 +629,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       goalWatchdog.start();
       schedules.start();
       evalService.start();
+      residentMainSession?.start();
       sourceRunner.start();
       ctx.pipelineAdvancer?.start();
     },
