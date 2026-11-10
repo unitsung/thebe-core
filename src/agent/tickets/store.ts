@@ -80,6 +80,23 @@ export type TicketStore = {
     isLive: (ticket: Ticket) => Promise<boolean> | boolean;
     attachedAt?: string;
   }): Promise<string[]>;
+  /**
+   * Attaches Triggers explicitly to one Ticket, subscribing it to every Thread they belong to.
+   * Idempotent by Trigger id, so retrying the same routing does not duplicate an Input.
+   */
+  attachToTicket(options: {
+    ticketId: string;
+    triggers: readonly Trigger[];
+    note?: string;
+    attachedAt?: string;
+  }): Promise<
+    | {
+        ticket: Ticket;
+        addedTriggerIds: string[];
+        reused: boolean;
+      }
+    | undefined
+  >;
 };
 
 export function createTicketStore(options: {
@@ -327,6 +344,70 @@ export function createTicketStore(options: {
         if (target.inputs.length > MAX_INPUTS_PER_TICKET) target.inputs.shift();
         await persist(target);
         return [target.id];
+      });
+    },
+    async attachToTicket(options) {
+      return serial(async () => {
+        await ensureLoaded();
+        const target = memory.get(options.ticketId);
+        if (!target) return undefined;
+        const triggers = [
+          ...new Map(
+            options.triggers.map((trigger) => [trigger.id, trigger])
+          ).values(),
+        ];
+        const existing = new Set(target.inputs.map((input) => input.triggerId));
+        const addedTriggerIds: string[] = [];
+        let subscriptionsChanged = false;
+        for (const trigger of triggers) {
+          for (const thread of trigger.threads) {
+            if (
+              target.subscriptions.some(
+                (subscription) =>
+                  normalizeThread(subscription) === normalizeThread(thread)
+              )
+            ) {
+              continue;
+            }
+            target.subscriptions.push(thread);
+            subscriptionsChanged = true;
+          }
+        }
+        let seq = target.inputs.reduce(
+          (highest, item) => Math.max(highest, item.seq),
+          0
+        );
+        const attachedAt = options.attachedAt ?? new Date().toISOString();
+        for (const trigger of triggers.sort((left, right) =>
+          left.at.localeCompare(right.at)
+        )) {
+          if (existing.has(trigger.id)) continue;
+          const input: TicketInput = {
+            triggerId: trigger.id,
+            seq: ++seq,
+            source: trigger.source,
+            kind: trigger.kind,
+            thread: trigger.threads[0]!,
+            at: trigger.at,
+            attachedAt,
+            ...(options.note ? { note: options.note } : {}),
+            ...(trigger.payload ? { payload: trigger.payload } : {}),
+          };
+          target.inputs.push(input);
+          existing.add(trigger.id);
+          addedTriggerIds.push(trigger.id);
+        }
+        if (target.inputs.length > MAX_INPUTS_PER_TICKET) {
+          target.inputs.splice(0, target.inputs.length - MAX_INPUTS_PER_TICKET);
+        }
+        if (addedTriggerIds.length > 0 || subscriptionsChanged) {
+          await persist(target);
+        }
+        return {
+          ticket: target,
+          addedTriggerIds,
+          reused: addedTriggerIds.length === 0,
+        };
       });
     },
   };

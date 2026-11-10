@@ -766,6 +766,25 @@ const operations: Operation[] = [
     ],
   },
   {
+    method: "post",
+    path: "/v1/decisions/{id}/attach",
+    summary:
+      "Attach one Decision's events to an explicitly named Ticket without another Eval",
+    tag: "ticket",
+    parameters: [idParameter()],
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "DecisionAttachRequest",
+    responseSchema: "DecisionAttachment",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "These events were already attached to this Ticket",
+        schema: "DecisionAttachment",
+      },
+    ],
+  },
+  {
     method: "get",
     path: "/v1/tickets",
     summary: "List Tickets, newest first",
@@ -3210,6 +3229,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "Derived when any Ticket links this Decision, including a candidate a person accepted.",
             },
+            candidate: {
+              type: "boolean",
+              description:
+                "True only for a positive Decision that no Ticket has accepted or attached.",
+            },
+            attachedTicketId: {
+              type: "string",
+              description:
+                "Derived when one of this Decision's source events was explicitly attached to a Ticket.",
+            },
             notTakenOn: {
               type: "string",
               description:
@@ -3218,6 +3247,24 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             policyVersion: { type: "string" },
             decidedAt: { type: "string", format: "date-time" },
           },
+        },
+        DecisionAttachRequest: {
+          type: "object",
+          required: ["ticketId"],
+          properties: {
+            ticketId: {
+              type: "string",
+              description:
+                "The existing Ticket the person explicitly named as the owner of this event.",
+            },
+            note: {
+              type: "string",
+              maxLength: 4000,
+              description:
+                "Optional routing context. It reaches the next worker checkpoint as untrusted data and grants no authority.",
+            },
+          },
+          additionalProperties: false,
         },
         TicketList: {
           type: "object",
@@ -3447,6 +3494,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           ],
         },
+        DecisionAttachment: {
+          allOf: [
+            { $ref: "#/components/schemas/TicketTask" },
+            {
+              type: "object",
+              required: ["decisionId", "attachedTicketId", "reused"],
+              properties: {
+                decisionId: { type: "string" },
+                attachedTicketId: { type: "string" },
+                reused: { type: "boolean" },
+              },
+            },
+          ],
+        },
         TicketInput: {
           type: "object",
           description:
@@ -3468,6 +3529,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             thread: { type: "string" },
             at: { type: "string", format: "date-time" },
             attachedAt: { type: "string", format: "date-time" },
+            note: {
+              type: "string",
+              description:
+                "Optional routing context supplied when a person explicitly attached this event.",
+            },
             payload: { type: "object" },
           },
         },

@@ -74,6 +74,39 @@ export async function handleEvalRoutes(
     return json(accepted, accepted.reused ? 200 : 201);
   }
 
+  const isAttachDecision =
+    context.parts.length === 4 &&
+    context.parts[1] === "decisions" &&
+    context.parts[3] === "attach";
+  if (isAttachDecision) {
+    if (request.method !== "POST") {
+      return json(
+        {
+          ok: false,
+          error: "Use POST to attach a Decision",
+          code: "method_not_allowed",
+        },
+        405
+      );
+    }
+    const blocked = quiescedWrite(context);
+    if (blocked) return blocked;
+    const decisionId = context.parts[2];
+    if (!decisionId) {
+      return json(
+        { ok: false, error: "decision not found", code: "not_found" },
+        404
+      );
+    }
+    const input = await readJson(request);
+    const attached = await agent.attachDecision({
+      decisionId,
+      ticketId: typeof input.ticketId === "string" ? input.ticketId.trim() : "",
+      ...(typeof input.note === "string" ? { note: input.note } : {}),
+    });
+    return json(attached, attached.reused ? 200 : 201);
+  }
+
   if (request.method !== "GET") {
     return json(
       {

@@ -5,7 +5,12 @@ import type { TicketTaskView } from "../tickets/control.ts";
 import { createTicketStore } from "../tickets/store.ts";
 import { createCandidateApi } from "./candidates.ts";
 import { createDecisionStore } from "./decision-store.ts";
-import { DECISION_ACCEPT_TOOL_NAME, DECISION_LIST_TOOL_NAME } from "./tools.ts";
+import {
+  DECISION_ACCEPT_TOOL_NAME,
+  DECISION_ATTACH_TOOL_NAME,
+  DECISION_GET_TOOL_NAME,
+  DECISION_LIST_TOOL_NAME,
+} from "./tools.ts";
 import type { Decision, Policy } from "./types.ts";
 
 const NOW = "2026-11-10T10:00:00.000Z";
@@ -58,6 +63,8 @@ async function setup(candidate = decision()) {
   await triggers.add([trigger]);
   const tickets = createTicketStore({});
   const started: unknown[] = [];
+  const reopened: string[] = [];
+  let stage: TicketTaskView["stage"] = "running";
   let goals = 0;
   const api = createCandidateApi({
     decisions,
@@ -67,9 +74,12 @@ async function setup(candidate = decision()) {
       if (!ticket) return undefined;
       return {
         ticket,
-        stage: "running",
+        stage,
         pendingPermissions: [],
-        receipt: { state: "running", complete: false },
+        receipt: {
+          state: stage,
+          complete: ["completed", "failed", "cancelled"].includes(stage),
+        },
       };
     },
     triggers,
@@ -80,6 +90,16 @@ async function setup(candidate = decision()) {
         goals += 1;
         return { thebeSessionId: `goal-${goals}` };
       },
+      reopenGoal: async (goalId) => {
+        if (
+          stage === "completed" ||
+          stage === "blocked" ||
+          stage === "failed"
+        ) {
+          reopened.push(goalId);
+          stage = "running";
+        }
+      },
     },
     sessions: {
       createSession: async () => ({ thebeSessionId: `goal-${goals + 1}` }),
@@ -87,7 +107,17 @@ async function setup(candidate = decision()) {
     servicesForResource: (kind) => (kind === "container" ? ["docker"] : []),
     now: () => new Date(NOW),
   });
-  return { api, candidate, decisions, tickets, started };
+  return {
+    api,
+    candidate,
+    decisions,
+    tickets,
+    started,
+    reopened,
+    setStage: (next: TicketTaskView["stage"]) => {
+      stage = next;
+    },
+  };
 }
 
 describe("Decision candidates", () => {
@@ -177,12 +207,139 @@ describe("Decision candidates", () => {
     expect(s.started).toEqual([]);
   });
 
+  it("attaches the Decision idempotently to an explicitly named live Ticket without another Eval", async () => {
+    const s = await setup();
+    const target = await s.tickets.recordDirect({
+      thread: "chat:target",
+      triggerId: "4".repeat(32),
+      kind: "goal-start",
+      at: "2026-11-10T09:00:00.000Z",
+      title: "Existing media task",
+      requester: "chat",
+      goalId: "goal-target",
+    });
+    const caller = { writes: true, irreversible: false };
+    const attached = await s.api.invoke(
+      DECISION_ATTACH_TOOL_NAME,
+      {
+        decisionId: DECISION_ID,
+        ticketId: target.id,
+        note: "Use this failure as context for the cleanup.",
+      },
+      caller
+    );
+    expect(attached).toMatchObject({
+      decisionId: DECISION_ID,
+      attachedTicketId: target.id,
+      reused: false,
+      stage: "running",
+      ticket: {
+        subscriptions: ["chat:target", "resource:container:emby"],
+        inputs: [
+          {
+            triggerId: TRIGGER_ID,
+            note: "Use this failure as context for the cleanup.",
+          },
+        ],
+      },
+    });
+    expect(s.started).toEqual([]);
+    expect(s.reopened).toEqual([]);
+    await expect(
+      s.api.invoke(DECISION_GET_TOOL_NAME, { decisionId: DECISION_ID }, caller)
+    ).resolves.toMatchObject({
+      candidate: false,
+      attachedTicketId: target.id,
+    });
+    await expect(
+      s.api.invoke(DECISION_LIST_TOOL_NAME, { candidateOnly: true }, caller)
+    ).resolves.toEqual({ decisions: [] });
+
+    await expect(
+      s.api.invoke(
+        DECISION_ATTACH_TOOL_NAME,
+        { decisionId: DECISION_ID, ticketId: target.id },
+        caller
+      )
+    ).resolves.toMatchObject({
+      attachedTicketId: target.id,
+      reused: true,
+    });
+    expect((await s.tickets.get(target.id))?.inputs).toHaveLength(1);
+    await expect(
+      s.api.invoke(
+        DECISION_ACCEPT_TOOL_NAME,
+        { decisionId: DECISION_ID },
+        caller
+      )
+    ).rejects.toMatchObject({ status: 409, code: "already_attached" });
+    expect(s.started).toEqual([]);
+  });
+
+  it("reopens ended work under the same Ticket and refuses one a person stopped", async () => {
+    const reopened = await setup();
+    const ended = await reopened.tickets.recordDirect({
+      thread: "chat:ended",
+      triggerId: "5".repeat(32),
+      kind: "goal-start",
+      at: "2026-11-10T09:00:00.000Z",
+      title: "Finished media task",
+      requester: "chat",
+      goalId: "goal-ended",
+    });
+    reopened.setStage("completed");
+    await expect(
+      reopened.api.invoke(
+        DECISION_ATTACH_TOOL_NAME,
+        { decisionId: DECISION_ID, ticketId: ended.id },
+        { writes: true, irreversible: false }
+      )
+    ).resolves.toMatchObject({
+      attachedTicketId: ended.id,
+      ticket: {
+        id: ended.id,
+        mandate: ended.mandate,
+        links: { legacyGoalId: "goal-ended" },
+      },
+    });
+    expect(reopened.reopened).toEqual(["goal-ended"]);
+    expect(reopened.started).toEqual([]);
+
+    const stopped = await setup();
+    const stoppedTicket = await stopped.tickets.recordDirect({
+      thread: "chat:stopped",
+      triggerId: "6".repeat(32),
+      kind: "goal-start",
+      at: "2026-11-10T09:00:00.000Z",
+      title: "Stopped media task",
+      requester: "chat",
+      goalId: "goal-stopped",
+    });
+    stopped.setStage("cancelled");
+    await expect(
+      stopped.api.invoke(
+        DECISION_ATTACH_TOOL_NAME,
+        { decisionId: DECISION_ID, ticketId: stoppedTicket.id },
+        { writes: true, irreversible: false }
+      )
+    ).rejects.toMatchObject({ status: 409, code: "ticket_stopped" });
+    expect((await stopped.tickets.get(stoppedTicket.id))?.inputs).toEqual([]);
+    expect(stopped.reopened).toEqual([]);
+  });
+
   it("requires write permission and reports when source evidence is gone", async () => {
     const noWrite = await setup();
     await expect(
       noWrite.api.invoke(
         DECISION_ACCEPT_TOOL_NAME,
         { decisionId: DECISION_ID },
+        { writes: false, irreversible: false }
+      )
+    ).rejects.toMatchObject({ status: 403, code: "mcp_write_required" });
+    await expect(
+      noWrite.api.invoke(
+        DECISION_ATTACH_TOOL_NAME,
+        { decisionId: DECISION_ID, ticketId: "4".repeat(32) },
         { writes: false, irreversible: false }
       )
     ).rejects.toMatchObject({ status: 403, code: "mcp_write_required" });

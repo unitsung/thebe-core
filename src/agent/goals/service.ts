@@ -881,6 +881,40 @@ export function createGoalApi(
     },
 
     /**
+     * Starts a fresh checkpoint for a terminal Ticket Goal after a person explicitly attaches a relevant
+     * event. The Ticket and its Mandate stay the same; a person's stop is never undone.
+     */
+    async reopenGoalForInput(thebeSessionId: string): Promise<GoalRun> {
+      const run = runs.get(thebeSessionId);
+      if (!run) throw new Error("no goal found for this session");
+      if (
+        run.status === "running" ||
+        run.status === "pausing" ||
+        run.status === "paused"
+      ) {
+        return snapshot(run);
+      }
+      if (run.status === "cancelled") {
+        throw httpError(
+          409,
+          "a person stopped this Ticket; attach the event to another Ticket or accept it as new work",
+          "ticket_stopped"
+        );
+      }
+      ctx.checkNotQuiesced();
+      await revalidateBeforeContinue(run);
+      run.blocked = undefined;
+      run.attention = undefined;
+      run.report = undefined;
+      run.lastReviewResult = undefined;
+      run.personNoticeId = undefined;
+      if (run.iteration >= run.maxIterations) {
+        run.maxIterations = run.iteration + 1;
+      }
+      return continueGoal(run, true);
+    },
+
+    /**
      * Answers the one open question, or accepts / sends back a finished result. A stale `attentionId`
      * (already answered, or a newer question) is a conflict, never a second answer.
      */

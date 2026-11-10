@@ -38,6 +38,8 @@ export type TicketInput = {
   thread: string;
   at: string;
   attachedAt: string;
+  /** Optional routing note from the person when the main Session attached this event explicitly. */
+  note?: string;
   payload?: Record<string, unknown>;
 };
 

@@ -546,6 +546,18 @@ export interface ThebeAgent {
       reused: boolean;
     }
   >;
+  /** Attach one Decision's events to an explicitly named Ticket without another Eval. */
+  attachDecision(input: {
+    decisionId: string;
+    ticketId: string;
+    note?: string;
+  }): Promise<
+    TicketTaskView & {
+      decisionId: string;
+      attachedTicketId: string;
+      reused: boolean;
+    }
+  >;
   /** Events the enabled Sources observed, newest first. They feed fan-out and Eval. */
   listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
   /** Read health for each enabled Source, including consecutive failures and the latest error. */
