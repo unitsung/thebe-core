@@ -19,6 +19,7 @@ const ID_RE = /^[a-f0-9]{32}$/;
 export type TicketStore = {
   get(id: string): Promise<Ticket | undefined>;
   getByGoal(goalId: string): Promise<Ticket | undefined>;
+  getByDecision(decisionId: string): Promise<Ticket | undefined>;
   list(): Promise<Ticket[]>;
   /**
    * Records the Ticket for work a person asked for. Idempotent: the same request gives the same Ticket,
@@ -56,6 +57,19 @@ export type TicketStore = {
     intent?: string;
     /** The Goal that carries it out. Its session id: the Ticket's Mandate is looked up from it. */
     goalId?: string;
+  }): Promise<Ticket>;
+  /**
+   * Records work a person explicitly took on after reviewing an Eval candidate. The Decision remains
+   * unchanged as evidence; this Ticket links back to it and derives its id from the same Eval.
+   */
+  recordDecisionAccepted(input: {
+    evalId: string;
+    decisionId: string;
+    thread: string;
+    at: string;
+    title: string;
+    requester: string;
+    goalId: string;
   }): Promise<Ticket>;
   /**
    * Fan-out: attaches a Trigger to the newest live Ticket subscribed to any of its threads.
@@ -144,6 +158,12 @@ export function createTicketStore(options: {
         (ticket) => ticket.links.legacyGoalId === goalId
       );
     },
+    async getByDecision(decisionId) {
+      await ensureLoaded();
+      return [...memory.values()].find(
+        (ticket) => ticket.links.decisionId === decisionId
+      );
+    },
     async list() {
       await ensureLoaded();
       return newestFirst([...memory.values()]);
@@ -216,6 +236,36 @@ export function createTicketStore(options: {
             decisionId: input.decisionId,
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
             sessionIds: input.goalId ? [input.goalId] : [],
+          },
+          createdAt: input.at,
+        };
+        memory.set(id, ticket);
+        await persist(ticket);
+        await prune();
+        return ticket;
+      });
+    },
+    async recordDecisionAccepted(input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const id = ticketIdFor(input.evalId);
+        const existing = memory.get(id);
+        if (existing) return existing;
+        const ticket: Ticket = {
+          id,
+          title: input.title,
+          mandate: {
+            strength: "explicit",
+            decidedBy: "direct",
+            evalId: input.evalId,
+            requester: input.requester,
+          },
+          subscriptions: [input.thread],
+          inputs: [],
+          links: {
+            decisionId: input.decisionId,
+            legacyGoalId: input.goalId,
+            sessionIds: [input.goalId],
           },
           createdAt: input.at,
         };

@@ -17,6 +17,7 @@ import { createDecisionStore } from "./eval/decision-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
 import type { Policy } from "./eval/types.ts";
 import { createEvalService, DEFAULT_BACKLOG_AGE_MS } from "./eval/service.ts";
+import { createCandidateApi } from "./eval/candidates.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { prepareForEval } from "./eval/preparation.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
@@ -379,11 +380,23 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     sessions,
     now: ctx.now,
   });
+  const candidates = createCandidateApi({
+    decisions: decisionStore,
+    tickets: ticketStore,
+    ticketView: ticketControl.get,
+    triggers: triggerStore,
+    policy: policyStore,
+    goals,
+    sessions,
+    servicesForResource,
+    now: ctx.now,
+  });
   void ticketControl.backfillGoals().catch(() => {
     // The next Ticket read retries; a migration failure must not prevent Core from starting.
   });
   const mainSession = createMainSessionApi({
     ctx,
+    candidates,
     tickets: ticketControl,
     sessions,
     prompts,

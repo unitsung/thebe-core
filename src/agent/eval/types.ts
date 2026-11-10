@@ -72,6 +72,10 @@ export type Decision = {
   outcome: DecisionOutcome;
   wouldAccept?: boolean;
   matchedRuleIds: string[];
+  /** The rules as they read when this Decision was made, so a later person can act on it after Policy edits. */
+  matchedRules?: PolicyRule[];
+  /** Assessment's one-sentence description of the work a positive Decision proposes. */
+  intent?: string;
   reason: string;
   /** Why no assessment was made or it failed: a Gate reason, a limit, a timeout, or a bad reply. */
   unavailableReason?: string;

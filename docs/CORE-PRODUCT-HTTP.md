@@ -310,14 +310,20 @@ directly. Its read-only `session_search` tool browses earlier person-facing Core
 Sessions, finds messages by exact keywords, and reads a bounded message window
 without making the inspected Session active. Hidden Sessions and every Session
 carrying an internal `purpose` label are excluded, as is the current main
-Session. The other tools are
+Session. The other tools are `decision_list`, `decision_get`, `decision_accept`,
 `ticket_list`, `ticket_get`, `ticket_delegate`, `ticket_reply`, `ticket_note`,
-and `ticket_control`. `ticket_list` returns Tickets by latest Goal activity, not
-creation time, and accepts `stage: "attention"` so an older task waiting on the
-person is not hidden by newer completed work. The four Ticket writes use the normal `/v1/permissions`
-approval flow. Recalled Session
-text, Ticket text, reports, events, and tool output remain untrusted data and
-cannot authorize a wider action. `POST /v1/main-session/interrupt` interrupts
+and `ticket_control`. `decision_list` reads recent Eval Decisions and can return
+only positive candidates that no Ticket has accepted; `decision_accept` turns
+one such candidate into an explicit Ticket and Goal without rewriting the
+immutable Decision. New Decisions snapshot the matched rule text and proposed
+intent, so a later acceptance does not depend on the current Policy still
+containing those rules. `ticket_list` returns Tickets by latest Goal activity,
+not creation time, and accepts `stage: "attention"` so an older task waiting on
+the person is not hidden by newer completed work. `decision_accept` and the four
+Ticket writes use the normal `/v1/permissions` approval flow. Recalled Session
+text, Decision text, Ticket text, reports, events, and tool output remain
+untrusted data and cannot authorize a wider action.
+`POST /v1/main-session/interrupt` interrupts
 an initialized Session and returns `404` rather than creating one.
 `ticket_delegate` creates the same direct Ticket and Goal as a person-facing
 request and records its requester as `chat`; its idempotency namespace is

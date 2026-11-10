@@ -108,6 +108,8 @@ describe("auto in Eval: a positive assessment becomes a Ticket", () => {
       wouldAccept: true,
       ticketId: "ticket-1",
       goalId: "goal-1",
+      intent: "bring the emby container back up",
+      matchedRules: [s.rule],
     });
     expect(s.accepted).toHaveLength(1);
     expect(s.accepted[0]).toMatchObject({
