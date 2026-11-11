@@ -90,11 +90,18 @@ describe("Feishu Source through Eval and the Ticket executor", () => {
       admitUnaddressed: true,
       fetch: api.fetch,
     });
+    const writeback = createFeishuChannelAdapter({
+      appId: "cli_app",
+      appSecret: "secret",
+      chats: ["oc_chat"],
+      fetch: api.fetch,
+    });
     const app = createThebeApp({
       runtime: fake.runtime,
       provider,
       sources: { intervalMs: 1000 },
       sourceAdapters: [source],
+      channelAdapters: [writeback],
     });
 
     await vi.advanceTimersByTimeAsync(0); // the chat baseline
@@ -167,6 +174,16 @@ describe("Feishu Source through Eval and the Ticket executor", () => {
     expect(
       (await app.agent.listSubagents(goalId)).map((run) => run.profileName)
     ).toEqual(["ticket-worker", "ticket-reviewer"]);
+
+    // The completed result is written back to the same chat once, with the idempotency uuid.
+    await vi.waitFor(() => expect(api.sent).toHaveLength(1));
+    const sent = api.sent[0]!;
+    expect(sent.receive_id).toBe("oc_chat");
+    expect(sent.uuid).toBeTruthy();
+    const completed = JSON.parse(String(sent.content)) as { text?: string };
+    expect(completed.text).toContain("A task is complete");
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(api.sent).toHaveLength(1);
 
     const channel = createFeishuChannelAdapter({
       appId: "cli_app",
