@@ -120,6 +120,97 @@ describe("GitHub Source", () => {
     });
   });
 
+  it("keeps a pull request's conversation comment on the pull thread", async () => {
+    const github = fakeGithub([event()]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: github.fetcher,
+    });
+    const baseline = await source.read(undefined);
+
+    github.setFeed([
+      event({
+        id: "1100",
+        payload: {
+          action: "created",
+          issue: {
+            number: 12,
+            title: "Fix the media container",
+            body: "It stopped again.",
+            html_url: "https://github.com/unitsung/thebe/pull/12",
+            pull_request: {
+              url: "https://api.github.com/repos/unitsung/thebe/pulls/12",
+            },
+          },
+          comment: {
+            body: "@thebe-agent still failing",
+            html_url: "https://github.com/unitsung/thebe/pull/12#c1",
+          },
+        },
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers[0]).toMatchObject({
+      threads: ["resource:github:unitsung/thebe:pull:12"],
+      resource: { kind: "github", id: "unitsung/thebe#pull/12" },
+      admission: "explicit",
+      channel: {
+        thread: "resource:github:unitsung/thebe:pull:12",
+        address: { repo: "unitsung/thebe", issue: "12", kind: "pull" },
+      },
+    });
+  });
+
+  it("only counts a mention in the event's own text, as a whole login", async () => {
+    const github = fakeGithub([event()]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: github.fetcher,
+    });
+    const baseline = await source.read(undefined);
+
+    github.setFeed([
+      event({
+        id: "1200",
+        payload: {
+          action: "created",
+          // The issue body mentions the bot, but this comment does not address it.
+          issue: { number: 12, body: "Ping @thebe-agent if this recurs." },
+          comment: { body: "still happening" },
+        },
+      }),
+      event({
+        id: "1201",
+        payload: {
+          action: "created",
+          issue: { number: 13 },
+          comment: { body: "@thebe-agent-extra please look" },
+        },
+      }),
+      event({
+        id: "1202",
+        payload: {
+          action: "created",
+          issue: { number: 14 },
+          comment: { body: "Thanks @thebe-agent, that worked." },
+        },
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers.map((trigger) => trigger.admission)).toEqual([
+      "ignore",
+      "ignore",
+      "explicit",
+    ]);
+    expect(read.triggers.map((trigger) => trigger.addressed)).toEqual([
+      undefined,
+      undefined,
+      "mention",
+    ]);
+  });
+
   it("ignores bot events and unaddressed comments without reaching a model", async () => {
     const github = fakeGithub([event()]);
     const source = createGithubSource({

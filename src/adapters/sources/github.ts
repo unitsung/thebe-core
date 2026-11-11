@@ -276,7 +276,7 @@ function toTrigger(
         }
       : undefined;
   const mention = policy.agentLogin
-    ? mentions(event.payload, policy.agentLogin)
+    ? mentions(event, policy.agentLogin)
     : false;
   const admission = admit({
     human,
@@ -375,11 +375,14 @@ function classify(event: GithubEvent):
       const comment = recordValue(payload.comment);
       const number = numberValue(issue?.number);
       if (!number || action !== "created") return undefined;
+      // GitHub reports a pull request's conversation comments as IssueCommentEvent; the embedded
+      // pull_request is what keeps them on the same thread as the PR's own events.
+      const issueKind = recordValue(issue?.pull_request) ? "pull" : "issue";
       return {
         kind: "github.issue.comment",
         action,
         issue: number,
-        issueKind: "issue",
+        issueKind,
         ...summaryOf(issue, payload),
         ...(stringValue(comment?.body)
           ? { body: truncate(stringValue(comment?.body)!, MAX_BODY_CHARS) }
@@ -451,15 +454,28 @@ function summaryOf(
   };
 }
 
-function mentions(payload: Record<string, unknown>, login: string): boolean {
-  const needle = `@${login}`.toLowerCase();
-  const texts = [
-    stringValue(recordValue(payload.comment)?.body),
-    stringValue(recordValue(payload.review)?.body),
-    stringValue(recordValue(payload.issue)?.body),
-    stringValue(recordValue(payload.pull_request)?.body),
-  ];
-  return texts.some((text) => text?.toLowerCase().includes(needle));
+function mentions(event: GithubEvent, login: string): boolean {
+  const payload = event.payload;
+  // Only the event's own new text can address the bot. An old mention in the issue or PR body
+  // must not turn a later unaddressed comment into an explicit request.
+  const text =
+    event.type === "IssueCommentEvent" ||
+    event.type === "PullRequestReviewCommentEvent"
+      ? stringValue(recordValue(payload.comment)?.body)
+      : event.type === "PullRequestReviewEvent"
+        ? stringValue(recordValue(payload.review)?.body)
+        : event.type === "IssuesEvent"
+          ? stringValue(recordValue(payload.issue)?.body)
+          : event.type === "PullRequestEvent"
+            ? stringValue(recordValue(payload.pull_request)?.body)
+            : undefined;
+  if (!text) return false;
+  // Match a whole login: `@thebe-agent-extra` and `me@thebe-agent` are not mentions.
+  const escaped = login.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(^|[^A-Za-z0-9_@-])@${escaped}(?![A-Za-z0-9_-])`,
+    "i"
+  ).test(text);
 }
 
 function isHuman(actor: GithubActor): boolean {
