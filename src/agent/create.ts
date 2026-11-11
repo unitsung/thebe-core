@@ -273,13 +273,39 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       }),
     accept: async (input) => {
       const ticketId = ticketIdFor(input.evalId);
+      const intent = input.assessment.intent ?? `Handle ${input.thread}`;
+      const scope = inferScope(input.triggers, servicesForResource);
       // Made again after a crash: the same Eval is the same Ticket, and its Goal already started.
       const existing = await ticketStore.get(ticketId);
       if (existing?.links.legacyGoalId) {
-        return { ticketId, goalId: existing.links.legacyGoalId };
+        const goalId = existing.links.legacyGoalId;
+        const goal =
+          goals.getGoal(goalId) ??
+          (await goals.listGoals()).find(
+            (run) => run.thebeSessionId === goalId
+          );
+        // A crash between recording the Ticket and starting its executor leaves the accepted work
+        // without a Goal; start it now instead of reporting success forever without running it.
+        if (!goal) {
+          await goals.startGoal({
+            thebeSessionId: goalId,
+            goal: executorTask({
+              intent,
+              rules: input.policy.rules.filter((rule) =>
+                input.assessment.matchedRuleIds.includes(rule.id)
+              ),
+              triggers: input.triggers,
+              scope,
+              ...(input.preparation ? { preparation: input.preparation } : {}),
+            }),
+            criteria: [
+              "The situation the event describes is resolved, checked with the read tools after any action; or you reported why it cannot be (blocked), or that nothing needed doing (dropped).",
+            ],
+            executor: "ticket",
+          });
+        }
+        return { ticketId, goalId };
       }
-      const intent = input.assessment.intent ?? `Handle ${input.thread}`;
-      const scope = inferScope(input.triggers, servicesForResource);
       // The Goal's session exists first and the Ticket is made before the executor runs: the executor's
       // writes are judged by the Ticket's Mandate, found from this session.
       const session = await sessions.createSession({

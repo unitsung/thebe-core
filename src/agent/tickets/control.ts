@@ -432,7 +432,42 @@ export function createTicketControlApi(options: {
       idempotencyKey: requestId,
     });
     const existing = await get(ticketId);
-    if (existing) return { ...existing, reused: true };
+    if (existing) {
+      const goalId = existing.ticket.links.legacyGoalId;
+      if (goalId) {
+        const goal =
+          options.goals.getGoal(goalId) ??
+          (await options.goals.listGoals()).find(
+            (run) => run.thebeSessionId === goalId
+          );
+        // A crash between recording the Ticket and starting its executor leaves the request
+        // without a Goal; start it now instead of returning a Ticket that can never run.
+        if (!goal) {
+          const run = await options.goals.startGoal({
+            thebeSessionId: goalId,
+            goal: sourceTrigger
+              ? `${task}\n\n${explicitTriggerContext(sourceTrigger)}`
+              : task,
+            criteria,
+            executor: "ticket",
+            maxIterations:
+              typeof input.maxIterations === "number"
+                ? input.maxIterations
+                : undefined,
+            ...(input.observe === true ? { observe: true } : {}),
+            ...(input.allowAsk !== false ? { allowAsk: true } : {}),
+            ...(input.reviewBeforeDone === true
+              ? { reviewBeforeDone: true }
+              : {}),
+          });
+          return {
+            ...view(existing.ticket, run, pendingFor(goalId)),
+            reused: true,
+          };
+        }
+      }
+      return { ...existing, reused: true };
+    }
     const pending = delegateFlights.get(ticketId);
     if (pending) return { ...(await pending), reused: true };
 
@@ -449,21 +484,8 @@ export function createTicketControlApi(options: {
           [`${origin.labelNamespace}RequestId`]: requestId,
         },
       });
-      const run = await options.goals.startGoal({
-        thebeSessionId: session.thebeSessionId,
-        goal: sourceTrigger
-          ? `${task}\n\n${explicitTriggerContext(sourceTrigger)}`
-          : task,
-        criteria,
-        executor: "ticket",
-        maxIterations:
-          typeof input.maxIterations === "number"
-            ? input.maxIterations
-            : undefined,
-        ...(input.observe === true ? { observe: true } : {}),
-        ...(input.allowAsk !== false ? { allowAsk: true } : {}),
-        ...(input.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
-      });
+      // The Ticket exists before the executor starts: its Mandate authorizes the worker's writes,
+      // and its channels can receive the first notice even if the Goal finishes immediately.
       const ticket = await options.store.recordDirect({
         thread,
         triggerId: requestId,
@@ -472,11 +494,36 @@ export function createTicketControlApi(options: {
         idempotencyKey: requestId,
         title: task.slice(0, 120),
         requester,
-        goalId: run.thebeSessionId,
-        sessionIds: [run.thebeSessionId],
+        goalId: session.thebeSessionId,
+        sessionIds: [session.thebeSessionId],
         ...(sourceTrigger ? { triggers: [sourceTrigger] } : {}),
       });
-      return view(ticket, run, pendingFor(run.thebeSessionId));
+      const scheduledGoalId = session.thebeSessionId;
+      const run =
+        ticket.links.legacyGoalId === scheduledGoalId
+          ? await options.goals.startGoal({
+              thebeSessionId: scheduledGoalId,
+              goal: sourceTrigger
+                ? `${task}\n\n${explicitTriggerContext(sourceTrigger)}`
+                : task,
+              criteria,
+              executor: "ticket",
+              maxIterations:
+                typeof input.maxIterations === "number"
+                  ? input.maxIterations
+                  : undefined,
+              ...(input.observe === true ? { observe: true } : {}),
+              ...(input.allowAsk !== false ? { allowAsk: true } : {}),
+              ...(input.reviewBeforeDone === true
+                ? { reviewBeforeDone: true }
+                : {}),
+            })
+          : options.goals.getGoal(ticket.links.legacyGoalId ?? "");
+      return view(
+        ticket,
+        run,
+        pendingFor(run?.thebeSessionId ?? scheduledGoalId)
+      );
     })();
     delegateFlights.set(ticketId, flight);
     try {
