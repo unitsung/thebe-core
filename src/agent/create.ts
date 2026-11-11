@@ -140,14 +140,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],
       onNeedsPerson: async (notice) => {
-        // Make the notice durable before the Goal reports its terminal state,
-        // so a shutdown cannot lose it; sending stays in the background.
-        await channelNotifier.enqueueNeedsPerson(notice).catch(() => {});
-        void channelNotifier.flush().catch(() => {});
-        await options.onGoalNeedsPerson?.(notice);
+        // The outbox entry is written before the Goal reports its terminal state, so a shutdown
+        // cannot lose it; sending stays in the background.
+        try {
+          await channelNotifier.enqueueNeedsPerson(notice);
+          void channelNotifier.flush().catch(() => {});
+        } finally {
+          await options.onGoalNeedsPerson?.(notice);
+        }
       },
       onCompleted: async (notice) => {
-        await channelNotifier.enqueueCompleted(notice).catch(() => {});
+        await channelNotifier.enqueueCompleted(notice);
         void channelNotifier.flush().catch(() => {});
       },
     }
