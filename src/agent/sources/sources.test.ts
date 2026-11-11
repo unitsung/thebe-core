@@ -11,7 +11,7 @@ import { createContainerHealthSource } from "./container-health.ts";
 import { createDownloadCompletedSource } from "./download-completed.ts";
 import { createSourceRunner } from "./runner.ts";
 import { createTriggerStore } from "./store.ts";
-import type { Source } from "./types.ts";
+import type { Source, Trigger } from "./types.ts";
 import type {
   DownloadItem,
   DownloadProvider,
@@ -361,6 +361,55 @@ describe("runner", () => {
     expect(errors).toEqual(["bad"]);
   });
 
+  it("rejects provenance that does not belong to the Source before storing or advancing its cursor", async () => {
+    const store = createTriggerStore({});
+    let valid = false;
+    const source: Source = {
+      id: "external-chat",
+      scope: "one external conversation",
+      read: async () => ({
+        cursor: "next",
+        triggers: [
+          {
+            id: "b".repeat(32),
+            source: "external-chat",
+            kind: "message.created",
+            at: "2026-11-06T10:00:00.000Z",
+            threads: ["conversation:42"],
+            payload: { text: "please inspect this" },
+            actor: {
+              source: valid ? "external-chat" : "other-source",
+              id: "person-7",
+            },
+            human: true,
+            channel: {
+              source: "external-chat",
+              thread: valid ? "conversation:42" : "conversation:other",
+              address: { conversationId: "42" },
+            },
+          },
+        ],
+      }),
+    };
+    const runner = createSourceRunner({ sources: [source], store });
+
+    expect(await runner.pollOnce()).toEqual([]);
+    expect(await store.list()).toEqual([]);
+    expect(await store.cursor(source.id)).toBeUndefined();
+    expect(runner.health()[0]).toMatchObject({
+      state: "failing",
+      consecutiveFailures: 1,
+    });
+
+    valid = true;
+    expect(await runner.pollOnce()).toHaveLength(1);
+    expect(await store.cursor(source.id)).toBe("next");
+    expect(runner.health()[0]).toMatchObject({
+      state: "healthy",
+      consecutiveFailures: 0,
+    });
+  });
+
   it("counts consecutive failures and clears them on a successful read", async () => {
     let failing = true;
     const source: Source = {
@@ -457,5 +506,195 @@ describe("runner", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("aborts an active read and waits without storing its cancelled result", async () => {
+    const store = createTriggerStore({});
+    const event: Trigger = {
+      id: "d".repeat(32),
+      source: "slow",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "hello" },
+    };
+    let signal: AbortSignal | undefined;
+    let release!: (result: { triggers: Trigger[]; cursor: string }) => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const runner = createSourceRunner({
+      sources: [
+        {
+          id: "slow",
+          scope: "test source",
+          read: (_cursor, readSignal) => {
+            signal = readSignal;
+            readStarted();
+            return new Promise((resolve) => {
+              release = resolve;
+            });
+          },
+        },
+      ],
+      store,
+    });
+
+    const polling = runner.pollOnce();
+    await started;
+    const stopping = runner.stop();
+    expect(signal?.aborted).toBe(true);
+    let stopped = false;
+    void stopping.then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    release({ triggers: [event], cursor: "offset-1" });
+    await Promise.all([polling, stopping]);
+    expect(await store.list()).toEqual([]);
+    expect(await store.cursor("slow")).toBeUndefined();
+  });
+
+  it("waits for Trigger dispatch after its durable cursor commit", async () => {
+    const store = createTriggerStore({});
+    const event: Trigger = {
+      id: "e".repeat(32),
+      source: "dispatch",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "hello" },
+    };
+    let finishDispatch!: () => void;
+    let dispatchStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      dispatchStarted = resolve;
+    });
+    const runner = createSourceRunner({
+      sources: [
+        {
+          id: "dispatch",
+          scope: "test source",
+          read: async () => ({ triggers: [event], cursor: "offset-1" }),
+        },
+      ],
+      store,
+      onTriggers: async () => {
+        dispatchStarted();
+        await new Promise<void>((resolve) => {
+          finishDispatch = resolve;
+        });
+      },
+    });
+
+    const polling = runner.pollOnce();
+    await started;
+    expect(await store.list()).toEqual([event]);
+    expect(await store.cursor("dispatch")).toBe("offset-1");
+    const stopping = runner.stop();
+    let stopped = false;
+    void stopping.then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    finishDispatch();
+    await Promise.all([polling, stopping]);
+    expect(stopped).toBe(true);
+  });
+
+  it("persists deterministic source-level admission with the Trigger", async () => {
+    const event: Trigger = {
+      id: "a".repeat(32),
+      source: "admission-source",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "Please inspect this" },
+      actor: { source: "admission-source", id: "person-7" },
+      human: true,
+      addressed: "direct",
+      channel: {
+        source: "admission-source",
+        thread: "conversation:42",
+        address: { conversationId: "42" },
+      },
+    };
+    const dispatched: Trigger[] = [];
+    const store = createTriggerStore({});
+    const runner = createSourceRunner({
+      sources: [
+        {
+          id: "admission-source",
+          scope: "one conversation",
+          admit: (trigger) =>
+            trigger.human && trigger.addressed === "direct"
+              ? "explicit"
+              : "ignore",
+          read: async () => ({ triggers: [event], cursor: "offset-1" }),
+        },
+      ],
+      store,
+      onTriggers: (triggers) => {
+        dispatched.push(...triggers);
+      },
+    });
+
+    await runner.pollOnce();
+
+    expect(await store.get(event.id)).toMatchObject({
+      admission: "explicit",
+      addressed: "direct",
+      actor: event.actor,
+      human: true,
+      channel: event.channel,
+    });
+    expect(dispatched).toMatchObject([{ id: event.id, admission: "explicit" }]);
+    await runner.stop();
+  });
+
+  it("retries a failed Trigger dispatch on the next poll", async () => {
+    const event: Trigger = {
+      id: "9".repeat(32),
+      source: "retry-dispatch",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "hello" },
+    };
+    let dispatches = 0;
+    const delivered: Trigger[] = [];
+    const errors: string[] = [];
+    const runner = createSourceRunner({
+      sources: [
+        {
+          id: "retry-dispatch",
+          scope: "test source",
+          read: async (cursor) => ({
+            triggers: cursor ? [] : [event],
+            cursor: "offset-1",
+          }),
+        },
+      ],
+      store: createTriggerStore({}),
+      onTriggers: async (triggers) => {
+        dispatches += 1;
+        if (dispatches === 1) throw new Error("dispatch unavailable");
+        delivered.push(...triggers);
+      },
+      onError: (source) => errors.push(source),
+    });
+
+    await runner.pollOnce();
+    expect(errors).toEqual(["dispatch"]);
+    expect(delivered).toEqual([]);
+    await runner.pollOnce();
+    expect(dispatches).toBe(2);
+    expect(delivered).toEqual([event]);
+    await runner.stop();
   });
 });

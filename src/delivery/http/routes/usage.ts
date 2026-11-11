@@ -43,13 +43,41 @@ export async function handleUsageRoutes(
     try {
       const body = await readJson(request);
       if (
-        typeof body.dailyTokens !== "number" ||
-        !Number.isSafeInteger(body.dailyTokens) ||
-        body.dailyTokens < 0
+        body.dailyTokens !== undefined &&
+        (typeof body.dailyTokens !== "number" ||
+          !Number.isSafeInteger(body.dailyTokens) ||
+          body.dailyTokens < 0)
       ) {
         return invalidBody("dailyTokens must be a non-negative integer");
       }
-      return json(await agent.setDailyBackgroundTokenBudget(body.dailyTokens));
+      let thresholds: number[] | undefined;
+      if (body.thresholds !== undefined) {
+        if (!Array.isArray(body.thresholds)) {
+          return invalidBody(
+            "thresholds must be an array of numbers strictly between 0 and 1"
+          );
+        }
+        thresholds = [];
+        for (const item of body.thresholds) {
+          if (
+            typeof item !== "number" ||
+            !Number.isFinite(item) ||
+            item <= 0 ||
+            item > 1
+          ) {
+            return invalidBody(
+              "thresholds items must be numbers strictly between 0 and 1"
+            );
+          }
+          thresholds.push(item);
+        }
+      }
+      if (body.dailyTokens === undefined && thresholds === undefined) {
+        return invalidBody("dailyTokens or thresholds required");
+      }
+      return json(
+        await agent.setDailyBackgroundTokenBudget(body.dailyTokens, thresholds)
+      );
     } catch (error) {
       return agentError(error);
     }

@@ -112,6 +112,17 @@ describe("background usage routes", () => {
       paused: true,
     });
 
+    const updatedThresholds = await call(app, "/v1/usage/budget", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dailyTokens: 2_000, thresholds: [0.5, 0.85] }),
+    });
+    expect(updatedThresholds.status).toBe(200);
+    expect(updatedThresholds.body.budget).toMatchObject({
+      dailyTokens: 2_000,
+      thresholds: [0.5, 0.85],
+    });
+
     const accepted = await call(app, "/v1/usage/budget/suggestion", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -129,6 +140,24 @@ describe("background usage routes", () => {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ dailyTokens: -1 }),
+      })
+    ).toMatchObject({
+      status: 400,
+    });
+    expect(
+      await call(app, "/v1/usage/budget", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thresholds: "not-an-array" }),
+      })
+    ).toMatchObject({
+      status: 400,
+    });
+    expect(
+      await call(app, "/v1/usage/budget", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ thresholds: [1.5] }),
       })
     ).toMatchObject({
       status: 400,

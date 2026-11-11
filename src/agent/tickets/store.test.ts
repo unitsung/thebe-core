@@ -113,6 +113,38 @@ describe("a Ticket for work Eval took on", () => {
     expect(ticket.subscriptions).toEqual(["resource:container:emby"]);
   });
 
+  it("persists source identity and reply channels without adding authority to the Mandate", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-origin-"));
+    const origin = {
+      ...trigger(1),
+      actor: { source: "container-health", id: "person-7" },
+      human: false,
+      channel: {
+        source: "container-health",
+        thread: "resource:container:emby",
+        address: { destination: "room-42" },
+      },
+    };
+    const ticket = await createTicketStore({ dir }).recordAccepted({
+      ...accepted,
+      triggers: [origin],
+    });
+    const loaded = await createTicketStore({ dir }).get(ticket.id);
+
+    expect(loaded?.origins).toEqual([
+      {
+        triggerId: origin.id,
+        source: "container-health",
+        actor: { source: "container-health", id: "person-7" },
+        human: false,
+        channel: origin.channel,
+      },
+    ]);
+    expect(loaded?.channels).toEqual([origin.channel]);
+    expect(loaded?.mandate).toEqual(ticket.mandate);
+    expect(loaded?.mandate.scope).toEqual(["container_restart:emby"]);
+  });
+
   it("is the same Ticket when the same Eval is taken on again, and survives a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "tickets-"));
     const first = await createTicketStore({ dir }).recordAccepted(accepted);
@@ -168,20 +200,34 @@ describe("ticket fan-out and inputs", () => {
       ...request(1),
       subscriptions: ["resource:container:emby"],
     });
+    const event = {
+      ...trigger(1),
+      actor: { source: "container-health", id: "bot-2" },
+      human: false,
+      channel: {
+        source: "container-health",
+        thread: "resource:container:emby",
+        address: { destination: "room-42" },
+      },
+    };
     const attached = await store.attachTrigger({
-      trigger: trigger(1),
+      trigger: event,
       isLive: () => true,
     });
     expect(attached).toEqual([ticket.id]);
     const updated = await store.get(ticket.id);
     expect(updated?.inputs).toHaveLength(1);
     expect(updated?.inputs[0]).toMatchObject({
-      triggerId: trigger(1).id,
+      triggerId: event.id,
       seq: 1,
       source: "container-health",
       kind: "container.went_down",
       thread: "resource:container:emby",
+      actor: { source: "container-health", id: "bot-2" },
+      human: false,
+      channel: event.channel,
     });
+    expect(updated?.channels).toEqual([event.channel]);
   });
 
   it("ignores ended tickets and attaches nothing when no live ticket is subscribed", async () => {
@@ -289,14 +335,30 @@ describe("ticket fan-out and inputs", () => {
       ...request(1),
       subscriptions: ["resource:container:emby"],
     });
+    const event = {
+      ...trigger(1),
+      actor: { source: "container-health", id: "person-7" },
+      human: true,
+      channel: {
+        source: "container-health",
+        thread: "resource:container:emby",
+        address: { destination: "room-42" },
+      },
+    };
     await firstStore.attachTrigger({
-      trigger: trigger(1),
+      trigger: event,
       isLive: () => true,
     });
     const secondStore = createTicketStore({ dir });
     const loaded = await secondStore.get(ticket.id);
     expect(loaded?.inputs).toHaveLength(1);
-    expect(loaded?.inputs[0]?.triggerId).toBe(trigger(1).id);
+    expect(loaded?.inputs[0]).toMatchObject({
+      triggerId: event.id,
+      actor: { source: "container-health", id: "person-7" },
+      human: true,
+      channel: event.channel,
+    });
+    expect(loaded?.channels).toEqual([event.channel]);
   });
 
   it("keeps input sequence monotonic after pruning the oldest event", async () => {

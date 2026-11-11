@@ -7,7 +7,7 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Changed
 
-- The Pi runtime packages are pinned to `@earendil-works/*` `1.5.0`, which
+- The Pi runtime packages are pinned to `@earendil-works/*` `1.5.2`, which
   raises `undici` and `minimatch` past the currently audited vulnerable ranges.
   The transitive `node-forge` lock moves to `1.4.3`. The sandbox runtime still
   pins `zod` 3, whose audit advisory has no compatible upstream fix yet.
@@ -30,6 +30,11 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- The Main Session is the single voice for communications to the owner (Issue #48).
+  Workers report only to their ticket, with direct messages to the owner asserted and
+  forbidden. Proactive messages from the resident Main Session and the `proactive_message`
+  tool are bounded to 100 words (shortened or refused) and stripped of raw tool execution
+  logs.
 - A durable daily token budget for autonomous work. Eval Assessments and
   self-initiated Main Session turns plus background Goal workers/reviewers
   count input, output and cache writes in a UTC-day ledger; personal chat is

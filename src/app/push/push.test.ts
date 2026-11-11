@@ -15,8 +15,10 @@ import { createPushIdentity, pushEventMessage } from "./identity.ts";
 import { createPushNotifier } from "./notifier.ts";
 
 const dirs: string[] = [];
+const apps: Array<ReturnType<typeof createThebeApp>> = [];
 afterEach(async () => {
   vi.useRealTimers();
+  await Promise.all(apps.splice(0).map((a) => a.agent.quiesce()));
   await Promise.all(
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
   );
@@ -283,6 +285,7 @@ describe("push app composition", () => {
       pushFetch: (async () =>
         new Response("{}", { status: 200 })) as unknown as typeof fetch,
     });
+    apps.push(app);
     const body = (await (
       await app.handler.handle(new Request("http://127.0.0.1:8787/v1/health"))
     ).json()) as Record<string, unknown>;
@@ -318,6 +321,7 @@ describe("push app composition", () => {
         return new Response("{}", { status: 200 });
       }) as unknown as typeof fetch,
     });
+    apps.push(app);
     await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/devices", {
         method: "POST",
@@ -377,6 +381,7 @@ describe("push app composition", () => {
         return new Response("{}", { status: 200 });
       }) as unknown as typeof fetch,
     });
+    apps.push(app);
     await app.handler.handle(
       new Request("http://127.0.0.1:8787/v1/devices", {
         method: "POST",
@@ -407,6 +412,68 @@ describe("push app composition", () => {
       deepLink: "thebe://core",
     });
     await app.agent.quiesce();
+  });
+
+  it("pushes threshold warnings and paused notice for autonomous budget", async () => {
+    const dir = await tempDir();
+    const calls: Array<Record<string, unknown>> = [];
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyContainers(),
+      agentStoreDir: dir,
+      dailyBackgroundTokenBudget: 1_000,
+      dailyBackgroundTokenBudgetThresholds: [0.5, 0.8, 1.0],
+      pushRelayUrl: "https://relay.example",
+      pushFetch: (async (_url: string, init: RequestInit) => {
+        calls.push(JSON.parse(init.body as string) as Record<string, unknown>);
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    apps.push(app);
+
+    await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: "t1",
+          platform: "ios",
+          relayDeviceId: "relay-1",
+          categories: ["thebe.activity"],
+        }),
+      })
+    );
+
+    await app.agent.recordBackgroundUsage?.({
+      id: "u1",
+      input: 500,
+      output: 0,
+      cacheWrite: 0,
+    });
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]).toMatchObject({
+      category: "thebe.activity",
+      title: "Background budget at 50%",
+      deepLink: "thebe://usage",
+    });
+
+    await app.agent.recordBackgroundUsage?.({
+      id: "u2",
+      input: 500,
+      output: 0,
+      cacheWrite: 0,
+    });
+    await vi.waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[1]).toMatchObject({
+      category: "thebe.activity",
+      title: "Background budget at 80%",
+      deepLink: "thebe://usage",
+    });
+    expect(calls[2]).toMatchObject({
+      category: "thebe.activity",
+      title: "Background work paused",
+      deepLink: "thebe://usage",
+    });
   });
 });
 

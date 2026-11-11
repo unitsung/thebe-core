@@ -89,6 +89,12 @@ export const TICKET_TOOL_SCHEMAS: Record<
         description:
           "Stable caller-generated key. Retrying with the same key returns the existing Ticket.",
       },
+      triggerId: {
+        type: "string",
+        pattern: "^[a-f0-9]{32}$",
+        description:
+          "Optional explicitly admitted Source event to bind to this Ticket. The event must be a human request; its provenance and reply channel are kept with the Ticket.",
+      },
       criteria: {
         type: "array",
         maxItems: 20,
@@ -204,7 +210,7 @@ export const TICKET_TOOL_DESCRIPTIONS: Record<TicketToolName, string> = {
   [TICKET_GET_TOOL_NAME]:
     "Read one Ticket with its Goal report, receipt, open attention, and pending permissions.",
   [TICKET_DELEGATE_TOOL_NAME]:
-    "Delegate one long-running task to Thebe and return its durable Ticket.",
+    "Delegate one long-running task to Thebe and return its durable Ticket. For an explicitly admitted Source request, pass its triggerId to preserve provenance and reply routing.",
   [TICKET_REPLY_TOOL_NAME]:
     "Answer a Ticket attention or approve/deny one pending worker permission.",
   [TICKET_NOTE_TOOL_NAME]:

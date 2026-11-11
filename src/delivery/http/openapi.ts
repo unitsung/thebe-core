@@ -1862,13 +1862,18 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         BackgroundBudgetUpdate: {
           type: "object",
-          required: ["dailyTokens"],
           properties: {
             dailyTokens: {
               type: "integer",
               minimum: 0,
               description:
                 "Autonomous input + output + cache-write tokens per UTC day. Zero pauses autonomous work.",
+            },
+            thresholds: {
+              type: "array",
+              items: { type: "number", minimum: 0, maximum: 1 },
+              description:
+                "Threshold ratios strictly between 0 and 1 at which to alert the owner.",
             },
           },
         },
@@ -1920,6 +1925,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 "remainingTokens",
                 "paused",
                 "resetsAt",
+                "thresholds",
+                "notifiedThresholds",
               ],
               properties: {
                 dailyTokens: { type: "integer" },
@@ -1927,6 +1934,14 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 paused: { type: "boolean" },
                 resetsAt: { type: "string", format: "date-time" },
                 pausedNotice: { type: "string" },
+                thresholds: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+                notifiedThresholds: {
+                  type: "array",
+                  items: { type: "number" },
+                },
               },
             },
             usage: { $ref: "#/components/schemas/BackgroundUsageTokens" },
@@ -3484,6 +3499,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             "title",
             "mandate",
             "subscriptions",
+            "inputs",
+            "origins",
+            "channels",
             "links",
             "createdAt",
           ],
@@ -3521,6 +3539,18 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               items: { $ref: "#/components/schemas/TicketInput" },
               description:
                 "Later events on subscribed threads attached to the ticket without a new assessment. Fresh inputs reach the worker's next checkpoint as untrusted data.",
+            },
+            origins: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketOrigin" },
+              description:
+                "Actor and human classification for the events that produced this Ticket.",
+            },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ChannelRef" },
+              description:
+                "Write destinations recorded from Source events attached to this Ticket.",
             },
             links: {
               type: "object",
@@ -3728,12 +3758,50 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             thread: { type: "string" },
             at: { type: "string", format: "date-time" },
             attachedAt: { type: "string", format: "date-time" },
+            actor: { $ref: "#/components/schemas/ActorRef" },
+            human: {
+              type: "boolean",
+              description:
+                "Whether the Source classifies the event as human-originated.",
+            },
+            channel: { $ref: "#/components/schemas/ChannelRef" },
             note: {
               type: "string",
               description:
                 "Optional routing context supplied when a person explicitly attached this event.",
             },
             payload: { type: "object" },
+          },
+        },
+        ActorRef: {
+          type: "object",
+          required: ["source", "id"],
+          properties: {
+            source: { type: "string" },
+            id: { type: "string" },
+          },
+        },
+        ChannelRef: {
+          type: "object",
+          required: ["source", "thread"],
+          properties: {
+            source: { type: "string" },
+            thread: { type: "string" },
+            address: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+        },
+        TicketOrigin: {
+          type: "object",
+          required: ["triggerId", "source"],
+          properties: {
+            triggerId: { type: "string" },
+            source: { type: "string" },
+            actor: { $ref: "#/components/schemas/ActorRef" },
+            human: { type: "boolean" },
+            channel: { $ref: "#/components/schemas/ChannelRef" },
           },
         },
         ProductGoalList: {

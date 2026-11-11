@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { Trigger } from "../sources/types.ts";
 import type { GoalRun } from "../types.ts";
 import { createTicketControlApi } from "./control.ts";
 import { createTicketStore } from "./store.ts";
@@ -323,11 +324,16 @@ describe("Ticket retry", () => {
       now: () => new Date("2026-11-10T01:00:00.000Z"),
     });
 
+    const failedView = await api.get(ticket.id);
+    expect(failedView?.canRetry).toBe(true);
+    expect(failedView?.receipt.canRetry).toBe(true);
+
     await expect(
       api.control({ ticketId: ticket.id, action: "retry" })
     ).resolves.toMatchObject({
       ticket: { id: ticket.id },
       stage: "running",
+      canRetry: false,
     });
     expect(retryGoal).toHaveBeenCalledWith("goal-retry");
 
@@ -363,5 +369,134 @@ describe("Ticket retry", () => {
       code: "invalid_transition",
     });
     expect(retryGoal).toHaveBeenCalledTimes(2);
+  });
+
+  it("binds an explicitly admitted Source request to one durable direct Ticket", async () => {
+    const at = "2026-11-06T10:00:00.000Z";
+    const channel = {
+      source: "external-chat",
+      thread: "conversation:42",
+      address: { conversationId: "42" },
+    };
+    const trigger: Trigger = {
+      id: "d".repeat(32),
+      source: "external-chat",
+      kind: "message.created",
+      at,
+      threads: [channel.thread],
+      payload: { text: "Please inspect this request." },
+      actor: { source: "external-chat", id: "person-7" },
+      human: true,
+      admission: "explicit",
+      addressed: "direct",
+      channel,
+    };
+    const inferred: Trigger = {
+      ...trigger,
+      id: "e".repeat(32),
+      admission: "inferred",
+    };
+    const tickets = createTicketStore({});
+    let current: GoalRun | undefined;
+    let startedGoal = "";
+    let createdSessions = 0;
+    const api = createTicketControlApi({
+      store: tickets,
+      triggers: {
+        get: async (id) =>
+          id === trigger.id
+            ? trigger
+            : id === inferred.id
+              ? inferred
+              : undefined,
+      },
+      goals: {
+        startGoal: async (input) => {
+          startedGoal = input.goal;
+          current = {
+            ...goal("goal-source", "running", at),
+            goal: input.goal,
+          };
+          return current;
+        },
+        getGoal: (id) => (current?.thebeSessionId === id ? current : undefined),
+        listGoals: async () => (current ? [current] : []),
+        answerGoal: async () => {
+          throw new Error("unused");
+        },
+        addGoalGuidance: async () => {
+          throw new Error("unused");
+        },
+        pauseGoal: async () => {
+          throw new Error("unused");
+        },
+        resumeGoal: async () => {
+          throw new Error("unused");
+        },
+        stopGoal: async () => {
+          throw new Error("unused");
+        },
+        retryGoal: async () => {
+          throw new Error("unused");
+        },
+      },
+      sessions: {
+        createSession: async () => {
+          createdSessions += 1;
+          return { thebeSessionId: "goal-source" };
+        },
+        listPendingPermissions: () => [],
+        resolvePendingPermission: async () => {
+          throw new Error("unused");
+        },
+      },
+      now: () => new Date("2026-11-10T01:00:00.000Z"),
+    });
+
+    const first = await api.delegateHttp({
+      task: "Inspect the admitted request.",
+      idempotencyKey: "first-attempt",
+      triggerId: trigger.id,
+    });
+    const duplicate = await api.delegateHttp({
+      task: "Inspect the admitted request.",
+      idempotencyKey: "different-retry-key",
+      triggerId: trigger.id,
+    });
+
+    expect(first).toMatchObject({ reused: false });
+    expect(duplicate).toMatchObject({ reused: true });
+    expect(duplicate.ticket.id).toBe(first.ticket.id);
+    expect(first.ticket).toMatchObject({
+      mandate: { strength: "explicit", decidedBy: "direct" },
+      subscriptions: [channel.thread],
+      origins: [
+        {
+          triggerId: trigger.id,
+          source: trigger.source,
+          actor: trigger.actor,
+          human: true,
+          admission: "explicit",
+          addressed: "direct",
+          channel,
+        },
+      ],
+      channels: [channel],
+    });
+    expect(startedGoal).toContain("Please inspect this request.");
+    expect(startedGoal).toContain("untrusted");
+    expect(createdSessions).toBe(1);
+
+    await expect(
+      api.delegateHttp({
+        task: "Do not use an inferred event as an explicit request.",
+        idempotencyKey: "inferred",
+        triggerId: inferred.id,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "trigger_not_explicit",
+    });
+    expect(createdSessions).toBe(1);
   });
 });

@@ -1,4 +1,5 @@
 import { mkdir, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { writeFileAtomic } from "../../atomic-write.ts";
 import type { TriggerStore } from "../sources/store.ts";
@@ -6,6 +7,11 @@ import type { Trigger } from "../sources/types.ts";
 import type { TicketControlApi } from "../tickets/control.ts";
 import type { BackgroundBudgetService } from "../usage/budget.ts";
 import type { MainSessionInfo } from "./service.ts";
+import {
+  isNoActionNeeded,
+  sanitizeProactiveMessage,
+  type ProactiveNotice,
+} from "./proactive.ts";
 
 export const DEFAULT_RESIDENT_BATCH_WINDOW_MS = 100;
 export const DEFAULT_RESIDENT_RETRY_MS = 60_000;
@@ -64,6 +70,8 @@ export function createResidentMainSession(options: {
   batchWindowMs?: number;
   retryMs?: number;
   onError?: (error: unknown) => void;
+  maxProactiveWords?: number;
+  onProactiveMessage?: (notice: ProactiveNotice) => Promise<void> | void;
 }): ResidentMainSession {
   const file = options.dir ? join(options.dir, "resident.json") : undefined;
   const batchWindowMs = positive(
@@ -195,7 +203,7 @@ export function createResidentMainSession(options: {
     if (!started || pausedForPerson) return;
     promptActive = true;
     try {
-      await options.prompt(
+      const promptResult = (await options.prompt(
         buildResidentBatchPrompt(triggers, {
           recovery: hasOpenTickets,
           remaining: Math.max(
@@ -203,7 +211,23 @@ export function createResidentMainSession(options: {
             state!.pendingTriggerIds.length - triggerIds.length
           ),
         })
-      );
+      )) as { text?: string } | undefined;
+
+      if (promptResult?.text && options.onProactiveMessage) {
+        const text = promptResult.text.trim();
+        if (!isNoActionNeeded(text)) {
+          const sanitized = sanitizeProactiveMessage(text, {
+            mode: "shorten",
+            maxWords: options.maxProactiveWords,
+          });
+          if (sanitized.ok) {
+            await options.onProactiveMessage({
+              id: `resident-proactive:${randomUUID()}`,
+              body: sanitized.body,
+            });
+          }
+        }
+      }
     } finally {
       promptActive = false;
     }
@@ -290,12 +314,14 @@ export function createResidentMainSession(options: {
       started = false;
       if (timer) clearTimeout(timer);
       timer = undefined;
+      await stateChain.catch(() => {});
       if (running) {
         if (promptActive) {
           await Promise.resolve(options.abort?.()).catch(() => {});
         }
         await running.catch(() => {});
       }
+      await stateChain.catch(() => {});
     },
     pollOnce,
     async idle() {
@@ -311,10 +337,14 @@ export function buildResidentBatchPrompt(
   const rows = triggers.map((trigger) => {
     const payload = boundedJson(trigger.payload, MAX_PAYLOAD_CHARS);
     return [
-      `- id: ${trigger.id}`,
+      `- trigger_id: ${trigger.id}`,
       `  source: ${trigger.source}`,
       `  kind: ${trigger.kind}`,
       `  at: ${trigger.at}`,
+      ...(trigger.actor ? [`  actor: ${trigger.actor.id}`] : []),
+      ...(trigger.human !== undefined ? [`  human: ${trigger.human}`] : []),
+      ...(trigger.addressed ? [`  addressed: ${trigger.addressed}`] : []),
+      ...(trigger.admission ? [`  admission: ${trigger.admission}`] : []),
       `  threads: ${trigger.threads.join(", ")}`,
       `  payload: ${payload}`,
     ].join("\n");
@@ -322,7 +352,7 @@ export function buildResidentBatchPrompt(
   return [
     "# Main Session background batch",
     "This is a self-initiated background turn, not a message from the person.",
-    "Review only the events below and the current Ticket state. Use decision_list for their Threads; use ticket_list and ticket_get before attaching an event or claiming what is running. Attach only when exactly one open Ticket is already subscribed to that Thread and no evidence contradicts it. Do not accept, dismiss, or requeue work without person intent, and never create a duplicate Ticket for the same event. A write still goes through the normal approval handler; do not claim it succeeded unless the tool returned a result.",
+    "Review only the events below and the current Ticket state. Use decision_list for their Threads; use ticket_list and ticket_get before attaching an event or claiming what is running. Attach only when exactly one open Ticket is already subscribed to that Thread and no evidence contradicts it. An event marked admission=explicit is a request the Source classified as explicitly addressed by an allowed actor; if you delegate it, pass its trigger_id to ticket_delegate so its provenance and reply channel stay with the Ticket. Do not accept, dismiss, or requeue inferred work without person intent, and never create a duplicate Ticket for the same event. A write still goes through the normal approval handler; do not claim it succeeded unless the tool returned a result.",
     "Keep the response brief. If nothing needs the person and no tool action is justified, say that in one sentence.",
     ...(options.recovery
       ? [

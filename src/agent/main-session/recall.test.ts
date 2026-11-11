@@ -204,6 +204,8 @@ function ticketView(): TicketTaskView {
     },
     subscriptions: ["chat:goal-backup", "resource:container:backup-agent"],
     inputs: [],
+    origins: [],
+    channels: [],
     links: {
       legacyGoalId: GOAL_ID,
       decisionId: "decision-backup",

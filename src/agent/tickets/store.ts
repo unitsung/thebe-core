@@ -8,8 +8,8 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { directEvalId, ticketIdFor } from "./ids.ts";
-import type { Ticket, TicketInput } from "./types.ts";
-import type { Trigger } from "../sources/types.ts";
+import type { Ticket, TicketInput, TicketOrigin } from "./types.ts";
+import type { ChannelRef, Trigger } from "../sources/types.ts";
 
 export const DEFAULT_TICKET_RETENTION = 500;
 export const MAX_INPUTS_PER_TICKET = 200;
@@ -38,6 +38,8 @@ export type TicketStore = {
     goalId?: string;
     sessionIds?: string[];
     subscriptions?: string[];
+    /** Source events explicitly routed to this direct Ticket by the Main Session. */
+    triggers?: readonly Trigger[];
   }): Promise<Ticket>;
   /**
    * Records the Ticket for work Eval took on under the person's policy. Its id derives from the Eval, so a
@@ -54,6 +56,8 @@ export type TicketStore = {
     policyVersion: string;
     matchedRuleIds: string[];
     scope: string[];
+    /** Source events that produced the accepted work; their identity does not change the Mandate. */
+    triggers?: readonly Trigger[];
     intent?: string;
     /** The Goal that carries it out. Its session id: the Ticket's Mandate is looked up from it. */
     goalId?: string;
@@ -70,6 +74,8 @@ export type TicketStore = {
     title: string;
     requester: string;
     goalId: string;
+    /** Source events behind the person-reviewed Decision. */
+    triggers?: readonly Trigger[];
   }): Promise<Ticket>;
   /**
    * Fan-out: attaches a Trigger to the newest live Ticket subscribed to any of its threads.
@@ -137,6 +143,10 @@ export function createTicketStore(options: {
           parsed.inputs = Array.isArray(parsed.inputs) ? parsed.inputs : [];
           parsed.subscriptions = Array.isArray(parsed.subscriptions)
             ? parsed.subscriptions
+            : [];
+          parsed.origins = Array.isArray(parsed.origins) ? parsed.origins : [];
+          parsed.channels = Array.isArray(parsed.channels)
+            ? parsed.channels
             : [];
           memory.set(parsed.id, parsed);
         }
@@ -212,9 +222,15 @@ export function createTicketStore(options: {
             requester: input.requester,
           },
           subscriptions: [
-            ...new Set([input.thread, ...(input.subscriptions ?? [])]),
+            ...new Set([
+              input.thread,
+              ...(input.subscriptions ?? []),
+              ...(input.triggers ?? []).flatMap((trigger) => trigger.threads),
+            ]),
           ],
           inputs: [],
+          origins: originsFor(input.triggers ?? []),
+          channels: channelsFor(input.triggers ?? []),
           links: {
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
             ...(input.idempotencyKey
@@ -251,6 +267,8 @@ export function createTicketStore(options: {
           },
           subscriptions: [input.thread],
           inputs: [],
+          origins: originsFor(input.triggers ?? []),
+          channels: channelsFor(input.triggers ?? []),
           links: {
             decisionId: input.decisionId,
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
@@ -281,6 +299,8 @@ export function createTicketStore(options: {
           },
           subscriptions: [input.thread],
           inputs: [],
+          origins: originsFor(input.triggers ?? []),
+          channels: channelsFor(input.triggers ?? []),
           links: {
             decisionId: input.decisionId,
             legacyGoalId: input.goalId,
@@ -338,11 +358,29 @@ export function createTicketStore(options: {
           thread: matchingThread,
           at: options.trigger.at,
           attachedAt: options.attachedAt ?? new Date().toISOString(),
+          ...(options.trigger.actor
+            ? { actor: cloneActorRef(options.trigger.actor) }
+            : {}),
+          ...(options.trigger.human !== undefined
+            ? { human: options.trigger.human }
+            : {}),
+          ...(options.trigger.admission
+            ? { admission: options.trigger.admission }
+            : {}),
+          ...(options.trigger.addressed
+            ? { addressed: options.trigger.addressed }
+            : {}),
+          ...(options.trigger.channel
+            ? { channel: cloneChannelRef(options.trigger.channel) }
+            : {}),
           ...(options.trigger.payload
             ? { payload: options.trigger.payload }
             : {}),
         };
         target.inputs.push(input);
+        target.channels = mergeChannels(target.channels ?? [], [
+          options.trigger.channel,
+        ]);
         if (target.inputs.length > MAX_INPUTS_PER_TICKET) target.inputs.shift();
         await persist(target);
         return [target.id];
@@ -360,8 +398,15 @@ export function createTicketStore(options: {
         ];
         const existing = new Set(target.inputs.map((input) => input.triggerId));
         const addedTriggerIds: string[] = [];
-        let subscriptionsChanged = false;
+        let ticketChanged = false;
         for (const trigger of triggers) {
+          const nextChannels = mergeChannels(target.channels ?? [], [
+            trigger.channel,
+          ]);
+          if (nextChannels.length !== (target.channels ?? []).length) {
+            target.channels = nextChannels;
+            ticketChanged = true;
+          }
           for (const thread of trigger.threads) {
             if (
               target.subscriptions.some(
@@ -372,7 +417,7 @@ export function createTicketStore(options: {
               continue;
             }
             target.subscriptions.push(thread);
-            subscriptionsChanged = true;
+            ticketChanged = true;
           }
         }
         let seq = target.inputs.reduce(
@@ -392,6 +437,13 @@ export function createTicketStore(options: {
             thread: trigger.threads[0]!,
             at: trigger.at,
             attachedAt,
+            ...(trigger.actor ? { actor: cloneActorRef(trigger.actor) } : {}),
+            ...(trigger.human !== undefined ? { human: trigger.human } : {}),
+            ...(trigger.admission ? { admission: trigger.admission } : {}),
+            ...(trigger.addressed ? { addressed: trigger.addressed } : {}),
+            ...(trigger.channel
+              ? { channel: cloneChannelRef(trigger.channel) }
+              : {}),
             ...(options.note ? { note: options.note } : {}),
             ...(trigger.payload ? { payload: trigger.payload } : {}),
           };
@@ -402,7 +454,7 @@ export function createTicketStore(options: {
         if (target.inputs.length > MAX_INPUTS_PER_TICKET) {
           target.inputs.splice(0, target.inputs.length - MAX_INPUTS_PER_TICKET);
         }
-        if (addedTriggerIds.length > 0 || subscriptionsChanged) {
+        if (addedTriggerIds.length > 0 || ticketChanged) {
           await persist(target);
         }
         return {
@@ -436,6 +488,56 @@ function newestFirst(tickets: Ticket[]): Ticket[] {
   return tickets.sort((a, b) =>
     a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0
   );
+}
+
+function originsFor(triggers: readonly Trigger[]): TicketOrigin[] {
+  return triggers.map((trigger) => ({
+    triggerId: trigger.id,
+    source: trigger.source,
+    ...(trigger.actor ? { actor: cloneActorRef(trigger.actor) } : {}),
+    ...(trigger.human !== undefined ? { human: trigger.human } : {}),
+    ...(trigger.admission ? { admission: trigger.admission } : {}),
+    ...(trigger.addressed ? { addressed: trigger.addressed } : {}),
+    ...(trigger.channel ? { channel: cloneChannelRef(trigger.channel) } : {}),
+  }));
+}
+
+function channelsFor(triggers: readonly Trigger[]): ChannelRef[] {
+  return mergeChannels(
+    [],
+    triggers.map((trigger) => trigger.channel)
+  );
+}
+
+function mergeChannels(
+  existing: readonly ChannelRef[],
+  incoming: readonly (ChannelRef | undefined)[]
+): ChannelRef[] {
+  const channels = new Map<string, ChannelRef>();
+  for (const channel of [...existing, ...incoming]) {
+    if (!channel) continue;
+    const address = Object.entries(channel.address ?? {}).sort(
+      ([left], [right]) => left.localeCompare(right)
+    );
+    const key = JSON.stringify([channel.source, channel.thread, address]);
+    if (!channels.has(key)) channels.set(key, cloneChannelRef(channel));
+  }
+  return [...channels.values()];
+}
+
+function cloneActorRef(actor: { source: string; id: string }): {
+  source: string;
+  id: string;
+} {
+  return { source: actor.source, id: actor.id };
+}
+
+function cloneChannelRef(channel: ChannelRef): ChannelRef {
+  return {
+    source: channel.source,
+    thread: channel.thread,
+    ...(channel.address ? { address: { ...channel.address } } : {}),
+  };
 }
 
 function normalizeThread(thread: string): string {

@@ -56,6 +56,10 @@ export function createThebeApp(options: {
   evalMaxPerHour?: number;
   /** Autonomous model tokens per UTC day; see `CreateThebeAgentOptions.dailyBackgroundTokenBudget`. */
   dailyBackgroundTokenBudget?: number;
+  /** Maximum word/token limit for proactive messages (default: 100). */
+  maxProactiveWords?: number;
+  /** Autonomous budget warning thresholds (e.g. [0.5, 0.8, 0.9, 1.0]); see `CreateThebeAgentOptions.dailyBackgroundTokenBudgetThresholds`. */
+  dailyBackgroundTokenBudgetThresholds?: number[];
   /** Deterministic stuck-task thresholds; see `CreateThebeAgentOptions.watchdog`. */
   watchdog?: {
     intervalMs?: number;
@@ -181,6 +185,29 @@ export function createThebeApp(options: {
             id: notice.id,
           })
       : undefined,
+    onBackgroundBudgetThreshold: notifier
+      ? (notice) =>
+          notifier.notify({
+            category: "thebe.activity",
+            title:
+              notice.title ??
+              `Background budget at ${Math.round((notice.threshold ?? 1) * 100)}%`,
+            body: notice.message,
+            deepLink: "thebe://usage",
+            id: notice.id,
+          })
+      : undefined,
+    onProactiveMessage: notifier
+      ? (notice) =>
+          notifier.notify({
+            category: "thebe.activity",
+            title: "Thebe",
+            body: notice.summary ?? notice.body,
+            deepLink: notice.deepLink ?? "thebe://main-session",
+            id: notice.id,
+            ticket: notice.ticketId,
+          })
+      : undefined,
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,
@@ -188,6 +215,9 @@ export function createThebeApp(options: {
     sources: options.sources,
     evalMaxPerHour: options.evalMaxPerHour,
     dailyBackgroundTokenBudget: options.dailyBackgroundTokenBudget,
+    maxProactiveWords: options.maxProactiveWords,
+    dailyBackgroundTokenBudgetThresholds:
+      options.dailyBackgroundTokenBudgetThresholds,
     watchdog: options.watchdog,
     now: options.now,
     callerId: options.callerId,

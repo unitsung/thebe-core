@@ -174,8 +174,10 @@ export function buildGoalPrompt(
     "## Report with the goal_report tool",
     "At the end of every checkpoint call goal_report once: progress, ready (with evidence), blocked (say exactly what you need), or dropped (say why nothing needs doing).",
     options.allowAsk
-      ? "You may also use state ask to put ONE clear question to the person when you cannot go on without their answer, with options when it is a choice. Never ask what you could find out yourself."
+      ? "You may also use state ask to put ONE clear question to the person when you cannot go on without their answer, with options when it is a choice. Never ask what you could find out yourself. Put full technical evidence in summary, but keep the person-facing question concise and actionable. Never merely write the question in summary or leave it in the workspace and wait."
       : "You cannot ask the person questions in this task; if you need something only they can give, report blocked and say what.",
+    "Distinguish completed, verifiable work from an incomplete draft. Do not declare completion if verification is absent.",
+    "Unsolicited visual or design redesign without explicit user mandate is prohibited.",
     "",
     "## Required checkpoint footer",
     "End every response with exactly these four lines:",

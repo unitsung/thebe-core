@@ -5,6 +5,7 @@ import { createActionApi } from "./action/service.ts";
 import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
 import type { Ticket } from "./tickets/types.ts";
+import { createTicketChannelNotifier } from "./channels/delivery.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
 import {
   createDownloadCompletedSource,
@@ -49,7 +50,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       : undefined,
     now: ctx.now,
     initialDailyTokens: options.dailyBackgroundTokenBudget,
+    thresholds: options.dailyBackgroundTokenBudgetThresholds,
     onPaused: options.onBackgroundBudgetPaused,
+    onThreshold: options.onBackgroundBudgetThreshold,
+    onNotice: options.onBackgroundBudgetNotice,
   });
   const artifactStore =
     options.artifactStore ??
@@ -72,9 +76,19 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ? join(options.agentStoreDir, "tickets")
       : undefined,
   });
+  const channelNotifier = createTicketChannelNotifier({
+    tickets: ticketStore,
+    adapters: options.channelAdapters ?? [],
+    outboxDir: options.agentStoreDir
+      ? join(options.agentStoreDir, "channels")
+      : undefined,
+    now: ctx.now,
+  });
+  channelNotifier.start();
   const enabledSources = [
     ...(options.sources?.containerHealth ? ["container-health"] : []),
     ...(options.sources?.downloadCompleted ? ["download-completed"] : []),
+    ...(options.sourceAdapters ?? []).map((source) => source.id),
   ];
   const policyStore = createPolicyStore({
     dir: options.agentStoreDir
@@ -121,7 +135,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       },
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],
-      onNeedsPerson: options.onGoalNeedsPerson,
+      onNeedsPerson: async (notice) => {
+        void channelNotifier.notifyNeedsPerson(notice).catch(() => {});
+        await options.onGoalNeedsPerson?.(notice);
+      },
     }
   );
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
@@ -193,7 +210,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,
-    sources: enabledSources.join(","),
+    sources: [
+      ...enabledSources,
+      ...(options.sourceAdapters ?? []).flatMap((source) =>
+        (source.assessedKinds ?? []).map((kind) => `${source.id}:${kind}`)
+      ),
+    ].join(","),
+    assessedKinds: (options.sourceAdapters ?? []).flatMap(
+      (source) => source.assessedKinds ?? []
+    ),
     backgroundBudget,
     maxPerHour: options.evalMaxPerHour,
     threadTickets: async (thread) => {
@@ -258,6 +283,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         policyVersion: input.policyVersion,
         matchedRuleIds: input.assessment.matchedRuleIds,
         scope,
+        triggers: input.triggers,
         intent,
         goalId: session.thebeSessionId,
       });
@@ -357,7 +383,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
 
   async function dispatchTriggers(triggers: readonly Trigger[]): Promise<void> {
     const unattached: Trigger[] = [];
+    const explicit: Trigger[] = [];
     for (const trigger of triggers) {
+      if (trigger.admission === "ignore") continue;
+      // An explicitly addressed request belongs to the resident Main Session. It must not be
+      // swallowed as a follow-up to an unrelated open Ticket or weighed as inferred work.
+      if (trigger.admission === "explicit") {
+        explicit.push(trigger);
+        continue;
+      }
       const attachedTo = await ticketStore.attachTrigger({
         trigger,
         isLive: isTicketLive,
@@ -369,7 +403,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     }
     if (unattached.length > 0) {
       evalService.enqueue(unattached);
-      void residentMainSession?.enqueue(unattached).catch(() => {});
+    }
+    const residentTriggers = [...unattached, ...explicit].sort((a, b) =>
+      a.at.localeCompare(b.at)
+    );
+    if (residentTriggers.length > 0) {
+      await residentMainSession?.enqueue(residentTriggers).catch(() => {});
     }
   }
 
@@ -393,11 +432,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
               : createUnconfiguredDownloadCompletedSource(),
           ]
         : []),
+      ...(options.sourceAdapters ?? []),
     ],
     store: triggerStore,
     intervalMs: options.sources?.intervalMs,
     now: ctx.now,
-    onTriggers: (triggers) => void dispatchTriggers(triggers),
+    onTriggers: dispatchTriggers,
     onError: () => {
       // A Source that cannot be read this time (for example Docker is down) is tried again next tick.
     },
@@ -406,7 +446,13 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     if (enabledSources.length === 0) return;
     const rows = await triggerStore.list();
     const unattached: Trigger[] = [];
+    const explicit: Trigger[] = [];
     for (const trigger of rows) {
+      if (trigger.admission === "ignore") continue;
+      if (trigger.admission === "explicit") {
+        explicit.push(trigger);
+        continue;
+      }
       const attachedTo = await ticketStore.attachTrigger({
         trigger,
         isLive: isTicketLive,
@@ -417,7 +463,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       }
     }
     await evalService.recover(unattached);
-    await residentMainSession?.enqueue(unattached);
+    const residentTriggers = [...unattached, ...explicit].sort((a, b) =>
+      a.at.localeCompare(b.at)
+    );
+    await residentMainSession?.enqueue(residentTriggers);
   }
   void evalDispositions
     .listTriggerRequeues()
@@ -432,6 +481,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     });
   const ticketControl = createTicketControlApi({
     store: ticketStore,
+    triggers: triggerStore,
     goals,
     sessions,
     now: ctx.now,
@@ -464,6 +514,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     usageDir: options.agentStoreDir
       ? join(options.agentStoreDir, "main-session")
       : undefined,
+    maxProactiveWords: options.maxProactiveWords,
+    onProactiveMessage: options.onProactiveMessage,
     sessions,
     prompts,
     model: options.mainSessionModel,
@@ -479,6 +531,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     prompt: (input) => mainSession.askResidentMainSession(input),
     budget: backgroundBudget,
     abort: () => ctx.requestStop(),
+    maxProactiveWords: options.maxProactiveWords,
+    onProactiveMessage: options.onProactiveMessage,
     onError: () => {
       // A failed resident turn stays pending and is retried without blocking new Source reads.
     },
@@ -493,16 +547,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     resumeAfterPerson: () => residentMainSession?.resumeAfterPerson(),
   });
+  let residentRecoveryPromise: Promise<unknown> | undefined;
   if (enabledSources.length > 0) {
     residentMainSession.start();
-    void recoverSourceTriggers()
+    residentRecoveryPromise = recoverSourceTriggers()
       .then(() => residentMainSession?.enqueueRecovery())
       .catch(() => residentMainSession?.enqueueRecovery())
       .catch(() => {
         // A later Source poll uses the same durable Trigger store.
       });
   } else {
-    void residentMainSession
+    residentRecoveryPromise = residentMainSession
       .enqueueRecovery()
       .then(() => mainSession.getMainSession())
       .then(async (existing) => {
@@ -524,6 +579,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     mainSessionId: mainSession.mainSessionId,
     getMainSession: mainSession.getMainSession,
     askMainSession: mainSession.askMainSession,
+    onProactiveMessage: options.onProactiveMessage,
     ...prompts,
     ...sessions,
     ...goals,
@@ -540,8 +596,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return withModes(await policyStore.set(input));
     },
     getBackgroundBudgetSummary: () => backgroundBudget.summary(),
-    setDailyBackgroundTokenBudget: (dailyTokens) =>
-      backgroundBudget.setDailyTokens(dailyTokens),
+    recordBackgroundUsage: (input) => backgroundBudget.record(input),
+    setDailyBackgroundTokenBudget: (dailyTokens, thresholds) => {
+      if (dailyTokens !== undefined) {
+        return backgroundBudget.setDailyTokens(dailyTokens, thresholds);
+      }
+      if (thresholds !== undefined) {
+        return backgroundBudget.setThresholds(thresholds);
+      }
+      return backgroundBudget.summary();
+    },
     resolveBackgroundBudgetSuggestion: (action) =>
       backgroundBudget.resolveSuggestion(action),
     async listDecisions(query) {
@@ -617,9 +681,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     runSchedule: schedules.runSchedule,
     async quiesce() {
       goalWatchdog.stop();
-      sourceRunner.stop();
       evalService.stop();
+      await sourceRunner.stop();
+      await evalService.idle();
+      await residentRecoveryPromise?.catch(() => {});
       await residentMainSession?.stop();
+      await channelNotifier.stop();
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
       await options.runtime.quiesce();
@@ -630,6 +697,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       schedules.start();
       evalService.start();
       residentMainSession?.start();
+      channelNotifier.start();
       sourceRunner.start();
       ctx.pipelineAdvancer?.start();
     },

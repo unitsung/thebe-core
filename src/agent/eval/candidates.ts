@@ -314,6 +314,25 @@ export function createCandidateApi(options: {
     return triggers;
   }
 
+  async function startAcceptedGoal(input: {
+    goalId: string;
+    triggers: readonly Trigger[];
+    rules: readonly PolicyRule[];
+    scope: readonly string[];
+  }): Promise<void> {
+    await options.goals.startGoal({
+      thebeSessionId: input.goalId,
+      goal: executorTask({
+        intent: EXECUTOR_GOAL,
+        rules: input.rules,
+        triggers: input.triggers,
+        scope: input.scope,
+      }),
+      criteria: [EXECUTOR_CRITERION],
+      executor: "ticket",
+    });
+  }
+
   async function rulesFor(decision: Decision): Promise<PolicyRule[]> {
     const current = await options.policy.get();
     const byId = new Map(
@@ -348,13 +367,40 @@ export function createCandidateApi(options: {
       }
       const existing = await existingTicket(decision);
       if (existing) {
-        const ticket = await options.ticketView(existing.id);
+        let ticket = await options.ticketView(existing.id);
         if (!ticket) {
           throw httpError(
             409,
             "the Ticket for this Decision is missing",
             "ticket_missing"
           );
+        }
+        if (
+          ticket.stage === "unassigned" &&
+          existing.links.legacyGoalId &&
+          existing.links.decisionId === decision.id
+        ) {
+          const [triggers, rules] = await Promise.all([
+            triggersFor(decision),
+            rulesFor(decision),
+          ]);
+          await startAcceptedGoal({
+            goalId: existing.links.legacyGoalId,
+            triggers,
+            rules,
+            scope:
+              existing.mandate.scope ??
+              inferScope(triggers, options.servicesForResource),
+          });
+          const resumed = await options.ticketView(existing.id);
+          if (!resumed) {
+            throw httpError(
+              409,
+              "the Ticket for this Decision is missing",
+              "ticket_missing"
+            );
+          }
+          ticket = resumed;
         }
         return {
           ...ticket,
@@ -404,17 +450,6 @@ export function createCandidateApi(options: {
           mainSessionDecisionId: decision.id,
         },
       });
-      await options.goals.startGoal({
-        thebeSessionId: session.thebeSessionId,
-        goal: executorTask({
-          intent: EXECUTOR_GOAL,
-          rules,
-          triggers,
-          scope,
-        }),
-        criteria: [EXECUTOR_CRITERION],
-        executor: "ticket",
-      });
       const ticket = await options.tickets.recordDecisionAccepted({
         evalId: decision.evalId,
         decisionId: decision.id,
@@ -423,6 +458,13 @@ export function createCandidateApi(options: {
         title: title.slice(0, 120),
         requester: "chat",
         goalId: session.thebeSessionId,
+        triggers,
+      });
+      await startAcceptedGoal({
+        goalId: session.thebeSessionId,
+        triggers,
+        rules,
+        scope,
       });
       const view = await options.ticketView(ticket.id);
       if (!view) {

@@ -223,6 +223,9 @@ export async function bootstrapThebe(
     sources: parseSources(process.env),
     evalMaxPerHour: parseEvalMaxPerHour(process.env),
     dailyBackgroundTokenBudget: parseDailyBackgroundTokenBudget(process.env),
+    maxProactiveWords: parseMaxProactiveWords(process.env),
+    dailyBackgroundTokenBudgetThresholds:
+      parseDailyBackgroundTokenBudgetThresholds(process.env),
     watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     auditPath:
@@ -412,4 +415,37 @@ export function parseDailyBackgroundTokenBudget(
   if (!raw) return undefined;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS`: comma-separated ratios (e.g. "0.5,0.8,0.9,1.0" or "50,80,90,100")
+ * at which autonomous work sends push warnings.
+ */
+export function parseDailyBackgroundTokenBudgetThresholds(
+  env: NodeJS.ProcessEnv
+): number[] | undefined {
+  const raw = env.THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS?.trim();
+  if (!raw) return undefined;
+  const parts = raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (parts.length === 0) return undefined;
+  const normalized = parts
+    .map((n) => (n > 1 && n <= 100 ? n / 100 : n))
+    .filter((n) => n > 0 && n <= 1);
+  if (normalized.length === 0) return undefined;
+  return [...new Set(normalized)].sort((a, b) => a - b);
+}
+
+/**
+ * `THEBE_PROACTIVE_MESSAGE_MAX_WORDS`: Maximum word/character limit for proactive messages (default: 100).
+ */
+export function parseMaxProactiveWords(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_PROACTIVE_MESSAGE_MAX_WORDS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

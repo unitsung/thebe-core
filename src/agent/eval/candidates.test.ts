@@ -28,6 +28,13 @@ const trigger: Trigger = {
   threads: ["resource:container:emby"],
   resource: { kind: "container", id: "emby" },
   payload: { from: "running", to: "exited" },
+  actor: { source: "container-health", id: "person-7" },
+  human: true,
+  channel: {
+    source: "container-health",
+    thread: "resource:container:emby",
+    address: { destination: "room-42" },
+  },
 };
 
 const policy: Policy = {
@@ -69,6 +76,7 @@ async function setup(candidate = decision()) {
   const reopened: string[] = [];
   let stage: TicketTaskView["stage"] = "running";
   let goals = 0;
+  let failNextGoalStart = false;
   const api = createCandidateApi({
     decisions,
     dispositions,
@@ -92,6 +100,12 @@ async function setup(candidate = decision()) {
       startGoal: async (input) => {
         started.push(input);
         goals += 1;
+        if (failNextGoalStart) {
+          failNextGoalStart = false;
+          stage = "unassigned";
+          throw new Error("goal runtime unavailable");
+        }
+        stage = "running";
         return { thebeSessionId: `goal-${goals}` };
       },
       reopenGoal: async (goalId) => {
@@ -121,6 +135,9 @@ async function setup(candidate = decision()) {
     reopened,
     setStage: (next: TicketTaskView["stage"]) => {
       stage = next;
+    },
+    failNextGoalStart: () => {
+      failNextGoalStart = true;
     },
   };
 }
@@ -162,6 +179,16 @@ describe("Decision candidates", () => {
           decisionId: DECISION_ID,
           legacyGoalId: "goal-1",
         },
+        origins: [
+          {
+            triggerId: TRIGGER_ID,
+            source: "container-health",
+            actor: { source: "container-health", id: "person-7" },
+            human: true,
+            channel: trigger.channel,
+          },
+        ],
+        channels: [trigger.channel],
       },
     });
     expect(s.started).toHaveLength(1);
@@ -190,6 +217,33 @@ describe("Decision candidates", () => {
     await expect(
       s.api.invoke(DECISION_LIST_TOOL_NAME, { candidateOnly: true }, caller)
     ).resolves.toEqual({ decisions: [] });
+  });
+
+  it("keeps the Ticket before starting its Goal and retries an unassigned accepted Ticket", async () => {
+    const s = await setup();
+    s.failNextGoalStart();
+    const caller = { writes: true, irreversible: false };
+
+    await expect(
+      s.api.invoke(
+        DECISION_ACCEPT_TOOL_NAME,
+        { decisionId: DECISION_ID },
+        caller
+      )
+    ).rejects.toThrow("goal runtime unavailable");
+    const [persisted] = await s.tickets.list();
+    expect(persisted?.links.legacyGoalId).toBe("goal-1");
+    expect(persisted?.channels).toEqual([trigger.channel]);
+
+    await expect(
+      s.api.invoke(
+        DECISION_ACCEPT_TOOL_NAME,
+        { decisionId: DECISION_ID },
+        caller
+      )
+    ).resolves.toMatchObject({ reused: true, stage: "running" });
+    expect(s.started).toHaveLength(2);
+    expect(await s.tickets.list()).toHaveLength(1);
   });
 
   it("refuses a Decision that is not a positive candidate", async () => {

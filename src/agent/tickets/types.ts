@@ -1,3 +1,9 @@
+import type {
+  ActorRef,
+  ChannelRef,
+  SourceAdmission,
+} from "../sources/types.ts";
+
 /**
  * A Ticket wraps one authorised unit of work. It owns only the domain layer: who asked, under what
  * authority, which thread it follows, and which existing objects carry it out. The Goal keeps its own
@@ -38,9 +44,25 @@ export type TicketInput = {
   thread: string;
   at: string;
   attachedAt: string;
+  actor?: ActorRef;
+  human?: boolean;
+  admission?: SourceAdmission;
+  addressed?: "mention" | "direct";
+  channel?: ChannelRef;
   /** Optional routing note from the person when the main Session attached this event explicitly. */
   note?: string;
   payload?: Record<string, unknown>;
+};
+
+/** Provenance for the events that caused Eval or a person to accept this Ticket. */
+export type TicketOrigin = {
+  triggerId: string;
+  source: string;
+  actor?: ActorRef;
+  human?: boolean;
+  admission?: SourceAdmission;
+  addressed?: "mention" | "direct";
+  channel?: ChannelRef;
 };
 
 export type TicketLinks = {
@@ -61,6 +83,10 @@ export type Ticket = {
   subscriptions: string[];
   /** Events on subscribed threads attached while the Ticket is open. */
   inputs: TicketInput[];
+  /** Provenance for the Trigger batch that caused this Ticket to be accepted. */
+  origins: TicketOrigin[];
+  /** Write destinations supplied by Sources attached to this Ticket. */
+  channels: ChannelRef[];
   links: TicketLinks;
   createdAt: string;
 };
