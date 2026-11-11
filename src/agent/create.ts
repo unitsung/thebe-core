@@ -146,6 +146,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
         void channelNotifier.flush().catch(() => {});
         await options.onGoalNeedsPerson?.(notice);
       },
+      onCompleted: async (notice) => {
+        await channelNotifier.enqueueCompleted(notice).catch(() => {});
+        void channelNotifier.flush().catch(() => {});
+      },
     }
   );
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {

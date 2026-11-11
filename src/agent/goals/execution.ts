@@ -47,6 +47,7 @@ export type ManagedGoal = GoalRun & {
     at: string;
   };
   personNoticeId?: string;
+  completedNoticeId?: string;
   finished: Promise<GoalRun>;
   resolveFinished: (result: GoalRun) => void;
   listeners: Set<(event: GoalEvent) => void>;

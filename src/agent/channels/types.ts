@@ -1,13 +1,20 @@
 import type { ChannelRef } from "../sources/types.ts";
 
-export type TicketChannelNotice = {
+type TicketChannelNoticeBase = {
   id: string;
   ticketId: string;
   goalId: string;
-  type: "goal_needs_person";
-  reason: "answer" | "review" | "blocked" | "stalled";
   message: string;
 };
+
+export type TicketChannelNotice =
+  | (TicketChannelNoticeBase & {
+      type: "goal_needs_person";
+      reason: "answer" | "review" | "blocked" | "stalled";
+    })
+  | (TicketChannelNoticeBase & {
+      type: "goal_completed";
+    });
 
 export type ChannelSendInput = {
   channel: ChannelRef;

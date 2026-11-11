@@ -129,6 +129,42 @@ describe("Ticket channel notifications", () => {
     await notifier.stop();
   });
 
+  it("delivers a completed notice once with a stable idempotency key", async () => {
+    const { tickets, ticket } = await acceptedTicket();
+    const sent: ChannelSendInput[] = [];
+    const notifier = createTicketChannelNotifier({
+      tickets,
+      adapters: [
+        {
+          id: channel.source,
+          accepts: () => true,
+          send: async (input) => {
+            sent.push(input);
+          },
+        },
+      ],
+    });
+
+    await notifier.enqueueCompleted({
+      id: "goal-1:completed:2026-11-06T10:05:00.000Z",
+      goalId: "goal-1",
+      ticketId: ticket.id,
+      message: "A task is complete: the backup set was verified.",
+    });
+    expect(await notifier.pending()).toHaveLength(1);
+    await notifier.flush();
+    await notifier.flush();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.notice).toMatchObject({
+      type: "goal_completed",
+      ticketId: ticket.id,
+      message: "A task is complete: the backup set was verified.",
+    });
+    expect(sent[0]?.idempotencyKey).toMatch(/^[a-f0-9]{32}$/);
+    await notifier.stop();
+  });
+
   it("does not modify Ticket state when a channel adapter fails", async () => {
     const { tickets, ticket } = await acceptedTicket();
     const outboxDir = await mkdtemp(join(tmpdir(), "thebe-channel-outbox-"));

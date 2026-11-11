@@ -184,6 +184,74 @@ describe("GitHub Source through Eval and the Ticket executor", () => {
     await app.agent.quiesce();
   });
 
+  it("writes a completed Ticket's result back to the issue once", async () => {
+    vi.useFakeTimers();
+    const fake = createFakeRuntime();
+    const feed = githubFeed();
+    const source = createGithubSource({
+      repositories: ["acme/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: feed.fetch,
+    });
+    const channel = createGithubChannelAdapter({
+      repositories: ["acme/thebe"],
+      fetch: feed.fetch,
+    });
+    const app = createThebeApp({
+      runtime: fake.runtime,
+      provider,
+      sources: { intervalMs: 1000 },
+      sourceAdapters: [source],
+      channelAdapters: [channel],
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    const policy = await app.agent.setPolicy({
+      rules: ["Investigate a newly opened issue"],
+      acceptMode: "auto",
+    });
+    fake.queueTurns([
+      {
+        kind: "text",
+        text: JSON.stringify({
+          decision: "accept",
+          matched: [policy.rules[0]!.id],
+          intent: "Investigate the newly opened issue",
+          reason: "a person opened an issue in a watched repository",
+        }),
+      },
+      {
+        kind: "text",
+        text: "Read the issue and checked the reported state; nothing is broken now.",
+      },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: the issue was read and the reported state checked\nREMAINING: none",
+      },
+    ]);
+
+    feed.open();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    await vi.waitFor(async () => {
+      expect(await app.agent.listTickets()).toHaveLength(1);
+    });
+    const [ticket] = await app.agent.listTickets();
+    const goalId = ticket!.links.legacyGoalId!;
+    await vi.waitFor(() =>
+      expect(app.agent.getGoal(goalId)?.status).toBe("completed")
+    );
+
+    await vi.waitFor(() => expect(feed.comments).toHaveLength(1));
+    expect(feed.comments[0]).toContain("A task is complete");
+    expect(feed.comments[0]).toContain("<!-- thebe-notice:");
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(feed.comments).toHaveLength(1);
+
+    await app.agent.quiesce();
+  });
+
   it("writes a blocked Ticket's needs-person notice back to the issue", async () => {
     vi.useFakeTimers();
     const fake = createFakeRuntime();

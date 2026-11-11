@@ -102,15 +102,17 @@ Thebe Core. It does not copy the DSH runtime or make Core depend on it.
   Trigger batch. `Ticket.channels` stores its authorized reply destinations;
   `TicketInput` carries the same provenance for later attached Triggers.
 - `CreateThebeAgentOptions.channelAdapters` registers adapters by source id.
-  Core sends Goal attention notices only to ChannelRefs already stored on the
-  matching Ticket, and only when the adapter accepts the address. The stable
-  idempotency key is scoped to the Ticket, notice, and destination; adapters
-  use it to deduplicate delivery retries.
-- Goal attention notices enter a durable outbox before a channel send. The
-  notice is enqueued before the Goal records its terminal state, so a shutdown
-  cannot drop it before it is durable. Failed sends retry with backoff after
-  restart. Sent, refused, and no-longer-owned destinations leave the queue;
-  delivery failures leave Goal state alone.
+  Core sends Goal notices only to ChannelRefs already stored on the matching
+  Ticket, and only when the adapter accepts the address. A notice is either an
+  attention request or the result of a completed Ticket. The stable idempotency
+  key is scoped to the Ticket, notice, and destination; adapters use it to
+  deduplicate delivery retries.
+- Goal notices enter a durable outbox before a channel send. The notice is
+  enqueued before the Goal records its terminal state, so a shutdown cannot drop
+  it before it is durable. Failed sends retry with backoff after restart. Sent,
+  refused, and no-longer-owned destinations leave the queue; delivery failures
+  leave Goal state alone. A completed Ticket sends its result once per
+  completion; a later retry and completion is a new result.
 - Source and channel metadata remains descriptive event data. The Ticket
   Mandate is still derived and enforced by Core's existing resource and
   approval checks.
@@ -243,7 +245,7 @@ the whole DSH prototype.
 | `src/core/engine.ts`, `src/core/intake.ts`, and `src/core/evals.ts`: deduplicate incoming Triggers, route them through thread ownership and policy gates, and persist Decisions.            | `src/agent/sources/runner.ts`, `src/agent/create.ts`, `src/agent/eval/`, plus `src/agent/agent.test.ts` and `src/agent/sources/sources.test.ts`.                                      | Covered through the existing Eval/Ticket path and the new Source adapter seam.                                                                                                                                               |
 | `src/sources/kind.ts`, `src/sources/registry.ts`, and `src/admission.ts`: normalize source facts, then apply actor allowlists and an addressed/unaddressed admission matrix in Core policy. | `src/agent/sources/types.ts` and `src/agent/sources/runner.ts` persist and validate `actor`, `human`, `addressed`, and `admission`; `src/adapters/sources/github.ts` and `feishu.ts` implement the admission matrix; `src/agent/create.ts` routes the classification. | Covered for the two production Sources: bot/self events are ignored, mentions or direct chats are explicit, newly opened issues/PRs are inferred. Admission stays per Source rather than a central Core allowlist. |
 | `src/core/tickets.ts`: persist Ticket origin, channels, subscriptions, and follow-up Inputs; bind later Triggers to the owning Ticket.                                                      | `src/agent/tickets/store.ts`, `src/agent/tickets/control.ts`, and `src/agent/tickets/types.ts`, covered by `src/agent/tickets/control.test.ts` and `src/agent/tickets/store.test.ts`. | Covered for the Core target: provenance and authorized destinations survive direct delegation and follow-up attachment.                                                                                                      |
-| `src/core/replies.ts` and the `Outbox` port in `src/core/ports.ts`: queue idempotent acknowledgements, answers, results, and attention replies through source Channels.                     | `src/agent/channels/delivery.ts`, `src/agent/channels/outbox.ts`, and `src/agent/channels/delivery.test.ts`.                                                                          | Narrower by design: this phase durably sends Goal attention notices. It does not implement DSH's full source-message reply lifecycle.                                                                                        |
+| `src/core/replies.ts` and the `Outbox` port in `src/core/ports.ts`: queue idempotent acknowledgements, answers, results, and attention replies through source Channels.                     | `src/agent/channels/delivery.ts`, `src/agent/channels/outbox.ts`, and `src/agent/channels/delivery.test.ts`.                                                                          | Narrower than DSH: this phase durably sends Goal attention notices and a result when a Ticket completes. It does not implement DSH's acknowledgement or answer reply lifecycle.                                             |
 | `src/core/assignments.ts` and `src/infra/environment.ts`: run Ticket Assignments with per-Ticket directories and repository/worktree preparation.                                           | Thebe continues using its existing Goal runner and Ticket Mandate/approval path. `src/agent/tickets/recovery.ts` resumes interrupted Ticket Goals after restart.                      | Not implemented: no DSH-style worktree manager or per-Ticket filesystem. Isolation is the Goal's subagent profile, one-shot runtime, Mandate scope, and approval checks.                                                       |
 
 Phase status: the acceptance criteria below define the completed Core and App
@@ -257,7 +259,8 @@ those behaviors.
 | --- | --- |
 | GitHub collection, admission, deduplication, writeback idempotency | `src/adapters/sources/github.test.ts` |
 | Feishu collection, chat mode, admission, token caching, writeback | `src/adapters/sources/feishu.test.ts` |
-| GitHub Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked notice written back as an issue comment with the idempotency marker | `src/adapters/sources/github-flow.test.ts` |
+| GitHub Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked or completed notice written back as an issue comment with the idempotency marker | `src/adapters/sources/github-flow.test.ts` |
+| Durable result notice for a completed Ticket, with one send per completion and a stable idempotency key | `src/agent/channels/delivery.test.ts` |
 | Feishu Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked notice written back to the chat with the idempotency `uuid` | `src/adapters/sources/feishu-flow.test.ts` |
 | Explicit GitHub mention or Feishu direct message → direct Ticket (no Eval) → isolated `ticket-worker` → durable blocked notice → idempotent retry without a duplicate | `src/agent/tickets/direct-source-e2e.test.ts` |
 | Feishu chat-mode lookup retry after a transient failure; GitHub marker search across comment pages | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
@@ -290,7 +293,9 @@ those behaviors.
   fan-out, including persistence and recovery.
 - A channel delivery can target only a `ChannelRef` persisted on that Ticket;
   it carries a stable idempotency key. A failed delivery remains queued and
-  retries after restart while Goal and Ticket state stay intact.
+  retries after restart while Goal and Ticket state stay intact. A completed
+  Ticket sends its result to those channels once; a re-completion after retry is
+  a new result.
 - Identity and channel metadata do not increase a Ticket's Mandate, bypass an
   approval, or permit an irreversible action.
 - With `THEBE_GITHUB_REPOS` set, a GitHub event produces one deduplicated

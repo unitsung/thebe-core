@@ -245,7 +245,8 @@ function validQueuedNotice(value: QueuedChannelNotice): boolean {
     typeof value.notice.id === "string" &&
     typeof value.notice.ticketId === "string" &&
     typeof value.notice.goalId === "string" &&
-    value.notice.type === "goal_needs_person" &&
+    (value.notice.type === "goal_needs_person" ||
+      value.notice.type === "goal_completed") &&
     typeof value.notice.message === "string"
   );
 }
