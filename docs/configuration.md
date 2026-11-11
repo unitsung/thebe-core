@@ -136,6 +136,27 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `auto` 有三道保险，用来防止无人值守时失控，不是调优参数，数字也没有实测依据：同一条线程 1 小时内最多接单 3 次（第 4 次只在「观察」页记「本来会接单」，原因 `thread_limit`）；Eval 每小时最多问模型 60 次，超过后每个事件仍记一条 Decision，原因 `assessment_limit`，`THEBE_EVAL_MAX_PER_HOUR` 可改，`0` 不限；重启后只评估 24 小时内的事件。模型不可用、回复无法解析或达到小时上限时，Decision 记为 `unavailable`；同一次故障只推送一次，直到之后有一次成功的 Assessment 才重新允许提示。
 - 后台模型工作还有每日预算：输入、输出和 cache-write 计入，cache-read 单独展示但不扣预算；用户自己的聊天不计入。默认每天 1,000,000 tokens，可用 `THEBE_BACKGROUND_TOKEN_BUDGET` 或 `PUT /v1/usage/budget` 调整，`0` 会暂停后台模型工作。告警阈值默认为 50%、80%、90%、100%（`THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS` 可配，支持小数或百分数），达到 50%、80%、90% 时推送预警提醒，达到 100% 耗尽时自动暂停并推送一次，每个阈值每天去重一次；次日 UTC 零点恢复。`GET /v1/usage/summary` 返回当天用量、估算美元成本、阈值状态、暂停状态和最近 30 天；满 15 天后会给出一次「日 p95 的两倍」建议，接受前不会改预算。
 - `THEBE_SOURCES` 是 Core 在后台观察的来源（Source）清单，逗号分隔；**默认不设，即什么都不观察、不起任何定时器。** 按 `THEBE_SOURCE_INTERVAL_MS`（默认 30000，不小于 1000）轮询。`container-health` 在容器状态变化时记 `container.went_down`、`container.recovered`、`container.appeared`、`container.removed` 或 `container.state_changed`；运行中的容器从非 `unhealthy` 变为 `unhealthy` 时记 `container.unhealthy`，从 `unhealthy` 变回 `healthy` 时记 `container.recovered`。线程为 `resource:container:<容器名>`。健康状态优先读 Docker Arcane API 的 `Health` 字段，旧引擎则从 `Status` 文本读取。`download-completed` 需要先配置下载引擎；它从非 `completed` 进入 `completed` 时记 `download.completed`，线程为 `resource:download:<engine>:<hash>`。两种 Source 的第一次读取都只建立基线，读取位置会保存，重启不重放；已有旧游标首次升级时只建立健康状态基线，不会把当时已经存在的 `unhealthy` 当新事件；多引擎下载列表只要有一个引擎不可达，本次读取就不推进游标。`GET /v1/health` 会在启用 Source 时返回 `sources`，每个 Source 带 `state`（`starting`、`healthy`、`failing`）、`consecutiveFailures` 和最近的错误；成功读取后连续失败数清零。请求了 `download-completed` 却没有下载 provider 时也会显示为 `failing`，不会静默消失。
+- GitHub 与飞书来源（Source）使用同一套轮询、游标持久化、静默、健康检查和 Trigger 去重机制；只有环境变量齐全时才启用，缺一项就不注册、不启定时器。
+
+  ```bash
+  # GitHub：一个或多个 owner/name 仓库
+  export THEBE_GITHUB_REPOS=unitsung/thebe
+  export THEBE_GITHUB_TOKEN=github_pat_...
+  export THEBE_GITHUB_AGENT_LOGIN=thebe-agent
+  # 可选：THEBE_GITHUB_API_URL、THEBE_GITHUB_ADMIT_UNMENTIONED=1、THEBE_GITHUB_ADMIT_OPENED=0
+
+  # 飞书：一个或多个 chat id（oc_...）
+  export THEBE_FEISHU_APP_ID=cli_...
+  export THEBE_FEISHU_APP_SECRET=...
+  export THEBE_FEISHU_CHATS=oc_...
+  # 可选：THEBE_FEISHU_API_URL、THEBE_FEISHU_BOT_OPEN_ID、THEBE_FEISHU_MENTIONS、THEBE_FEISHU_ADMIT_UNMENTIONED=1
+  ```
+
+  - GitHub 读取 `GET /repos/{owner}/{repo}/events`（带 ETag），记录 issue/PR 的打开、关闭、重开、评论、review 和 review 评论。每个仓库第一次读取只建立基线。机器人事件和没有 @ 的评论不接单；提到 `THEBE_GITHUB_AGENT_LOGIN` 的评论是明确请求；新打开的 issue/PR 默认按推断处理（`THEBE_GITHUB_ADMIT_OPENED=0` 关闭，`THEBE_GITHUB_ADMIT_UNMENTIONED=1` 接未 @ 评论）。回复以 issue 评论发出，并带隐藏的幂等标记。
+  - 飞书按对话轮询 `GET /open-apis/im/v1/messages`。第一次读取以过去 24 小时为基线，之后按 `create_time` 增量读取并用 `message_id` 去重。非用户发送者不接单；单聊或 @ 机器人（`THEBE_FEISHU_BOT_OPEN_ID`，或 `THEBE_FEISHU_MENTIONS` 中的显示名）是明确请求；群里没有 @ 的消息默认不接单，`THEBE_FEISHU_ADMIT_UNMENTIONED=1` 时按推断处理。回复以消息 `uuid` 作为幂等键发回对话。
+  - 准入结果随 Trigger 持久化；工单范围（Mandate）和 Core 的审批检查仍是授权边界，来源身份不能扩大范围。
+  - 两个适配器目前只有模拟 API 的自动化测试；接入生产账号前，先在测试 Core 上验证凭据和网络。
+
 - `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
