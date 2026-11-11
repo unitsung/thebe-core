@@ -106,9 +106,11 @@ Thebe Core. It does not copy the DSH runtime or make Core depend on it.
   matching Ticket, and only when the adapter accepts the address. The stable
   idempotency key is scoped to the Ticket, notice, and destination; adapters
   use it to deduplicate delivery retries.
-- Goal attention notices enter a durable outbox before a channel send. Failed
-  sends retry with backoff after restart. Sent, refused, and no-longer-owned
-  destinations leave the queue; delivery failures leave Goal state alone.
+- Goal attention notices enter a durable outbox before a channel send. The
+  notice is enqueued before the Goal records its terminal state, so a shutdown
+  cannot drop it before it is durable. Failed sends retry with backoff after
+  restart. Sent, refused, and no-longer-owned destinations leave the queue;
+  delivery failures leave Goal state alone.
 - Source and channel metadata remains descriptive event data. The Ticket
   Mandate is still derived and enforced by Core's existing resource and
   approval checks.
@@ -144,8 +146,9 @@ of 100 events per repository per poll.
 - The Channel adapter writes to
   `POST /repos/{owner}/{repo}/issues/{number}/comments`, refuses repositories
   outside the configured list, and appends a hidden
-  `<!-- thebe-notice:<idempotencyKey> -->` marker. A retry checks recent comments
-  for the marker before posting again.
+  `<!-- thebe-notice:<idempotencyKey> -->` marker. A retry pages through the
+  issue's comments (up to 20 pages of 100) looking for the marker before posting
+  again, so a long thread cannot produce a duplicate notice.
 - Environment: `THEBE_GITHUB_REPOS` (comma-separated `owner/name`, required),
   `THEBE_GITHUB_TOKEN`, `THEBE_GITHUB_API_URL`,
   `THEBE_GITHUB_AGENT_LOGIN`, `THEBE_GITHUB_ADMIT_UNMENTIONED=1`, and
@@ -161,7 +164,8 @@ of 100 events per repository per poll.
 - The first read of a chat baselines the previous 24 hours; later reads start
   from the newest seen `create_time` with a one-second overlap and deduplicate by
   `message_id`. A chat's mode is read from
-  `GET /open-apis/im/v1/chats/{chat_id}` and cached.
+  `GET /open-apis/im/v1/chats/{chat_id}` and cached; a failed or malformed lookup
+  is retried on a later poll instead of being cached as "unknown".
 - Admission is deterministic: non-user senders are `ignore`; a direct (`p2p`)
   chat or a message that mentions the bot is `explicit`; an unaddressed group
   message is `ignore` unless unmentioned admission is enabled, in which case it
@@ -255,6 +259,8 @@ those behaviors.
 | Feishu collection, chat mode, admission, token caching, writeback | `src/adapters/sources/feishu.test.ts` |
 | GitHub Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked notice written back as an issue comment with the idempotency marker | `src/adapters/sources/github-flow.test.ts` |
 | Feishu Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked notice written back to the chat with the idempotency `uuid` | `src/adapters/sources/feishu-flow.test.ts` |
+| Explicit GitHub mention or Feishu direct message → direct Ticket (no Eval) → isolated `ticket-worker` → durable blocked notice → idempotent retry without a duplicate | `src/agent/tickets/direct-source-e2e.test.ts` |
+| Feishu chat-mode lookup retry after a transient failure; GitHub marker search across comment pages | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
 | Ticket store loading under concurrent startup reads | `src/agent/tickets/store.test.ts` |
 | Interrupted Ticket Goal recovery only for `running`/`pausing`, only after Mandate revalidation, and every HTTP or MCP Ticket read/control waiting for that pass | `src/agent/tickets/recovery.test.ts`, `src/agent/tickets/control.test.ts` |
 | Assignment view, controls and Ticket task shape | `src/agent/tickets/control.test.ts`, `src/delivery/http/tickets.test.ts` |
