@@ -212,6 +212,11 @@ export function createGoalApi(
         // A report Artifact is supplementary; it must not change Goal state.
       }
     }
+    // Make the notice durable before any terminal snapshot is written, so a crash between the two
+    // cannot leave a finished Goal whose Ticket never hears about it. The completion broadcast
+    // below persists the terminal state itself, so the notice has to come first.
+    await notifyNeedsPerson(run);
+    await notifyCompleted(run);
     broadcast(run, {
       type: "goal_completed",
       // GoalEvent's generic loop has no paused terminal state; the UI has the
@@ -220,10 +225,6 @@ export function createGoalApi(
       totalIterations: run.iteration,
       summary: finalSummary ?? `Goal ${status}.`,
     });
-    // Make the notice durable before the terminal state is written, so a crash between the two
-    // cannot leave a finished Goal whose Ticket never hears about it.
-    await notifyNeedsPerson(run);
-    await notifyCompleted(run);
     const result = snapshot(run);
     await queueGoalPersistence(
       result,

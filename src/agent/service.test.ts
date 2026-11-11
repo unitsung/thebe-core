@@ -12,6 +12,19 @@ import { createJsonAgentSettingsStore } from "./settings/store.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
 
+async function storedGoalStatus(
+  dir: string,
+  goalId: string
+): Promise<string | undefined> {
+  try {
+    const text = await readFile(join(dir, `${goalId}.json`), "utf8");
+    return (JSON.parse(text) as { goalRun?: { status?: string } }).goalRun
+      ?.status;
+  } catch {
+    return undefined;
+  }
+}
+
 function emptyProvider(): ContainerInfoProvider {
   return {
     listContainers: async () => [],
@@ -634,6 +647,36 @@ describe("Thebe agent service (fake runtime)", () => {
       });
       expect(done.attention?.id).toEqual(expect.any(String));
       expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+
+    it("reaches the person before the paused state is written", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "thebe-goal-notice-"));
+      const fake = createFakeRuntime();
+      fake.queueTurns([report({ state: "ask", question: "Which library?" })]);
+      const seen: Array<string | undefined> = [];
+      const agent = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir: dir,
+        onGoalNeedsPerson: async (notice) => {
+          // A crash right after this hook must leave the notice queued while the stored Goal
+          // still has to be paused by recovery, not already reported as stopped. Give any
+          // already queued write time to land before looking.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          seen.push(await storedGoalStatus(dir, notice.goalId));
+        },
+      });
+      const session = await agent.createSession({ title: "notice order" });
+      await agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Move the library",
+        maxIterations: 4,
+        allowAsk: true,
+      });
+      await agent.waitGoal(session.thebeSessionId);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).not.toBe("paused");
     });
 
     it("clears the open question when a person stops the paused task", async () => {
