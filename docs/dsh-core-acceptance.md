@@ -249,9 +249,9 @@ the whole DSH prototype.
 | `src/core/assignments.ts` and `src/infra/environment.ts`: run Ticket Assignments with per-Ticket directories and repository/worktree preparation.                                           | Thebe continues using its existing Goal runner and Ticket Mandate/approval path. `src/agent/tickets/recovery.ts` resumes interrupted Ticket Goals after restart.                      | Not implemented: no DSH-style worktree manager or per-Ticket filesystem. Isolation is the Goal's subagent profile, one-shot runtime, Mandate scope, and approval checks.                                                       |
 
 Phase status: the acceptance criteria below define the completed Core and App
-scope. The central actor policy, full source-channel reply lifecycle, and
-DSH-style worktree execution remain separate follow-up decisions if Thebe needs
-those behaviors.
+scope. The central actor policy, DSH's acknowledgement/answer replies beyond
+attention and result notices, and DSH-style worktree execution remain separate
+follow-up decisions if Thebe needs those behaviors.
 
 ## Verification map
 
