@@ -90,9 +90,17 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
     })
       .then((data) => {
         const mode = recordValue(data)?.chat_mode;
-        return mode === "p2p" || mode === "group" ? mode : undefined;
+        if (mode === "p2p" || mode === "group") return mode;
+        // A malformed answer is not a lasting fact: retry it on a later poll.
+        chatModes.delete(chatId);
+        return undefined;
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // A transient lookup failure must not make every later direct message
+        // look unaddressed for the life of the process.
+        chatModes.delete(chatId);
+        return undefined;
+      });
     chatModes.set(chatId, flight);
     return flight;
   }
