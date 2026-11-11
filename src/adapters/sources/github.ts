@@ -456,8 +456,14 @@ function summaryOf(
 
 function mentions(event: GithubEvent, login: string): boolean {
   const payload = event.payload;
-  // Only the event's own new text can address the bot. An old mention in the issue or PR body
-  // must not turn a later unaddressed comment into an explicit request.
+  const action = stringValue(payload.action);
+  // A body is new text only when the event opens or edits it. A push, close, reopen, or label
+  // carries the same old body, and an old mention must not turn it into a fresh request.
+  const newBody = (subject: unknown): string | undefined =>
+    action === "opened" || action === "edited"
+      ? stringValue(recordValue(subject)?.body)
+      : undefined;
+  // Only the event's own new text can address the bot.
   const text =
     event.type === "IssueCommentEvent" ||
     event.type === "PullRequestReviewCommentEvent"
@@ -465,9 +471,9 @@ function mentions(event: GithubEvent, login: string): boolean {
       : event.type === "PullRequestReviewEvent"
         ? stringValue(recordValue(payload.review)?.body)
         : event.type === "IssuesEvent"
-          ? stringValue(recordValue(payload.issue)?.body)
+          ? newBody(payload.issue)
           : event.type === "PullRequestEvent"
-            ? stringValue(recordValue(payload.pull_request)?.body)
+            ? newBody(payload.pull_request)
             : undefined;
   if (!text) return false;
   // Match a whole login: `@thebe-agent-extra` and `me@thebe-agent` are not mentions.
