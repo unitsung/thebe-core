@@ -1,4 +1,4 @@
-import type { TriggerStore } from "./store.ts";
+import { DEFAULT_TRIGGER_RETENTION, type TriggerStore } from "./store.ts";
 import type { Source, Trigger } from "./types.ts";
 
 export type SourceHealth = {
@@ -36,6 +36,12 @@ export function createSourceRunner(options: {
   now?: () => Date;
   onError?: (source: string, error: unknown) => void;
   onTriggers?: (triggers: Trigger[]) => Promise<void> | void;
+  /**
+   * Retries keep the newest Triggers. The default matches the Trigger store's
+   * retention, so a bounded in-memory backlog never outlives what the store can
+   * recover after a restart.
+   */
+  maxPendingDispatch?: number;
 }): SourceRunner {
   const sourceIds = options.sources.map((source) => source.id);
   if (sourceIds.some((id) => !id.trim())) {
@@ -55,6 +61,14 @@ export function createSourceRunner(options: {
     }
   }
   const intervalMs = options.intervalMs ?? DEFAULT_SOURCE_INTERVAL_MS;
+  const maxPendingDispatch =
+    options.maxPendingDispatch ?? DEFAULT_TRIGGER_RETENTION;
+  if (
+    !Number.isSafeInteger(maxPendingDispatch) ||
+    maxPendingDispatch <= 0
+  ) {
+    throw new Error("maxPendingDispatch must be a positive integer");
+  }
   const now = options.now ?? (() => new Date());
   const statuses = new Map<string, SourceHealth>(
     options.sources.map((source) => [
@@ -137,6 +151,16 @@ export function createSourceRunner(options: {
         pendingDispatch.push(
           ...added.filter((trigger) => !known.has(trigger.id))
         );
+        if (pendingDispatch.length > maxPendingDispatch) {
+          const dropped = pendingDispatch.length - maxPendingDispatch;
+          pendingDispatch = pendingDispatch.slice(-maxPendingDispatch);
+          options.onError?.(
+            "dispatch",
+            new Error(
+              `Source dispatch backlog exceeded ${maxPendingDispatch} Triggers; dropped ${dropped} oldest queued Trigger(s)`
+            )
+          );
+        }
       }
       await dispatchPending();
       return added;
