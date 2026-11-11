@@ -197,15 +197,39 @@ describe("GitHub Source", () => {
           comment: { body: "Thanks @thebe-agent, that worked." },
         },
       }),
+      event({
+        id: "1203",
+        type: "PullRequestEvent",
+        payload: {
+          // A push repeats the old PR body; its mention does not make this a request.
+          action: "synchronize",
+          pull_request: {
+            number: 15,
+            body: "Ping @thebe-agent if this recurs.",
+          },
+        },
+      }),
+      event({
+        id: "1204",
+        type: "PullRequestEvent",
+        payload: {
+          action: "edited",
+          pull_request: { number: 16, body: "@thebe-agent please recheck." },
+        },
+      }),
     ]);
     const read = await source.read(baseline.cursor);
     expect(read.triggers.map((trigger) => trigger.admission)).toEqual([
       "ignore",
       "ignore",
       "explicit",
+      "ignore",
+      "explicit",
     ]);
     expect(read.triggers.map((trigger) => trigger.addressed)).toEqual([
       undefined,
+      undefined,
+      "mention",
       undefined,
       "mention",
     ]);
