@@ -143,8 +143,13 @@ of 100 events per repository per poll.
   `[bot]`, or `github-actions`) are `ignore`; an issue or PR comment that
   mentions `THEBE_GITHUB_AGENT_LOGIN` is `explicit`; a newly opened issue or PR
   is `inferred`; any other comment is `ignore`.
+- A mention is read only from the event's own new text (a comment or review
+  body, or the issue/PR body for opened/edited events) and must match the whole
+  login, so a login quoted elsewhere in the payload does not address the bot.
 - Threads are `resource:github:<owner>/<repo>:<issue|pull>:<number>`. The
-  ChannelRef address is `{repo, issue, kind}`.
+  ChannelRef address is `{repo, issue, kind}`. A conversation comment on a pull
+  request stays on the pull thread, even though GitHub delivers it through the
+  issue-comment API.
 - The Channel adapter writes to
   `POST /repos/{owner}/{repo}/issues/{number}/comments`, refuses repositories
   outside the configured list, and appends a hidden
@@ -167,7 +172,10 @@ of 100 events per repository per poll.
   from the newest seen `create_time` with a one-second overlap and deduplicate by
   `message_id`. A chat's mode is read from
   `GET /open-apis/im/v1/chats/{chat_id}` and cached; a failed or malformed lookup
-  is retried on a later poll instead of being cached as "unknown".
+  is retried on a later poll instead of being cached as "unknown". While the
+  lookup is failing and the chat has fresh messages, that chat's cursor does not
+  advance, so the messages are classified again after the lookup recovers
+  instead of being silently dropped.
 - Admission is deterministic: non-user senders are `ignore`; a direct (`p2p`)
   chat or a message that mentions the bot is `explicit`; an unaddressed group
   message is `ignore` unless unmentioned admission is enabled, in which case it
@@ -207,6 +215,17 @@ The Goal runner stays the only executor. A Ticket links to its Goal through
   alone.
 - Ticket HTTP/tool reads and controls wait for that recovery pass, so a client
   cannot observe a half-restored assignment.
+- A needs-person or completed notice is attempted before the terminal state is
+  persisted and is marked sent only after the adapter accepts it, so a crash
+  between the two cannot leave a finished Goal whose Ticket never hears about it.
+- Ending a Goal any other way than pausing clears its open question or review
+  attention, so a stopped or rejected Ticket leaves the needs-you section.
+- A resume or answer that races another one applies once: a Goal that is already
+  running/pausing, or no longer paused, is returned unchanged instead of
+  starting a second checkpoint.
+- If a recorded Ticket's Goal is missing (for example after a crash between
+  Ticket and Goal persistence), a repeated delegation starts the executor again
+  from the stored Ticket instead of returning work that can never run.
 
 ## Thebe App Ticket surface
 
@@ -263,10 +282,12 @@ follow-up decisions if Thebe needs those behaviors.
 | Durable result notice for a completed Ticket, with one send per completion and a stable idempotency key | `src/agent/channels/delivery.test.ts` |
 | Feishu Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → completed or blocked notice written back to the chat with the idempotency `uuid` | `src/adapters/sources/feishu-flow.test.ts` |
 | Explicit GitHub mention or Feishu direct message → direct Ticket (no Eval) → isolated `ticket-worker` → durable blocked notice → idempotent retry without a duplicate | `src/agent/tickets/direct-source-e2e.test.ts` |
-| Feishu chat-mode lookup retry after a transient failure; GitHub marker search across comment pages | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
+| Feishu chat-mode lookup retry after a transient failure; Feishu cursor held while the lookup fails; GitHub marker search across comment pages; GitHub PR conversation comment stays on the pull thread; mention only in the event's own text and as a whole login | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
 | Ticket store loading under concurrent startup reads | `src/agent/tickets/store.test.ts` |
 | Interrupted Ticket Goal recovery only for `running`/`pausing`, only after Mandate revalidation, and every HTTP or MCP Ticket read/control waiting for that pass | `src/agent/tickets/recovery.test.ts`, `src/agent/tickets/control.test.ts` |
 | Composed-app restart: a running Ticket Goal persisted in the Agent store is resumed by a new Core process behind the startup recovery gate, keeps the interrupted worker record, and completes with a fresh isolated worker/reviewer | `src/agent/tickets/recovery-app.test.ts` |
+| Durable person notices before terminal persistence; stopping a paused Goal clears its question; one answer and one resumed checkpoint per race | `src/agent/service.test.ts` |
+| A recorded Ticket whose Goal was lost starts the executor on a repeated delegation | `src/agent/tickets/control.test.ts` |
 | Assignment view, controls and Ticket task shape | `src/agent/tickets/control.test.ts`, `src/delivery/http/tickets.test.ts` |
 | App Ticket decoding, stage derivation, section ordering | `ui/Tests/Tickets/ThebeTicketModelTests.swift` |
 | App list/reload, control, note, reply request shapes and failure states | `ui/Tests/Tickets/ThebeTicketControllerTests.swift` |
