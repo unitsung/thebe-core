@@ -516,6 +516,8 @@ describe("Ticket startup recovery gate", () => {
     const run = goal("goal-recovered", "running", "2026-11-10T00:00:05.000Z");
     let restored = false;
     let goalReads = 0;
+    let pauses = 0;
+    const guidance: string[] = [];
     let releaseRecovery!: () => void;
     const recovery = new Promise<void>((resolve) => {
       releaseRecovery = resolve;
@@ -537,8 +539,14 @@ describe("Ticket startup recovery gate", () => {
           return restored ? [run] : [];
         },
         answerGoal: unused,
-        addGoalGuidance: unused,
-        pauseGoal: unused,
+        addGoalGuidance: async (_id, note) => {
+          guidance.push(note);
+          return run;
+        },
+        pauseGoal: async () => {
+          pauses += 1;
+          return run;
+        },
         resumeGoal: unused,
         stopGoal: unused,
         retryGoal: unused,
@@ -558,11 +566,15 @@ describe("Ticket startup recovery gate", () => {
       {},
       { writes: false, irreversible: false }
     );
+    const paused = api.control({ ticketId: ticket.id, action: "pause" });
+    const noted = api.note({ ticketId: ticket.id, note: "keep an eye" });
     // Let every caller run to its first real await. None may observe the Goal side before the
     // recovery promise settles, or it would report this assignment as unassigned.
     await Promise.resolve();
     await Promise.resolve();
     expect(goalReads).toBe(0);
+    expect(pauses).toBe(0);
+    expect(guidance).toEqual([]);
 
     restored = true;
     releaseRecovery();
@@ -578,5 +590,9 @@ describe("Ticket startup recovery gate", () => {
     await expect(invoked).resolves.toMatchObject({
       tickets: [{ ticket: { id: ticket.id }, stage: "running" }],
     });
+    await expect(paused).resolves.toMatchObject({ stage: "running" });
+    await expect(noted).resolves.toMatchObject({ stage: "running" });
+    expect(pauses).toBe(1);
+    expect(guidance).toEqual(["keep an eye"]);
   });
 });

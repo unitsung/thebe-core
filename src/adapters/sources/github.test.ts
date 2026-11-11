@@ -211,6 +211,90 @@ describe("GitHub Source", () => {
     ).toBe(true);
   });
 
+  it("treats a 304 response as no news and keeps the cursor", async () => {
+    const github = fakeGithub([]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      fetch: github.fetcher,
+    });
+    const baseline = await source.read(undefined);
+    github.setStatus(304);
+
+    const read = await source.read(baseline.cursor);
+
+    expect(read.triggers).toEqual([]);
+    expect(read.cursor).toBe(baseline.cursor);
+  });
+
+  it("reads the second page before stopping", async () => {
+    const pages = new Map<string, unknown[]>();
+    const requested: string[] = [];
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (!url.includes("/events")) return Response.json([]);
+      requested.push(url);
+      const page = new URL(url).searchParams.get("page") ?? "1";
+      return Response.json(pages.get(page) ?? [], {
+        headers: { etag: '"pages"' },
+      });
+    }) as typeof fetch;
+    const mention = (id: string, seconds: number) =>
+      event({
+        id,
+        created_at: new Date(
+          Date.parse("2026-11-11T10:00:00.000Z") + seconds * 1000
+        ).toISOString(),
+        payload: {
+          action: "created",
+          issue: { number: 12, title: "Restart the media container" },
+          comment: { body: "@thebe-agent please restart emby" },
+        },
+      });
+    pages.set("1", [
+      event({
+        id: "1000",
+        created_at: "2026-11-11T09:00:00.000Z",
+        payload: {
+          action: "created",
+          issue: { number: 12 },
+          comment: { body: "just a note" },
+        },
+      }),
+    ]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: fetcher,
+    });
+    const baseline = await source.read(undefined);
+
+    pages.set(
+      "1",
+      Array.from({ length: 100 }, (_, index) => mention(`p1-${index}`, index))
+    );
+    pages.set("2", [mention("p2-0", 1000)]);
+    const read = await source.read(baseline.cursor);
+
+    expect(read.triggers).toHaveLength(101);
+    expect(read.triggers[0]).toMatchObject({
+      admission: "explicit",
+      addressed: "mention",
+    });
+    expect(read.triggers.at(-1)?.actor).toEqual({
+      source: "github",
+      id: "unitsung",
+    });
+    expect(
+      requested.some((url) => url.includes("page=1")),
+      requested.join("\n")
+    ).toBe(true);
+    expect(
+      requested.some((url) => url.includes("page=2")),
+      requested.join("\n")
+    ).toBe(true);
+    expect(requested.some((url) => url.includes("page=3"))).toBe(false);
+  });
+
   it("reports a repository read failure instead of silently advancing", async () => {
     const github = fakeGithub([]);
     github.setStatus(500);
