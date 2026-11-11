@@ -235,6 +235,12 @@ function ticketView(): TicketTaskView {
       },
       finalReport: "TOOL_LOG_SECRET should never be recalled",
     },
+    assignment: {
+      executor: "goal",
+      state: "ended",
+      goalId: GOAL_ID,
+      agentRuns: 0,
+    },
     pendingPermissions: [],
     receipt: {
       state: "completed",

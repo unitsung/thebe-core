@@ -39,10 +39,19 @@ export type TicketReceipt = {
   error?: string;
 };
 
+export type TicketAssignmentView = {
+  executor: "goal";
+  state: "pending" | "running" | "waiting" | "ended";
+  goalId?: string;
+  /** How many isolated agent runs this assignment started; 0 while it is still queued. */
+  agentRuns: number;
+};
+
 export type TicketTaskView = {
   ticket: Ticket;
   stage: TicketStage;
   canRetry?: boolean;
+  assignment: TicketAssignmentView;
   goal?: ProductGoal & { finalReport?: string };
   pendingPermissions: ProductPendingPermission[];
   receipt: TicketReceipt;
@@ -128,10 +137,20 @@ export function createTicketControlApi(options: {
   goals: GoalPort;
   sessions: SessionPort;
   now: () => Date;
+  /**
+   * Resolves once startup recovery has restored interrupted Ticket Goals. Reads that run before it
+   * finishes would report a running assignment as unassigned, so every public read and control
+   * waits for this promise first.
+   */
+  ready?: () => Promise<unknown>;
 }) {
   const delegateFlights = new Map<string, Promise<TicketTaskView>>();
   const backfillCutoff = options.now().getTime();
   let backfillFlight: Promise<void> | undefined;
+
+  async function readyToRead(): Promise<void> {
+    await options.ready?.();
+  }
 
   async function goalFor(ticket: Ticket): Promise<GoalRun | undefined> {
     const id = ticket.links.legacyGoalId;
@@ -147,6 +166,21 @@ export function createTicketControlApi(options: {
     return options.sessions
       .listPendingPermissions()
       .filter((permission) => permission.sessionId === goalId);
+  }
+
+  function assignmentOf(goal: GoalRun | undefined): TicketAssignmentView {
+    if (!goal) return { executor: "goal", state: "pending", agentRuns: 0 };
+    return {
+      executor: "goal",
+      state:
+        goal.status === "running" || goal.status === "pausing"
+          ? "running"
+          : goal.status === "paused"
+            ? "waiting"
+            : "ended",
+      goalId: goal.thebeSessionId,
+      agentRuns: goal.subagentRunIds.length,
+    };
   }
 
   function stageOf(
@@ -190,6 +224,7 @@ export function createTicketControlApi(options: {
       ticket,
       stage,
       canRetry: retryable,
+      assignment: assignmentOf(goal),
       ...(product
         ? {
             goal: {
@@ -240,7 +275,8 @@ export function createTicketControlApi(options: {
    * Goals that predate Tickets get one direct migration Ticket. This runs once per Core process and is
    * awaited by every Ticket read, so a client never sees a partially migrated catalogue.
    */
-  function backfillGoals(): Promise<void> {
+  async function backfillGoals(): Promise<void> {
+    await readyToRead();
     if (backfillFlight) return backfillFlight;
     backfillFlight = (async () => {
       for (const run of await options.goals.listGoals()) {
@@ -259,6 +295,7 @@ export function createTicketControlApi(options: {
   }
 
   async function get(ticketId: string): Promise<TicketTaskView | undefined> {
+    await readyToRead();
     const ticket = await options.store.get(ticketId);
     if (!ticket) return undefined;
     const goal = await goalFor(ticket);
@@ -273,6 +310,7 @@ export function createTicketControlApi(options: {
   async function list(
     input: Record<string, unknown> = {}
   ): Promise<TicketTaskView[]> {
+    await readyToRead();
     await backfillGoals();
     const stage = parseTicketStage(input.stage);
     const requested =
@@ -289,6 +327,7 @@ export function createTicketControlApi(options: {
   async function related(
     query: TicketRelationshipQuery
   ): Promise<TicketTaskView[]> {
+    await readyToRead();
     await backfillGoals();
     const sessionIds = new Set(query.sessionIds ?? []);
     const decisionIds = new Set(query.decisionIds ?? []);
@@ -332,6 +371,7 @@ export function createTicketControlApi(options: {
     input: Record<string, unknown>,
     origin: DelegationOrigin
   ): Promise<TicketTaskView & { reused: boolean }> {
+    await readyToRead();
     const task = typeof input.task === "string" ? input.task.trim() : "";
     if (!task) throw httpError(400, "task cannot be empty", "invalid_body");
     if (task.length > MAX_TASK_CHARS) {
@@ -471,6 +511,7 @@ export function createTicketControlApi(options: {
   async function reply(
     input: Record<string, unknown>
   ): Promise<TicketTaskView> {
+    await readyToRead();
     const ticketId =
       typeof input.ticketId === "string" ? input.ticketId.trim() : "";
     if (!ticketId) {
@@ -537,6 +578,7 @@ export function createTicketControlApi(options: {
   }
 
   async function note(input: Record<string, unknown>): Promise<TicketTaskView> {
+    await readyToRead();
     const ticketId =
       typeof input.ticketId === "string" ? input.ticketId.trim() : "";
     if (!ticketId) {
@@ -585,6 +627,7 @@ export function createTicketControlApi(options: {
     ticketId: string;
     action: TicketControlAction;
   }): Promise<TicketTaskView> {
+    await readyToRead();
     const ticketId = input.ticketId.trim();
     if (!ticketId) {
       throw httpError(400, "ticketId is required", "invalid_body");
@@ -663,6 +706,7 @@ export function createTicketControlApi(options: {
     caller: McpCaller,
     source: TicketInvocationSource = "mcp"
   ): Promise<unknown> {
+    await readyToRead();
     switch (name) {
       case TICKET_LIST_TOOL_NAME:
         return { tickets: await list(input) };

@@ -87,6 +87,11 @@ async function setup(candidate = decision()) {
       return {
         ticket,
         stage,
+        assignment: {
+          executor: "goal",
+          state: "pending",
+          agentRuns: 0,
+        },
         pendingPermissions: [],
         receipt: {
           state: stage,

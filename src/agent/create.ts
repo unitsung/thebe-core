@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
 import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
+import { recoverInterruptedTicketGoals } from "./tickets/recovery.ts";
 import type { Ticket } from "./tickets/types.ts";
 import { createTicketChannelNotifier } from "./channels/delivery.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
@@ -108,6 +109,24 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     }
     return [...new Set(services)];
   };
+  async function revalidateTicketGoal(
+    goalId: string
+  ): Promise<ReturnType<typeof revalidateMandate>> {
+    const ticket = await ticketStore.getByGoal(goalId);
+    if (!ticket) {
+      return {
+        allowed: false,
+        reason: "the Ticket is missing",
+      };
+    }
+    return revalidateMandate({
+      mandate: ticket.mandate,
+      subscriptions: ticket.subscriptions,
+      policy: await policyStore.get(),
+      servicesForResource,
+      enabledSources,
+    });
+  }
   const { watchdog: goalWatchdog, ...goals } = createGoalApi(
     ctx,
     subagents,
@@ -117,22 +136,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       watchdog: options.watchdog,
       getTicketIdForGoal: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.id,
-      revalidateMandate: async (goalId) => {
-        const ticket = await ticketStore.getByGoal(goalId);
-        if (!ticket) {
-          return {
-            allowed: false,
-            reason: "the Ticket is missing",
-          };
-        }
-        return revalidateMandate({
-          mandate: ticket.mandate,
-          subscriptions: ticket.subscriptions,
-          policy: await policyStore.get(),
-          servicesForResource,
-          enabledSources,
-        });
-      },
+      revalidateMandate: revalidateTicketGoal,
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],
       onNeedsPerson: async (notice) => {
@@ -479,13 +483,31 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     .catch(() => {
       // A later explicit requeue retries; restart recovery must not block Core.
     });
+  // The recovery promise is created after this API, but every caller reaches its reads only after
+  // composition finishes, so the placeholder is never observed. Gating inside the API covers HTTP,
+  // MCP tools, and the main Session with one rule instead of trusting each call site to wait.
+  let ticketReady: Promise<unknown> = Promise.resolve();
   const ticketControl = createTicketControlApi({
     store: ticketStore,
     triggers: triggerStore,
     goals,
     sessions,
     now: ctx.now,
+    ready: () => ticketReady,
   });
+  // A Ticket whose executor was mid-checkpoint when the previous process ended continues without
+  // waiting for the person; a paused, stopped, or attention-waiting Ticket is deliberately left alone.
+  const ticketRecovery = recoverInterruptedTicketGoals({
+    tickets: ticketStore,
+    lookup: (goalId) => ctx.lookup(goalId),
+    restore: (goal, events) => goals.restoreGoal(goal, events),
+    revalidate: revalidateTicketGoal,
+    resume: (goalId) => goals.resumeGoal(goalId),
+    onError: () => {
+      // The Ticket stays paused and its view carries the error; startup must not fail.
+    },
+  }).catch(() => []);
+  ticketReady = ticketRecovery;
   const candidates = createCandidateApi({
     decisions: decisionStore,
     dispositions: evalDispositions,
@@ -636,26 +658,33 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     sourceHealth: sourceRunner.health,
     async listTickets() {
+      await ticketRecovery;
       await ticketControl.backfillGoals();
       return ticketStore.list();
     },
     async getTicket(id) {
+      await ticketRecovery;
       return ticketStore.get(id);
     },
     async getTicketForGoal(goalId) {
+      await ticketRecovery;
       await ticketControl.backfillGoals();
       return ticketStore.getByGoal(goalId);
     },
     async delegateTicket(input) {
+      await ticketRecovery;
       return ticketControl.delegateHttp(input);
     },
     async replyTicket(input) {
+      await ticketRecovery;
       return ticketControl.reply(input);
     },
     async noteTicket(input) {
+      await ticketRecovery;
       return ticketControl.note(input);
     },
     async controlTicket(input) {
+      await ticketRecovery;
       return ticketControl.control(input);
     },
     async recordGoalTicket(run, goalOptions) {
