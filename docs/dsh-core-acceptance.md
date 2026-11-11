@@ -171,11 +171,12 @@ of 100 events per repository per poll.
 - The first read of a chat baselines the previous 24 hours; later reads start
   from the newest seen `create_time` with a one-second overlap and deduplicate by
   `message_id`. A chat's mode is read from
-  `GET /open-apis/im/v1/chats/{chat_id}` and cached; a failed or malformed lookup
-  is retried on a later poll instead of being cached as "unknown". While the
-  lookup is failing and the chat has fresh messages, that chat's cursor does not
-  advance, so the messages are classified again after the lookup recovers
-  instead of being silently dropped.
+  `GET /open-apis/im/v1/chats/{chat_id}` and cached. The accepted modes are
+  `p2p`, `group`, and `topic` (a topic group is treated as a group); a failed or
+  malformed lookup is retried on a later poll instead of being cached as
+  "unknown". While the lookup is failing and the chat has fresh messages, that
+  chat's cursor does not advance, so the messages are classified again after the
+  lookup recovers instead of being silently dropped.
 - Admission is deterministic: non-user senders are `ignore`; a direct (`p2p`)
   chat or a message that mentions the bot is `explicit`; an unaddressed group
   message is `ignore` unless unmentioned admission is enabled, in which case it
@@ -218,8 +219,9 @@ The Goal runner stays the only executor. A Ticket links to its Goal through
 - A needs-person or completed notice is entered into the durable channel outbox
   before any terminal snapshot is written, and is marked sent only once that
   enqueue succeeds. A crash between the two cannot leave a finished Goal whose
-  Ticket never hears about it; a failed enqueue stays unmarked so a later
-  terminal write tries again.
+  Ticket never hears about it. A failed enqueue stays unmarked so a later
+  terminal transition can attempt it again; a Goal that never transitions again
+  keeps its attention in the Ticket view as the record.
 - Ending a Goal any other way than pausing clears its open question or review
   attention, so a stopped or rejected Ticket leaves the needs-you section.
 - A resume or answer that races another one applies once: a Goal that is already
