@@ -122,16 +122,31 @@ export function createTicketStore(options: {
     return run;
   }
 
-  async function ensureLoaded(): Promise<void> {
-    if (loaded) return;
-    loaded = true;
-    if (!options.dir) return;
+  let load: Promise<void> | undefined;
+
+  /**
+   * The load runs once and every caller awaits the same promise. Marking the store loaded before the
+   * files were in memory let a read racing startup (for example Ticket recovery) miss persisted
+   * Tickets, so a delegate would create a second Goal for the same request.
+   */
+  function ensureLoaded(): Promise<void> {
+    if (loaded) return Promise.resolve();
+    load ??= loadFromDisk();
+    return load;
+  }
+
+  async function loadFromDisk(): Promise<void> {
+    if (!options.dir) {
+      loaded = true;
+      return;
+    }
     let names: string[] = [];
     try {
       names = (await readdir(options.dir)).filter(
         (name) => name.endsWith(".json") && !name.endsWith(".tmp.json")
       );
     } catch {
+      loaded = true;
       return;
     }
     for (const name of names) {
@@ -154,6 +169,7 @@ export function createTicketStore(options: {
         // A damaged file is skipped, not fatal.
       }
     }
+    loaded = true;
   }
 
   async function persist(ticket: Ticket): Promise<void> {

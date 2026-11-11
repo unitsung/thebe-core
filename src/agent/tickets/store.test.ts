@@ -67,6 +67,20 @@ describe("ticket store", () => {
     expect(await reopened.list()).toHaveLength(1);
   });
 
+  it("gives concurrent startup reads the fully loaded store", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-"));
+    const first = await createTicketStore({ dir }).recordDirect(request(4));
+    const reopened = createTicketStore({ dir });
+    // Recovery lists at startup while a caller can already delegate; the later read must wait for
+    // the same load rather than seeing an empty in-memory map.
+    const [listed, found] = await Promise.all([
+      reopened.list(),
+      reopened.get(first.id),
+    ]);
+    expect(found).toEqual(first);
+    expect(listed.map((ticket) => ticket.id)).toEqual([first.id]);
+  });
+
   it("keeps only the newest tickets within its bound", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-"));
     const store = createTicketStore({ dir, maxItems: 2 });

@@ -500,3 +500,83 @@ describe("Ticket retry", () => {
     expect(createdSessions).toBe(1);
   });
 });
+
+describe("Ticket startup recovery gate", () => {
+  it("holds HTTP reads and MCP tool calls until interrupted assignments are restored", async () => {
+    const store = createTicketStore({});
+    const ticket = await store.recordDirect({
+      thread: "chat",
+      triggerId: "recovered",
+      kind: "goal-start",
+      at: "2026-11-10T00:00:00.000Z",
+      title: "Interrupted work",
+      requester: "chat",
+      goalId: "goal-recovered",
+    });
+    const run = goal("goal-recovered", "running", "2026-11-10T00:00:05.000Z");
+    let restored = false;
+    let goalReads = 0;
+    let releaseRecovery!: () => void;
+    const recovery = new Promise<void>((resolve) => {
+      releaseRecovery = resolve;
+    });
+    const unused = async () => {
+      throw new Error("unused");
+    };
+    const api = createTicketControlApi({
+      store,
+      ready: () => recovery,
+      goals: {
+        startGoal: unused,
+        getGoal: (id) => {
+          goalReads += 1;
+          return restored && id === run.thebeSessionId ? run : undefined;
+        },
+        listGoals: async () => {
+          goalReads += 1;
+          return restored ? [run] : [];
+        },
+        answerGoal: unused,
+        addGoalGuidance: unused,
+        pauseGoal: unused,
+        resumeGoal: unused,
+        stopGoal: unused,
+        retryGoal: unused,
+      },
+      sessions: {
+        createSession: unused,
+        listPendingPermissions: () => [],
+        resolvePendingPermission: unused,
+      },
+      now: () => new Date("2026-11-10T01:00:00.000Z"),
+    });
+
+    const read = api.get(ticket.id);
+    const listed = api.list();
+    const invoked = api.invoke(
+      "ticket_list",
+      {},
+      { writes: false, irreversible: false }
+    );
+    // Let every caller run to its first real await. None may observe the Goal side before the
+    // recovery promise settles, or it would report this assignment as unassigned.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(goalReads).toBe(0);
+
+    restored = true;
+    releaseRecovery();
+
+    await expect(read).resolves.toMatchObject({
+      ticket: { id: ticket.id },
+      stage: "running",
+      assignment: { state: "running", goalId: "goal-recovered" },
+    });
+    await expect(listed).resolves.toMatchObject([
+      { ticket: { id: ticket.id }, stage: "running" },
+    ]);
+    await expect(invoked).resolves.toMatchObject({
+      tickets: [{ ticket: { id: ticket.id }, stage: "running" }],
+    });
+  });
+});
