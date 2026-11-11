@@ -48,6 +48,8 @@ export type ManagedGoal = GoalRun & {
   };
   personNoticeId?: string;
   completedNoticeId?: string;
+  /** One answer request is applying; a concurrent duplicate is refused instead of queued. */
+  answerPending?: boolean;
   finished: Promise<GoalRun>;
   resolveFinished: (result: GoalRun) => void;
   listeners: Set<(event: GoalEvent) => void>;

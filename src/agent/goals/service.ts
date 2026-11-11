@@ -144,15 +144,16 @@ export function createGoalApi(
     if (!options.onNeedsPerson) return;
     const notice = personNotice(run);
     if (!notice || run.personNoticeId === notice.id) return;
-    run.personNoticeId = notice.id;
     try {
       const ticketId = await options.getTicketIdForGoal?.(run.thebeSessionId);
       await options.onNeedsPerson({
         ...notice,
         ...(ticketId ? { ticketId } : {}),
       });
+      run.personNoticeId = notice.id;
     } catch {
-      // A notification adapter must not change Goal state.
+      // A notification adapter must not change Goal state. The id stays unmarked so a later
+      // terminal write can try again.
     }
   }
 
@@ -160,13 +161,13 @@ export function createGoalApi(
     if (!options.onCompleted) return;
     const notice = completionNotice(run);
     if (!notice || run.completedNoticeId === notice.id) return;
-    run.completedNoticeId = notice.id;
     try {
       const ticketId = await options.getTicketIdForGoal?.(run.thebeSessionId);
       await options.onCompleted({
         ...notice,
         ...(ticketId ? { ticketId } : {}),
       });
+      run.completedNoticeId = notice.id;
     } catch {
       // A notification adapter must not change Goal state.
     }
@@ -184,6 +185,9 @@ export function createGoalApi(
           `Paused by Watchdog: ${watchdogReasonText(run.watchdog.reason)}. It needs you to decide how to continue.`)
         : summary;
     run.status = status;
+    // A question or review belongs to the paused state: once the Goal ends another way, it is no
+    // longer answerable and must not keep the Ticket in the needs-you section.
+    if (status !== "paused") run.attention = undefined;
     run.summary = finalSummary;
     run.error = error;
     run.finishedAt = ctx.now().toISOString();
@@ -216,14 +220,16 @@ export function createGoalApi(
       totalIterations: run.iteration,
       summary: finalSummary ?? `Goal ${status}.`,
     });
+    // Make the notice durable before the terminal state is written, so a crash between the two
+    // cannot leave a finished Goal whose Ticket never hears about it.
+    await notifyNeedsPerson(run);
+    await notifyCompleted(run);
     const result = snapshot(run);
     await queueGoalPersistence(
       result,
       run.thebeSessionId,
       storedGoalEvents(run.events)
     );
-    await notifyNeedsPerson(run);
-    await notifyCompleted(run);
     run.resolveFinished(result);
     return result;
   }
@@ -377,7 +383,10 @@ export function createGoalApi(
       });
     }
     runs.set(run.thebeSessionId, run);
-    if (interrupted) {
+    if (interrupted && persisted.executor !== "ticket") {
+      // A Ticket Goal's interrupted state belongs to startup recovery: persisting the pause here
+      // would race that pass and make it skip a run that should resume. Recovery, a person's
+      // action, or a later restart records the real transition.
       void queueGoalPersistence(
         snapshot(run),
         run.thebeSessionId,
@@ -531,7 +540,16 @@ export function createGoalApi(
     run: ManagedGoal,
     mandateChecked = false
   ): Promise<GoalRun> {
-    if (!mandateChecked) await revalidateBeforeContinue(run);
+    if (!mandateChecked) {
+      await revalidateBeforeContinue(run);
+      // Revalidation is asynchronous: a concurrent resume or answer may have started the run, or a
+      // stop may have ended it, while it was in flight. Starting another checkpoint here would run
+      // the same Goal twice.
+      if (run.status !== "paused") return snapshot(run);
+    }
+    if (run.status === "running" || run.status === "pausing") {
+      return snapshot(run);
+    }
     run.status = "running";
     resetFinished(run);
     run.finishedAt = undefined;
@@ -1035,45 +1053,69 @@ export function createGoalApi(
           "invalid_body"
         );
       }
-      if (attention.kind === "review") {
-        if (input.decision !== "accept" && input.decision !== "reject") {
-          throw httpError(
-            400,
-            "decision must be accept or reject",
-            "invalid_body"
-          );
-        }
-        if (input.decision === "accept") {
-          run.attention = undefined;
-          return setTerminal(
-            run,
-            "completed",
-            "Goal accepted by you after review."
-          );
-        }
-        if (!text) {
-          throw httpError(
-            400,
-            "say what to change when sending a result back",
-            "invalid_body"
-          );
-        }
-        await revalidateBeforeContinue(run);
-        (run.guidance ??= []).push(`Review feedback: ${text}`);
-      } else {
-        if (!text) {
-          throw httpError(400, "answer cannot be empty", "invalid_body");
-        }
-        await revalidateBeforeContinue(run);
-        (run.guidance ??= []).push(
-          `Your question was "${attention.question}". The person answered: ${text}`
+      if (run.answerPending) {
+        throw httpError(
+          409,
+          "another answer is already being applied; reload the task",
+          "attention_stale"
         );
       }
-      run.attention = undefined;
-      // An answer that lands on the last checkpoint needs one more to be used at all.
-      if (run.iteration >= run.maxIterations)
-        run.maxIterations = run.iteration + 1;
-      return continueGoal(run, true);
+      // Revalidation is asynchronous; a concurrent stop must not leave us starting a fresh
+      // checkpoint from an answer that no longer applies.
+      const stillAnswerable = async (): Promise<void> => {
+        await revalidateBeforeContinue(run);
+        if (run.status !== "paused" || run.attention?.id !== attention.id) {
+          throw httpError(
+            409,
+            "this task changed while the answer was being checked; reload it",
+            "attention_stale"
+          );
+        }
+      };
+      run.answerPending = true;
+      try {
+        if (attention.kind === "review") {
+          if (input.decision !== "accept" && input.decision !== "reject") {
+            throw httpError(
+              400,
+              "decision must be accept or reject",
+              "invalid_body"
+            );
+          }
+          if (input.decision === "accept") {
+            run.attention = undefined;
+            return await setTerminal(
+              run,
+              "completed",
+              "Goal accepted by you after review."
+            );
+          }
+          if (!text) {
+            throw httpError(
+              400,
+              "say what to change when sending a result back",
+              "invalid_body"
+            );
+          }
+          await stillAnswerable();
+          (run.guidance ??= []).push(`Review feedback: ${text}`);
+        } else {
+          if (!text) {
+            throw httpError(400, "answer cannot be empty", "invalid_body");
+          }
+          await stillAnswerable();
+          (run.guidance ??= []).push(
+            `Your question was "${attention.question}". The person answered: ${text}`
+          );
+        }
+        run.attention = undefined;
+        // An answer that lands on the last checkpoint needs one more to be used at all.
+        if (run.iteration >= run.maxIterations)
+          run.maxIterations = run.iteration + 1;
+        return await continueGoal(run, true);
+      } finally {
+        run.answerPending = false;
+      }
     },
 
     async addGoalGuidance(

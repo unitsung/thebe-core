@@ -636,6 +636,60 @@ describe("Thebe agent service (fake runtime)", () => {
       expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
     });
 
+    it("clears the open question when a person stops the paused task", async () => {
+      const { done, agent, session } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true }
+      );
+      expect(done.attention).toBeDefined();
+
+      const stopped = await agent.stopGoal(session.thebeSessionId);
+      expect(stopped).toMatchObject({ status: "cancelled" });
+      expect(stopped.attention).toBeUndefined();
+    });
+
+    it("applies one answer when the same question is answered twice", async () => {
+      const { done, agent, session, fake } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true }
+      );
+      const attentionId = done.attention!.id;
+      fake.queueTurns([
+        { kind: "text", text: "Moved the library into Movies." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: the files are in Movies\nREMAINING: none",
+        },
+      ]);
+
+      const results = await Promise.allSettled([
+        agent.answerGoal(session.thebeSessionId, {
+          attentionId,
+          answer: "Movies",
+        }),
+        agent.answerGoal(session.thebeSessionId, {
+          attentionId,
+          answer: "Shows",
+        }),
+      ]);
+      expect(
+        results.filter((result) => result.status === "fulfilled")
+      ).toHaveLength(1);
+      const rejected = results.find((result) => result.status === "rejected");
+      expect(rejected).toMatchObject({
+        status: "rejected",
+        reason: { status: 409, code: "attention_stale" },
+      });
+
+      await expect(
+        agent.waitGoal(session.thebeSessionId)
+      ).resolves.toMatchObject({ status: "completed" });
+      // The original worker plus one new worker and its reviewer, not two of each.
+      await expect(
+        agent.listSubagents(session.thebeSessionId)
+      ).resolves.toHaveLength(3);
+    });
+
     it("turns a question into a blocker when the task did not opt in to being interrupted", async () => {
       const { done } = await runGoal([
         report({ state: "ask", question: "Which library?" }),
@@ -727,6 +781,50 @@ describe("Thebe agent service (fake runtime)", () => {
         iteration: 2,
       }
     );
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(3);
+  });
+
+  it("starts one new checkpoint when a paused goal is resumed twice", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "goal-double-resume" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Finish the task",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        agent.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await agent.pauseGoal(session.thebeSessionId);
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "paused" }
+    );
+
+    fake.queueTurns([
+      { kind: "text", text: "checkpoint complete" },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: task artifact exists\nREMAINING: none",
+      },
+    ]);
+    const resumed = await Promise.all([
+      agent.resumeGoal(session.thebeSessionId),
+      agent.resumeGoal(session.thebeSessionId),
+    ]);
+    expect(resumed[0]?.status).toBe("running");
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "completed", iteration: 2 }
+    );
+    // The paused worker plus the one new worker and its reviewer.
     await expect(
       agent.listSubagents(session.thebeSessionId)
     ).resolves.toHaveLength(3);
