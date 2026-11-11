@@ -1,4 +1,7 @@
-import type { GoalNeedsPersonNotice } from "../goals/service.ts";
+import type {
+  GoalCompletedNotice,
+  GoalNeedsPersonNotice,
+} from "../goals/service.ts";
 import { key } from "../tickets/ids.ts";
 import type { TicketStore } from "../tickets/store.ts";
 import type { ChannelRef } from "../sources/types.ts";
@@ -8,6 +11,13 @@ import {
   type ChannelDeliveryAttempt,
   type QueuedChannelNotice,
 } from "./outbox.ts";
+
+/** Distributes over the notice union so each variant keeps its own fields. */
+type NoticeWithoutTicket = TicketChannelNotice extends infer Notice
+  ? Notice extends TicketChannelNotice
+    ? Omit<Notice, "ticketId">
+    : never
+  : never;
 
 export type ChannelDeliveryResult =
   | { status: "sent"; channel: ChannelRef }
@@ -56,7 +66,7 @@ export function createTicketChannelNotifier(options: {
   async function deliver(input: {
     ticketId: string;
     channel: ChannelRef;
-    notice: Omit<TicketChannelNotice, "ticketId">;
+    notice: NoticeWithoutTicket;
   }): Promise<ChannelDeliveryResult> {
     const ticket = await options.tickets
       .get(input.ticketId)
@@ -101,35 +111,62 @@ export function createTicketChannelNotifier(options: {
     }
   }
 
-  /** Makes the notice durable. Delivery stays a separate, retryable step. */
-  async function enqueueNeedsPerson(
-    notice: GoalNeedsPersonNotice
-  ): Promise<void> {
-    if (!notice.ticketId) return;
+  /** Makes a notice durable. Delivery stays a separate, retryable step. */
+  async function enqueueForTicket(input: {
+    ticketId: string;
+    goalId: string;
+    notice: NoticeWithoutTicket;
+  }): Promise<void> {
     const ticket = await options.tickets
-      .get(notice.ticketId)
+      .get(input.ticketId)
       .catch(() => undefined);
-    if (!ticket || ticket.links.legacyGoalId !== notice.goalId) return;
-    const channelNotice = {
-      id: notice.id,
-      goalId: notice.goalId,
-      type: "goal_needs_person" as const,
-      reason: notice.reason,
-      message: notice.message,
-    };
+    if (!ticket || ticket.links.legacyGoalId !== input.goalId) return;
     const queued: QueuedChannelNotice[] = (ticket.channels ?? [])
       .filter(isChannelRef)
       .map((channel) => ({
         id: ticketChannelNoticeKey(
           ticket.id,
-          channelNotice.id,
-          channelNotice.goalId,
+          input.notice.id,
+          input.notice.goalId,
           channel
         ),
         channel: cloneChannelRef(channel),
-        notice: { ...channelNotice, ticketId: ticket.id },
+        notice: { ...input.notice, ticketId: ticket.id },
       }));
     await outbox.enqueue(queued);
+  }
+
+  async function enqueueNeedsPerson(
+    notice: GoalNeedsPersonNotice
+  ): Promise<void> {
+    if (!notice.ticketId) return;
+    await enqueueForTicket({
+      ticketId: notice.ticketId,
+      goalId: notice.goalId,
+      notice: {
+        id: notice.id,
+        goalId: notice.goalId,
+        type: "goal_needs_person",
+        reason: notice.reason,
+        message: notice.message,
+      },
+    });
+  }
+
+  async function enqueueCompleted(
+    notice: GoalCompletedNotice
+  ): Promise<void> {
+    if (!notice.ticketId) return;
+    await enqueueForTicket({
+      ticketId: notice.ticketId,
+      goalId: notice.goalId,
+      notice: {
+        id: notice.id,
+        goalId: notice.goalId,
+        type: "goal_completed",
+        message: notice.message,
+      },
+    });
   }
 
   async function notifyNeedsPerson(
@@ -142,6 +179,7 @@ export function createTicketChannelNotifier(options: {
   return {
     deliver,
     enqueueNeedsPerson,
+    enqueueCompleted,
     notifyNeedsPerson,
     start: outbox.start,
     stop: outbox.stop,

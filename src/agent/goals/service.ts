@@ -40,6 +40,13 @@ export type GoalNeedsPersonNotice = {
   message: string;
 };
 
+export type GoalCompletedNotice = {
+  id: string;
+  goalId: string;
+  ticketId?: string;
+  message: string;
+};
+
 export type GoalApiOptions = {
   watchdog?: {
     intervalMs?: number;
@@ -52,6 +59,7 @@ export type GoalApiOptions = {
   revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
   ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
   onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
+  onCompleted?: (notice: GoalCompletedNotice) => Promise<void> | void;
 };
 
 export function createGoalApi(
@@ -148,6 +156,22 @@ export function createGoalApi(
     }
   }
 
+  async function notifyCompleted(run: ManagedGoal): Promise<void> {
+    if (!options.onCompleted) return;
+    const notice = completionNotice(run);
+    if (!notice || run.completedNoticeId === notice.id) return;
+    run.completedNoticeId = notice.id;
+    try {
+      const ticketId = await options.getTicketIdForGoal?.(run.thebeSessionId);
+      await options.onCompleted({
+        ...notice,
+        ...(ticketId ? { ticketId } : {}),
+      });
+    } catch {
+      // A notification adapter must not change Goal state.
+    }
+  }
+
   async function setTerminal(
     run: ManagedGoal,
     status: Exclude<GoalRunStatus, "running" | "pausing">,
@@ -199,6 +223,7 @@ export function createGoalApi(
       storedGoalEvents(run.events)
     );
     await notifyNeedsPerson(run);
+    await notifyCompleted(run);
     run.resolveFinished(result);
     return result;
   }
@@ -519,6 +544,7 @@ export function createGoalApi(
     run.watchdog = undefined;
     run.watchdogRetryRequested = undefined;
     run.personNoticeId = undefined;
+    run.completedNoticeId = undefined;
     run.pauseRequested = false;
     run.stopRequested = false;
     await queueGoalPersistence(
@@ -544,6 +570,7 @@ export function createGoalApi(
     run.report = undefined;
     run.lastReviewResult = undefined;
     run.personNoticeId = undefined;
+    run.completedNoticeId = undefined;
     if (run.iteration >= run.maxIterations) {
       run.maxIterations = run.iteration + 1;
     }
@@ -1310,6 +1337,19 @@ function personNotice(
     };
   }
   return undefined;
+}
+
+function completionNotice(
+  run: ManagedGoal
+): Omit<GoalCompletedNotice, "ticketId"> | undefined {
+  if (run.status !== "completed") return undefined;
+  const report = run.finalReport?.trim() || run.summary?.trim();
+  const clean = report ? shortenToWords(stripToolLogs(report), 50) : "";
+  return {
+    id: `${run.thebeSessionId}:completed:${run.finishedAt ?? run.createdAt}`,
+    goalId: run.thebeSessionId,
+    message: clean ? `A task is complete: ${clean}` : "A task is complete.",
+  };
 }
 
 function watchdogReasonText(reason: GoalWatchdogReason): string {
