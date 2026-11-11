@@ -94,6 +94,41 @@ describe("Ticket channel notifications", () => {
     expect(sent).toHaveLength(2);
   });
 
+  it("makes a notice durable before attempting delivery", async () => {
+    const { tickets, ticket } = await acceptedTicket();
+    const outboxDir = await mkdtemp(join(tmpdir(), "thebe-channel-outbox-"));
+    const sent: ChannelSendInput[] = [];
+    const notifier = createTicketChannelNotifier({
+      tickets,
+      adapters: [
+        {
+          id: channel.source,
+          accepts: () => true,
+          send: async (input) => {
+            sent.push(input);
+          },
+        },
+      ],
+      outboxDir,
+      now: () => new Date("2026-11-06T10:02:00.000Z"),
+    });
+
+    await notifier.enqueueNeedsPerson({
+      id: "goal-1:blocked:2026-11-06T10:02:00.000Z",
+      goalId: "goal-1",
+      ticketId: ticket.id,
+      reason: "blocked",
+      message: "The task needs your help.",
+    });
+    expect(await notifier.pending()).toHaveLength(1);
+    expect(sent).toHaveLength(0);
+
+    await notifier.flush();
+    expect(sent).toHaveLength(1);
+    expect(await notifier.pending()).toHaveLength(0);
+    await notifier.stop();
+  });
+
   it("does not modify Ticket state when a channel adapter fails", async () => {
     const { tickets, ticket } = await acceptedTicket();
     const outboxDir = await mkdtemp(join(tmpdir(), "thebe-channel-outbox-"));

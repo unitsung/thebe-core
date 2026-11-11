@@ -101,7 +101,8 @@ export function createTicketChannelNotifier(options: {
     }
   }
 
-  async function notifyNeedsPerson(
+  /** Makes the notice durable. Delivery stays a separate, retryable step. */
+  async function enqueueNeedsPerson(
     notice: GoalNeedsPersonNotice
   ): Promise<void> {
     if (!notice.ticketId) return;
@@ -129,11 +130,18 @@ export function createTicketChannelNotifier(options: {
         notice: { ...channelNotice, ticketId: ticket.id },
       }));
     await outbox.enqueue(queued);
+  }
+
+  async function notifyNeedsPerson(
+    notice: GoalNeedsPersonNotice
+  ): Promise<void> {
+    await enqueueNeedsPerson(notice);
     await outbox.flush();
   }
 
   return {
     deliver,
+    enqueueNeedsPerson,
     notifyNeedsPerson,
     start: outbox.start,
     stop: outbox.stop,
