@@ -117,6 +117,29 @@ file contents.
 - `container-health` records `container.went_down`, `container.recovered`, `container.appeared`, `container.removed`, and `container.state_changed` on `resource:container:<name>`. A running container moving from any other health state to `unhealthy` records `container.unhealthy`; moving from `unhealthy` back to `healthy` records `container.recovered`. Health comes from the Docker or Arcane `Health` field when available, with Docker status text as the fallback for older engines.
 - `download-completed` requires a configured download provider. It records `download.completed` when a download moves from any non-completed phase into `completed`, on `resource:download:<engine>:<hash>`. If any engine in a multi-engine listing is unreachable, the read fails without advancing the cursor.
 - Both Sources establish a baseline on the first read, persist their cursor, and do not replay after a restart. The first read after upgrading a cursor written before health tracking seeds the health baseline without announcing an already-unhealthy container. When Sources are enabled, `GET /v1/health` includes `sources`; each entry has `state` (`starting`, `healthy`, or `failing`), `consecutiveFailures`, and the latest error. A successful read clears the failure count. A requested `download-completed` Source with no download provider stays visible as `failing`.
+
+### GitHub and Feishu event sources
+
+These integrations are enabled only when their environment is complete. They use the same Source runner, cursor persistence, quiesce, health reporting, and Trigger deduplication as the built-in Sources.
+
+```bash
+# GitHub: one or more owner/name repositories
+export THEBE_GITHUB_REPOS=unitsung/thebe
+export THEBE_GITHUB_TOKEN=github_pat_...
+export THEBE_GITHUB_AGENT_LOGIN=thebe-agent
+# Optional: THEBE_GITHUB_API_URL, THEBE_GITHUB_ADMIT_UNMENTIONED=1, THEBE_GITHUB_ADMIT_OPENED=0
+
+# Feishu: one or more chat ids (oc_...)
+export THEBE_FEISHU_APP_ID=cli_...
+export THEBE_FEISHU_APP_SECRET=...
+export THEBE_FEISHU_CHATS=oc_...
+# Optional: THEBE_FEISHU_API_URL, THEBE_FEISHU_BOT_OPEN_ID, THEBE_FEISHU_MENTIONS, THEBE_FEISHU_ADMIT_UNMENTIONED=1
+```
+
+- GitHub reads `GET /repos/{owner}/{repo}/events` with ETags and records issue/PR opened, closed, reopened, comment, review, and review-comment events. The first read of a repository is a baseline. Bot actors and unaddressed comments are ignored; a comment mentioning `THEBE_GITHUB_AGENT_LOGIN` is explicit; a newly opened issue or PR is inferred (disable with `THEBE_GITHUB_ADMIT_OPENED=0`, admit unmentioned comments with `THEBE_GITHUB_ADMIT_UNMENTIONED=1`). Replies are posted as issue comments with a hidden idempotency marker.
+- Feishu polls `GET /open-apis/im/v1/messages` per chat. The first read baselines the previous 24 hours; later reads use `create_time` and deduplicate by `message_id`. Non-user senders are ignored; a direct chat or a bot mention (`THEBE_FEISHU_BOT_OPEN_ID`, or an `@` name in `THEBE_FEISHU_MENTIONS`) is explicit; unaddressed group messages are ignored unless `THEBE_FEISHU_ADMIT_UNMENTIONED=1`. Replies are sent with the idempotency key as the message `uuid`.
+- Admission results are persisted on the Trigger; the Ticket Mandate and Core's approval checks remain the authorization boundary. A Source can never widen a Mandate.
+- The adapters have automated mock-API coverage only. Verify credentials and network access on a test Core before pointing them at a production account.
 - Eval asks the configured assessment model about eligible Triggers under the Policy. `THEBE_EVAL_MAX_PER_HOUR` caps questions at 60 per hour by default; `0` removes the cap. A provider error, an unusable reply, or the hourly limit records a Decision with `outcome: "unavailable"`, never a "no". Core pushes one notice for an assessment outage and waits for a successful assessment before it announces another.
   Autonomous model work also has a daily budget. Input, output and cache-write tokens count; cache-read is reported separately and does not consume the budget. The owner's own chat is never included. The default is 1,000,000 tokens per UTC day and can be changed with `THEBE_BACKGROUND_TOKEN_BUDGET` or `PUT /v1/usage/budget`; `0` pauses autonomous model work. Warning thresholds default to 50%, 80%, 90% and 100% (configurable via `THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS` or `PUT /v1/usage/budget`); notices trigger once per UTC day when crossing 50%, 80%, 90% and 100%. At the limit Eval still runs the deterministic Gate, but skips the model, records `unavailable` / `daily_budget`, accepts no new Ticket, and sends one notice that day. It resumes at the next UTC midnight. `GET /v1/usage/summary` returns today's usage, estimated USD cost, thresholds, pause state and the last 30 days; after 15 days Core offers a one-time budget of twice the daily p95, and nothing changes unless the owner accepts it.
 

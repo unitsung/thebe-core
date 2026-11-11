@@ -27,6 +27,8 @@ import type { ArtifactStore } from "../agent/artifacts/store.ts";
 import type { StrmRepairProvider } from "../agent/capabilities/strm.ts";
 import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/product.ts";
 import type { OAuthHttpIntegration } from "../delivery/http/oauth/service.ts";
+import type { Source } from "../agent/sources/types.ts";
+import type { ChannelAdapter } from "../agent/channels/types.ts";
 
 export type ThebeAppPrompt = (
   text: string
@@ -54,6 +56,10 @@ export function createThebeApp(options: {
   };
   /** Eval's hourly limit on questions to the model; see `CreateThebeAgentOptions.evalMaxPerHour`. */
   evalMaxPerHour?: number;
+  /** Host supplied Sources polled alongside the built-in ones (GitHub, Feishu, …). */
+  sourceAdapters?: readonly Source[];
+  /** Host supplied reply channels for Ticket notices, matching `ChannelRef.source`. */
+  channelAdapters?: readonly ChannelAdapter[];
   /** Autonomous model tokens per UTC day; see `CreateThebeAgentOptions.dailyBackgroundTokenBudget`. */
   dailyBackgroundTokenBudget?: number;
   /** Maximum word/token limit for proactive messages (default: 100). */
@@ -213,6 +219,8 @@ export function createThebeApp(options: {
     auditPath: options.auditPath,
     agentStoreDir: options.agentStoreDir,
     sources: options.sources,
+    sourceAdapters: options.sourceAdapters,
+    channelAdapters: options.channelAdapters,
     evalMaxPerHour: options.evalMaxPerHour,
     dailyBackgroundTokenBudget: options.dailyBackgroundTokenBudget,
     maxProactiveWords: options.maxProactiveWords,

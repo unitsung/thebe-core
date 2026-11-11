@@ -20,6 +20,8 @@ import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowla
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
 import { createMediaBrowserProviderFromEnv } from "../adapters/media-browser/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
+import { createGithubFromEnv } from "../adapters/sources/github.ts";
+import { createFeishuFromEnv } from "../adapters/sources/feishu.ts";
 import {
   arcaneEnvironmentIdFromEnv,
   createArcaneBackgroundTaskProviderFromEnv,
@@ -211,6 +213,10 @@ export async function bootstrapThebe(
   const agentStoreDir =
     process.env.THEBE_AGENT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
+  const eventIntegrations = [
+    createGithubFromEnv(process.env),
+    createFeishuFromEnv(process.env),
+  ].flatMap((integration) => (integration ? [integration] : []));
 
   const app = createThebeApp({
     runtime,
@@ -221,6 +227,10 @@ export async function bootstrapThebe(
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
     sources: parseSources(process.env),
+    sourceAdapters: eventIntegrations.map((integration) => integration.source),
+    channelAdapters: eventIntegrations.map(
+      (integration) => integration.channel
+    ),
     evalMaxPerHour: parseEvalMaxPerHour(process.env),
     dailyBackgroundTokenBudget: parseDailyBackgroundTokenBudget(process.env),
     maxProactiveWords: parseMaxProactiveWords(process.env),
