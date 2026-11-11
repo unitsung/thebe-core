@@ -873,6 +873,101 @@ describe("Thebe agent service (fake runtime)", () => {
     ).resolves.toHaveLength(3);
   });
 
+  it("starts one checkpoint when the same session is started twice at once", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "goal-double-start" });
+
+    const results = await Promise.allSettled([
+      agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "First request",
+        maxIterations: 3,
+      }),
+      agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Second request",
+        maxIterations: 3,
+      }),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled")
+    ).toHaveLength(1);
+    expect(
+      results.find((result) => result.status === "rejected")
+    ).toMatchObject({
+      status: "rejected",
+      reason: { message: "a goal is already running for this session" },
+    });
+    await vi.waitFor(async () => {
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+    await agent.quiesce();
+  });
+
+  it("keeps the resumed checkpoint separate from the pause that asked", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: { state: "ask", question: "Which library?" },
+          },
+        ],
+      },
+      // The fake runtime continues a tool turn with the next queued turn in the same worker.
+      { kind: "text", text: "Waiting for your answer." },
+      { kind: "text", text: "Moved the library into Movies." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: the files are in Movies\nREMAINING: none",
+      },
+    ]);
+    let answer: (() => Promise<unknown>) | undefined;
+    let sessionId = "";
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      onGoalNeedsPerson: async () => {
+        // Answer while the pause notice is being written: the pause must still report itself,
+        // and the resumed checkpoint must keep its own promise.
+        await answer?.();
+        answer = undefined;
+      },
+    });
+    const session = await agent.createSession({
+      title: "answer during notice",
+    });
+    sessionId = session.thebeSessionId;
+    answer = async () => {
+      const goal = agent.getGoal(sessionId)!;
+      return agent.answerGoal(sessionId, {
+        attentionId: goal.attention!.id,
+        answer: "Movies",
+      });
+    };
+    await agent.startGoal({
+      thebeSessionId: sessionId,
+      goal: "Move the library",
+      maxIterations: 4,
+      allowAsk: true,
+    });
+
+    await expect(agent.waitGoal(sessionId)).resolves.toMatchObject({
+      status: "paused",
+    });
+    await expect(agent.waitGoal(sessionId)).resolves.toMatchObject({
+      status: "completed",
+    });
+    await agent.quiesce();
+  });
+
   it("persists guidance added while a goal checkpoint is running", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-guidance-"));
     const fake = createFakeRuntime();
