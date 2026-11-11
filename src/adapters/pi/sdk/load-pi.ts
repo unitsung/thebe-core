@@ -10,7 +10,7 @@ export function piDistDir(): string {
       "node_modules",
       "@earendil-works",
       "pi-coding-agent",
-      "dist",
+      "dist"
     );
     if (existsSync(join(candidate, "core", "sdk.js"))) {
       return candidate;
@@ -43,7 +43,7 @@ export function findPiAiDist(roots: string[]): string | undefined {
         "node_modules",
         "@earendil-works",
         "pi-ai",
-        "dist",
+        "dist"
       );
       if (existsSync(join(candidate, "index.js"))) {
         return candidate;
@@ -87,17 +87,23 @@ export async function loadPiSdk() {
   const mcp = await import(piDistUrl("extensions/mcp/index.js"));
   const mcpRuntime = await import(piDistUrl("extensions/mcp/runtime.js"));
   const mcpServers = await import(piDistUrl("core/mcp-servers.js"));
+  const piMcp = await import("@earendil-works/pi-mcp");
   const codemode = await import(piDistUrl("extensions/codemode/index.js"));
   const toolSearch = await import(piDistUrl("extensions/tool-search/index.js"));
   return {
-    createToolSearchExtension: toolSearch.createToolSearchExtension as typeof toolSearch.createToolSearchExtension,
-    createDefaultMcpTransport: mcpRuntime.createDefaultTransport as typeof mcpRuntime.createDefaultTransport,
+    createToolSearchExtension:
+      toolSearch.createToolSearchExtension as typeof toolSearch.createToolSearchExtension,
+    createDefaultMcpTransport:
+      mcpRuntime.createDefaultTransport as typeof mcpRuntime.createDefaultTransport,
     createMcpExtension: mcp.createMcpExtension as typeof mcp.createMcpExtension,
-    createCodemodeExtension: codemode.createCodemodeExtension as typeof codemode.createCodemodeExtension,
+    createCodemodeExtension:
+      codemode.createCodemodeExtension as typeof codemode.createCodemodeExtension,
     isMcpToolName: mcpServers.isMcpToolName as typeof mcpServers.isMcpToolName,
-    mcpNamespace: mcpServers.mcpNamespace as typeof mcpServers.mcpNamespace,
+    mcpNamespace: (mcpServers.mcpNamespace ??
+      piMcp.mcpNamespace) as typeof piMcp.mcpNamespace,
     loadSkills: skills.loadSkills as typeof skills.loadSkills,
-    loadSkillsFromDir: skills.loadSkillsFromDir as typeof skills.loadSkillsFromDir,
+    loadSkillsFromDir:
+      skills.loadSkillsFromDir as typeof skills.loadSkillsFromDir,
     createAgentSession: sdk.createAgentSession as typeof sdk.createAgentSession,
     createBashTool: bash.createBashTool as typeof bash.createBashTool,
     createLocalBashOperations:
@@ -109,7 +115,8 @@ export async function loadPiSdk() {
       extensions.loadExtensionFromFactory as typeof extensions.loadExtensionFromFactory,
     createEventBus: eventBus.createEventBus as typeof eventBus.createEventBus,
     SessionManager: session.SessionManager as typeof session.SessionManager,
-    SettingsManager: settings.SettingsManager as typeof settings.SettingsManager,
+    SettingsManager:
+      settings.SettingsManager as typeof settings.SettingsManager,
     ModelRuntime: modelRuntime.ModelRuntime as typeof modelRuntime.ModelRuntime,
     createSyntheticSourceInfo:
       source.createSyntheticSourceInfo as typeof source.createSyntheticSourceInfo,

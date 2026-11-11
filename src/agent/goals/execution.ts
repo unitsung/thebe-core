@@ -15,6 +15,7 @@ import type {
   SubagentRun,
   SubagentUpdate,
 } from "../types.ts";
+import type { ActorRef, ChannelRef } from "../sources/types.ts";
 
 export type GoalSubagentApi = {
   spawnSubagent(input: {
@@ -59,6 +60,9 @@ export type GoalCheckpointInput = {
   kind: string;
   thread: string;
   at: string;
+  actor?: ActorRef;
+  human?: boolean;
+  channel?: ChannelRef;
   payload?: Record<string, unknown>;
 };
 

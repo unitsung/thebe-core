@@ -17,7 +17,7 @@ import type {
 } from "./types.ts";
 import type { BackgroundBudgetService } from "../usage/budget.ts";
 
-/** The kinds of change worth weighing. A pause or an unlisted state change is noise. */
+/** Built-in kinds worth weighing. Sources may add their own kinds through `assessedKinds`. */
 export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
   "container.went_down",
   "container.unhealthy",
@@ -64,6 +64,8 @@ export function createEvalService(options: {
   decisions: DecisionStore;
   /** What the enabled Sources are, folded into the policy version. */
   sources: string;
+  /** Additional event kinds declared by host supplied Sources. */
+  assessedKinds?: readonly string[];
   /** Durable admission for autonomous model work. */
   backgroundBudget?: Pick<BackgroundBudgetService, "exhausted">;
   /** Asks the model; returns its raw reply. Rejects on a timeout or provider failure. */
@@ -116,6 +118,10 @@ export function createEvalService(options: {
   const maxAccepts =
     acceptsConfigured > 0 ? acceptsConfigured : Number.POSITIVE_INFINITY;
   const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
+  const assessedKinds = new Set([
+    ...ASSESSED_KINDS,
+    ...(options.assessedKinds ?? []),
+  ]);
   const preparationTimeoutMs =
     options.preparationTimeoutMs ?? DEFAULT_PREPARATION_TIMEOUT_MS;
   type QueuedTrigger = {
@@ -127,11 +133,19 @@ export function createEvalService(options: {
   let draining: Promise<void> | undefined;
   let stopped = false;
 
+  function startDrain(): void {
+    if (draining || stopped) return;
+    draining = drain().finally(() => {
+      draining = undefined;
+      // Resume work that arrived during a quiesce or while the previous round was finishing.
+      if (pending.size > 0 && !stopped) startDrain();
+    });
+  }
+
   function queue(
     triggers: readonly Trigger[],
     requeueIdsByTrigger: ReadonlyMap<string, readonly string[]> = new Map()
   ): void {
-    if (stopped) return;
     for (const trigger of triggers) {
       const requeueIds = [...(requeueIdsByTrigger.get(trigger.id) ?? [])];
       for (const thread of trigger.threads) {
@@ -147,13 +161,7 @@ export function createEvalService(options: {
         pending.set(thread, list);
       }
     }
-    if (!draining) {
-      draining = drain().finally(() => {
-        draining = undefined;
-        // Something may have been queued while the last round was finishing.
-        if (pending.size > 0 && !stopped) queue([]);
-      });
-    }
+    startDrain();
   }
 
   // At most one Eval runs at a time, and every Trigger that queued on a thread meanwhile is weighed
@@ -257,7 +265,7 @@ export function createEvalService(options: {
       });
       return;
     }
-    if (!triggers.some((row) => ASSESSED_KINDS.has(row.kind))) {
+    if (!triggers.some((row) => assessedKinds.has(row.kind))) {
       await record({
         outcome: "ignore",
         gate: true,
@@ -459,6 +467,7 @@ export function createEvalService(options: {
     },
     start() {
       stopped = false;
+      startDrain();
     },
   };
 }

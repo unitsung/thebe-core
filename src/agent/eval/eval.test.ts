@@ -185,6 +185,41 @@ describe("assessment prompt and reply", () => {
     );
   });
 
+  it("carries actor, human, and channel metadata through fenced Eval and Goal prompts", () => {
+    const event = trigger(2, {
+      actor: { source: "container-health", id: "person-7" },
+      human: true,
+      channel: {
+        source: "container-health",
+        thread: "resource:container:emby",
+        address: { destination: "room-42" },
+      },
+    });
+    const assessment = buildAssessmentPrompt(rules, [event]);
+    const task = executorTask({
+      intent: "bring emby back up",
+      rules,
+      triggers: [event],
+      scope: ["docker:write"],
+    });
+
+    for (const prompt of [assessment, task]) {
+      expect(prompt).toContain('"source":"container-health"');
+      expect(prompt).toContain(
+        '"actor":{"source":"container-health","id":"person-7"}'
+      );
+      expect(prompt).toContain('"human":true');
+      expect(prompt).toContain(
+        '"channel":{"source":"container-health","thread":"resource:container:emby","address":{"destination":"room-42"}}'
+      );
+    }
+    expect(assessment).toContain("do not authorize actions");
+    expect(task).toContain("do not add authority to the Mandate");
+    expect(task.indexOf("## Mandate")).toBeGreaterThan(
+      task.indexOf("## What happened")
+    );
+  });
+
   it("keeps read-only preparation in its own untrusted fence", () => {
     const prompt = buildAssessmentPrompt(rules, [trigger(1)], [], {
       ...preparation,
@@ -320,6 +355,7 @@ describe("eval service", () => {
       ["no rules", { rules: [] as string[] }, {}, "no_rules"],
       ["off", { mode: "off" as const }, {}, "mode_off"],
       ["kind", {}, { kind: "container.state_changed" }, "kind_not_assessed"],
+      ["custom kind", {}, { kind: "message.created" }, "kind_not_assessed"],
     ] as const) {
       const s = await setup(() => {
         throw new Error("must not be asked");
@@ -616,7 +652,7 @@ describe("eval service", () => {
     expect(s.prompts).toHaveLength(1); // the fresh one was already decided; the stale one is past its time
   });
 
-  it("stop() ends weighing, start() resumes it", async () => {
+  it("stop() holds queued triggers and start() resumes weighing them", async () => {
     const s = await setup(
       () => '{"decision":"ignore","matched":[],"reason":"x"}'
     );
@@ -625,7 +661,6 @@ describe("eval service", () => {
     await s.service.idle();
     expect(await s.decisions.list()).toHaveLength(0);
     s.service.start();
-    s.service.enqueue([trigger(1)]);
     await s.service.idle();
     expect(await s.decisions.list()).toHaveLength(1);
   });

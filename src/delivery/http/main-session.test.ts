@@ -113,6 +113,7 @@ describe("main Session", () => {
     expect(state.tools.map((tool) => tool.name)).toEqual([
       "session_search",
       "recall",
+      "proactive_message",
       "decision_list",
       "decision_get",
       "decision_accept",
@@ -469,6 +470,7 @@ describe("main Session", () => {
     expect(resumedState.tools.map((tool) => tool.name)).toEqual([
       "session_search",
       "recall",
+      "proactive_message",
       "decision_list",
       "decision_get",
       "decision_accept",

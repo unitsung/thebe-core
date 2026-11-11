@@ -49,6 +49,25 @@ export {
 } from "./background-tasks/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
 export type {
+  Source,
+  Trigger,
+  ActorRef,
+  ChannelRef,
+  SourceAdmission,
+} from "./sources/types.ts";
+export type {
+  ChannelAdapter,
+  ChannelSendInput,
+  TicketChannelNotice,
+} from "./channels/types.ts";
+export type {
+  Ticket,
+  TicketInput,
+  TicketMandate,
+  TicketOrigin,
+  TicketStrength,
+} from "./tickets/types.ts";
+export type {
   StrmRepairOutcome,
   StrmRepairProvider,
   StrmRepairRequest,

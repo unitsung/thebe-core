@@ -5,6 +5,7 @@ import type { ThebeSessionContext } from "../runtime/interface.ts";
 import { httpError } from "../types.ts";
 
 export const DEFAULT_DAILY_BACKGROUND_TOKEN_BUDGET = 1_000_000;
+export const DEFAULT_BUDGET_ALERT_THRESHOLDS = [0.5, 0.8, 0.9, 1.0];
 export const BACKGROUND_BUDGET_SUGGESTION_AFTER_DAYS = 15;
 export const BACKGROUND_BUDGET_HISTORY_DAYS = 30;
 
@@ -28,6 +29,8 @@ export type BackgroundBudgetNotice = {
   id: string;
   day: string;
   at: string;
+  title?: string;
+  threshold?: number;
   message: string;
 };
 
@@ -49,6 +52,8 @@ export type BackgroundBudgetSummary = {
     remainingTokens: number;
     paused: boolean;
     resetsAt: string;
+    thresholds: number[];
+    notifiedThresholds: number[];
     pausedNotice?: string;
   };
   usage: BackgroundUsageTokens;
@@ -59,6 +64,7 @@ export type BackgroundBudgetSummary = {
 type StoredDay = BackgroundUsageTokens & {
   recordedIds: string[];
   notifiedAt?: string;
+  notifiedThresholds?: number[];
 };
 
 type StoredSuggestion = BackgroundBudgetSuggestion & {
@@ -69,6 +75,7 @@ type LedgerState = {
   version: 1;
   startedAt: string;
   dailyTokens: number;
+  thresholds?: number[];
   days: Record<string, StoredDay>;
   suggestion?: StoredSuggestion;
 };
@@ -93,7 +100,11 @@ export type BackgroundBudgetService = {
     at?: string;
   }): Promise<boolean>;
   summary(): Promise<BackgroundBudgetSummary>;
-  setDailyTokens(dailyTokens: number): Promise<BackgroundBudgetSummary>;
+  setDailyTokens(
+    dailyTokens: number,
+    thresholds?: number[]
+  ): Promise<BackgroundBudgetSummary>;
+  setThresholds(thresholds: number[]): Promise<BackgroundBudgetSummary>;
   resolveSuggestion(
     action: "accept" | "ignore"
   ): Promise<BackgroundBudgetSummary>;
@@ -107,7 +118,10 @@ export function createBackgroundBudgetService(options: {
   dir?: string;
   now: () => Date;
   initialDailyTokens?: number;
+  thresholds?: number[];
   onPaused?: (notice: BackgroundBudgetNotice) => Promise<void> | void;
+  onThreshold?: (notice: BackgroundBudgetNotice) => Promise<void> | void;
+  onNotice?: (notice: BackgroundBudgetNotice) => Promise<void> | void;
   /** Test seam for a deterministic ledger start; production starts on first use. */
   startedAt?: string;
 }): BackgroundBudgetService {
@@ -115,6 +129,9 @@ export function createBackgroundBudgetService(options: {
   const initialDailyTokens = normalizeDailyTokens(
     options.initialDailyTokens ?? DEFAULT_DAILY_BACKGROUND_TOKEN_BUDGET
   );
+  const initialThresholds = options.thresholds
+    ? normalizeThresholds(options.thresholds)
+    : undefined;
   let state: LedgerState | undefined;
   let chain = Promise.resolve();
 
@@ -136,7 +153,8 @@ export function createBackgroundBudgetService(options: {
       try {
         state = parseState(
           JSON.parse(await readFile(file, "utf8")),
-          initialDailyTokens
+          initialDailyTokens,
+          initialThresholds
         );
         return;
       } catch {
@@ -147,6 +165,7 @@ export function createBackgroundBudgetService(options: {
       version: 1,
       startedAt: options.startedAt ?? options.now().toISOString(),
       dailyTokens: initialDailyTokens,
+      thresholds: initialThresholds,
       days: {},
     };
   }
@@ -159,7 +178,12 @@ export function createBackgroundBudgetService(options: {
 
   function dayState(day: string): StoredDay {
     const current = state!.days[day];
-    if (current) return current;
+    if (current) {
+      if (!current.notifiedThresholds) {
+        current.notifiedThresholds = current.notifiedAt ? [1.0] : [];
+      }
+      return current;
+    }
     const next: StoredDay = {
       input: 0,
       output: 0,
@@ -168,6 +192,7 @@ export function createBackgroundBudgetService(options: {
       counted: 0,
       cost: 0,
       recordedIds: [],
+      notifiedThresholds: [],
     };
     state!.days[day] = next;
     return next;
@@ -177,33 +202,97 @@ export function createBackgroundBudgetService(options: {
     return utcDay(options.now());
   }
 
-  async function pausedNoticeIfNeeded(
+  async function thresholdNoticesIfNeeded(
     day: string
-  ): Promise<BackgroundBudgetNotice | undefined> {
+  ): Promise<BackgroundBudgetNotice[]> {
     const row = dayState(day);
-    if (row.counted < state!.dailyTokens) return undefined;
-    if (row.notifiedAt) return undefined;
+    if (state!.dailyTokens <= 0) return [];
+    const ratio = row.counted / state!.dailyTokens;
+    const notices: BackgroundBudgetNotice[] = [];
+    const activeThresholds =
+      state!.thresholds ?? DEFAULT_BUDGET_ALERT_THRESHOLDS;
     const at = options.now().toISOString();
-    row.notifiedAt = at;
-    await persist();
-    return {
-      id: `background-budget-paused-${day}`,
-      day,
-      at,
-      message: `Automatic work is paused because today's ${state!.dailyTokens.toLocaleString(
-        "en-US"
-      )}-token budget is spent. It resumes tomorrow; your chat is not limited.`,
-    };
+    row.notifiedThresholds ??= row.notifiedAt ? [1.0] : [];
+
+    for (const threshold of activeThresholds) {
+      if (ratio >= threshold && !row.notifiedThresholds.includes(threshold)) {
+        row.notifiedThresholds.push(threshold);
+        if (threshold >= 1.0) {
+          row.notifiedAt = at;
+          notices.push({
+            id: `background-budget-paused-${day}`,
+            day,
+            at,
+            threshold,
+            title: "Background work paused",
+            message: `Automatic work is paused because today's ${state!.dailyTokens.toLocaleString(
+              "en-US"
+            )}-token budget is spent. It resumes tomorrow; your chat is not limited.`,
+          });
+        } else {
+          const pct = Math.round(threshold * 100);
+          notices.push({
+            id: `background-budget-threshold-${day}-${pct}`,
+            day,
+            at,
+            threshold,
+            title: `Background budget at ${pct}%`,
+            message: `Automatic work has reached ${pct}% of today's ${state!.dailyTokens.toLocaleString(
+              "en-US"
+            )}-token budget (${row.counted.toLocaleString("en-US")} tokens used${
+              pct >= 90 ? ", approaching the daily limit" : ""
+            }).`,
+          });
+        }
+      }
+    }
+
+    if (ratio >= 1.0 && !row.notifiedAt) {
+      row.notifiedAt = at;
+      if (!row.notifiedThresholds.includes(1.0)) {
+        row.notifiedThresholds.push(1.0);
+      }
+      notices.push({
+        id: `background-budget-paused-${day}`,
+        day,
+        at,
+        threshold: 1.0,
+        title: "Background work paused",
+        message: `Automatic work is paused because today's ${state!.dailyTokens.toLocaleString(
+          "en-US"
+        )}-token budget is spent. It resumes tomorrow; your chat is not limited.`,
+      });
+    }
+
+    if (notices.length > 0) {
+      await persist();
+    }
+    return notices;
   }
 
   async function notify(
     notice: BackgroundBudgetNotice | undefined
   ): Promise<void> {
-    if (!notice || !options.onPaused) return;
+    if (!notice) return;
     try {
-      await options.onPaused(notice);
+      if (options.onNotice) {
+        await options.onNotice(notice);
+      }
+      if (notice.threshold !== undefined && notice.threshold >= 1.0) {
+        if (options.onPaused) {
+          await options.onPaused(notice);
+        }
+      } else if (options.onThreshold) {
+        await options.onThreshold(notice);
+      }
     } catch {
       // Accounting must not fail because a push transport is unavailable.
+    }
+  }
+
+  async function notifyAll(notices: BackgroundBudgetNotice[]): Promise<void> {
+    for (const notice of notices) {
+      await notify(notice);
     }
   }
 
@@ -240,6 +329,8 @@ export function createBackgroundBudgetService(options: {
     const row = state!.days[day];
     const usage = usageOf(row);
     const paused = usage.counted >= state!.dailyTokens;
+    const activeThresholds =
+      state!.thresholds ?? DEFAULT_BUDGET_ALERT_THRESHOLDS;
     const history = Array.from(
       { length: BACKGROUND_BUDGET_HISTORY_DAYS },
       (_, index) => {
@@ -255,6 +346,10 @@ export function createBackgroundBudgetService(options: {
         remainingTokens: Math.max(0, state!.dailyTokens - usage.counted),
         paused,
         resetsAt: `${addDays(day, 1)}T00:00:00.000Z`,
+        thresholds: activeThresholds,
+        notifiedThresholds: row?.notifiedThresholds
+          ? [...row.notifiedThresholds]
+          : [],
         ...(paused
           ? {
               pausedNotice:
@@ -304,8 +399,8 @@ export function createBackgroundBudgetService(options: {
       }
       await prune();
       await persist();
-      const notice = await pausedNoticeIfNeeded(day);
-      await notify(notice);
+      const notices = await thresholdNoticesIfNeeded(day);
+      await notifyAll(notices);
       return true;
     });
   }
@@ -314,8 +409,8 @@ export function createBackgroundBudgetService(options: {
     async exhausted() {
       return serial(async () => {
         const day = currentDay();
-        const notice = await pausedNoticeIfNeeded(day);
-        await notify(notice);
+        const notices = await thresholdNoticesIfNeeded(day);
+        await notifyAll(notices);
         return dayState(day).counted >= state!.dailyTokens;
       });
     },
@@ -341,16 +436,21 @@ export function createBackgroundBudgetService(options: {
         await ensureSuggestion();
         await prune();
         await persist();
-        const notice = await pausedNoticeIfNeeded(currentDay());
-        await notify(notice);
+        const notices = await thresholdNoticesIfNeeded(currentDay());
+        await notifyAll(notices);
         return summary();
       });
     },
 
-    async setDailyTokens(dailyTokens) {
+    async setDailyTokens(dailyTokens, thresholds) {
       const normalized = normalizeDailyTokens(dailyTokens);
+      const normalizedThresholds =
+        thresholds !== undefined ? normalizeThresholds(thresholds) : undefined;
       return serial(async () => {
         state!.dailyTokens = normalized;
+        if (normalizedThresholds !== undefined) {
+          state!.thresholds = normalizedThresholds;
+        }
         if (
           state!.suggestion &&
           state!.suggestion.status === "pending" &&
@@ -360,8 +460,19 @@ export function createBackgroundBudgetService(options: {
           state!.suggestion.resolvedAt = options.now().toISOString();
         }
         await persist();
-        const notice = await pausedNoticeIfNeeded(currentDay());
-        await notify(notice);
+        const notices = await thresholdNoticesIfNeeded(currentDay());
+        await notifyAll(notices);
+        return summary();
+      });
+    },
+
+    async setThresholds(thresholds) {
+      const normalizedThresholds = normalizeThresholds(thresholds);
+      return serial(async () => {
+        state!.thresholds = normalizedThresholds;
+        await persist();
+        const notices = await thresholdNoticesIfNeeded(currentDay());
+        await notifyAll(notices);
         return summary();
       });
     },
@@ -390,15 +501,19 @@ export function createBackgroundBudgetService(options: {
           state!.dailyTokens = suggestion.dailyTokens;
         }
         await persist();
-        const notice = await pausedNoticeIfNeeded(currentDay());
-        await notify(notice);
+        const notices = await thresholdNoticesIfNeeded(currentDay());
+        await notifyAll(notices);
         return summary();
       });
     },
   };
 }
 
-function parseState(value: unknown, fallbackDailyTokens: number): LedgerState {
+function parseState(
+  value: unknown,
+  fallbackDailyTokens: number,
+  fallbackThresholds?: number[]
+): LedgerState {
   const input = value as Partial<LedgerState> | null;
   if (
     !input ||
@@ -436,9 +551,19 @@ function parseState(value: unknown, fallbackDailyTokens: number): LedgerState {
       ...(typeof row.notifiedAt === "string"
         ? { notifiedAt: row.notifiedAt }
         : {}),
+      notifiedThresholds: Array.isArray(row.notifiedThresholds)
+        ? row.notifiedThresholds.filter(
+            (t): t is number => typeof t === "number" && Number.isFinite(t)
+          )
+        : typeof row.notifiedAt === "string"
+          ? [1.0]
+          : [],
     };
   }
   const suggestion = parseSuggestion(input.suggestion);
+  const thresholds = Array.isArray(input.thresholds)
+    ? normalizeThresholds(input.thresholds)
+    : fallbackThresholds;
   return {
     version: 1,
     startedAt: input.startedAt,
@@ -446,6 +571,7 @@ function parseState(value: unknown, fallbackDailyTokens: number): LedgerState {
       input.dailyTokens === undefined
         ? fallbackDailyTokens
         : normalizeDailyTokens(input.dailyTokens),
+    thresholds,
     days,
     ...(suggestion ? { suggestion } : {}),
   };
@@ -507,6 +633,33 @@ function usageOf(row: StoredDay | undefined): BackgroundUsageTokens {
     counted: row.input + row.output + row.cacheWrite,
     cost: Math.round(row.cost * 1e6) / 1e6,
   };
+}
+
+export function normalizeThresholds(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    throw httpError(
+      400,
+      "thresholds must be an array of numbers strictly between 0 and 1",
+      "invalid_body"
+    );
+  }
+  const thresholds: number[] = [];
+  for (const item of value) {
+    if (
+      typeof item !== "number" ||
+      !Number.isFinite(item) ||
+      item <= 0 ||
+      item > 1
+    ) {
+      throw httpError(
+        400,
+        "threshold items must be numbers strictly between 0 and 1",
+        "invalid_body"
+      );
+    }
+    thresholds.push(Math.round(item * 1000) / 1000);
+  }
+  return [...new Set(thresholds)].sort((left, right) => left - right);
 }
 
 function normalizeDailyTokens(value: unknown): number {

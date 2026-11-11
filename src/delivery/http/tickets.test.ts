@@ -91,6 +91,14 @@ describe("tickets", () => {
       "/v1/tickets/{id}/stop": { post: expect.any(Object) },
       "/v1/tickets/{id}/retry": { post: expect.any(Object) },
     });
+    expect(spec.body.components.schemas.Ticket.required).toEqual(
+      expect.arrayContaining(["inputs", "origins", "channels"])
+    );
+    expect(spec.body.components.schemas.TicketInput.properties).toMatchObject({
+      actor: { $ref: "#/components/schemas/ActorRef" },
+      human: { type: "boolean" },
+      channel: { $ref: "#/components/schemas/ChannelRef" },
+    });
   });
 
   it("makes an explicit, direct Ticket for a task the person asks for, and links it from the task", async () => {

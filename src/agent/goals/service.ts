@@ -18,6 +18,7 @@ import { createGoalReportInbox, type GoalReportInbox } from "./report.ts";
 import type { StoredGoalEvent } from "../store.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
+import { stripToolLogs, shortenToWords } from "../main-session/proactive.ts";
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { MandateRevalidation } from "../tickets/mandate.ts";
 import {
@@ -1296,12 +1297,15 @@ function personNotice(
     };
   }
   if (run.status === "failed" && run.blocked) {
+    const cleanError = run.error
+      ? shortenToWords(stripToolLogs(run.error), 50)
+      : "";
     return {
       id: `${run.thebeSessionId}:blocked:${run.finishedAt ?? run.createdAt}`,
       goalId: run.thebeSessionId,
       reason: "blocked",
-      message: run.error
-        ? `A task is blocked and needs you: ${boundedText(run.error, 300)}`
+      message: cleanError
+        ? `A task is blocked and needs you: ${cleanError}`
         : "A task is blocked and needs you.",
     };
   }

@@ -15,23 +15,35 @@ async function setup(
   options: {
     start?: number;
     dailyTokens?: number;
+    thresholds?: number[];
     dir?: string;
   } = {}
 ) {
   let now = options.start ?? START;
   const notices: BackgroundBudgetNotice[] = [];
+  const thresholdNotices: BackgroundBudgetNotice[] = [];
+  const allNotices: BackgroundBudgetNotice[] = [];
   const service = createBackgroundBudgetService({
     dir: options.dir,
     now: () => new Date(now),
     startedAt: new Date(START).toISOString(),
     initialDailyTokens: options.dailyTokens ?? 1_000,
+    thresholds: options.thresholds,
     onPaused: (notice) => {
       notices.push(notice);
+    },
+    onThreshold: (notice) => {
+      thresholdNotices.push(notice);
+    },
+    onNotice: (notice) => {
+      allNotices.push(notice);
     },
   });
   return {
     service,
     notices,
+    thresholdNotices,
+    allNotices,
     advance(ms: number) {
       now += ms;
     },
@@ -216,5 +228,138 @@ describe("background token budget", () => {
     expect(accepted.budget.dailyTokens).toBe(200);
     expect(await f.service.exhausted()).toBe(false);
     expect(f.notices).toHaveLength(1);
+  });
+
+  it("notifies at 50%, 80%, 90% thresholds and pauses at 100%, deduplicated per day", async () => {
+    const f = await setup({ dailyTokens: 1_000 });
+
+    // 40% usage -> no notices yet
+    await f.service.record({ id: "r1", input: 400, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(0);
+    expect(f.notices).toHaveLength(0);
+
+    // 50% usage -> triggers 50% threshold notice
+    await f.service.record({ id: "r2", input: 100, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(1);
+    expect(f.thresholdNotices[0]).toMatchObject({
+      id: "background-budget-threshold-2026-10-01-50",
+      threshold: 0.5,
+      title: "Background budget at 50%",
+    });
+    expect(f.thresholdNotices[0]!.message).toContain(
+      "50% of today's 1,000-token budget"
+    );
+    expect(f.notices).toHaveLength(0);
+
+    // 80% usage -> triggers 80% threshold notice
+    await f.service.record({ id: "r3", input: 300, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(2);
+    expect(f.thresholdNotices[1]).toMatchObject({
+      id: "background-budget-threshold-2026-10-01-80",
+      threshold: 0.8,
+      title: "Background budget at 80%",
+    });
+
+    // 90% usage -> triggers 90% threshold notice with approaching warning
+    await f.service.record({ id: "r4", input: 100, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(3);
+    expect(f.thresholdNotices[2]).toMatchObject({
+      id: "background-budget-threshold-2026-10-01-90",
+      threshold: 0.9,
+      title: "Background budget at 90%",
+    });
+    expect(f.thresholdNotices[2]!.message).toContain(
+      "approaching the daily limit"
+    );
+
+    // 100% usage -> triggers paused notice
+    await f.service.record({ id: "r5", input: 100, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(3);
+    expect(f.notices).toHaveLength(1);
+    expect(f.notices[0]).toMatchObject({
+      id: "background-budget-paused-2026-10-01",
+      threshold: 1.0,
+      title: "Background work paused",
+    });
+
+    // Further records on same day do not re-emit any notices
+    await f.service.record({ id: "r6", input: 50, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(3);
+    expect(f.notices).toHaveLength(1);
+
+    const summary = await f.service.summary();
+    expect(summary.budget.thresholds).toEqual([0.5, 0.8, 0.9, 1.0]);
+    expect(summary.budget.notifiedThresholds).toEqual([0.5, 0.8, 0.9, 1.0]);
+
+    // Next UTC day resets triggered notices
+    f.setNow(START + DAY);
+    f.thresholdNotices.length = 0;
+    f.notices.length = 0;
+
+    await f.service.record({
+      id: "day2-r1",
+      input: 550,
+      output: 0,
+      cacheWrite: 0,
+    });
+    expect(f.thresholdNotices).toHaveLength(1);
+    expect(f.thresholdNotices[0]!.id).toBe(
+      "background-budget-threshold-2026-10-02-50"
+    );
+  });
+
+  it("dispatches multiple notices in order when usage jumps across thresholds", async () => {
+    const f = await setup({ dailyTokens: 1_000 });
+
+    // Jump directly from 0% to 85%
+    await f.service.record({
+      id: "jump",
+      input: 850,
+      output: 0,
+      cacheWrite: 0,
+    });
+    expect(f.thresholdNotices).toHaveLength(2);
+    expect(f.thresholdNotices[0]!.threshold).toBe(0.5);
+    expect(f.thresholdNotices[1]!.threshold).toBe(0.8);
+  });
+
+  it("respects custom configured thresholds and survives restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-budget-thresholds-"));
+    const f = await setup({ dir, dailyTokens: 1_000, thresholds: [0.3, 0.7] });
+
+    await f.service.record({ id: "r1", input: 350, output: 0, cacheWrite: 0 });
+    expect(f.thresholdNotices).toHaveLength(1);
+    expect(f.thresholdNotices[0]!.threshold).toBe(0.3);
+
+    // Reopen service from disk
+    const reopenedThresholdNotices: BackgroundBudgetNotice[] = [];
+    const reopened = createBackgroundBudgetService({
+      dir,
+      now: () => new Date(START),
+      initialDailyTokens: 1_000,
+      onThreshold: (n) => {
+        reopenedThresholdNotices.push(n);
+      },
+    });
+
+    const summary = await reopened.summary();
+    expect(summary.budget.thresholds).toEqual([0.3, 0.7]);
+    expect(summary.budget.notifiedThresholds).toEqual([0.3]);
+
+    // Record more usage to cross 0.7
+    await reopened.record({ id: "r2", input: 400, output: 0, cacheWrite: 0 });
+    expect(reopenedThresholdNotices).toHaveLength(1);
+    expect(reopenedThresholdNotices[0]!.threshold).toBe(0.7);
+  });
+
+  it("supports dynamically updating thresholds via setThresholds and setDailyTokens", async () => {
+    const f = await setup({ dailyTokens: 1_000 });
+
+    const updated = await f.service.setThresholds([0.25, 0.75]);
+    expect(updated.budget.thresholds).toEqual([0.25, 0.75]);
+
+    const updatedWithBudget = await f.service.setDailyTokens(2_000, [0.4, 0.8]);
+    expect(updatedWithBudget.budget.dailyTokens).toBe(2_000);
+    expect(updatedWithBudget.budget.thresholds).toEqual([0.4, 0.8]);
   });
 });

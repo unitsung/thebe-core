@@ -67,7 +67,8 @@ import type {
   MainSessionInfo,
   MainSessionPromptOptions,
 } from "./main-session/service.ts";
-import type { Trigger } from "./sources/types.ts";
+import type { Source, Trigger } from "./sources/types.ts";
+import type { ChannelAdapter } from "./channels/types.ts";
 import type { SourceHealth } from "./sources/runner.ts";
 import type { Decision, Policy } from "./eval/types.ts";
 import type { EvalUnavailableNotice } from "./eval/service.ts";
@@ -128,6 +129,10 @@ export type CreateThebeAgentOptions = {
     downloadCompleted?: boolean;
     intervalMs?: number;
   };
+  /** Host supplied, vendor-neutral event sources polled and persisted by Core. */
+  sourceAdapters?: readonly Source[];
+  /** Host supplied, vendor-neutral reply channels for Ticket notices. */
+  channelAdapters?: readonly ChannelAdapter[];
   /**
    * How many times an hour Eval may ask the model before the rest are recorded as `unavailable`
    * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.
@@ -147,8 +152,24 @@ export type CreateThebeAgentOptions = {
   onBackgroundBudgetPaused?: (
     notice: BackgroundBudgetNotice
   ) => Promise<void> | void;
+  /** Called when autonomous model work crosses a budget warning threshold (e.g. 50%, 80%, 90%). */
+  onBackgroundBudgetThreshold?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Called for every autonomous budget notice (warning thresholds and pause). */
+  onBackgroundBudgetNotice?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Called when Thebe Main Session emits a proactive message for the person. */
+  onProactiveMessage?: (
+    notice: import("./main-session/proactive.ts").ProactiveNotice
+  ) => Promise<void> | void;
   /** Tokens autonomous work may use per UTC day. Default: one million; zero pauses it. */
   dailyBackgroundTokenBudget?: number;
+  /** Maximum word/token limit for proactive messages (default: 100). */
+  maxProactiveWords?: number;
+  /** Threshold ratios (strictly between 0 and 1) at which warnings fire. Default: [0.5, 0.8, 0.9, 1.0]. */
+  dailyBackgroundTokenBudgetThresholds?: number[];
   /** Deterministic stuck-task thresholds. Defaults: 60 s scan; Goal 30/60 min; worker/reviewer 10/10 min. */
   watchdog?: {
     intervalMs?: number;
@@ -611,9 +632,14 @@ export interface ThebeAgent {
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
   /** Today's autonomous token usage, durable budget and the 15-day budget suggestion. */
   getBackgroundBudgetSummary(): Promise<BackgroundBudgetSummary>;
+  /** Record autonomous usage against today's budget. Returns false if already recorded with this id. */
+  recordBackgroundUsage?(
+    input: import("./usage/budget.ts").RecordBackgroundUsageInput
+  ): Promise<boolean>;
   /** Set the autonomous token budget. The owner's normal chat never uses this budget. */
   setDailyBackgroundTokenBudget(
-    dailyTokens: number
+    dailyTokens?: number,
+    thresholds?: number[]
   ): Promise<BackgroundBudgetSummary>;
   /** Accept or ignore the one-time budget suggestion. */
   resolveBackgroundBudgetSuggestion(
@@ -643,6 +669,9 @@ export interface ThebeAgent {
     output: string;
     truncated: boolean;
   }>;
+  onProactiveMessage?: (
+    notice: import("./main-session/proactive.ts").ProactiveNotice
+  ) => Promise<void> | void;
   quiesce(): Promise<void>;
   unquiesce(): Promise<void>;
   reapIdleSessions(idleMs?: number): Promise<{ reaped: number }>;
