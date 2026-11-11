@@ -215,9 +215,11 @@ The Goal runner stays the only executor. A Ticket links to its Goal through
   alone.
 - Ticket HTTP/tool reads and controls wait for that recovery pass, so a client
   cannot observe a half-restored assignment.
-- A needs-person or completed notice is attempted before the terminal state is
-  persisted and is marked sent only after the adapter accepts it, so a crash
-  between the two cannot leave a finished Goal whose Ticket never hears about it.
+- A needs-person or completed notice is entered into the durable channel outbox
+  before any terminal snapshot is written, and is marked sent only once that
+  enqueue succeeds. A crash between the two cannot leave a finished Goal whose
+  Ticket never hears about it; a failed enqueue stays unmarked so a later
+  terminal write tries again.
 - Ending a Goal any other way than pausing clears its open question or review
   attention, so a stopped or rejected Ticket leaves the needs-you section.
 - A resume or answer that races another one applies once: a Goal that is already
