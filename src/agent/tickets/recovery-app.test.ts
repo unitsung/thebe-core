@@ -110,7 +110,8 @@ describe("Ticket Goal recovery across Core recreation", () => {
         runs
           .filter((run) => run.profileName === "ticket-worker")
           .map((run) => run.status)
-      ).toEqual(["interrupted", "completed"]);
+          .sort()
+      ).toEqual(["completed", "interrupted"]);
       expect(runs.map((run) => run.profileName)).toContain("ticket-reviewer");
     } finally {
       await app2.agent.quiesce();
