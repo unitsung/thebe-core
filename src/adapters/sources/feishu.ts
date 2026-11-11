@@ -152,6 +152,24 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
             message.createTime > max ? message.createTime : max,
           saved.lastCreateTime
         );
+        if (!saved.initialized) {
+          next.chats[chatId] = {
+            initialized: true,
+            lastCreateTime: latest,
+            seen: [
+              ...messages.map((message) => message.messageId),
+              ...saved.seen.filter(
+                (id) => !messages.some((message) => message.messageId === id)
+              ),
+            ].slice(0, MAX_SEEN_MESSAGES),
+          };
+          continue;
+        }
+
+        const mode = await chatMode(chatId);
+        // A chat whose kind could not be read cannot classify its messages: keep its cursor where
+        // it was so they are judged again after the lookup recovers, never silently dropped.
+        if (mode === undefined && fresh.length > 0) continue;
         next.chats[chatId] = {
           initialized: true,
           lastCreateTime: latest,
@@ -162,10 +180,8 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
             ),
           ].slice(0, MAX_SEEN_MESSAGES),
         };
-        if (!saved.initialized) continue;
         next.n += 1;
 
-        const mode = await chatMode(chatId);
         for (const message of fresh.sort((left, right) =>
           left.createTime.localeCompare(right.createTime)
         )) {

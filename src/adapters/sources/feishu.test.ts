@@ -186,7 +186,7 @@ describe("Feishu Source", () => {
     });
   });
 
-  it("retries a failed chat-mode lookup instead of treating later direct messages as unaddressed", async () => {
+  it("keeps messages from a failed chat-mode lookup for the next poll", async () => {
     const feishu = fakeFeishu({ mode: "p2p", chatModeFailures: 1 });
     const source = createFeishuSource({
       appId: "app",
@@ -200,14 +200,15 @@ describe("Feishu Source", () => {
       message({ id: "om_6", text: "first", time: "1762850400000" }),
     ]);
     const duringFailure = await source.read(baseline.cursor);
-    expect(duringFailure.triggers[0]?.admission).toBe("ignore");
+    // The chat's kind is unknown, so the message is not classified and not marked seen.
+    expect(duringFailure.triggers).toEqual([]);
 
     feishu.setMessages([
       message({ id: "om_6", text: "first", time: "1762850400000" }),
       message({ id: "om_7", text: "second", time: "1762850500000" }),
     ]);
     const retried = await source.read(duringFailure.cursor);
-    expect(retried.triggers).toHaveLength(1);
+    expect(retried.triggers).toHaveLength(2);
     expect(retried.triggers[0]).toMatchObject({
       admission: "explicit",
       addressed: "direct",
