@@ -152,8 +152,8 @@ export function createGoalApi(
       });
       run.personNoticeId = notice.id;
     } catch {
-      // A notification adapter must not change Goal state. The id stays unmarked so a later
-      // terminal write can try again.
+      // A notification adapter must not change Goal state. The id stays unmarked, so a later
+      // terminal transition can attempt the same notice again.
     }
   }
 
@@ -212,11 +212,26 @@ export function createGoalApi(
         // A report Artifact is supplementary; it must not change Goal state.
       }
     }
+    // Capture this checkpoint's promise before any await: an answer may resume the Goal while the
+    // notice is being written, which installs a new finished promise for the next checkpoint.
+    const finished = run.finished;
+    const resolveFinished = run.resolveFinished;
+    const terminal = snapshot(run);
     // Make the notice durable before any terminal snapshot is written, so a crash between the two
     // cannot leave a finished Goal whose Ticket never hears about it. The completion broadcast
     // below persists the terminal state itself, so the notice has to come first.
     await notifyNeedsPerson(run);
     await notifyCompleted(run);
+    if (run.finished !== finished) {
+      // The Goal resumed while the notice was in flight. This checkpoint still ended as recorded,
+      // but the event and the current promise belong to the newer one.
+      resolveFinished(terminal);
+      return snapshot(run);
+    }
+    if (run.status !== status) {
+      // Another terminal transition took over; it writes the event and resolves the promise.
+      return snapshot(run);
+    }
     broadcast(run, {
       type: "goal_completed",
       // GoalEvent's generic loop has no paused terminal state; the UI has the
@@ -231,7 +246,7 @@ export function createGoalApi(
       run.thebeSessionId,
       storedGoalEvents(run.events)
     );
-    run.resolveFinished(result);
+    resolveFinished(result);
     return result;
   }
 
@@ -850,17 +865,19 @@ export function createGoalApi(
       ctx.checkNotQuiesced();
       const goal = input.goal.trim();
       if (!goal) throw new Error("goal cannot be empty");
-      const existing = runs.get(input.thebeSessionId);
-      if (
-        existing &&
-        (existing.status === "running" || existing.status === "pausing")
-      ) {
-        throw new Error("a goal is already running for this session");
-      }
-      if (existing?.status === "paused") {
-        throw new Error("goal is paused; use /goal resume");
-      }
+      const assertStartable = (run: ManagedGoal | undefined): void => {
+        if (run && (run.status === "running" || run.status === "pausing")) {
+          throw new Error("a goal is already running for this session");
+        }
+        if (run?.status === "paused") {
+          throw new Error("goal is paused; use /goal resume");
+        }
+      };
+      assertStartable(runs.get(input.thebeSessionId));
       await ctx.lookup(input.thebeSessionId);
+      // The lookup is asynchronous: a concurrent start on the same session may have created the
+      // run while this call waited. Starting a second one would run two checkpoints on it.
+      assertStartable(runs.get(input.thebeSessionId));
       const run = createRun({
         thebeSessionId: input.thebeSessionId,
         goal,
