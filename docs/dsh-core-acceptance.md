@@ -266,6 +266,7 @@ follow-up decisions if Thebe needs those behaviors.
 | Feishu chat-mode lookup retry after a transient failure; GitHub marker search across comment pages | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
 | Ticket store loading under concurrent startup reads | `src/agent/tickets/store.test.ts` |
 | Interrupted Ticket Goal recovery only for `running`/`pausing`, only after Mandate revalidation, and every HTTP or MCP Ticket read/control waiting for that pass | `src/agent/tickets/recovery.test.ts`, `src/agent/tickets/control.test.ts` |
+| Composed-app restart: a running Ticket Goal persisted in the Agent store is resumed by a new Core process behind the startup recovery gate, keeps the interrupted worker record, and completes with a fresh isolated worker/reviewer | `src/agent/tickets/recovery-app.test.ts` |
 | Assignment view, controls and Ticket task shape | `src/agent/tickets/control.test.ts`, `src/delivery/http/tickets.test.ts` |
 | App Ticket decoding, stage derivation, section ordering | `ui/Tests/Tickets/ThebeTicketModelTests.swift` |
 | App list/reload, control, note, reply request shapes and failure states | `ui/Tests/Tickets/ThebeTicketControllerTests.swift` |
