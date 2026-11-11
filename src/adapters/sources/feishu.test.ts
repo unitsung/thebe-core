@@ -193,6 +193,50 @@ describe("Feishu Source", () => {
   });
 });
 
+describe("Feishu polling", () => {
+  it("reuses the tenant token across polls", async () => {
+    const feishu = fakeFeishu({});
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      fetch: feishu.fetcher,
+    });
+
+    const baseline = await source.read(undefined);
+    await source.read(baseline.cursor);
+
+    expect(feishu.tokenCalls()).toBe(1);
+  });
+
+  it("does not report one message twice across overlapping polls", async () => {
+    const feishu = fakeFeishu({});
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      botOpenId: "ou_thebe",
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_9",
+        text: "check the backup",
+        mentionBot: true,
+        time: "1762850400000",
+      }),
+    ]);
+
+    const first = await source.read(baseline.cursor);
+    const again = await source.read(first.cursor);
+
+    expect(first.triggers).toHaveLength(1);
+    expect(again.triggers).toEqual([]);
+  });
+});
+
 describe("Feishu Channel", () => {
   it("sends a text notice with the idempotency key as the message uuid", async () => {
     const feishu = fakeFeishu({});

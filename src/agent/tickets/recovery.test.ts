@@ -116,6 +116,33 @@ describe("Ticket assignment recovery", () => {
     expect(resume).not.toHaveBeenCalled();
   });
 
+  it("reports a failed resume and still recovers the next Ticket", async () => {
+    const errors: Array<{ goalId: string; error: unknown }> = [];
+    const recovered = await recoverInterruptedTicketGoals({
+      tickets: store([
+        ticket("a".repeat(32), "goal-fail"),
+        ticket("b".repeat(32), "goal-next"),
+      ]),
+      lookup: async (goalId) => ({
+        goalRun: goal(goalId, "running", "ticket"),
+      }),
+      restore: () => {},
+      revalidate: async () => ({ allowed: true }),
+      resume: async (goalId) => {
+        if (goalId === "goal-fail") throw new Error("runtime down");
+        return goalId;
+      },
+      onError: (goalId, error) => errors.push({ goalId, error }),
+    });
+
+    expect(recovered).toEqual([
+      { ticketId: "b".repeat(32), goalId: "goal-next" },
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]?.goalId).toBe("goal-fail");
+    expect(errors[0]?.error).toBeInstanceOf(Error);
+  });
+
   it("ignores a Ticket with no Goal and a Goal that already ended", async () => {
     const resume = vi.fn();
     await recoverInterruptedTicketGoals({
