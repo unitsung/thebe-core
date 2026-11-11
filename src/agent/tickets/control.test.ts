@@ -487,6 +487,20 @@ describe("Ticket retry", () => {
     expect(startedGoal).toContain("untrusted");
     expect(createdSessions).toBe(1);
 
+    // The Ticket survived a crash before its Goal was recorded: a retry starts the executor
+    // instead of returning a Ticket that can never run.
+    current = undefined;
+    const healed = await api.delegateHttp({
+      task: "Inspect the admitted request.",
+      idempotencyKey: "after-restart",
+      triggerId: trigger.id,
+    });
+    expect(healed).toMatchObject({
+      reused: true,
+      assignment: { state: "running", goalId: "goal-source" },
+    });
+    expect(createdSessions).toBe(1);
+
     await expect(
       api.delegateHttp({
         task: "Do not use an inferred event as an explicit request.",
