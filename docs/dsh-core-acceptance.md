@@ -261,7 +261,7 @@ follow-up decisions if Thebe needs those behaviors.
 | Feishu collection, chat mode, admission, token caching, writeback | `src/adapters/sources/feishu.test.ts` |
 | GitHub Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked or completed notice written back as an issue comment with the idempotency marker | `src/adapters/sources/github-flow.test.ts` |
 | Durable result notice for a completed Ticket, with one send per completion and a stable idempotency key | `src/agent/channels/delivery.test.ts` |
-| Feishu Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → blocked notice written back to the chat with the idempotency `uuid` | `src/adapters/sources/feishu-flow.test.ts` |
+| Feishu Source → Eval → inferred Ticket → isolated Ticket worker/reviewer → completed or blocked notice written back to the chat with the idempotency `uuid` | `src/adapters/sources/feishu-flow.test.ts` |
 | Explicit GitHub mention or Feishu direct message → direct Ticket (no Eval) → isolated `ticket-worker` → durable blocked notice → idempotent retry without a duplicate | `src/agent/tickets/direct-source-e2e.test.ts` |
 | Feishu chat-mode lookup retry after a transient failure; GitHub marker search across comment pages | `src/adapters/sources/feishu.test.ts`, `src/adapters/sources/github.test.ts` |
 | Ticket store loading under concurrent startup reads | `src/agent/tickets/store.test.ts` |
