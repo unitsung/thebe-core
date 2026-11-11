@@ -601,17 +601,22 @@ async function hasComment(input: {
   marker: string;
 }): Promise<boolean> {
   try {
-    const value = await githubRequest({
-      fetcher: input.fetcher,
-      apiBaseUrl: input.apiBaseUrl,
-      token: input.token,
-      path: `/repos/${repoPath(input.repository)}/issues/${input.issue}/comments?per_page=100`,
-      method: "GET",
-      body: undefined,
-    });
-    return (
-      Array.isArray(value) &&
-      value.some(
+    // GitHub returns issue comments oldest first. A long thread's marker is on
+    // a later page, so the retry check must page through instead of looking
+    // only at the first 100 comments. The cap bounds a pathological thread.
+    const pageSize = 100;
+    const maxPages = 20;
+    for (let page = 1; page <= maxPages; page += 1) {
+      const value = await githubRequest({
+        fetcher: input.fetcher,
+        apiBaseUrl: input.apiBaseUrl,
+        token: input.token,
+        path: `/repos/${repoPath(input.repository)}/issues/${input.issue}/comments?per_page=${pageSize}&page=${page}`,
+        method: "GET",
+        body: undefined,
+      });
+      if (!Array.isArray(value)) return false;
+      const found = value.some(
         (entry) =>
           typeof entry === "object" &&
           entry !== null &&
@@ -619,8 +624,11 @@ async function hasComment(input: {
           ((entry as Record<string, unknown>).body as string).includes(
             input.marker
           )
-      )
-    );
+      );
+      if (found) return true;
+      if (value.length < pageSize) return false;
+    }
+    return false;
   } catch {
     // A failed duplicate check must not stop the notice: at-least-once is better than silent loss.
     return false;
