@@ -31,8 +31,13 @@ function message(overrides: {
   };
 }
 
-function fakeFeishu(options: { mode?: "p2p" | "group"; messages?: Message[] }) {
+function fakeFeishu(options: {
+  mode?: "p2p" | "group";
+  messages?: Message[];
+  chatModeFailures?: number;
+}) {
   let messages = options.messages ?? [];
+  let chatModeFailures = options.chatModeFailures ?? 0;
   let tokenCalls = 0;
   const sent: Array<Record<string, unknown>> = [];
   const calls: string[] = [];
@@ -51,6 +56,13 @@ function fakeFeishu(options: { mode?: "p2p" | "group"; messages?: Message[] }) {
       });
     }
     if (url.includes("/im/v1/chats/")) {
+      if (chatModeFailures > 0) {
+        chatModeFailures -= 1;
+        return Response.json(
+          { code: 99991400, msg: "transient" },
+          { status: 500 }
+        );
+      }
       return Response.json({
         code: 0,
         data: { chat_mode: options.mode ?? "group" },
@@ -168,6 +180,35 @@ describe("Feishu Source", () => {
     feishu.setMessages([message({ id: "om_4", text: "what is running?" })]);
     const read = await source.read(baseline.cursor);
     expect(read.triggers[0]).toMatchObject({
+      admission: "explicit",
+      addressed: "direct",
+      human: true,
+    });
+  });
+
+  it("retries a failed chat-mode lookup instead of treating later direct messages as unaddressed", async () => {
+    const feishu = fakeFeishu({ mode: "p2p", chatModeFailures: 1 });
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_direct"],
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({ id: "om_6", text: "first", time: "1762850400000" }),
+    ]);
+    const duringFailure = await source.read(baseline.cursor);
+    expect(duringFailure.triggers[0]?.admission).toBe("ignore");
+
+    feishu.setMessages([
+      message({ id: "om_6", text: "first", time: "1762850400000" }),
+      message({ id: "om_7", text: "second", time: "1762850500000" }),
+    ]);
+    const retried = await source.read(duringFailure.cursor);
+    expect(retried.triggers).toHaveLength(1);
+    expect(retried.triggers[0]).toMatchObject({
       admission: "explicit",
       addressed: "direct",
       human: true,
