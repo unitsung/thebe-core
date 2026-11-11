@@ -365,6 +365,53 @@ describe("GitHub Channel", () => {
       `<!-- thebe-notice:${"a".repeat(32)} -->`
     );
   });
+
+  it("finds an idempotency marker beyond the first page of comments", async () => {
+    const marker = `<!-- thebe-notice:${"b".repeat(32)} -->`;
+    const pages: Array<Array<{ body: string }>> = [
+      Array.from({ length: 100 }, (_, index) => ({ body: `comment ${index}` })),
+      [{ body: `earlier notice\n${marker}` }],
+    ];
+    const requestedPages: number[] = [];
+    const posts: Array<Record<string, unknown>> = [];
+    const fetcher = (async (
+      input: Parameters<typeof fetch>[0],
+      init?: RequestInit
+    ) => {
+      const url = new URL(String(input));
+      if ((init?.method ?? "GET") === "GET") {
+        const page = Number(url.searchParams.get("page") ?? "1");
+        requestedPages.push(page);
+        return Response.json(pages[page - 1] ?? []);
+      }
+      posts.push(JSON.parse(String(init?.body)));
+      return Response.json({ id: 1 }, { status: 201 });
+    }) as typeof fetch;
+    const adapter = createGithubChannelAdapter({
+      fetch: fetcher,
+      repositories: ["unitsung/thebe"],
+    });
+
+    await adapter.send({
+      channel: {
+        source: "github",
+        thread: "resource:github:unitsung/thebe:issue:12",
+        address: { repo: "unitsung/thebe", issue: "12" },
+      },
+      notice: {
+        id: "n2",
+        ticketId: "t1",
+        goalId: "g1",
+        type: "goal_needs_person",
+        reason: "review",
+        message: "Work is ready for your review.",
+      },
+      idempotencyKey: "b".repeat(32),
+    });
+
+    expect(requestedPages).toEqual([1, 2]);
+    expect(posts).toHaveLength(0);
+  });
 });
 
 describe("GitHub environment wiring", () => {
