@@ -32,7 +32,7 @@ function message(overrides: {
 }
 
 function fakeFeishu(options: {
-  mode?: "p2p" | "group";
+  mode?: "p2p" | "group" | "topic";
   messages?: Message[];
   chatModeFailures?: number;
 }) {
@@ -214,6 +214,37 @@ describe("Feishu Source", () => {
       addressed: "direct",
       human: true,
     });
+  });
+
+  it("classifies a topic group like any other group", async () => {
+    const feishu = fakeFeishu({ mode: "topic" });
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_topic"],
+      botOpenId: "ou_thebe",
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_topic",
+        text: "@_user_1 restart emby",
+        time: "1762850600000",
+        mentionBot: true,
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers).toHaveLength(1);
+    expect(read.triggers[0]).toMatchObject({
+      admission: "explicit",
+      addressed: "mention",
+      human: true,
+    });
+    // The cursor advanced, so the same message is not read again on the next poll.
+    const settled = await source.read(read.cursor);
+    expect(settled.triggers).toEqual([]);
   });
 
   it("marks unaddressed group messages inferred only when asked", async () => {

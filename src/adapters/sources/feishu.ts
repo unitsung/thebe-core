@@ -75,9 +75,14 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
     appSecret: options.appSecret,
     now,
   });
-  const chatModes = new Map<string, Promise<"p2p" | "group" | undefined>>();
+  const chatModes = new Map<
+    string,
+    Promise<"p2p" | "group" | "topic" | undefined>
+  >();
 
-  function chatMode(chatId: string): Promise<"p2p" | "group" | undefined> {
+  function chatMode(
+    chatId: string
+  ): Promise<"p2p" | "group" | "topic" | undefined> {
     const pending = chatModes.get(chatId);
     if (pending) return pending;
     const flight = feishuRequest({
@@ -90,7 +95,8 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
     })
       .then((data) => {
         const mode = recordValue(data)?.chat_mode;
-        if (mode === "p2p" || mode === "group") return mode;
+        // A topic group is still a group: only `p2p` makes a message direct.
+        if (mode === "p2p" || mode === "group" || mode === "topic") return mode;
         // A malformed answer is not a lasting fact: retry it on a later poll.
         chatModes.delete(chatId);
         return undefined;
@@ -302,7 +308,7 @@ export function createFeishuFromEnv(
 async function toTrigger(
   message: FeishuMessage,
   policy: {
-    mode: "p2p" | "group" | undefined;
+    mode: "p2p" | "group" | "topic" | undefined;
     botOpenId?: string;
     mentionNames: readonly string[];
     admitUnaddressed: boolean;
