@@ -136,6 +136,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       watchdog: options.watchdog,
       getTicketIdForGoal: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.id,
+      getTicketForGoal: (goalId) => ticketStore.getByGoal(goalId),
       revalidateMandate: revalidateTicketGoal,
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],

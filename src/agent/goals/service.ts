@@ -24,7 +24,10 @@ import type { MandateRevalidation } from "../tickets/mandate.ts";
 import {
   buildGoalStatusCheckPrompt,
   createGoalWatchdog,
+  ticketWatchdogClass,
   type GoalWatchdogTarget,
+  type TicketWatchdogContext,
+  type WatchdogClass,
   type WatchdogDecision,
 } from "../watchdog/service.ts";
 
@@ -56,6 +59,10 @@ export type GoalApiOptions = {
     workerSecondMs?: number;
   };
   getTicketIdForGoal?: (goalId: string) => Promise<string | undefined>;
+  /** The stored Ticket a Ticket Goal runs; its origin and Thread choose the Watchdog class. */
+  getTicketForGoal?: (
+    goalId: string
+  ) => Promise<TicketWatchdogContext | undefined>;
   revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
   ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
   onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
@@ -631,12 +638,33 @@ export function createGoalApi(
     );
   }
 
-  function watchdogTarget(run: ManagedGoal): GoalWatchdogTarget {
+  async function watchdogClassFor(run: ManagedGoal): Promise<WatchdogClass> {
+    if (run.watchdogClass) return run.watchdogClass;
+    if (run.executor !== "ticket") return "personal";
+    try {
+      const ticket = await options.getTicketForGoal?.(run.thebeSessionId);
+      if (ticket) {
+        const watchdogClass = ticketWatchdogClass(ticket);
+        run.watchdogClass = watchdogClass;
+        return watchdogClass;
+      }
+    } catch {
+      // A transient Ticket read must not stop watching; the next tick looks it up again.
+    }
+    // Until the stored Ticket is readable, the conservative Ticket default applies.
+    return "ticket";
+  }
+
+  function watchdogTarget(
+    run: ManagedGoal,
+    watchdogClass: WatchdogClass
+  ): GoalWatchdogTarget {
     return {
       goalId: run.thebeSessionId,
       goal: run.goal,
       iteration: run.iteration,
       ...(run.executor ? { executor: run.executor } : {}),
+      ...(run.executor === "ticket" ? { watchdogClass } : {}),
       status: run.status,
       createdAt: run.createdAt,
       updatedAt: run.updatedAt ?? run.createdAt,
@@ -831,10 +859,16 @@ export function createGoalApi(
   }
 
   const watchdog = createGoalWatchdog({
-    listTargets: () =>
-      [...runs.values()]
-        .filter((run) => run.status === "running")
-        .map(watchdogTarget),
+    listTargets: async () => {
+      const running = [...runs.values()].filter(
+        (run) => run.status === "running"
+      );
+      return Promise.all(
+        running.map(async (run) =>
+          watchdogTarget(run, await watchdogClassFor(run))
+        )
+      );
+    },
     execute: async (decision) => {
       if (decision.type === "status_check") {
         await statusCheckFromWatchdog(decision);

@@ -196,7 +196,7 @@ The durable queue push notices go through (`push-outbox.json` beside the device 
 _Avoid_: best-effort push, a fire-and-forget send, giving up on a notice because the relay was down
 
 **Goal Watchdog**:
-The deterministic inactivity supervisor in `src/agent/watchdog/`. It scans every 60 seconds. A Goal with no semantic progress gets one read-only status check after 30 minutes and pauses into `person / stalled` at 60; an inactive worker or reviewer is cancelled and retried once after 10 minutes, then pauses after another 10. Interventions are bounded, audited as `watchdog.*`, retained on `GoalRun.watchdog`, and never grant authority or change a Mandate.
+The deterministic inactivity supervisor in `src/agent/watchdog/`. It scans every 60 seconds. A personal coding Goal with no semantic progress gets one read-only status check after 30 minutes and pauses into `person / stalled` at 60. A Goal that runs a Ticket takes its thresholds from the stored Ticket's origin Source/kind and resource Thread, never from its Goal text: container health 15/30 minutes, download completed 2/4 hours, post-download pipeline 30/60 minutes, library scan 2/4 hours, and any other Ticket 15/30. An inactive worker or reviewer is cancelled and retried once after 10 minutes, then pauses after another 10. Interventions are bounded, audited as `watchdog.*`, retained on `GoalRun.watchdog`, and never grant authority or change a Mandate.
 _Avoid_: treating audit traffic as progress, asking the active worker to diagnose itself, or retrying without a bound
 
 **Release line**:
