@@ -13,21 +13,22 @@ export type SourceHealth = {
 };
 
 export type SourceRunner = {
-  /** One read of every Source. Safe to call by hand; the timer calls the same thing. */
+  /** One concurrent read of every Source. Safe to call by hand; the timer calls the same thing. */
   pollOnce(): Promise<Trigger[]>;
   /** Current read health, in configured order. A successful read clears the failure count. */
   health(): SourceHealth[];
   start(): void;
-  /** Stops new reads, aborts an active read, and waits for any commit and Trigger dispatch to finish. */
+  /** Stops new reads, aborts active reads, and waits for any commit and Trigger dispatch to finish. */
   stop(): Promise<void>;
 };
 
 export const DEFAULT_SOURCE_INTERVAL_MS = 30_000;
 
 /**
- * Reads each Source on a timer, saves the new Triggers once, then saves the cursor. The cursor moves only
- * after the Triggers are stored, so a crash between the two re-reads the change (and the store drops the
- * duplicate) rather than losing it. One Source failing does not stop the others.
+ * Reads every Source concurrently on a timer, saves its new Triggers, then saves its cursor. The cursor
+ * moves only after the Triggers are stored, so a crash between the two re-reads the change (and the store
+ * drops the duplicate) rather than losing it. Each Source has its own read, cursor, and health, so one
+ * slow or failing provider does not delay or stop the others.
  */
 export function createSourceRunner(options: {
   sources: readonly Source[];
@@ -98,54 +99,64 @@ export function createSourceRunner(options: {
     }
   }
 
+  async function readSource(
+    source: Source,
+    signal: AbortSignal
+  ): Promise<Trigger[]> {
+    const status = statuses.get(source.id)!;
+    const attemptedAt = now().toISOString();
+    try {
+      const before = await options.store.cursor(source.id);
+      if (signal.aborted) return [];
+      const result = await source.read(before, signal);
+      // If quiesce interrupted the read, keep the old cursor so the Source can report this batch again.
+      if (signal.aborted) return [];
+      const triggers = result.triggers.map((trigger) => {
+        const admission = source.admit?.(trigger);
+        return admission === undefined
+          ? trigger
+          : { ...trigger, admission };
+      });
+      validateSourceResult(source, { ...result, triggers });
+      // Once storage starts, finish the cursor write even if quiesce arrives mid-commit: the Trigger is
+      // already durable, and leaving the cursor behind would replay it without dispatching it.
+      const fresh = await options.store.add(triggers);
+      await options.store.setCursor(source.id, result.cursor);
+      statuses.set(source.id, {
+        id: source.id,
+        scope: source.scope,
+        state: "healthy",
+        consecutiveFailures: 0,
+        lastAttemptAt: attemptedAt,
+        lastSuccessAt: now().toISOString(),
+      });
+      return fresh;
+    } catch (error) {
+      if (signal.aborted) return [];
+      statuses.set(source.id, {
+        ...status,
+        state: "failing",
+        consecutiveFailures: status.consecutiveFailures + 1,
+        lastAttemptAt: attemptedAt,
+        lastFailureAt: now().toISOString(),
+        lastError: errorText(error),
+      });
+      options.onError?.(source.id, error);
+      return [];
+    }
+  }
+
   async function pollOnce(): Promise<Trigger[]> {
     if (stopped) return [];
-    // A slow read must not overlap the next tick.
+    // Overlapping calls share one poll, so a slow read cannot start twice.
     if (running) return running;
     const controller = new AbortController();
     activeController = controller;
     running = (async () => {
-      const added: Trigger[] = [];
-      for (const source of options.sources) {
-        if (controller.signal.aborted) break;
-        const status = statuses.get(source.id)!;
-        const attemptedAt = now().toISOString();
-        try {
-          const before = await options.store.cursor(source.id);
-          if (controller.signal.aborted) break;
-          const result = await source.read(before, controller.signal);
-          // If quiesce interrupted the read, keep the old cursor so the Source can report this batch again.
-          if (controller.signal.aborted) break;
-          const triggers = result.triggers.map((trigger) => {
-            const admission = source.admit?.(trigger);
-            return admission === undefined
-              ? trigger
-              : { ...trigger, admission };
-          });
-          validateSourceResult(source, { ...result, triggers });
-          added.push(...(await options.store.add(triggers)));
-          await options.store.setCursor(source.id, result.cursor);
-          statuses.set(source.id, {
-            id: source.id,
-            scope: source.scope,
-            state: "healthy",
-            consecutiveFailures: 0,
-            lastAttemptAt: attemptedAt,
-            lastSuccessAt: now().toISOString(),
-          });
-        } catch (error) {
-          if (controller.signal.aborted) break;
-          statuses.set(source.id, {
-            ...status,
-            state: "failing",
-            consecutiveFailures: status.consecutiveFailures + 1,
-            lastAttemptAt: attemptedAt,
-            lastFailureAt: now().toISOString(),
-            lastError: errorText(error),
-          });
-          options.onError?.(source.id, error);
-        }
-      }
+      const batches = await Promise.all(
+        options.sources.map((source) => readSource(source, controller.signal))
+      );
+      const added = batches.flat();
       if (options.onTriggers && added.length > 0) {
         const known = new Set(pendingDispatch.map((trigger) => trigger.id));
         pendingDispatch.push(
