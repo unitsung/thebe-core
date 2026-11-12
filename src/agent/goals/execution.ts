@@ -16,6 +16,7 @@ import type {
   SubagentUpdate,
 } from "../types.ts";
 import type { ActorRef, ChannelRef } from "../sources/types.ts";
+import type { WatchdogClass } from "../watchdog/service.ts";
 
 export type GoalSubagentApi = {
   spawnSubagent(input: {
@@ -41,6 +42,8 @@ export type BufferedGoalEvent = {
 export type ManagedGoal = GoalRun & {
   stopRequested: boolean;
   pauseRequested: boolean;
+  /** Chosen from the stored Ticket, not persisted, so the Watchdog thresholds survive a restart. */
+  watchdogClass?: WatchdogClass;
   watchdogRetryRequested?: {
     runId: string;
     role: "worker" | "reviewer";
