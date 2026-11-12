@@ -61,4 +61,30 @@ describe("subagent slots", () => {
     await manager.cancel(backgroundA.runId, "parent");
     await manager.cancel(backgroundB.runId, "parent");
   });
+
+  it("keeps an explicit turn budget above the old fixed ceiling", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "text", text: "done" }]);
+    const manager = createSubagentRunManager({
+      createSession: async () =>
+        fake.runtime.createSession({
+          customTools: [],
+          builtinTools: [],
+          inMemory: true,
+        }),
+    });
+
+    const run = manager.spawn({
+      profile: { ...profile, maxTurns: 75 },
+      task: "long task",
+      parentSessionId: "parent",
+    });
+
+    expect(run.maxTurns).toBe(75);
+    await expect(manager.wait(run.runId)).resolves.toMatchObject({
+      status: "completed",
+      maxTurns: 75,
+      turns: 1,
+    });
+  });
 });

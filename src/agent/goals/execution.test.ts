@@ -128,4 +128,103 @@ describe("goal checkpoint input delivery", () => {
     expect(run.ticketInputSeq).toBe(7);
     expect(run.status).toBe("completed");
   });
+
+  it("continues after a worker reaches its per-run turn budget", async () => {
+    const reviewerPrompts: string[] = [];
+    const runs = new Map<string, SubagentRun>();
+    let workerCount = 0;
+    let reviewerCount = 0;
+    const subagents: GoalSubagentApi = {
+      async spawnSubagent(input) {
+        let run: SubagentRun;
+        if (input.profileName === "goal-worker") {
+          workerCount += 1;
+          run =
+            workerCount === 1
+              ? {
+                  ...subagent(input, "partial edit"),
+                  status: "failed",
+                  turns: 8,
+                  maxTurns: 8,
+                  turnLimitReached: true,
+                  error: "subagent reached its 8-turn limit",
+                }
+              : subagent(input, "finished");
+        } else {
+          reviewerPrompts.push(input.taskPrompt);
+          run = subagent(
+            input,
+            reviewerCount++ === 0
+              ? "VERDICT: fail\nEVIDENCE: the edit is incomplete\nREMAINING: finish it"
+              : "VERDICT: pass\nEVIDENCE: tests show the edit is complete\nREMAINING: none"
+          );
+        }
+        runs.set(run.runId, run);
+        return run;
+      },
+      async waitSubagent(runId) {
+        return runs.get(runId)!;
+      },
+      subscribeSubagent() {
+        return () => {};
+      },
+      async cancelSubagent(runId) {
+        return runs.get(runId)!;
+      },
+      takeMandateDenial() {
+        return undefined;
+      },
+    };
+    let resolveFinished!: (run: GoalRun) => void;
+    const run: ManagedGoal = {
+      thebeSessionId: "goal-turn-budget",
+      goal: "Finish the implementation",
+      criteria: ["tests pass"],
+      maxIterations: 3,
+      iteration: 0,
+      status: "running",
+      createdAt: "2026-11-10T00:00:00.000Z",
+      updatedAt: "2026-11-10T00:00:00.000Z",
+      progressAt: "2026-11-10T00:00:00.000Z",
+      subagentRunIds: [],
+      guidance: [],
+      stopRequested: false,
+      pauseRequested: false,
+      finished: new Promise<GoalRun>((resolve) => {
+        resolveFinished = resolve;
+      }),
+      resolveFinished,
+      listeners: new Set(),
+      events: [],
+    };
+
+    await executeGoal(run, {
+      subagents,
+      emitChild() {},
+      onEvent(current, event) {
+        if (event.type === "goal_iteration") {
+          current.iteration = event.iteration;
+        }
+      },
+      async setTerminal(current, status, summary, error) {
+        current.status = status;
+        current.summary = summary;
+        current.error = error;
+        current.finishedAt = "2026-11-10T00:00:03.000Z";
+        const result = { ...current };
+        current.resolveFinished(result);
+        return result;
+      },
+      reportInbox: createGoalReportInbox(
+        () => new Date("2026-11-10T00:00:00.000Z")
+      ),
+      now: () => new Date("2026-11-10T00:00:00.000Z"),
+    });
+
+    expect(workerCount).toBe(2);
+    expect(reviewerCount).toBe(2);
+    expect(reviewerPrompts[0]).toContain("Per-run turn budget reached");
+    expect(reviewerPrompts[0]).toContain("partial edit");
+    expect(run.status).toBe("completed");
+  });
 });

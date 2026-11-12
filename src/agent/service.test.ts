@@ -2124,6 +2124,7 @@ describe("Thebe agent service (fake runtime)", () => {
         status: "failed",
         turns: 1,
         maxTurns: 1,
+        turnLimitReached: true,
       });
       expect(completed.result).toBe("");
       expect(completed.error).toContain("turn limit");
