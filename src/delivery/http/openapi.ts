@@ -3142,7 +3142,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: { type: "string", minLength: 1 },
             },
-            maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            maxIterations: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
+            },
             observe: {
               type: "boolean",
               description:
@@ -3206,7 +3211,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               maxItems: 32,
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
-            maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            maxIterations: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
+            },
             acceptMode: {
               type: "string",
               enum: ["auto", "observe"],
@@ -3592,8 +3602,8 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             maxIterations: {
               type: "integer",
               minimum: 1,
-              maximum: 50,
-              description: "Maximum worker checkpoints; defaults to 8.",
+              description:
+                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
             },
             observe: {
               type: "boolean",

@@ -107,6 +107,7 @@ export type RunGoalLoopOptions = {
 
 const STATUS_RE = /^GOAL_STATUS:\s*(continue|complete|blocked)\s*$/im;
 const VERIFICATION_RE = /^VERIFICATION:\s*(.+)$/im;
+export const DEFAULT_GOAL_MAX_ITERATIONS = 8;
 
 /**
  * Coding-agent goal contract inspired by the public Codex /goal workflow:
@@ -362,7 +363,7 @@ export async function runGoalLoop(
   params: RunGoalLoopOptions
 ): Promise<GoalRunResult> {
   const { options, execute, reviewEvaluator, onEvent, shouldStop } = params;
-  const maxIterations = clampIterations(options.maxIterations);
+  const maxIterations = normalizeGoalMaxIterations(options.maxIterations);
   const evaluator = reviewEvaluator ?? defaultHeuristicReview;
   const emit = (event: GoalEvent) => onEvent?.(event);
   const reviews: GoalReviewResult[] = params.initialReview
@@ -426,7 +427,12 @@ export async function runGoalLoop(
   };
 }
 
-function clampIterations(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 8;
-  return Math.max(1, Math.min(50, Math.floor(value as number)));
+/**
+ * A Goal's checkpoint budget is a caller-controlled fuse, not a product
+ * ceiling. Core keeps the default finite so an omitted budget stays bounded,
+ * but an explicit budget may be any positive integer.
+ */
+export function normalizeGoalMaxIterations(value: number | undefined): number {
+  if (!Number.isFinite(value)) return DEFAULT_GOAL_MAX_ITERATIONS;
+  return Math.max(1, Math.floor(value as number));
 }

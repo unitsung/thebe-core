@@ -70,6 +70,8 @@ export type SubagentRun = {
   status: SubagentRunStatus;
   turns: number;
   maxTurns: number;
+  /** The per-run turn budget stopped this child before it finished normally. */
+  turnLimitReached?: boolean;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;

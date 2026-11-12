@@ -104,8 +104,8 @@ export const TICKET_TOOL_SCHEMAS: Record<
       maxIterations: {
         type: "integer",
         minimum: 1,
-        maximum: 50,
-        description: "Maximum worker checkpoints; defaults to 8.",
+        description:
+          "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
       },
       observe: {
         type: "boolean",

@@ -415,13 +415,11 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
     );
   if (
     input.maxIterations !== undefined &&
-    (!Number.isInteger(input.maxIterations) ||
-      input.maxIterations < 1 ||
-      input.maxIterations > 32)
+    (!Number.isSafeInteger(input.maxIterations) || input.maxIterations < 1)
   )
     throw httpError(
       400,
-      "maxIterations must be an integer from 1 to 32",
+      "maxIterations must be a positive integer",
       "invalid_body"
     );
   if (

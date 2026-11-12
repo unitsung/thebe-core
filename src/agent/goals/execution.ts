@@ -238,14 +238,17 @@ export async function executeGoal(
         if (mandateDenial) {
           throw new GoalReportStop("blocked", mandateDenial.detail);
         }
-        // A failed run is an infrastructure error; retrying burns every checkpoint on the same cause.
-        if (workerResult.status === "failed") {
+        // A per-run turn budget is a checkpoint boundary, not a failed Goal. The
+        // reviewer still decides whether the work is complete; otherwise the next
+        // checkpoint starts from the same workspace and repairs it.
+        const turnLimited = workerResult.turnLimitReached === true;
+        if (workerResult.status === "failed" && !turnLimited) {
           throw new GoalChildFailure(
             "worker",
             failureDetail(workerResult.error, "worker")
           );
         }
-        if (workerResult.status !== "completed") {
+        if (workerResult.status !== "completed" && !turnLimited) {
           run.finalReport = childReport(workerResult);
           return `VERDICT: blocked\nEVIDENCE: worker ${workerResult.status}: ${workerResult.error ?? "no result"}\nREMAINING: resume the goal after resolving the worker failure`;
         }
@@ -282,6 +285,13 @@ export async function executeGoal(
         }
         const workerText = [
           workerResult.result ?? "",
+          turnLimited
+            ? [
+                "## Per-run turn budget reached",
+                `The worker stopped after ${workerResult.turns} turns.`,
+                "Inspect the workspace and verify the objective. If it is not complete, list the remaining work for the next checkpoint.",
+              ].join("\n")
+            : "",
           report && (report.state === "ready" || report.state === "progress")
             ? [
                 "",

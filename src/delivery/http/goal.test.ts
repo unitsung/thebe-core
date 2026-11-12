@@ -81,6 +81,26 @@ describe("Goal HTTP", () => {
     await app.agent.waitGoal(String(body.id));
   });
 
+  it("accepts an explicit checkpoint budget above the old HTTP ceiling", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns(completingTurns());
+    const app = createThebeApp({ runtime: fake.runtime, provider: provider() });
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/goals", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          goal: "Finish the refactor",
+          maxIterations: 75,
+        }),
+      })
+    );
+    expect(res.status).toBe(201);
+    const body = await json(res);
+    expect(body.maxIterations).toBe(75);
+    await app.agent.waitGoal(String(body.id));
+  });
+
   it("stops at the first failed worker and reports why instead of burning every checkpoint", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
