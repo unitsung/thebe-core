@@ -106,7 +106,7 @@ export EDITOR=vim
 
 `permissionMode` 是新会话的默认权限模式：`plan`、`manual`、`acceptEdits` 或 `bypassPermissions`（见下文“权限模式”）。只认这四个名字。运行中也可以使用 `/permissions` 或设置菜单修改。
 
-`maxSubagentConcurrency` 和 `maxSubagentsPerParent` 分别控制全局 child 并发数和单个父会话的并发数；它们只限制一次性 in-memory subagent，不影响普通会话。数值会被限制在 1–16，单个 profile 的 `maxTurns` 另行限制在 1–50。总并发大于 1 时，Core 固定保留 1 个槽位给人工请求，后台 Goal worker/reviewer 最多使用其余槽位；总并发为 1 时没有单独的后台容量。
+`maxSubagentConcurrency` 和 `maxSubagentsPerParent` 分别控制全局 child 并发数和单个父会话的并发数；它们只限制一次性 in-memory subagent，不影响普通会话。数值会被限制在 1–16。单个 profile 的 `maxTurns` 是正整数，Core 不设固定上限；它只是单次 child 的 turn 预算，达到后由 Goal 继续验证并进入下一 checkpoint，而不是把整项任务判死。总并发大于 1 时，Core 固定保留 1 个槽位给人工请求，后台 Goal worker/reviewer 最多使用其余槽位；总并发为 1 时没有单独的后台容量。
 
 `watchdog` 的五个字段都以毫秒计，非正数会回退到默认值。默认每 60 秒扫描一次；Goal 30 分钟没有语义进展时先做一次只读状态检查，60 分钟仍无进展则暂停并进入 `person / stalled`。worker 或 reviewer 10 分钟没有活动时取消并重试一次，之后再过 10 分钟仍无活动就暂停。每次介入都写入 `watchdog.status_check`、`watchdog.retry_worker` 或 `watchdog.pause` 审计记录，并把最后状态放在 Goal 的 `watchdog` 字段中。`goalSecondMs` 不会小于 `goalFirstMs`。
 

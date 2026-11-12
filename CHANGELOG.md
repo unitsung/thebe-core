@@ -7,6 +7,12 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Changed
 
+- Goal checkpoints and subagent turns are no longer silently capped at 50.
+  `maxIterations` and a profile's `maxTurns` accept any positive integer; the
+  defaults remain 8 and 5/8. A worker that reaches its per-run turn budget now
+  hands the workspace to the independent reviewer and continues with another
+  checkpoint instead of failing the whole Goal. The web and MCP request schemas,
+  schedule validation, and CLI-visible limits use the same rule.
 - The Pi runtime packages are pinned to `@earendil-works/*` `1.5.2`, which
   raises `undici` and `minimatch` past the currently audited vulnerable ranges.
   The transitive `node-forge` lock moves to `1.4.3`. The sandbox runtime still

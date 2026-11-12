@@ -70,6 +70,7 @@ export async function executeSubagentRun(
         run.turns += 1;
         if (run.turns >= run.maxTurns && !maxTurnsReached) {
           maxTurnsReached = true;
+          run.turnLimitReached = true;
           void session?.abort().catch(() => {});
         }
       }
@@ -91,6 +92,7 @@ export async function executeSubagentRun(
   } catch (error) {
     if (run.cancelRequested) run.status = "cancelled";
     else if (maxTurnsReached) {
+      run.turnLimitReached = true;
       run.status = "failed";
       run.result = session?.lastAssistantText().trim() || undefined;
       run.error = `subagent reached its ${run.maxTurns}-turn limit`;

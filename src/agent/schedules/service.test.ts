@@ -272,11 +272,12 @@ describe("durable Goal schedules", () => {
       lastError: expect.stringContaining("restarted"),
     });
   });
-  it("rejects unbounded and invalid inputs before writing or running", async () => {
+  it("rejects invalid inputs before writing or running", async () => {
     const f = fixture();
     for (const patch of [
       { intervalMinutes: 0 },
-      { maxIterations: 33 },
+      { maxIterations: 0 },
+      { maxIterations: 1.5 },
       { startAt: "bad" },
       { title: "" },
       { criteria: [""] },
@@ -286,5 +287,11 @@ describe("durable Goal schedules", () => {
       ).rejects.toMatchObject({ status: 400 });
     }
     expect(await f.api.listSchedules()).toEqual([]);
+  });
+
+  it("accepts a checkpoint budget above the old 32-checkpoint ceiling", async () => {
+    const f = fixture();
+    const row = await f.api.createSchedule({ ...input, maxIterations: 75 });
+    expect(row.maxIterations).toBe(75);
   });
 });

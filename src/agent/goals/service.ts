@@ -1,4 +1,4 @@
-import type { GoalEvent } from "../goals/runner.ts";
+import { normalizeGoalMaxIterations, type GoalEvent } from "../goals/runner.ts";
 import {
   executeGoal,
   type GoalCheckpointInput,
@@ -916,7 +916,7 @@ export function createGoalApi(
         thebeSessionId: input.thebeSessionId,
         goal,
         criteria: input.criteria,
-        maxIterations: clampIterations(input.maxIterations),
+        maxIterations: normalizeGoalMaxIterations(input.maxIterations),
         observe: input.observe,
         executor: input.executor,
         allowAsk: input.allowAsk,
@@ -1459,9 +1459,4 @@ function watchdogReasonText(reason: GoalWatchdogReason): string {
 
 function watchdogPauseMessage(reason: GoalWatchdogReason): string {
   return `Paused by Watchdog after ${watchdogReasonText(reason)}. It needs you to decide how to continue.`;
-}
-
-function clampIterations(value: number | undefined): number {
-  if (!Number.isFinite(value)) return 8;
-  return Math.max(1, Math.min(50, Math.floor(value as number)));
 }

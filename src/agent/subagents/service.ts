@@ -24,7 +24,6 @@ import {
 import { httpError } from "../types.ts";
 
 const DEFAULT_MAX_TURNS = 5;
-const MAX_ALLOWED_TURNS = 50;
 const MAX_RETAINED_RUNS = 100;
 export const SUBAGENT_RUN_INTERRUPTED_ERROR =
   "Subagent run interrupted when Core restarted.";
@@ -443,14 +442,13 @@ export function createSubagentRunManager(options: {
       maxPerParent,
       maxBackground,
       humanReserve,
-      maxTurns: MAX_ALLOWED_TURNS,
     },
   };
 }
 
 function normalizeTurns(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_TURNS;
-  return Math.max(1, Math.min(MAX_ALLOWED_TURNS, Math.floor(value as number)));
+  return Math.max(1, Math.floor(value as number));
 }
 
 function active(status: SubagentRunStatus): boolean {

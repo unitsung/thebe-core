@@ -3,6 +3,7 @@ import {
   buildGoalPrompt,
   buildGoalVerifierPrompt,
   defaultHeuristicReview,
+  normalizeGoalMaxIterations,
   runGoalLoop,
 } from "./runner.ts";
 
@@ -158,5 +159,26 @@ describe("goal runner", () => {
     });
     expect(result.blocked).toBeUndefined();
     expect(result.status).toBe("completed");
+  });
+
+  it("does not cap an explicit checkpoint budget at the old ceiling", async () => {
+    expect(normalizeGoalMaxIterations(undefined)).toBe(8);
+    expect(normalizeGoalMaxIterations(75)).toBe(75);
+
+    let runs = 0;
+    const result = await runGoalLoop({
+      options: { goal: "x", maxIterations: 75 },
+      execute: async () => {
+        runs += 1;
+        return "GOAL_STATUS: continue\nCHECKPOINT: still working\nVERIFICATION: none\nREMAINING: continue";
+      },
+    });
+
+    expect(runs).toBe(75);
+    expect(result).toMatchObject({
+      status: "max_iterations",
+      complete: false,
+      iterations: 75,
+    });
   });
 });
