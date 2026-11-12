@@ -3,17 +3,22 @@ name: publish-image
 # Builds the supported Core container (docs/DEPLOYMENT.md) for both
 # supported architectures and pushes it to GitHub Container Registry. The
 # package is private while this repository is private; it becomes public with
-# the open-source release. It runs on version tags and manual dispatch, not on
-# every commit: a push to `dev`/`main` is verified by the `verify` workflow.
+# the open-source release. It runs only on version tags, not on every commit:
+# routine `dev`/`main` changes are verified locally by the NAS pipeline.
+# A tag is not a release until its commit is on `main` and the release gate
+# passes again on the exact tagged commit.
 
 on:
   push:
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: publish-image-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -25,6 +30,24 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require the tag to be on main
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Re-run the release gate on the tagged commit
+        run: |
+          npm ci --no-audit --no-fund
+          bash scripts/release-check.sh
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
