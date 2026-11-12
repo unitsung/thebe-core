@@ -13,6 +13,39 @@ export const DEFAULT_GOAL_WATCHDOG_SECOND_MS = 60 * 60_000;
 export const DEFAULT_WORKER_WATCHDOG_FIRST_MS = 10 * 60_000;
 export const DEFAULT_WORKER_WATCHDOG_SECOND_MS = 10 * 60_000;
 
+/**
+ * Which inactivity thresholds a Goal follows. A personal coding Goal is the only class that uses the
+ * configured Goal values; a Goal that runs a Ticket takes the class derived from that Ticket.
+ */
+export type WatchdogClass =
+  | "personal"
+  | "container"
+  | "download"
+  | "pipeline"
+  | "scan"
+  | "ticket";
+
+/** The stored Ticket fields the Watchdog needs to choose a class. */
+export type TicketWatchdogContext = {
+  origins?: ReadonlyArray<{ source: string; kind?: string }>;
+  subscriptions?: readonly string[];
+};
+
+type ClassThresholds = {
+  firstMs: number;
+  secondMs: number;
+};
+
+const TICKET_WATCHDOG_THRESHOLDS: Readonly<
+  Record<Exclude<WatchdogClass, "personal">, ClassThresholds>
+> = {
+  container: { firstMs: 15 * 60_000, secondMs: 30 * 60_000 },
+  download: { firstMs: 2 * 60 * 60_000, secondMs: 4 * 60 * 60_000 },
+  pipeline: { firstMs: 30 * 60_000, secondMs: 60 * 60_000 },
+  scan: { firstMs: 2 * 60 * 60_000, secondMs: 4 * 60 * 60_000 },
+  ticket: { firstMs: 15 * 60_000, secondMs: 30 * 60_000 },
+};
+
 export type GoalWatchdogThresholds = {
   intervalMs: number;
   goalFirstMs: number;
@@ -26,6 +59,10 @@ export type GoalWatchdogTarget = {
   goal: string;
   iteration: number;
   executor?: "ticket";
+  /** Internal: set for a Ticket Goal from its stored Ticket; never part of the public Goal shape. */
+  watchdogClass?: WatchdogClass;
+  /** Internal: a fallback for a caller that has the stored Ticket but has not classified it yet. */
+  ticket?: TicketWatchdogContext;
   status: GoalRunStatus;
   createdAt: string;
   updatedAt: string;
@@ -102,6 +139,7 @@ export function createGoalWatchdog(options: {
       return [];
     }
 
+    const goalThresholds = thresholdsFor(target, thresholds);
     const progressAt =
       validTime(target.progressAt) ?? validTime(target.updatedAt);
     if (progressAt === undefined) return [];
@@ -168,7 +206,7 @@ export function createGoalWatchdog(options: {
 
     const inactivityMs = at.getTime() - progressAt;
     if (tracker.statusCheckFor) {
-      if (inactivityMs >= thresholds.goalSecondMs) {
+      if (inactivityMs >= goalThresholds.secondMs) {
         return [
           {
             type: "pause",
@@ -181,7 +219,7 @@ export function createGoalWatchdog(options: {
       }
       return [];
     }
-    if (inactivityMs >= thresholds.goalFirstMs) {
+    if (inactivityMs >= goalThresholds.firstMs) {
       tracker.statusCheckFor = target.progressAt;
       return [
         {
@@ -239,6 +277,78 @@ export function createGoalWatchdog(options: {
     },
     thresholds,
   };
+}
+
+function thresholdsFor(
+  target: GoalWatchdogTarget,
+  defaults: GoalWatchdogThresholds
+): ClassThresholds {
+  const goalClass =
+    target.watchdogClass ??
+    (target.ticket
+      ? ticketWatchdogClass(target.ticket)
+      : target.executor === "ticket"
+        ? "ticket"
+        : "personal");
+  if (goalClass === "personal") {
+    return {
+      firstMs: defaults.goalFirstMs,
+      secondMs: defaults.goalSecondMs,
+    };
+  }
+  return TICKET_WATCHDOG_THRESHOLDS[goalClass];
+}
+
+/**
+ * A Ticket's class comes from the events that caused it and the resource it follows, never from the
+ * free-form Goal text a worker sees. Explicit Trigger kinds win, then a pipeline/scan Source or
+ * Thread, then any broader container/download evidence.
+ */
+export function ticketWatchdogClass(
+  ticket: TicketWatchdogContext
+): WatchdogClass {
+  const origins = ticket.origins ?? [];
+  const sources = origins.map((origin) => origin.source);
+  const resourceKinds = (ticket.subscriptions ?? [])
+    .map((thread) => /^resource:([^:]+)/.exec(thread)?.[1])
+    .filter((kind): kind is string => Boolean(kind));
+
+  // An explicit Trigger kind is the most specific evidence.
+  for (const origin of origins) {
+    const fromKind = classFromSignal(origin.kind);
+    if (fromKind) return fromKind;
+  }
+  // A pipeline or scan may carry a broader download/container Source, so its own Source or
+  // resource Thread is checked before the remaining Source evidence.
+  for (const signal of [...sources, ...resourceKinds]) {
+    const specific = classFromSignal(signal);
+    if (specific === "pipeline" || specific === "scan") return specific;
+  }
+  for (const source of sources) {
+    const fromSource = classFromSignal(source);
+    if (fromSource) return fromSource;
+  }
+  for (const resourceKind of resourceKinds) {
+    const fromThread = classFromSignal(resourceKind);
+    if (fromThread) return fromThread;
+  }
+  return "ticket";
+}
+
+function classFromSignal(value: string | undefined): WatchdogClass | undefined {
+  if (!value) return undefined;
+  const signal = value.toLowerCase();
+  if (
+    signal.includes("pipeline") ||
+    signal.includes("post-download") ||
+    signal.includes("post_download")
+  ) {
+    return "pipeline";
+  }
+  if (signal.includes("scan") || signal.includes("library")) return "scan";
+  if (signal.includes("container")) return "container";
+  if (signal.includes("download")) return "download";
+  return undefined;
 }
 
 /** The first action is one fresh, read-only model checkpoint. It gets no write tools and no Mandate. */
