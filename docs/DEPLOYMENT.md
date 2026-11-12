@@ -612,8 +612,26 @@ Release gate:
 bash scripts/release-check.sh     # tsc --noEmit + oxlint + tsdown + vitest run + smoke
 ```
 
-CI runs the same gate (`.github/workflows/verify.yml`) on every push and
-pull request, so a release candidate on a clean host reproduces what CI saw.
+GitHub Actions does not run this gate on every push.
+`.github/workflows/verify.yml` is manual `workflow_dispatch`, and image
+publishing runs only on version tags.
+
+### Local verification gate
+
+Routine changes reach `dev` through the local `thebe/local-verify` delivery gate
+instead of GitHub Actions on every push:
+
+1. On the NAS, the gate installs from the lockfile with `npm ci` and runs
+   `bash scripts/release-check.sh` — typecheck, lint, build, the full Vitest
+   suite, and the smoke test.
+2. An independent reviewer that does not share the worker's transcript checks
+   the diff against the acceptance criteria and the verifier output.
+3. After that review passes, the change is squash-merged into `dev`
+   automatically as one conventional commit.
+
+A failed check or review blocks the merge; fix the root cause and rerun the
+gate. The same `scripts/release-check.sh` command is the release gate above, so
+a local pass and a manual `verify` dispatch run the same checks.
 
 ### Container verification after an upgrade
 
