@@ -1061,6 +1061,51 @@ describe("Thebe agent service (fake runtime)", () => {
     await second.quiesce();
   });
 
+  it("keeps a finish that raced with a stop instead of rewriting it as cancelled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-stop-race-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({
+      title: "stop raced with finish",
+    });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await first.waitGoal(session.thebeSessionId);
+
+    // The stop landed after the loop had already recorded a successful finish, so the durable
+    // snapshot carries both. Recovery must keep the finish: the work really succeeded.
+    const path = join(dir, `${session.thebeSessionId}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    stored.goalRun.stopRequested = true;
+    stored.goalRun.status = "succeeded";
+    await writeFile(path, JSON.stringify(stored));
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "succeeded",
+    });
+    await second.quiesce();
+  });
+
   it("refuses to resume a Ticket executor when its Ticket is missing", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);
