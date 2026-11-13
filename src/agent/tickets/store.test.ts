@@ -149,6 +149,7 @@ describe("a Ticket for work Eval took on", () => {
       {
         triggerId: origin.id,
         source: "container-health",
+        kind: "container.went_down",
         actor: { source: "container-health", id: "person-7" },
         human: false,
         channel: origin.channel,

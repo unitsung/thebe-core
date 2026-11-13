@@ -510,6 +510,7 @@ function originsFor(triggers: readonly Trigger[]): TicketOrigin[] {
   return triggers.map((trigger) => ({
     triggerId: trigger.id,
     source: trigger.source,
+    kind: trigger.kind,
     ...(trigger.actor ? { actor: cloneActorRef(trigger.actor) } : {}),
     ...(trigger.human !== undefined ? { human: trigger.human } : {}),
     ...(trigger.admission ? { admission: trigger.admission } : {}),

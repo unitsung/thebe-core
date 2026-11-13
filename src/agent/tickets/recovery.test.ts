@@ -101,6 +101,23 @@ describe("Ticket assignment recovery", () => {
     ]);
   });
 
+  it("restores a pause in flight without resuming it", async () => {
+    const resume = vi.fn();
+    const restored: string[] = [];
+    const recovered = await recoverInterruptedTicketGoals({
+      tickets: store([ticket("9".repeat(32), "goal-pausing")]),
+      lookup: async () => ({
+        goalRun: goal("goal-pausing", "pausing", "ticket"),
+      }),
+      restore: (run) => restored.push(run.thebeSessionId),
+      revalidate: async () => ({ allowed: true }),
+      resume,
+    });
+    expect(restored).toEqual(["goal-pausing"]);
+    expect(resume).not.toHaveBeenCalled();
+    expect(recovered).toEqual([]);
+  });
+
   it("leaves a Ticket alone when the policy no longer authorizes its Mandate", async () => {
     const resume = vi.fn();
     const recovered = await recoverInterruptedTicketGoals({

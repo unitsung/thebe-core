@@ -19,6 +19,7 @@ export type RecoverableTicketGoal = {
  * Resumes Ticket Goals that were mid-checkpoint when the previous Core process ended. It never
  * resumes work that a person paused, stopped, or that is waiting for an answer or review; those are
  * deliberate states, not an interruption. A Goal whose Mandate no longer revalidates stays paused.
+ * A `pausing` Goal is restored into its paused state but is never resumed.
  */
 export async function recoverInterruptedTicketGoals(options: {
   tickets: Pick<TicketStore, "list">;
@@ -45,8 +46,12 @@ export async function recoverInterruptedTicketGoals(options: {
     const goal = meta.goalRun;
     if (!goal || goal.executor !== "ticket") continue;
     if (goal.status !== "running" && goal.status !== "pausing") continue;
+    // `pausing` is a person's (or Watchdog's) deliberate pause in flight, not an interruption.
+    // Restoring it keeps the Goal paused where the view can show it; resuming would undo the pause.
+    const interrupted = goal.status === "running";
     try {
       options.restore(goal, meta.goalEvents);
+      if (!interrupted) continue;
       const revalidation = await options.revalidate(goalId);
       if (!revalidation.allowed) continue;
       await options.resume(goalId);

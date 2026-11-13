@@ -1015,6 +1015,52 @@ describe("Thebe agent service (fake runtime)", () => {
     });
   });
 
+  it("finishes a persisting stop after a restart instead of resuming the work", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-stop-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({
+      title: "stopped before restart",
+    });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await first.waitGoal(session.thebeSessionId);
+
+    // Rewind the persisted status to what a crash between stop and the terminal transition leaves:
+    // the person's stop intent is already durable, the loop never wrote `cancelled`.
+    const path = join(dir, `${session.thebeSessionId}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    expect(stored.goalRun.stopRequested).toBe(true);
+    stored.goalRun.status = "running";
+    await writeFile(path, JSON.stringify(stored));
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "cancelled",
+      stopRequested: true,
+    });
+    await second.quiesce();
+  });
+
   it("refuses to resume a Ticket executor when its Ticket is missing", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([{ kind: "hang" }]);

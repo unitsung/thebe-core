@@ -66,6 +66,9 @@ export function createDownloadCompletedSource(options: {
         if (before === "completed" || item.phase !== "completed") continue;
         const completedAt = item.completedAt ?? at;
         triggers.push({
+          // The read's sequence number keeps a crash-before-cursor replay idempotent. The completion
+          // time is not part of the id: a provider that reports no completion time (aria2) would
+          // otherwise hash the read clock and turn one replay into a second Trigger.
           id: key(
             "trigger",
             DOWNLOAD_COMPLETED_SOURCE_ID,
@@ -73,7 +76,6 @@ export function createDownloadCompletedSource(options: {
             item.hash,
             before ?? "-",
             "completed",
-            completedAt,
             String(n)
           ),
           source: DOWNLOAD_COMPLETED_SOURCE_ID,
