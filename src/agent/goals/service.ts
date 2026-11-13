@@ -359,9 +359,11 @@ export function createGoalApi(
       run.ticketInputSeq = persisted.ticketInputSeq;
     }
     run.iteration = persisted.iteration;
-    if (persisted.stopRequested) {
+    if (persisted.stopRequested && interrupted) {
       // The person ended this run before the previous process could finish the stop. Finishing it
-      // now is the only faithful recovery; resuming would undo their decision.
+      // now is the only faithful recovery; resuming would undo their decision. A stop that raced
+      // with the run's own finish leaves a terminal status behind: the work really ended that way,
+      // and reporting it as cancelled would misstate what happened.
       run.stopRequested = true;
       run.status = "cancelled";
       run.finishedAt = persisted.finishedAt ?? persisted.updatedAt;
