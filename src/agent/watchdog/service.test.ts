@@ -149,6 +149,54 @@ describe("Goal Watchdog planner", () => {
     expect(decisions[0]?.type).toBe("retry_worker");
   });
 
+  it("gives a retried worker its own window before pausing it", async () => {
+    let now = new Date(Date.parse(START) + 10 * 60_000);
+    let current = target({ activeSubagent: worker() });
+    const decisions: WatchdogDecision[] = [];
+    const watchdog = createGoalWatchdog({
+      listTargets: () => [current],
+      execute: async (decision) => {
+        decisions.push(decision);
+      },
+      now: () => now,
+      workerFirstMs: 10 * 60_000,
+      workerSecondMs: 10 * 60_000,
+    });
+
+    await watchdog.pollOnce();
+    expect(decisions.map((decision) => decision.type)).toEqual([
+      "retry_worker",
+    ]);
+
+    // The replacement reports activity, but the Goal's semantic progress has not moved yet.
+    current = target({
+      activeSubagent: worker({
+        runId: "worker-2",
+        startedAt: "2026-11-09T00:10:01.000Z",
+        createdAt: "2026-11-09T00:10:01.000Z",
+        activity: [
+          {
+            id: 1,
+            at: "2026-11-09T00:10:01.000Z",
+            kind: "status",
+            title: "running",
+          },
+        ],
+      }),
+    });
+    now = new Date(Date.parse(START) + 20 * 60_000);
+    await watchdog.pollOnce();
+    expect(decisions).toHaveLength(1);
+
+    // That replacement then goes quiet for its own full window.
+    now = new Date(Date.parse(START) + 21 * 60_000);
+    await watchdog.pollOnce();
+    expect(decisions.map((decision) => decision.type)).toEqual([
+      "retry_worker",
+      "pause",
+    ]);
+  });
+
   it("does not notify or intervene on a task already waiting for the person", async () => {
     const decisions: WatchdogDecision[] = [];
     const watchdog = createGoalWatchdog({
@@ -195,9 +243,7 @@ describe("Goal Watchdog Ticket classes", () => {
     {
       name: "download completed",
       ticket: {
-        origins: [
-          { source: "download-completed", kind: "download.completed" },
-        ],
+        origins: [{ source: "download-completed", kind: "download.completed" }],
         subscriptions: ["resource:download:qbittorrent:" + "a".repeat(40)],
       },
       firstMs: 2 * HOUR,

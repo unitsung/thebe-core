@@ -197,6 +197,11 @@ export type GoalRun = {
   progressAt?: string;
   /** Set while Watchdog is checking, retrying, or waiting for the person. */
   watchdog?: GoalWatchdogState;
+  /**
+   * A person stopped this Goal while a worker was active. Persisted so a restart finishes the stop
+   * instead of resuming work the person already ended.
+   */
+  stopRequested?: boolean;
 };
 
 /** @deprecated Use ThebePromptResult */

@@ -113,6 +113,7 @@ export function createGoalApi(
     ...(run.guidance?.length ? { guidance: run.guidance.slice() } : {}),
     ...(run.ticketInputSeq ? { ticketInputSeq: run.ticketInputSeq } : {}),
     ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
+    ...(run.stopRequested ? { stopRequested: true } : {}),
   });
 
   const RECOVERY_MESSAGE =
@@ -358,7 +359,16 @@ export function createGoalApi(
       run.ticketInputSeq = persisted.ticketInputSeq;
     }
     run.iteration = persisted.iteration;
-    run.status = interrupted ? "paused" : persisted.status;
+    if (persisted.stopRequested) {
+      // The person ended this run before the previous process could finish the stop. Finishing it
+      // now is the only faithful recovery; resuming would undo their decision.
+      run.stopRequested = true;
+      run.status = "cancelled";
+      run.finishedAt = persisted.finishedAt ?? persisted.updatedAt;
+      run.summary = persisted.summary ?? "Goal stopped before Core restarted.";
+    } else {
+      run.status = interrupted ? "paused" : persisted.status;
+    }
     run.createdAt = persisted.createdAt;
     run.updatedAt =
       persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
@@ -1229,6 +1239,13 @@ export function createGoalApi(
         return snapshot(run);
       }
       run.stopRequested = true;
+      // Make the stop durable before the loop observes it: a restart between here and the terminal
+      // transition must not resume the work the person just stopped.
+      await queueGoalPersistence(
+        snapshot(run),
+        run.thebeSessionId,
+        storedGoalEvents(run.events)
+      );
       const active = run.activeSubagent;
       if (
         active &&
