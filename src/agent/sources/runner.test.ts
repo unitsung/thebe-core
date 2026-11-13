@@ -142,9 +142,7 @@ describe("Source runner concurrency", () => {
         expect(fastReads).toBe(1);
         expect(await store.cursor("fast")).toBe("fast-1");
       });
-      expect((await store.list()).map((item) => item.source)).toEqual([
-        "fast",
-      ]);
+      expect((await store.list()).map((item) => item.source)).toEqual(["fast"]);
       // The fast Trigger is durable, but dispatch still waits for the whole poll.
       expect(dispatched).toEqual([]);
       expect(runner.health()).toEqual([
@@ -333,6 +331,37 @@ describe("Source runner concurrency", () => {
     ]);
   });
 
+  it("does not let a Source that ignores the signal hold quiesce open", async () => {
+    const store = createTriggerStore({});
+    const started = gate();
+    const runner = createSourceRunner({
+      sources: [
+        {
+          id: "stuck",
+          scope: "stuck source",
+          read: () => {
+            started.open();
+            return new Promise(() => {});
+          },
+        },
+      ],
+      store,
+      now: fixedNow,
+    });
+
+    void runner.pollOnce();
+    await started.promise;
+    const stopping = runner.stop();
+    const outcome = await Promise.race([
+      stopping.then(() => "stopped"),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve("timeout"), 200)
+      ),
+    ]);
+    expect(outcome).toBe("stopped");
+    expect(await store.list()).toEqual([]);
+  });
+
   it("restores each persisted cursor after a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-sources-concurrent-"));
     const seen: Record<string, Array<string | undefined>> = {
@@ -356,9 +385,10 @@ describe("Source runner concurrency", () => {
       store: createTriggerStore({ dir }),
       now: fixedNow,
     });
-    expect((await first.pollOnce()).map((item) => item.source).sort()).toEqual(
-      ["alpha", "beta"]
-    );
+    expect((await first.pollOnce()).map((item) => item.source).sort()).toEqual([
+      "alpha",
+      "beta",
+    ]);
 
     const restarted = createSourceRunner({
       sources: [make("alpha", "alpha-1"), make("beta", "beta-1")],
@@ -398,4 +428,3 @@ describe("Source runner concurrency", () => {
     );
   });
 });
-

@@ -260,6 +260,20 @@ describe("download-completed source", () => {
     expect(again.triggers[0]?.id).toBe(first.triggers[0]?.id);
   });
 
+  it("keeps a stable id when the provider reports no completion time", async () => {
+    const items = [download("downloading")];
+    const source = createDownloadCompletedSource({
+      downloads: downloads(items),
+      now: clock(),
+    });
+    const baseline = await source.read(undefined);
+    items[0] = download("completed");
+    const first = await source.read(baseline.cursor);
+    const again = await source.read(baseline.cursor);
+    expect(first.triggers).toHaveLength(1);
+    expect(again.triggers[0]?.id).toBe(first.triggers[0]?.id);
+  });
+
   it("fails the read instead of advancing a partial multi-engine cursor", async () => {
     const provider: DownloadProvider = {
       ...downloads([download("downloading")]),

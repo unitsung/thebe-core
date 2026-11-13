@@ -58,6 +58,8 @@ export type TicketInput = {
 export type TicketOrigin = {
   triggerId: string;
   source: string;
+  /** The Trigger kind the Source declared, so the Watchdog picks thresholds without guessing from names. */
+  kind?: string;
   actor?: ActorRef;
   human?: boolean;
   admission?: SourceAdmission;
