@@ -146,6 +146,10 @@ export type CreateThebeAgentOptions = {
   onGoalNeedsPerson?: (
     notice: import("./goals/service.ts").GoalNeedsPersonNotice
   ) => Promise<void> | void;
+  /** Called once when a Goal reaches a terminal state with a person-facing completion notice. */
+  onGoalCompleted?: (
+    notice: import("./goals/service.ts").GoalCompletedNotice
+  ) => Promise<void> | void;
   /** Called once when assessment fails and again only after a successful assessment. */
   onEvalUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
   /** Called once per UTC day when autonomous model work exhausts its token budget. */

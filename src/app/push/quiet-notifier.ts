@@ -4,7 +4,7 @@ import {
   isQuiet,
   msUntilQuietEnds,
   type QuietHoursStore,
-} from "../../delivery/http/quiet-hours.ts";
+} from "../../agent/notifications/quiet-hours.ts";
 import type { DurablePushNotifier, PushNotice } from "./notifier.ts";
 
 export const DEFAULT_HELD_NOTICES = 10;

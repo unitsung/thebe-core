@@ -152,6 +152,7 @@ describe("decisions over HTTP", () => {
       "main-session",
       "policy",
       "decisions",
+      "notifications",
     ]);
     expect((await call("/openapi.json")).body.paths).toMatchObject({
       "/v1/decisions/{id}/accept": { post: expect.any(Object) },

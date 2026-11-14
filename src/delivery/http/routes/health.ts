@@ -1,7 +1,7 @@
 import { json, readJson } from "../json.ts";
 import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { parseDeviceCategories } from "../devices.ts";
-import { QuietHoursError } from "../quiet-hours.ts";
+import { QuietHoursError } from "../../../agent/notifications/quiet-hours.ts";
 import { handleCompatibility } from "./compat.ts";
 
 /** Health, event collection, device-registration, and legacy message routes. */
@@ -19,6 +19,7 @@ export async function handleHealthEventsCompatibility(
           ? ["tickets", "main-session", "policy", "decisions"]
           : []),
         ...(context.mcpOAuth ? ["mcp-oauth"] : []),
+        ...(context.notifications ? ["notifications"] : []),
         ...(sources.length > 0 ? ["sources"] : []),
       ],
       ...(sources.length > 0 ? { sources } : {}),

@@ -86,6 +86,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     now: ctx.now,
   });
   channelNotifier.start();
+  const ticketChannels = async (
+    ticketId: string | undefined,
+    goalId: string
+  ) => {
+    const ticket = ticketId
+      ? await ticketStore.get(ticketId).catch(() => undefined)
+      : await ticketStore.getByGoal(goalId).catch(() => undefined);
+    return ticket?.channels ?? [];
+  };
   const enabledSources = [
     ...(options.sources?.containerHealth ? ["container-health"] : []),
     ...(options.sources?.downloadCompleted ? ["download-completed"] : []),
@@ -141,18 +150,36 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],
       onNeedsPerson: async (notice) => {
-        // The outbox entry is written before the Goal reports its terminal state, so a shutdown
-        // cannot lose it; sending stays in the background.
+        if (options.onGoalNeedsPerson) {
+          // The app-level notification layer owns both the owner targets and the Ticket's channels.
+          await options.onGoalNeedsPerson({
+            ...notice,
+            channels: await ticketChannels(notice.ticketId, notice.goalId),
+          });
+          return;
+        }
+        // A host that only installed channel adapters keeps the older writeback path.
         try {
           await channelNotifier.enqueueNeedsPerson(notice);
           void channelNotifier.flush().catch(() => {});
-        } finally {
-          await options.onGoalNeedsPerson?.(notice);
+        } catch {
+          // Delivery is supplementary and never changes Goal state.
         }
       },
       onCompleted: async (notice) => {
-        await channelNotifier.enqueueCompleted(notice);
-        void channelNotifier.flush().catch(() => {});
+        if (options.onGoalCompleted) {
+          await options.onGoalCompleted({
+            ...notice,
+            channels: await ticketChannels(notice.ticketId, notice.goalId),
+          });
+          return;
+        }
+        try {
+          await channelNotifier.enqueueCompleted(notice);
+          void channelNotifier.flush().catch(() => {});
+        } catch {
+          // Delivery is supplementary and never changes Goal state.
+        }
       },
     }
   );

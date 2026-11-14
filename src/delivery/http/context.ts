@@ -1,8 +1,9 @@
 import type { ThebeAgent } from "../../agent/index.ts";
+import type { NotificationService } from "../../agent/notifications/service.ts";
 import { json } from "./json.ts";
 import type { DeviceRegistry } from "./devices.ts";
 import type { PushOutboxStatus } from "./push-status.ts";
-import type { QuietHoursStore } from "./quiet-hours.ts";
+import type { QuietHoursStore } from "../../agent/notifications/quiet-hours.ts";
 import type { TokenCaller } from "./token-store.ts";
 
 /** The shared seam between HTTP dispatch and focused route modules. */
@@ -23,6 +24,8 @@ export type ThebeHttpContext = {
   pushOutbox?: { status(): PushOutboxStatus };
   /** The daily window in which Core holds its pushes. */
   quietHours?: QuietHoursStore;
+  /** Multi-channel notifications: settings, routing, and the durable outbox. */
+  notifications?: NotificationService;
   /** Whether the optional MCP OAuth authorization server is configured. */
   mcpOAuth?: boolean;
   /** The authorization boundary, used by the isolation report. */
@@ -49,6 +52,7 @@ export function createThebeHttpContext(
     pushIdentity?: { publicKey: string; relayUrl: string };
     pushOutbox?: ThebeHttpContext["pushOutbox"];
     quietHours?: QuietHoursStore;
+    notifications?: ThebeHttpContext["notifications"];
     mcpOAuth?: boolean;
     workspacePath?: string;
   }
@@ -67,6 +71,7 @@ export function createThebeHttpContext(
     pushIdentity: options.pushIdentity,
     pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
+    notifications: options.notifications,
     mcpOAuth: options.mcpOAuth,
     workspacePath: options.workspacePath,
   };
