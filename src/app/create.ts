@@ -15,7 +15,7 @@ import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createDeviceRegistry } from "../delivery/http/devices.ts";
 import { createPushIdentity } from "./push/identity.ts";
-import { createQuietHoursStore } from "../delivery/http/quiet-hours.ts";
+import { createQuietHoursStore } from "../agent/notifications/quiet-hours.ts";
 import { createQuietHoursNotifier } from "./push/quiet-notifier.ts";
 import { createPushNotifier } from "./push/notifier.ts";
 import { createThebeAgent, type ThebeAgent } from "../agent/index.ts";
@@ -29,6 +29,18 @@ import type { ProductBackgroundTaskProvider } from "../agent/background-tasks/pr
 import type { OAuthHttpIntegration } from "../delivery/http/oauth/service.ts";
 import type { Source } from "../agent/sources/types.ts";
 import type { ChannelAdapter } from "../agent/channels/types.ts";
+import { key } from "../agent/tickets/ids.ts";
+import {
+  createNotificationService,
+  type NotificationService,
+} from "../agent/notifications/service.ts";
+import type {
+  NotificationAdapter,
+  NotificationTarget,
+} from "../agent/notifications/types.ts";
+import { priorityForGoalNotice } from "../agent/notifications/types.ts";
+import type { ChannelRef } from "../agent/sources/types.ts";
+import { createChannelNotificationAdapter } from "../adapters/notifications/channel.ts";
 
 export type ThebeAppPrompt = (
   text: string
@@ -78,6 +90,10 @@ export function createThebeApp(options: {
   pushRelayUrl?: string;
   /** Replaces `fetch` for calls to the Push Relay; tests use it to stand in for the relay. */
   pushFetch?: typeof fetch;
+  /** Multi-channel notification transports (webhook, Telegram, WeCom, DingTalk, email). */
+  notificationAdapters?: readonly NotificationAdapter[];
+  /** Inject a composed notification service; tests use it to observe or replace delivery. */
+  notifications?: NotificationService;
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -119,6 +135,7 @@ export function createThebeApp(options: {
   handler: ReturnType<typeof createThebeHttpHandler>;
 } {
   const storedSettings = options.settingsStore?.load();
+  const clock = options.now ?? (() => new Date());
   const deviceDir = options.agentStoreDir
     ? join(options.agentStoreDir, "devices")
     : undefined;
@@ -140,6 +157,29 @@ export function createThebeApp(options: {
       : undefined;
   // Quiet hours only delay the push; the approval itself is already waiting.
   const quietHours = createQuietHoursStore({ dir: deviceDir });
+  // A Ticket's recorded channel is a default notification target; wrapping the same ChannelAdapter
+  // keeps its write-back and idempotency behaviour instead of adding a second delivery stack.
+  const notificationAdapters = [
+    ...(options.notificationAdapters ?? []),
+    ...(options.channelAdapters ?? [])
+      .filter(
+        (adapter) =>
+          !(options.notificationAdapters ?? []).some(
+            (existing) => existing.id === adapter.id
+          )
+      )
+      .map(createChannelNotificationAdapter),
+  ];
+  const notifications =
+    options.notifications ??
+    createNotificationService({
+      adapters: notificationAdapters,
+      dir: options.agentStoreDir
+        ? join(options.agentStoreDir, "notifications")
+        : undefined,
+      now: clock,
+    });
+  notifications.start();
   const notifier = pushNotifier
     ? createQuietHoursNotifier({
         inner: pushNotifier,
@@ -148,72 +188,168 @@ export function createThebeApp(options: {
       })
     : undefined;
   void notifier?.resume();
+  const ticketTargets = (
+    channels: readonly ChannelRef[] | undefined
+  ): NotificationTarget[] =>
+    (channels ?? []).map((channel) => ({
+      id: `ticket:${key(
+        "notification-target",
+        channel.source,
+        channel.thread,
+        ...Object.entries(channel.address ?? {})
+          .sort(([left], [right]) => left.localeCompare(right))
+          .flatMap(([name, value]) => [name, value])
+      )}`,
+      channel,
+      categories: "all",
+      enabled: true,
+    }));
   const agent = createThebeAgent({
-    onPendingApproval: notifier
-      ? (record) => {
-          void notifier.notify({
-            category: "thebe.permission",
-            title: "Thebe",
-            body: "An action is waiting for your approval.",
-            deepLink: `thebe://approval/${encodeURIComponent(record.id)}`,
-            id: `approval-${record.id}`,
-          });
-        }
-      : undefined,
-    onGoalNeedsPerson: notifier
-      ? (notice) =>
-          notifier.notify({
-            category: "thebe.activity",
-            title: "Thebe",
-            body: notice.message,
-            deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
-            id: notice.id,
-            ticket: notice.ticketId ?? notice.goalId,
-          })
-      : undefined,
-    onEvalUnavailable: notifier
-      ? (notice) =>
-          notifier.notify({
-            category: "thebe.activity",
-            title: "Thebe",
-            body: notice.message,
-            deepLink: "thebe://core",
-            id: notice.id,
-          })
-      : undefined,
-    onBackgroundBudgetPaused: notifier
-      ? (notice) =>
-          notifier.notify({
-            category: "thebe.activity",
-            title: "Background work paused",
-            body: notice.message,
-            deepLink: "thebe://usage",
-            id: notice.id,
-          })
-      : undefined,
-    onBackgroundBudgetThreshold: notifier
-      ? (notice) =>
-          notifier.notify({
-            category: "thebe.activity",
-            title:
-              notice.title ??
-              `Background budget at ${Math.round((notice.threshold ?? 1) * 100)}%`,
-            body: notice.message,
-            deepLink: "thebe://usage",
-            id: notice.id,
-          })
-      : undefined,
-    onProactiveMessage: notifier
-      ? (notice) =>
-          notifier.notify({
-            category: "thebe.activity",
-            title: "Thebe",
-            body: notice.summary ?? notice.body,
-            deepLink: notice.deepLink ?? "thebe://main-session",
-            id: notice.id,
-            ticket: notice.ticketId,
-          })
-      : undefined,
+    onPendingApproval: (record) => {
+      void notifier?.notify({
+        category: "thebe.permission",
+        title: "Thebe",
+        body: "An action is waiting for your approval.",
+        deepLink: `thebe://approval/${encodeURIComponent(record.id)}`,
+        id: `approval-${record.id}`,
+      });
+      void notifications.notify({
+        id: `approval-${record.id}`,
+        category: "attention",
+        priority: "critical",
+        title: "Thebe",
+        body: "An action is waiting for your approval.",
+        deepLink: `thebe://approval/${encodeURIComponent(record.id)}`,
+        createdAt: clock().toISOString(),
+      });
+    },
+    onGoalNeedsPerson: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title: "Thebe",
+        body: notice.message,
+        deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
+        id: notice.id,
+        ticket: notice.ticketId ?? notice.goalId,
+      });
+      await notifications.notify(
+        {
+          id: notice.id,
+          category: "attention",
+          priority: priorityForGoalNotice("goal_needs_person", notice.reason),
+          title: "Thebe",
+          body: notice.message,
+          deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
+          ...(notice.ticketId ? { ticketId: notice.ticketId } : {}),
+          goalId: notice.goalId,
+          ticketReason: notice.reason,
+          createdAt: clock().toISOString(),
+        },
+        { extraTargets: ticketTargets(notice.channels) }
+      );
+    },
+    onGoalCompleted: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title: "Thebe",
+        body: notice.message,
+        deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
+        id: notice.id,
+        ticket: notice.ticketId ?? notice.goalId,
+      });
+      await notifications.notify(
+        {
+          id: notice.id,
+          category: "completed",
+          priority: "normal",
+          title: "Thebe",
+          body: notice.message,
+          deepLink: `thebe://goal/${encodeURIComponent(notice.goalId)}`,
+          ...(notice.ticketId ? { ticketId: notice.ticketId } : {}),
+          goalId: notice.goalId,
+          createdAt: clock().toISOString(),
+        },
+        { extraTargets: ticketTargets(notice.channels) }
+      );
+    },
+    onEvalUnavailable: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title: "Thebe",
+        body: notice.message,
+        deepLink: "thebe://core",
+        id: notice.id,
+      });
+      await notifications.notify({
+        id: notice.id,
+        category: "source_health",
+        priority: "normal",
+        title: "Thebe",
+        body: notice.message,
+        deepLink: "thebe://core",
+        createdAt: clock().toISOString(),
+      });
+    },
+    onBackgroundBudgetPaused: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title: "Background work paused",
+        body: notice.message,
+        deepLink: "thebe://usage",
+        id: notice.id,
+      });
+      await notifications.notify({
+        id: notice.id,
+        category: "budget",
+        priority: "critical",
+        title: "Background work paused",
+        body: notice.message,
+        deepLink: "thebe://usage",
+        createdAt: clock().toISOString(),
+      });
+    },
+    onBackgroundBudgetThreshold: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title:
+          notice.title ??
+          `Background budget at ${Math.round((notice.threshold ?? 1) * 100)}%`,
+        body: notice.message,
+        deepLink: "thebe://usage",
+        id: notice.id,
+      });
+      await notifications.notify({
+        id: notice.id,
+        category: "budget",
+        priority: "normal",
+        title:
+          notice.title ??
+          `Background budget at ${Math.round((notice.threshold ?? 1) * 100)}%`,
+        body: notice.message,
+        deepLink: "thebe://usage",
+        createdAt: clock().toISOString(),
+      });
+    },
+    onProactiveMessage: async (notice) => {
+      await notifier?.notify({
+        category: "thebe.activity",
+        title: "Thebe",
+        body: notice.summary ?? notice.body,
+        deepLink: notice.deepLink ?? "thebe://main-session",
+        id: notice.id,
+        ticket: notice.ticketId,
+      });
+      await notifications.notify({
+        id: notice.id,
+        category: "attention",
+        priority: "normal",
+        title: "Thebe",
+        body: notice.summary ?? notice.body,
+        deepLink: notice.deepLink ?? "thebe://main-session",
+        ...(notice.ticketId ? { ticketId: notice.ticketId } : {}),
+        createdAt: clock().toISOString(),
+      });
+    },
     runtime: options.runtime,
     provider: options.provider,
     auditPath: options.auditPath,
@@ -269,6 +405,18 @@ export function createThebeApp(options: {
     const result = await agent.prompt(text);
     return { text: result.text, tools: result.tools };
   };
+  // Notification delivery is app-level, so quiesce has to stop its timer too; otherwise a maintenance
+  // window could still write outbox state while the rest of Core is idle.
+  const quiesce = agent.quiesce.bind(agent);
+  const unquiesce = agent.unquiesce.bind(agent);
+  agent.quiesce = async () => {
+    await notifications.stop();
+    await quiesce();
+  };
+  agent.unquiesce = async () => {
+    await unquiesce();
+    notifications.start();
+  };
   const handler = createThebeHttpHandler({
     version: options.version ?? "0.1.0",
     token: options.token,
@@ -281,6 +429,7 @@ export function createThebeApp(options: {
         : undefined,
     quietHours,
     pushOutbox: pushNotifier,
+    notifications,
     workspacePath: options.workspacePath,
     oauth: options.oauth,
   });

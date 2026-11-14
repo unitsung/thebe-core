@@ -179,6 +179,49 @@ const operations: Operation[] = [
     requestBody: { required: true },
   },
   {
+    method: "get",
+    path: "/v1/notifications/settings",
+    summary: "Read notification targets with credentials masked",
+    tag: "system",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/settings",
+    summary: "Replace notification targets and global routing policy",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationSettingsInput",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/status",
+    summary: "Read per-target pending, dropped, unknown, and last error state",
+    tag: "system",
+    responseSchema: "NotificationStatus",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/test",
+    summary: "Send one test notice to a configured target",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationTestRequest",
+    responseSchema: "NotificationTestResult",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/send",
+    summary:
+      "Queue a notification for every configured target (external entry point for devloop)",
+    tag: "system",
+    response: 202,
+    requestBody: { required: true },
+    requestSchema: "NotificationSendRequest",
+    responseSchema: "NotificationSendResult",
+  },
+  {
     method: "post",
     path: "/v1/messages",
     summary: "Send a prompt (compatibility endpoint)",
@@ -1761,6 +1804,184 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 at: { type: "string", format: "date-time" },
               },
             },
+          },
+        },
+        NotificationCategory: {
+          type: "string",
+          enum: [
+            "attention",
+            "completed",
+            "failed",
+            "budget",
+            "watchdog",
+            "source_health",
+            "pipeline",
+          ],
+        },
+        NotificationPriority: {
+          type: "string",
+          enum: ["critical", "normal", "low"],
+        },
+        NotificationTarget: {
+          type: "object",
+          required: ["id", "channel", "categories", "enabled"],
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            channel: {
+              type: "object",
+              required: ["source", "thread"],
+              properties: {
+                source: { type: "string" },
+                thread: { type: "string" },
+                address: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                },
+              },
+            },
+            categories: {
+              oneOf: [
+                { type: "string", enum: ["all"] },
+                {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              ],
+            },
+            minPriority: {
+              $ref: "#/components/schemas/NotificationPriority",
+            },
+            quietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string", example: "23:00" },
+                end: { type: "string", example: "07:00" },
+                timeZone: { type: "string" },
+              },
+            },
+            digest: {
+              type: "object",
+              required: ["windowMinutes", "categories"],
+              properties: {
+                windowMinutes: { type: "integer", minimum: 1, maximum: 1440 },
+                categories: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              },
+            },
+            enabled: { type: "boolean" },
+          },
+        },
+        NotificationSettings: {
+          type: "object",
+          required: [
+            "version",
+            "targets",
+            "criticalBypassesQuietHours",
+            "rateLimitPerHour",
+            "updatedAt",
+          ],
+          properties: {
+            version: { type: "integer", enum: [1] },
+            targets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/NotificationTarget" },
+            },
+            defaultQuietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string" },
+                end: { type: "string" },
+                timeZone: { type: "string" },
+              },
+            },
+            criticalBypassesQuietHours: { type: "boolean" },
+            rateLimitPerHour: { type: "integer", minimum: 0 },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSettingsInput: {
+          type: "object",
+          properties: {
+            settings: { $ref: "#/components/schemas/NotificationSettings" },
+          },
+          additionalProperties: true,
+        },
+        NotificationStatus: {
+          type: "object",
+          required: ["pending", "dropped", "unknown", "targets"],
+          properties: {
+            pending: { type: "integer", minimum: 0 },
+            dropped: { type: "integer", minimum: 0 },
+            unknown: { type: "integer", minimum: 0 },
+            lastError: { type: "string" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            targets: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        NotificationTestRequest: {
+          type: "object",
+          required: ["targetId"],
+          properties: { targetId: { type: "string" } },
+        },
+        NotificationTestResult: {
+          type: "object",
+          required: ["ok", "targetId", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            targetId: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            reason: { type: "string" },
+          },
+        },
+        NotificationSendRequest: {
+          type: "object",
+          required: ["category", "priority", "title", "body"],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Stable deduplication key; omitted ids are generated per request.",
+            },
+            category: { $ref: "#/components/schemas/NotificationCategory" },
+            priority: { $ref: "#/components/schemas/NotificationPriority" },
+            title: { type: "string" },
+            body: { type: "string" },
+            deepLink: { type: "string" },
+            ticketId: { type: "string" },
+            goalId: { type: "string" },
+            resource: {
+              type: "object",
+              required: ["kind", "id"],
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSendResult: {
+          type: "object",
+          required: ["ok", "id", "targets", "skipped"],
+          properties: {
+            ok: { type: "boolean" },
+            id: { type: "string" },
+            targets: { type: "array", items: { type: "string" } },
+            skipped: { type: "integer", minimum: 0 },
           },
         },
         OAuthAuthorizeRequest: {

@@ -61,6 +61,19 @@ export type {
   TicketChannelNotice,
 } from "./channels/types.ts";
 export type {
+  Notification,
+  NotificationAdapter,
+  NotificationCapabilities,
+  NotificationDeliveryAttempt,
+  NotificationSendInput,
+  NotificationSettings,
+  NotificationTarget,
+  NoticeCategory,
+  NoticePriority,
+} from "./notifications/types.ts";
+export { createNotificationService } from "./notifications/service.ts";
+export type { NotificationService } from "./notifications/service.ts";
+export type {
   Ticket,
   TicketInput,
   TicketMandate,

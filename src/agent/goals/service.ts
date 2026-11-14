@@ -21,6 +21,7 @@ import { httpError } from "../types.ts";
 import { stripToolLogs, shortenToWords } from "../main-session/proactive.ts";
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { MandateRevalidation } from "../tickets/mandate.ts";
+import type { ChannelRef } from "../sources/types.ts";
 import {
   buildGoalStatusCheckPrompt,
   createGoalWatchdog,
@@ -41,6 +42,8 @@ export type GoalNeedsPersonNotice = {
   ticketId?: string;
   reason: "answer" | "review" | "blocked" | "stalled";
   message: string;
+  /** The Ticket's recorded reply channels, filled by the composition root for notification routing. */
+  channels?: ChannelRef[];
 };
 
 export type GoalCompletedNotice = {
@@ -48,6 +51,8 @@ export type GoalCompletedNotice = {
   goalId: string;
   ticketId?: string;
   message: string;
+  /** The Ticket's recorded reply channels, filled by the composition root for notification routing. */
+  channels?: ChannelRef[];
 };
 
 export type GoalApiOptions = {

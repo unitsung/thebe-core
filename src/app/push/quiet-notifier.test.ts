@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createQuietHoursStore } from "../../delivery/http/quiet-hours.ts";
+import { createQuietHoursStore } from "../../agent/notifications/quiet-hours.ts";
 import { createQuietHoursNotifier } from "./quiet-notifier.ts";
 import type { DurablePushNotifier, PushNotice } from "./notifier.ts";
 

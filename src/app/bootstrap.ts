@@ -31,6 +31,7 @@ import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createTokenVerifier } from "../delivery/http/token-store.ts";
 import { createThebeApp } from "./create.ts";
+import { createNotificationAdaptersFromEnv } from "./notifications.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
@@ -238,6 +239,7 @@ export async function bootstrapThebe(
       parseDailyBackgroundTokenBudgetThresholds(process.env),
     watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
+    notificationAdapters: createNotificationAdaptersFromEnv(process.env),
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
     model: defaultModel,
