@@ -143,6 +143,41 @@ export THEBE_FEISHU_CHATS=oc_...
 - Eval asks the configured assessment model about eligible Triggers under the Policy. `THEBE_EVAL_MAX_PER_HOUR` caps questions at 60 per hour by default; `0` removes the cap. A provider error, an unusable reply, or the hourly limit records a Decision with `outcome: "unavailable"`, never a "no". Core pushes one notice for an assessment outage and waits for a successful assessment before it announces another.
   Autonomous model work also has a daily budget. Input, output and cache-write tokens count; cache-read is reported separately and does not consume the budget. The owner's own chat is never included. The default is 1,000,000 tokens per UTC day and can be changed with `THEBE_BACKGROUND_TOKEN_BUDGET` or `PUT /v1/usage/budget`; `0` pauses autonomous model work. Warning thresholds default to 50%, 80%, 90% and 100% (configurable via `THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS` or `PUT /v1/usage/budget`); notices trigger once per UTC day when crossing 50%, 80%, 90% and 100%. At the limit Eval still runs the deterministic Gate, but skips the model, records `unavailable` / `daily_budget`, accepts no new Ticket, and sends one notice that day. It resumes at the next UTC midnight. `GET /v1/usage/summary` returns today's usage, estimated USD cost, thresholds, pause state and the last 30 days; after 15 days Core offers a one-time budget of twice the daily p95, and nothing changes unless the owner accepts it.
 
+## Multi-channel notifications
+
+`/v1/notifications/*` sends person-facing events to the owner's configured targets. Device push (`/v1/devices` and the Push Relay) remains a separate, parallel channel.
+
+- Settings live in `{agentStoreDir}/notifications/notifications.json` (0600) and the pending queue in `outbox.json` in the same directory. Adapter-level credentials (bot token, SMTP password, WeCom corp secret) come from the environment; an address that embeds its own token (a DingTalk access token or a webhook URL) stays in the owner-only settings file and is masked on read.
+- `NotificationTarget.channel.source` selects the adapter: `webhook`, `slack`, `discord`, `openclaw`, `telegram`, `wecom`, `dingtalk`, or `smtp`. Existing Feishu and GitHub ticket channels also work as owner targets (a non-Ticket notice becomes a plain message/comment). `channel.address` is per channel: webhook `{url, secret?}`; Slack/Discord `{url}`; OpenClaw `{channel, target, account?, threadId?, replyTo?, silent?}`; Telegram `{chatId, threadId?}`; WeCom group robot `{url}` or application message `{toUser}`; DingTalk `{accessToken, secret?}`; email `{to}`.
+- The `openclaw` adapter is protocol-only and never embeds OpenClaw. With `THEBE_OPENCLAW_GATEWAY_URL` (and an optional `THEBE_OPENCLAW_GATEWAY_TOKEN`) it calls the Gateway's `POST /tools/invoke` `message` tool, so one target reaches every channel OpenClaw supports without Core implementing each one. Without a Gateway URL it falls back to an installed `openclaw message send --json` (`THEBE_OPENCLAW_BIN` overrides the executable). The `openclaw` profile in `deploy/docker-compose.yml` wires the Gateway as a sidecar. The OpenClaw npm package is not a Core dependency. The two transports classify errors differently: a timeout, a partial delivery, or a 2xx with no delivery receipt is recorded as `unknown` and never replayed; a missing CLI or an invalid Gateway URL is a permanent discard; recoverable errors (Gateway 408/425/429/5xx, an explicit delivery failure, a CLI rate limit, and an unconfigured channel on the Gateway path) retry indefinitely with exponential backoff (interval capped at 5 minutes); they are not auto-discarded, so fix the configuration or disable the target to stop retrying. Gateway 4xx (auth / policy / tool unavailable) is a permanent discard; only the CLI path treats channel errors such as `unknown channel` / `not configured` as a permanent discard — the Gateway path does not.
+- Categories: `attention`, `completed`, `failed`, `budget`, `watchdog`, `source_health`, `pipeline`. Priorities: `critical`, `normal`, `low`. A target narrows itself with `categories` and `minPriority`.
+- `critical` bypasses quiet hours by default; set `criticalBypassesQuietHours` to `false` to disable that. Normal and low notices enter the queue only when the window ends. `rateLimitPerHour` is a per-target hourly limit (0 means no limit); `critical` is never rate limited, and the rolling window is in memory, so a restart resets it.
+- Delivery is durable, at-least-once, and serial per target. Retrying the same `id` never produces a second notice. A request that was sent but timed out (TimeoutError/AbortError) is recorded as `unknown` and is never replayed, including after a Core restart. A connection failure / disconnect (refused, reset, etc.) is a recoverable error and retries with backoff instead of being recorded as `unknown`.
+- `GET/PUT /v1/notifications/settings`, `GET /v1/notifications/status`, `POST /v1/notifications/test`, and `POST /v1/notifications/send` require the Core token. Writes return 503 while quiesced. `GET settings` masks `secret`/`token`-shaped fields and credentials in URL query strings.
+- `POST /v1/notifications/send` is the external entry point for devloop and similar hosts. It accepts `{id?, category, priority, title, body, deepLink?, ticketId?, goalId?}`. Without a caller-supplied `id` a fresh id is generated, so pass a stable id when retries must be idempotent. It only enqueues and returns 202; the outbox performs delivery.
+- A target with `digest` (`{windowMinutes, categories}`) holds matching `low`/`normal` notices and sends one summary when the window ends; `critical` notices always bypass the window. Digest state is durable (`digests.json`), so a restart keeps an open window and emits one that ended while Core was down. `GET /v1/notifications/status` reports held notices as `digestPending`. A Goal notice also carries the Ticket's recorded `ChannelRef`s as event-specific targets; they are merged with owner targets and deduplicated by channel, and the existing write-back adapter performs the send.
+
+Environment:
+
+```bash
+# The generic webhook needs no environment variable; each target supplies url (and optional secret) in address.
+# OpenClaw sidecar (omit both when using a local openclaw CLI):
+export THEBE_OPENCLAW_GATEWAY_URL='http://127.0.0.1:18789'
+export THEBE_OPENCLAW_GATEWAY_TOKEN=...
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+export THEBE_WECOM_WEBHOOK_URL='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
+# Or WeCom application messages (a target uses {toUser}):
+export THEBE_WECOM_CORP_ID=ww...
+export THEBE_WECOM_CORP_SECRET=...
+export THEBE_WECOM_AGENT_ID=1000002
+export THEBE_DINGTALK_WEBHOOK_URL='https://oapi.dingtalk.com/robot/send?access_token=...'
+export THEBE_DINGTALK_SECRET=SEC...
+export THEBE_SMTP_URL="smtps://smtp.example.com:465"
+export THEBE_SMTP_FROM='thebe@example.com'
+```
+
+An adapter without its credential is not registered; a target pointing at it records `adapter_missing` and does not affect other targets. A test send validates the address and credential and never enters the outbox.
+
 ## Model providers and sign-in
 
 Model providers are managed by the Pi runtime adapter. List and configure them
