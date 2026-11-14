@@ -254,6 +254,77 @@ without activity pauses the Goal. Every intervention writes an audit method
 under `watchdog.*`, and the latest state survives on the Goal as `watchdog`.
 These actions never expand its Mandate or inject work into a running worker.
 
+### 3.3 Multi-channel notifications and the OpenClaw sidecar
+
+Core's notification outbox sends owner events to every configured target; device
+push stays a separate transport. Adapter credentials come from the environment;
+the settings file holds targets and addresses only. The built-in webhook, Slack,
+Discord, Telegram, WeCom, DingTalk, and SMTP adapters are documented under
+[Multi-channel notifications](configuration.en.md#multi-channel-notifications).
+
+A target with `channel.source: "openclaw"` reaches every platform OpenClaw
+supports. The compose file ships an optional sidecar so the deployment includes
+that channel without adding OpenClaw to Core:
+
+```bash
+cd deploy
+printf '\nTHEBE_OPENCLAW_GATEWAY_TOKEN=%s\n' "$(openssl rand -hex 32)" >> .env
+docker compose --profile openclaw up -d --build
+```
+
+Set `THEBE_OPENCLAW_GATEWAY_TOKEN` **before** enabling the profile. The same
+token is passed to Core and the sidecar; OpenClaw refuses to bind `0.0.0.0`
+without auth, so an unset token fails loudly at sidecar startup rather than
+opening an unauthenticated `/tools/invoke`. The default (profile-less) deploy
+is unaffected by this variable.
+
+Core reaches the Gateway at `http://openclaw:18789` (the compose default for
+`THEBE_OPENCLAW_GATEWAY_URL`); the Gateway has no published host port and is
+reachable only on the compose network. Its state lives in the `openclaw-data`
+volume. The default image is the official `ghcr.io/openclaw/openclaw:latest`;
+pin a version with `OPENCLAW_IMAGE` in production. Because the compose file
+always sets the Gateway URL, the local `openclaw` CLI fallback is not used in
+this container deployment.
+
+Register each channel once after the sidecar is up (this writes into the volume).
+Passing `TELEGRAM_BOT_TOKEN`, `SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`, or
+`DISCORD_BOT_TOKEN` in `deploy/.env` makes the credential available inside the
+container, but the env value alone does **not** register a channel:
+
+```bash
+docker compose --profile openclaw run -T --rm --entrypoint node openclaw \
+  /app/openclaw.mjs channels add --channel telegram --use-env
+```
+
+`--use-env` stores an env-backed reference in `openclaw.json` instead of the
+token itself; `--entrypoint node ... /app/openclaw.mjs` runs the CLI without the
+Gateway entrypoint, and `-T` keeps the command non-interactive. Repeat
+`channels add` per channel/account, then restart is not required — the Gateway
+hot-reloads channel config.
+
+Then add an owner target with the settings API:
+
+```bash
+curl -sS -X PUT http://127.0.0.1:8787/v1/notifications/settings \
+  -H "X-Thebe-Token: $TOKEN" -H 'content-type: application/json' \
+  -d '{"version":1,"criticalBypassesQuietHours":true,"rateLimitPerHour":30,
+       "targets":[{"id":"ops","channel":{"source":"openclaw","thread":"ops",
+       "address":{"channel":"telegram","target":"123456789"}},
+       "categories":"all","enabled":true}]}'
+```
+
+`POST /v1/notifications/test` with `{"targetId":"ops"}` performs one real send,
+and `GET /v1/notifications/status` shows the queue and the latest error. The
+sidecar is optional: without it, an `openclaw` target records retries while every
+other target keeps working. Never publish port 18789. If a test send never
+settles, check `docker compose --profile openclaw logs openclaw` (the Gateway
+must be listening on `0.0.0.0:18789`) and confirm the channel is registered with
+`... run -T --rm --entrypoint node openclaw /app/openclaw.mjs channels list`.
+
+For a local (non-container) run, either start `openclaw gateway` and set
+`THEBE_OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789`, or install the CLI and set
+`THEBE_OPENCLAW_BIN` when it is not on `PATH`.
+
 ## 4. Network exposure and client connections
 
 Pick one TLS path; all three keep Core on loopback and never expose the token in

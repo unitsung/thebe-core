@@ -504,6 +504,41 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 - 直接打 Docker Engine API 的调用（`curl --unix-socket /var/run/docker.sock ... /containers/create`、podman remote）走 `docker-api-guard.ts`：`HostConfig.Privileged=true`、`Binds` 里的宿主根 / `docker.sock`、`CapAdd: SYS_ADMIN|ALL`、`/volumes/prune` 与 `/system/prune` 一律 `critical`（策略拒绝）；`/containers/create` 的 body 解析不出来时降级为 `dangerous`（转人工）而不是放行。
 - 这层守卫始终开启；只有 `bypassPermissions`（见下）能为单个会话关掉它。
 
+## 多通道通知
+
+`/v1/notifications/*` 把需要人知道的事件送到 owner 配置的目标；设备 Push（`/v1/devices` 与 Push Relay）仍是并行的另一条通道。
+
+- 设置保存在 `{agentStoreDir}/notifications/notifications.json`（0600），待发送队列保存在同目录的 `outbox.json`。适配器级凭据（bot token、SMTP password、企微 corp secret）来自环境变量；地址自身携带的 token（钉钉 access token、webhook URL）保存在 0600 设置文件，读取时会被遮住。
+- `NotificationTarget.channel.source` 选择适配器：`webhook`、`slack`、`discord`、`openclaw`、`telegram`、`wecom`、`dingtalk`、`smtp`。现有飞书/GitHub Ticket channel 也可作为 owner target（非 Ticket 通知会作为普通消息/评论发送）。`channel.address` 按通道填写：webhook `{url, secret?}`；Slack/Discord `{url}`；OpenClaw `{channel, target, account?, threadId?, replyTo?, silent?}`；Telegram `{chatId, threadId?}`；企业微信群机器人 `{url}` 或应用消息 `{toUser}`；钉钉 `{accessToken, secret?}`；邮件 `{to}`。
+- `openclaw` 适配器只做协议适配，不内嵌 OpenClaw。设置 `THEBE_OPENCLAW_GATEWAY_URL`（及可选的 `THEBE_OPENCLAW_GATEWAY_TOKEN`）时，它调用 Gateway 的 `POST /tools/invoke` 和 `message` 工具；因此能覆盖 OpenClaw 支持的全部通道，Core 不需要逐个实现。没有 Gateway URL 时回退到本机已安装的 `openclaw message send --json`（`THEBE_OPENCLAW_BIN` 可指定路径）。`deploy/docker-compose.yml` 的 `openclaw` profile 已把 Gateway 作为 sidecar 接好。Core 不依赖 OpenClaw 的 npm 包。两条传输的错误分类不同：超时、部分投递或 2xx 但无送达回执记为 `unknown` 且永不重放；CLI 缺失或 Gateway URL 非法永久丢弃；可恢复错误（Gateway 408/425/429/5xx、明确的投递失败、CLI 限流、以及 Gateway 侧的通道未配置）按指数退避持续重试（间隔上限 5 分钟），不会自动放弃，需由运维修正配置或停用目标来停止。Gateway 4xx（鉴权/策略/工具不可用）永久丢弃；只有 CLI 路径把 `unknown channel`/`not configured` 这类通道错误当永久丢弃，Gateway 路径不会。
+- 类别：`attention`、`completed`、`failed`、`budget`、`watchdog`、`source_health`、`pipeline`。优先级：`critical`、`normal`、`low`。目标用 `categories` 和 `minPriority` 收窄自己。
+- `critical` 默认穿透静默时段；把 `criticalBypassesQuietHours` 设为 `false` 可关闭。普通和低优先级通知在静默窗口结束后才进入队列。`rateLimitPerHour` 是每目标每小时上限（0 表示不限），`critical` 不受限；滚动窗口只在内存中，重启会清零。
+- 投递是持久、至少一次、按目标串行的：同一 `id` 重试不会产生第二条；请求已发出但超时（TimeoutError/AbortError）记为 `unknown`，Core 重启后不会重放。连接失败/断连（refused、reset 等）属于可恢复错误，会按退避重试而非记为 `unknown`。
+- `GET/PUT /v1/notifications/settings`、`GET /v1/notifications/status`、`POST /v1/notifications/test`、`POST /v1/notifications/send` 都受 Core token 保护；写操作在 quiesce 时返回 503。`GET settings` 会遮住 `secret`/`token` 类字段和 URL 查询串里的凭据。
+- `POST /v1/notifications/send` 是 devloop 等外部发送方的入口，接受 `{id?, category, priority, title, body, deepLink?, ticketId?, goalId?}`；省略 `id` 时每次请求生成新 id，需要幂等时请自带稳定 id。它只入队并返回 202，实际投递由 outbox 完成。
+- 带 `digest`（`{windowMinutes, categories}`）的目标会把匹配的 `low`/`normal` 通知累积到窗口结束，只发一条摘要；`critical` 永远立即发送。摘要状态持久化在 `digests.json`，重启会保留窗口，并补发 Core 停机期间已结束的窗口。`GET /v1/notifications/status` 用 `digestPending` 报告尚未发出的条数。Goal 通知还会携带 Ticket 记录的 `ChannelRef` 作为事件级 target；它们与 owner targets 合并并按 channel 去重，最终仍由现有 ChannelAdapter 写回。
+
+环境变量：
+
+```bash
+# 通用 webhook 不需要环境变量；每个目标在 address 里给 url（可选 secret 做 HMAC-SHA256）
+# OpenClaw sidecar（或用本机 openclaw CLI 时省略这两个变量）
+export THEBE_OPENCLAW_GATEWAY_URL='http://127.0.0.1:18789'
+export THEBE_OPENCLAW_GATEWAY_TOKEN=...
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+export THEBE_WECOM_WEBHOOK_URL='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
+# 或企业微信应用消息（target 使用 {toUser}）
+export THEBE_WECOM_CORP_ID=ww...
+export THEBE_WECOM_CORP_SECRET=...
+export THEBE_WECOM_AGENT_ID=1000002
+export THEBE_DINGTALK_WEBHOOK_URL='https://oapi.dingtalk.com/robot/send?access_token=...'
+export THEBE_DINGTALK_SECRET=SEC...
+export THEBE_SMTP_URL='smtps://smtp.example.com:465'
+export THEBE_SMTP_FROM='thebe@example.com'
+```
+
+没有配置对应凭据的适配器不会注册；指向它的目标会记录 `adapter_missing`，不影响其他目标。测试发送只验证地址和凭据，不进入 outbox。
+
 ## 权限模式
 
 一个设置决定会话不问就能做多少。名字沿用 Claude Code。

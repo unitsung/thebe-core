@@ -36,6 +36,31 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- Multi-channel notifications. `GET/PUT /v1/notifications/settings`,
+  `GET /v1/notifications/status`, `POST /v1/notifications/test` and
+  `POST /v1/notifications/send` expose durable owner targets for generic
+  webhooks, email, Telegram, WeCom (group robot or application message) and
+  DingTalk. Slack/Discord webhooks are included, an `openclaw` target bridges
+  every channel OpenClaw supports through its Gateway `tools/invoke` API (or a
+  local CLI), and the compose file can start that Gateway as an optional
+  sidecar. An existing Feishu or GitHub Ticket channel can serve as an owner
+  target for any
+  notice. A unified `Notification` carries category, priority, a stable id and
+  a `thebe://` deep link; the router filters by category/priority, honors
+  per-target quiet hours (critical bypasses by default), applies an hourly rate
+  limit, and queues one entry per `(notification, target)` in a durable outbox.
+  Delivery is serial per target, retries keep the same idempotency key, and a
+  send interrupted by a restart is recorded `unknown` and never replayed.
+  Credentials stay in environment variables; `GET settings` masks
+  credential-shaped address fields and URL query secrets. Goal attention and
+  completion, approval, budget, Eval outage and proactive-message events now
+  feed the same layer alongside the existing device Push path. A Goal notice
+  also carries the Ticket's recorded channels as event-specific targets, so the
+  Ticket's own reply address and the owner targets are merged and deduplicated
+  by channel. A target may configure a digest window: matching low/normal
+  notices are held in durable `digests.json` and sent as one summary when the
+  window ends, while critical notices bypass it; `GET
+  /v1/notifications/status` reports held notices as `digestPending`.
 - The Main Session is the single voice for communications to the owner (Issue #48).
   Workers report only to their ticket, with direct messages to the owner asserted and
   forbidden. Proactive messages from the resident Main Session and the `proactive_message`
