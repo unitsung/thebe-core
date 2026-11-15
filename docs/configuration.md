@@ -539,6 +539,31 @@ export THEBE_SMTP_FROM='thebe@example.com'
 
 没有配置对应凭据的适配器不会注册；指向它的目标会记录 `adapter_missing`，不影响其他目标。测试发送只验证地址和凭据，不进入 outbox。
 
+## IM 双向通道（多平台接缝；内置 Telegram）
+
+`/v1/im/*` 是双向聊天接入，和上面的通知出口是两条并列的路径：通知只写出站，IM 适配器还能接收平台消息。入站消息只允许进入 owner 私聊绑定的主 Session（`thebe-main`）；绑定同时固定 owner 的平台 sender id，同一私聊里的其他 sender 会被记录但不会进入模型。群聊和 guest 绑定只记录、不进入模型，也不会获得 shell/文件工具或跳过审批。
+
+- 状态保存在 `{agentStoreDir}/im/im.json`（0600）：账号、绑定、带 bot 身份标记的游标、7 天去重表和未处理入站队列。凭据是一组平台自定义字段，单独保存在同目录的 `im-secrets.json`（0600），任何 HTTP 响应都不返回；日志和错误信息也不包含凭据。
+- `POST /v1/im/channels` 接受 `{platform, label?, credentials: {字段: 值}}`。每个平台的 factory 声明必填字段、可选字段和校验规则；`platform` 是注册 id，内置适配器目前只有 `telegram`，`qq`、`wechat`、`imessage` 是预留的已知平台，尚未实现。Telegram 仍接受旧的 `token` 简写。
+- 平台工厂可选提供扫码/链接/验证码登录。`POST /v1/im/logins` 开始一次登录，`GET /v1/im/logins/{id}` 轮询，`DELETE /v1/im/logins/{id}` 取消。二维码/链接只在开始响应里返回一次，不写入状态文件或日志；确认后只返回新建的 `accountId`，凭据直接写入 `im-secrets.json`。内置 Telegram 使用 token，不支持登录流程，会返回 `login_not_supported`。
+- 路由：`GET /v1/im/platforms`（已注册平台、凭据字段和是否支持登录）、`GET/POST /v1/im/channels`、`DELETE /v1/im/channels/{id}`、`POST /v1/im/channels/{id}/test`、`POST /v1/im/logins`、`GET/DELETE /v1/im/logins/{id}`、`GET /v1/im/status`、`GET /v1/im/conversations`、`POST /v1/im/bind`、`DELETE /v1/im/bind/{id}`、`POST /v1/im/send`。写操作在 quiesce 时返回 503。
+- 绑定：先让 owner 给 bot 发一条消息，从 `/v1/im/conversations` 拿到 `chat.id`，再 `POST /v1/im/bind`，`chat.kind` 为 `direct`、`role` 为 `owner`。未观察过的 chat 返回 `chat_not_seen`；`senderId` 可省略（固定最后观察到的 sender），显式给出时必须与观察值一致，否则返回 `sender_mismatch`。`sessionId` 目前只能是 `thebe-main`；群聊只能绑为 `guest`，私聊不能绑为 `guest`，群聊也不能绑为 `owner`。
+- 入站先持久化再处理；同一 `(platform, account, chat, threadId, messageId)` 或 `updateId` 只处理一次。每个 chat（含 thread）一条串行队列，不同 chat 并行；Core 重启后未处理的入站会继续，已完成的消息不会重放。
+- 主 Session 正在处理另一轮时，owner 消息留在队列里而不是丢弃：默认 5 秒后回一条“排队中”，10 分钟后回一条超时提示并结束该条消息；如果主 Session 正在流式输出，消息会以 `followUp` 加入当前轮。`GET /v1/im/status` 的 `pending` 是队列深度。
+- 每个适配器会如实报告 capabilities：`proactive`、`replyOnly`、`replyWindowMs`、`maxMessagesPerWindow`、`recall`、`media`、`maxTextLength`、`markdown`、`threads`、`typing`。主动发送前 gateway 会检查 `proactive` 和适配器的 `canSendProactively(chat)`；不支持时返回 `proactive_not_supported`，窗口关闭时返回 `window_closed`。回复锚点（`replyTo`、`contextToken`）只属于当轮，持久目标只有 account + chat + 可选 thread。
+- 入站结构已包含 `threadId`、`mentions`、`media` 和 `replyAuthor`；媒体只记录描述，不下载、不执行。带文本的媒体消息会保留描述；纯媒体消息只记录会话，owner 会收到“暂不支持媒体”的提示，不进入模型。出站媒体在 `media: true` 的适配器真正实现前不会被声明为支持。
+- 游标与 bot/账号身份绑定：token 或账号身份变化时旧游标作废，避免把新 bot 从旧 `update_id` 开始轮询。
+- Telegram 适配器用 `getUpdates` 长轮询（`allowed_updates: ["message"]`），游标是 `update_id + 1`；支持论坛/话题的 `message_thread_id`。发送为纯文本，不设置 `parse_mode`，按 4096 字符分块并带 `(n/m)` 标记。429 只暂停该 bot token，409（另一个进程在轮询同一个 bot）进入 `error` 并停止轮询，不会无限重连。
+- `GET /v1/health` 只在至少配置了一个通道时报告 `im`。`health.state` 为 `stopped` / `starting` / `connected` / `needs_login` / `error`，可带安全的 `code`、`since`、`retryAt`。一个通道失败不会影响 Core 启动或其他通道；`GET /v1/im/status` 显示每个通道的最新错误（不含凭据）。
+- `THEBE_TELEGRAM_BOT_TOKEN` 会自动创建一个 environment 类型的 Telegram 通道（不能通过 API 删除）。`THEBE_TELEGRAM_API_BASE` 可用于自建代理或测试，`THEBE_TELEGRAM_POLL_TIMEOUT` 设置长轮询秒数（1–50，默认 50）。
+
+```bash
+# 只用环境变量接一个 Telegram 双向通道；同一个 bot token 也可以继续作为通知 target
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+# 可选：自建 Bot API 代理，或测试用假服务
+export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
+```
+
 ## 权限模式
 
 一个设置决定会话不问就能做多少。名字沿用 Claude Code。

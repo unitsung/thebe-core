@@ -31,6 +31,7 @@ export type ThebeHttpHandlerOptions = {
   pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: import("../../agent/notifications/quiet-hours.ts").QuietHoursStore;
   notifications?: import("./context.ts").ThebeHttpContext["notifications"];
+  im?: import("./context.ts").ThebeHttpContext["im"];
   workspacePath?: string;
   /** Calls a minute a scoped token may make over `/mcp`; 0 is no limit. Default: `THEBE_MCP_RATE_LIMIT`, else 120. */
   mcpRateLimit?: number;
@@ -82,6 +83,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
     notifications: options.notifications,
+    im: options.im,
     workspacePath: options.workspacePath,
     mcpRateLimit: options.mcpRateLimit,
     oauth: options.oauth,

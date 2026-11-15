@@ -240,6 +240,7 @@ export async function bootstrapThebe(
     watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
     notificationAdapters: createNotificationAdaptersFromEnv(process.env),
+    im: { env: process.env },
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
     model: defaultModel,

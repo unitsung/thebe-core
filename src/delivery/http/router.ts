@@ -20,6 +20,7 @@ import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
 import { handleMemoryRoutes } from "./routes/memory.ts";
 import { handleNotificationRoutes } from "./routes/notifications.ts";
+import { handleImRoutes } from "./routes/im.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
@@ -46,6 +47,7 @@ export type ThebeHttpRouterOptions = {
   pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: ThebeHttpContext["quietHours"];
   notifications?: ThebeHttpContext["notifications"];
+  im?: ThebeHttpContext["im"];
   workspacePath?: string;
   /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
   mcpRateLimit?: number;
@@ -161,6 +163,8 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (notificationResponse) {
         return notificationResponse;
       }
+      const imResponse = await handleImRoutes(context);
+      if (imResponse) return imResponse;
       const settingsResponse = await handleSettingsRoutes(context);
       if (settingsResponse) {
         return settingsResponse;

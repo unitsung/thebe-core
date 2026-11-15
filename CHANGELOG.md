@@ -36,6 +36,41 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- The two-way IM seam is now platform-neutral. A factory registers a platform,
+  declares its credential schema and validation, may expose a QR/link/code
+  login adapter, and reports truthful capabilities (`proactive`, `replyOnly`,
+  reply window, `media`, `markdown`, `threads`, `typing`). Channels accept an
+  opaque `credentials` map, `GET /v1/im/platforms` exposes the registry's
+  credential fields, and `POST/GET/DELETE /v1/im/logins` drive an optional
+  login, and a confirmed login creates the channel without returning its
+  credentials. Owner bindings now pin the platform sender id (a different
+  sender in the same direct chat is recorded, never prompted); binding requires
+  an observed chat, rejects a direct `guest` and a group `owner`. A message
+  that arrives while the main Session is busy is queued, joins a streaming
+  turn as a `followUp`, or gets a busy notice/timeout instead of being dropped.
+  Inbound/outbound chats can carry a thread id, inbound media and mentions are
+  preserved as descriptors, and a persisted cursor is discarded when the bot
+  identity changes. `im-secrets.json` now holds arbitrary declared fields.
+  Telegram reports `media: false`, supports forum threads, and uses a hashed
+  token identity for its cursor. QQ, WeChat and iMessage remain platform ids
+  without adapters.
+- Two-way IM channels, Phase 1 with Telegram. `GET/POST /v1/im/channels`,
+  `DELETE /v1/im/channels/{id}`, `POST /v1/im/channels/{id}/test`,
+  `GET /v1/im/status`, `GET /v1/im/conversations`, `POST /v1/im/bind`,
+  `DELETE /v1/im/bind/{id}` and `POST /v1/im/send` configure a bot, inspect its
+  health and bind a direct chat to the main Session. An owner message becomes a
+  normal main-Session turn and its reply returns to the same chat; a group or
+  guest chat is recorded but never reaches the model, and an unknown chat only
+  gets a `/start` pairing hint. `THEBE_TELEGRAM_BOT_TOKEN` seeds a channel from
+  the environment; a channel added over HTTP keeps its token in an owner-only
+  `im-secrets.json` that no response returns. Accounts, bindings, the
+  `update_id` cursor, a 7-day dedupe table and the accepted inbound queue are
+  durable in `im.json`, so a restart resumes unhandled messages and never
+  replays a completed one. Each chat has one serial queue; a 429 pauses only
+  that bot token, a 409 polling conflict becomes `error` instead of a reconnect
+  loop, and one channel failing never stops Core or another channel. The
+  Telegram transport sends plain text without `parse_mode` and chunks at 4096
+  characters. `GET /v1/health` reports `im` only when a channel is configured.
 - Multi-channel notifications. `GET/PUT /v1/notifications/settings`,
   `GET /v1/notifications/status`, `POST /v1/notifications/test` and
   `POST /v1/notifications/send` expose durable owner targets for generic

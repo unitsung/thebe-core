@@ -11,6 +11,7 @@ export async function handleHealthEventsCompatibility(
   const { request, path, parts, agent, deviceRegistry } = context;
   if (request.method === "GET" && path === "/v1/health") {
     const sources = context.agent?.sourceHealth?.() ?? [];
+    const im = context.im ? await context.im.summary() : undefined;
     return json({
       ok: true,
       version: context.version,
@@ -20,9 +21,11 @@ export async function handleHealthEventsCompatibility(
           : []),
         ...(context.mcpOAuth ? ["mcp-oauth"] : []),
         ...(context.notifications ? ["notifications"] : []),
+        ...(im && im.channels.length > 0 ? ["im"] : []),
         ...(sources.length > 0 ? ["sources"] : []),
       ],
       ...(sources.length > 0 ? { sources } : {}),
+      ...(im && im.channels.length > 0 ? { im } : {}),
       ...(context.pushOutbox ? { push: context.pushOutbox.status() } : {}),
     });
   }

@@ -41,6 +41,9 @@ import type {
 import { priorityForGoalNotice } from "../agent/notifications/types.ts";
 import type { ChannelRef } from "../agent/sources/types.ts";
 import { createChannelNotificationAdapter } from "../adapters/notifications/channel.ts";
+import { createImIntegration } from "./im.ts";
+import type { ImGateway } from "../agent/im/gateway.ts";
+import type { ImAdapterFactory } from "../agent/im/types.ts";
 
 export type ThebeAppPrompt = (
   text: string
@@ -94,6 +97,16 @@ export function createThebeApp(options: {
   notificationAdapters?: readonly NotificationAdapter[];
   /** Inject a composed notification service; tests use it to observe or replace delivery. */
   notifications?: NotificationService;
+  /**
+   * Two-way IM channels. Omit and the feature is absent; the server passes the host environment,
+   * which seeds an environment-owned Telegram account when `THEBE_TELEGRAM_BOT_TOKEN` is set.
+   */
+  im?: {
+    dir?: string;
+    env?: NodeJS.ProcessEnv;
+    fetch?: typeof fetch;
+    factories?: readonly ImAdapterFactory[];
+  };
   now?: () => Date;
   callerId?: string;
   model?: import("../agent/runtime/interface.ts").RuntimeModelRef;
@@ -133,6 +146,7 @@ export function createThebeApp(options: {
   prompt: ThebeAppPrompt;
   send: ThebeAppSend;
   handler: ReturnType<typeof createThebeHttpHandler>;
+  im?: ImGateway;
 } {
   const storedSettings = options.settingsStore?.load();
   const clock = options.now ?? (() => new Date());
@@ -401,6 +415,30 @@ export function createThebeApp(options: {
     backgroundTaskProviders: options.backgroundTaskProviders,
     serviceAPIProviders: options.serviceAPIProviders,
   });
+  const imAgent = {
+    askMainSession: (
+      input: string,
+      promptOptions?: { mode?: "prompt" | "followUp" }
+    ) => agent.askMainSession(input, promptOptions),
+    isMainSessionBusy: () => agent.isBusy(agent.mainSessionId),
+    isMainSessionStreaming: () => agent.isStreaming(agent.mainSessionId),
+  };
+  const im = options.im
+    ? createImIntegration({
+        agent: imAgent,
+        dir:
+          options.im.dir ??
+          (options.agentStoreDir
+            ? join(options.agentStoreDir, "im")
+            : undefined),
+        env: options.im.env,
+        fetch: options.im.fetch,
+        factories: options.im.factories,
+        now: clock,
+      })
+    : undefined;
+  // Startup is background: a channel that cannot connect must not delay the HTTP listener.
+  void im?.start().catch(() => {});
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);
     return { text: result.text, tools: result.tools };
@@ -410,12 +448,14 @@ export function createThebeApp(options: {
   const quiesce = agent.quiesce.bind(agent);
   const unquiesce = agent.unquiesce.bind(agent);
   agent.quiesce = async () => {
+    await im?.stop();
     await notifications.stop();
     await quiesce();
   };
   agent.unquiesce = async () => {
     await unquiesce();
     notifications.start();
+    await im?.start();
   };
   const handler = createThebeHttpHandler({
     version: options.version ?? "0.1.0",
@@ -430,8 +470,9 @@ export function createThebeApp(options: {
     quietHours,
     pushOutbox: pushNotifier,
     notifications,
+    im,
     workspacePath: options.workspacePath,
     oauth: options.oauth,
   });
-  return { agent, prompt, send: prompt, handler };
+  return { agent, prompt, send: prompt, handler, ...(im ? { im } : {}) };
 }
