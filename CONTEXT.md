@@ -28,6 +28,30 @@ _Avoid_: counting foreground chat, counting cache reads against the limit, notif
 A person-facing event delivered outside the conversation by `src/agent/notifications/`. It has a stable `id` for deduplication, one category (`attention`, `completed`, `failed`, `budget`, `watchdog`, `source_health`, `pipeline`), a priority (`critical`, `normal`, `low`), a short title and body, and an optional `thebe://` deep link. A `NotificationTarget` adds a `ChannelRef`, category and priority filters, optional quiet hours, an optional digest window, and an enabled flag; targets live in owner-only `notifications.json` while credentials belong to host environment configuration. The router selects targets, applies category/priority, per-target quiet hours (critical bypasses by default), and an hourly rate limit, then enqueues one durable entry per `(notification.id, target.id)`. A target's digest window holds matching low/normal notices in durable `digests.json` and emits one summary at the end; critical notices bypass it. A Goal notice also carries the Ticket's recorded `ChannelRef`s as event-specific targets, merged with owner targets and deduplicated by channel; the original `ChannelAdapter` performs that write-back. Delivery is serial per target; a retry keeps the same key, and a send interrupted by a restart is recorded `unknown` and never replayed. Device Push is a separate transport with its own outbox and is not replaced by this layer.
 _Avoid_: notifying from an adapter, treating a delivery failure as a Ticket/Goal state change, or storing credentials in the settings file
 
+**IM channel**:
+A two-way chat transport in `src/agent/im/`, separate from the write-only `ChannelAdapter` used for Ticket notices. An `ImAdapter` owns one platform account (transport, auth/login, send, reconnect, health, capabilities); `ImGateway` owns the platform registry, durable dedupe, the accepted inbound queue, one serial queue per chat, and the binding from `(accountId, chat)` to a Core Session. The seam is frozen for Telegram, QQ, WeChat and iMessage; platform differences stay inside adapters. The built-in adapter set is still Telegram. Only the durable Main Session (`thebe-main`) can be bound; only a direct chat may bind as `owner`, and the binding pins the owner's platform sender id. Group chats are recorded; a group `guest` binding never reaches the model. A message that arrives while the Main Session is busy stays in the durable queue and joins a streaming turn as a `followUp`. Inbound text is person input and still passes approvals, Policy and audit. Reply anchors (`replyTo`, `contextToken`) belong to the current turn; a durable destination is `accountId` plus `chat` (and optional thread). Accounts, bindings, identity-tagged cursors, dedupe keys and the pending queue live in owner-only `im.json`; platform-declared credential fields live separately in `im-secrets.json` and no HTTP response returns them. An adapter failure is reported in `GET /v1/im/status` and never stops Core or another channel.
+_Avoid_: turning `ChannelAdapter` into a bidirectional interface, storing a platform reply token as a durable target, letting an unbound or group chat prompt the model, or embedding a whole IM application as a Core dependency
+
+**IM account**:
+A configured platform identity (a bot token or a QR-authorized session) that Core starts and monitors; the HTTP API exposes it as a channel.
+_Avoid_: using channel when the platform identity is meant, bot
+
+**IM chat**:
+A durable platform destination: account, kind (`direct` or `group`), platform chat id, and optional thread id.
+_Avoid_: conversation, session
+
+**IM conversation**:
+A chat an adapter has observed, with its last sender and last-seen time; it exists without a binding.
+_Avoid_: binding
+
+**IM binding**:
+An explicit mapping from an IM chat to the Main Session. An `owner` binding may prompt the model and pins the owner's platform sender id; a `guest` binding is record-only and never reaches it. Only a direct chat may be an owner.
+_Avoid_: pairing, subscription
+
+**IM login**:
+A short-lived platform authorization flow (QR, link or code) that yields credentials for an IM account; its challenge is never persisted or logged.
+_Avoid_: binding, stored QR
+
 **Ticket**:
 An authorised unit of work in `src/agent/tickets/`. Created by a decision: a person asking (`direct`, through `POST /v1/goals`, `POST /v1/tickets` or `/mcp`), an explicitly admitted human Source request bound by `ticket_delegate`, or Eval taking on an event under the person's policy (`eval`). Its id is derived from its content, so the same request or event produces the same Ticket; HTTP and `/mcp` delegation use the caller's stable `idempotencyKey`, while an explicitly bound Source event uses its stable Trigger id. Goals persisted before Tickets existed are backfilled once per Core process as `direct` migration Tickets keyed by `legacyGoalId`. A Ticket wraps existing objects (a Goal keeps its own id, status, report, receipt, permissions, and attention); its stage is derived on every read and not stored.
 A Ticket subscribes to resource threads (`subscriptions`). While the Ticket is open, subsequent events on those threads are fanned out to it directly as `inputs` (`seq`, `source`, `kind`, `thread`, `at`, `attachedAt`), skipping Eval (0 tokens). Actor, human, admission, addressing, and channel provenance remain on each input. The worker receives each fresh input as fenced untrusted data at its next checkpoint; the active checkpoint is not interrupted. An ended Ticket stops receiving inputs. Goal attention notices use only the Ticket's stored `ChannelRef`s and enter a durable Core outbox before delivery; failures retry after restart with the same idempotency key.

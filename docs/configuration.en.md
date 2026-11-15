@@ -178,6 +178,31 @@ export THEBE_SMTP_FROM='thebe@example.com'
 
 An adapter without its credential is not registered; a target pointing at it records `adapter_missing` and does not affect other targets. A test send validates the address and credential and never enters the outbox.
 
+## Two-way IM channels (multi-platform seam; Telegram built in)
+
+`/v1/im/*` is a two-way chat integration, parallel to the notification transports above: a notification adapter only writes out, while an IM adapter also receives platform messages. Inbound messages may enter the main Session (`thebe-main`) only from an owner-bound direct chat. The binding also pins the owner's platform sender id, so another sender in the same direct chat is recorded but never reaches the model. Groups and guest bindings are recorded but never reach the model, and an inbound message never gets shell/file tools or bypasses an approval.
+
+- State lives in `{agentStoreDir}/im/im.json` (0600): accounts, bindings, cursors tagged with the bot identity, a 7-day dedupe table, and the accepted inbound queue. Credentials are an opaque per-platform field map in `im-secrets.json` (0600); no HTTP response, log, or error message contains them.
+- `POST /v1/im/channels` accepts `{platform, label?, credentials: {field: value}}`. A platform factory declares required and optional fields plus its own validation. `platform` is a registered id; the only built-in adapter today is `telegram`, while `qq`, `wechat` and `imessage` are known platform names without adapters yet. Telegram still accepts the older `token` shorthand.
+- A platform factory may also provide a QR, link or code login. `POST /v1/im/logins` starts one, `GET /v1/im/logins/{id}` polls it, and `DELETE /v1/im/logins/{id}` cancels it. The QR payload or link appears only in the start response and is never persisted or logged; confirmation returns only the new `accountId`, and the resulting credentials go straight into `im-secrets.json`. The built-in Telegram adapter uses a static token, so it reports `login_not_supported` for these routes.
+- Routes: `GET /v1/im/platforms` (registered platforms, credential fields and login support), `GET/POST /v1/im/channels`, `DELETE /v1/im/channels/{id}`, `POST /v1/im/channels/{id}/test`, `POST /v1/im/logins`, `GET/DELETE /v1/im/logins/{id}`, `GET /v1/im/status`, `GET /v1/im/conversations`, `POST /v1/im/bind`, `DELETE /v1/im/bind/{id}`, and `POST /v1/im/send`. Writes return 503 while quiesced.
+- Pairing: have the owner message the bot, read `chat.id` from `GET /v1/im/conversations`, then `POST /v1/im/bind` with `chat.kind: "direct"` and `role: "owner"`. A chat that has not been observed returns `chat_not_seen`. `senderId` may be omitted (the last observed sender is pinned); when supplied it must match the observed sender or the request returns `sender_mismatch`. `sessionId` is currently always `thebe-main`; a group can only be bound as a `guest`, a direct chat cannot bind as `guest`, and a group cannot bind as `owner`.
+- Inbound messages are persisted before processing. The same `(platform, account, chat, threadId, messageId)` or `updateId` is handled once. Each chat (including its thread) has one serial queue and different chats run in parallel; accepted messages survive a Core restart and completed ones are never replayed.
+- While the main Session is busy with another turn, an owner message stays in the queue instead of being dropped. By default a notice is sent after 5 seconds and a timeout reply after 10 minutes; while the main Session is streaming, the message joins the current turn as a `followUp`. `pending` in `GET /v1/im/status` is the queue depth.
+- Each adapter reports truthful capabilities: `proactive`, `replyOnly`, `replyWindowMs`, `maxMessagesPerWindow`, `recall`, `media`, `maxTextLength`, `markdown`, `threads` and `typing`. Before a proactive send the gateway checks `proactive` and the adapter's `canSendProactively(chat)`: unsupported returns `proactive_not_supported`, a closed window returns `window_closed`. Reply anchors (`replyTo`, `contextToken`) belong to the current turn only; the durable destination is account + chat + optional thread.
+- Inbound already carries `threadId`, `mentions`, `media` and `replyAuthor`; media are descriptors and are never downloaded or executed. A message with text keeps its media descriptors; a media-only message records the conversation and sends the owner a "media not supported yet" notice without entering the model. Outbound media is not advertised until an adapter actually implements `media: true`.
+- A cursor is tied to the bot/account identity: when the token or account identity changes, the old cursor is discarded so a new bot is not resumed from another bot's update position.
+- The Telegram adapter long-polls `getUpdates` (`allowed_updates: ["message"]`) with `update_id + 1` as its cursor and supports forum/topic `message_thread_id` on inbound and outbound messages. It sends plain text without `parse_mode`, chunked at 4096 characters with an `(n/m)` marker. A 429 pauses only that bot token; a 409 (another process polls the same bot) becomes `error` and stops polling instead of reconnecting forever.
+- `GET /v1/health` reports `im` only when at least one channel is configured. `health.state` is `stopped`, `starting`, `connected`, `needs_login`, or `error`, optionally with a safe `code`, `since` and `retryAt`. One channel failing never stops Core or another channel; `GET /v1/im/status` shows the latest safe error without credentials.
+- `THEBE_TELEGRAM_BOT_TOKEN` automatically creates an environment-owned Telegram channel (it cannot be removed through the API). `THEBE_TELEGRAM_API_BASE` points the adapter at a proxy or a test server, and `THEBE_TELEGRAM_POLL_TIMEOUT` sets the long-poll seconds (1–50, default 50).
+
+```bash
+# One Telegram two-way channel from the environment; the same bot token can still serve a notification target.
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+# Optional: a self-hosted Bot API proxy or a test double.
+export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
+```
+
 ## Model providers and sign-in
 
 Model providers are managed by the Pi runtime adapter. List and configure them

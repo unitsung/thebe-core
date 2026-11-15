@@ -222,6 +222,118 @@ const operations: Operation[] = [
     responseSchema: "NotificationSendResult",
   },
   {
+    method: "get",
+    path: "/v1/im/channels",
+    summary: "List IM channels with health, capabilities and binding count",
+    tag: "system",
+    responseSchema: "ImChannels",
+  },
+  {
+    method: "get",
+    path: "/v1/im/platforms",
+    summary:
+      "List registered IM platforms with their credential fields and login support",
+    tag: "system",
+    responseSchema: "ImPlatformList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels",
+    summary:
+      "Add an IM channel; the credential is stored in an owner-only file and never returned",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImAddChannelRequest",
+    responseSchema: "ImChannelResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/channels/{channelId}",
+    summary:
+      "Remove an IM channel and its bindings (environment channels are refused)",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels/{channelId}/test",
+    summary: "Send a test message to the channel's bound owner chat",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "ImSendResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins",
+    summary: "Start a QR, link or code login for a platform",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImLoginStartRequest",
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "get",
+    path: "/v1/im/logins/{loginId}",
+    summary:
+      "Poll an IM login; the confirmed response never includes credentials",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/logins/{loginId}",
+    summary: "Cancel an in-progress IM login",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: "/v1/im/status",
+    summary: "Read IM channel health and the durable inbound queue depth",
+    tag: "system",
+    responseSchema: "ImStatus",
+  },
+  {
+    method: "get",
+    path: "/v1/im/conversations",
+    summary: "List chats seen by an IM adapter, with their binding if any",
+    tag: "system",
+    responseSchema: "ImConversationList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/bind",
+    summary:
+      "Bind an IM chat to the main Session; only direct chats may bind as owner",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImBindRequest",
+    responseSchema: "ImBindingResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/bind/{bindingId}",
+    summary: "Remove an IM chat binding",
+    tag: "system",
+    parameters: [idParameter("bindingId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/send",
+    summary: "Send text through a configured IM channel (local owner control)",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "ImSendRequest",
+    responseSchema: "ImSendResult",
+  },
+  {
     method: "post",
     path: "/v1/messages",
     summary: "Send a prompt (compatibility endpoint)",
@@ -1982,6 +2094,329 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             targets: { type: "array", items: { type: "string" } },
             skipped: { type: "integer", minimum: 0 },
+          },
+        },
+        ImChat: {
+          type: "object",
+          required: ["kind", "id"],
+          properties: {
+            kind: { type: "string", enum: ["direct", "group"] },
+            id: { type: "string" },
+            threadId: {
+              type: "string",
+              description:
+                "Platform forum topic or thread id, when the platform addresses one.",
+            },
+            title: { type: "string" },
+          },
+        },
+        ImCapabilities: {
+          type: "object",
+          required: [
+            "proactive",
+            "replyOnly",
+            "recall",
+            "media",
+            "maxTextLength",
+          ],
+          properties: {
+            proactive: { type: "boolean" },
+            replyOnly: { type: "boolean" },
+            replyWindowMs: { type: "integer", minimum: 0 },
+            maxMessagesPerWindow: { type: "integer", minimum: 1 },
+            recall: { type: "boolean" },
+            media: {
+              type: "boolean",
+              description:
+                "True only when this adapter can actually send images or files.",
+            },
+            maxTextLength: { type: "integer", minimum: 1 },
+            markdown: { type: "boolean" },
+            threads: { type: "boolean" },
+            typing: { type: "boolean" },
+          },
+        },
+        ImPlatformInfo: {
+          type: "object",
+          required: ["platform", "credentials", "login"],
+          properties: {
+            platform: { type: "string" },
+            credentials: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["key"],
+                properties: {
+                  key: { type: "string" },
+                  label: { type: "string" },
+                  required: { type: "boolean" },
+                  secret: { type: "boolean" },
+                },
+              },
+            },
+            login: { type: "boolean" },
+          },
+        },
+        ImPlatformList: {
+          type: "object",
+          required: ["ok", "platforms"],
+          properties: {
+            ok: { type: "boolean" },
+            platforms: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImPlatformInfo" },
+            },
+          },
+        },
+        ImChannel: {
+          type: "object",
+          required: [
+            "id",
+            "platform",
+            "label",
+            "enabled",
+            "health",
+            "source",
+            "bindings",
+          ],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            label: { type: "string" },
+            enabled: { type: "boolean" },
+            createdAt: { type: "string", format: "date-time" },
+            source: { type: "string", enum: ["settings", "environment"] },
+            health: {
+              type: "object",
+              required: ["state"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "stopped",
+                    "starting",
+                    "connected",
+                    "needs_login",
+                    "error",
+                  ],
+                },
+                detail: { type: "string" },
+                code: { type: "string" },
+                since: { type: "string", format: "date-time" },
+                retryAt: { type: "string", format: "date-time" },
+              },
+            },
+            capabilities: { $ref: "#/components/schemas/ImCapabilities" },
+            bindings: { type: "integer", minimum: 0 },
+            lastInboundAt: { type: "string", format: "date-time" },
+            lastOutboundAt: { type: "string", format: "date-time" },
+            lastError: { type: "string" },
+          },
+        },
+        ImChannels: {
+          type: "object",
+          required: ["ok", "channels"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+          },
+        },
+        ImChannelResult: {
+          type: "object",
+          required: ["ok", "channel"],
+          properties: {
+            ok: { type: "boolean" },
+            channel: { $ref: "#/components/schemas/ImChannel" },
+          },
+        },
+        ImAddChannelRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: {
+              type: "string",
+              description:
+                "Registered platform id; the built-in adapter is telegram.",
+            },
+            label: { type: "string" },
+            credentials: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              writeOnly: true,
+              description:
+                "Platform-declared credential fields. Stored in an owner-only file and never returned.",
+            },
+            token: {
+              type: "string",
+              writeOnly: true,
+              deprecated: true,
+              description:
+                "Telegram shorthand for credentials.token; responses never include it.",
+            },
+          },
+        },
+        ImBinding: {
+          type: "object",
+          required: [
+            "id",
+            "accountId",
+            "chat",
+            "sessionId",
+            "role",
+            "createdAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            role: { type: "string", enum: ["owner", "guest"] },
+            senderId: {
+              type: "string",
+              description:
+                "Platform sender id pinned for an owner binding; only this sender may prompt.",
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        ImBindingResult: {
+          type: "object",
+          required: ["ok", "binding"],
+          properties: {
+            ok: { type: "boolean" },
+            binding: { $ref: "#/components/schemas/ImBinding" },
+          },
+        },
+        ImBindRequest: {
+          type: "object",
+          required: ["accountId", "chat"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            role: { type: "string", enum: ["owner", "guest"] },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            senderId: {
+              type: "string",
+              description:
+                "Optional owner sender id; it must match the last sender observed in the chat. When omitted, the observed sender is pinned.",
+            },
+          },
+        },
+        ImStatus: {
+          type: "object",
+          required: ["ok", "channels", "pending"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+            pending: { type: "integer", minimum: 0 },
+          },
+        },
+        ImConversationList: {
+          type: "object",
+          required: ["ok", "conversations"],
+          properties: {
+            ok: { type: "boolean" },
+            conversations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  accountId: { type: "string" },
+                  platform: { type: "string" },
+                  chat: { $ref: "#/components/schemas/ImChat" },
+                  lastSeenAt: { type: "string", format: "date-time" },
+                  binding: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      role: { type: "string", enum: ["owner", "guest"] },
+                      sessionId: { type: "string" },
+                      senderId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        ImSendRequest: {
+          type: "object",
+          required: ["accountId", "chat", "text"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            text: { type: "string" },
+            mode: { type: "string", enum: ["reply", "proactive"] },
+            replyTo: { type: "string" },
+            contextToken: { type: "string" },
+            idempotencyKey: { type: "string" },
+          },
+        },
+        ImSendResult: {
+          type: "object",
+          required: ["ok", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            platformMessageId: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+        ImLoginStartRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+        ImLogin: {
+          type: "object",
+          required: ["id", "platform", "kind", "expiresAt", "state"],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            kind: { type: "string", enum: ["qr", "link", "code"] },
+            content: {
+              type: "string",
+              description:
+                "QR payload or login URL. Returned only when the login begins; never persisted or logged.",
+            },
+            expiresAt: { type: "string", format: "date-time" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "scanned",
+                "confirmed",
+                "expired",
+                "failed",
+                "cancelled",
+              ],
+            },
+            detail: { type: "string" },
+            retryAfterMs: { type: "integer", minimum: 0 },
+            accountId: {
+              type: "string",
+              description: "Set when a confirmed login created an IM channel.",
+            },
+          },
+        },
+        ImLoginResult: {
+          type: "object",
+          required: ["ok", "login"],
+          properties: {
+            ok: { type: "boolean" },
+            login: { $ref: "#/components/schemas/ImLogin" },
           },
         },
         OAuthAuthorizeRequest: {

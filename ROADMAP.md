@@ -122,6 +122,20 @@ Work named for the first beta, not yet complete in this checkout.
   and Recall. Still required are live deployment acceptance and real
   external-agent/connector acceptance; those are not claims made by the local
   tests.
+- **IM channel expansion.** The `ImAdapter`/`ImGateway` seam is now
+  platform-neutral: a factory declares credentials and validation, optional
+  QR/link/code login, truthful capabilities and cursor identity; owner
+  bindings pin the sender id; a busy main Session queues an owner message and
+  a streaming turn accepts a `followUp`; chats can carry a thread id. Telegram
+  remains the only built-in adapter: an owner direct chat becomes a main-Session
+  turn, groups/guests are recorded but never reach the model, and the cursor,
+  dedupe table and inbound queue survive a restart. Next are QQ and WeChat
+  adapters (reply-window aware, WeChat using the login seam), iMessage through
+  a Mac bridge, the settings UI, and an `ImNotificationAdapter` so the
+  notification router can choose a proactive or reply-only IM channel by
+  capability. The plan is
+  `docs/research/im-channels-plan-2026-11-14.md`; only the seam and Telegram
+  adapter are implemented.
 
 ## Later
 

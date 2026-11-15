@@ -73,6 +73,38 @@ export type {
 } from "./notifications/types.ts";
 export { createNotificationService } from "./notifications/service.ts";
 export type { NotificationService } from "./notifications/service.ts";
+export { KNOWN_IM_PLATFORMS, isKnownImPlatform } from "./im/types.ts";
+export type {
+  ImAccount,
+  ImAdapter,
+  ImAdapterCredentials,
+  ImAdapterFactory,
+  ImBinding,
+  ImCapabilities,
+  ImChannelView,
+  ImChat,
+  ImChatKind,
+  ImConversation,
+  ImCredentialField,
+  ImHealth,
+  ImInbound,
+  ImLoginAdapter,
+  ImLoginChallenge,
+  ImLoginKind,
+  ImLoginPoll,
+  ImLoginState,
+  ImLoginView,
+  ImMediaRef,
+  ImPlatform,
+  ImPlatformInfo,
+  ImSendInput,
+  ImSendMode,
+  ImSendResult,
+  ImSender,
+  ImStatus,
+  KnownImPlatform,
+} from "./im/types.ts";
+export type { ImGateway } from "./im/gateway.ts";
 export type {
   Ticket,
   TicketInput,

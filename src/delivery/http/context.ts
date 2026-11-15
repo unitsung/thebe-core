@@ -1,5 +1,6 @@
 import type { ThebeAgent } from "../../agent/index.ts";
 import type { NotificationService } from "../../agent/notifications/service.ts";
+import type { ImGateway } from "../../agent/im/gateway.ts";
 import { json } from "./json.ts";
 import type { DeviceRegistry } from "./devices.ts";
 import type { PushOutboxStatus } from "./push-status.ts";
@@ -26,6 +27,8 @@ export type ThebeHttpContext = {
   quietHours?: QuietHoursStore;
   /** Multi-channel notifications: settings, routing, and the durable outbox. */
   notifications?: NotificationService;
+  /** Two-way IM channels, their bindings and durable inbound queue. */
+  im?: ImGateway;
   /** Whether the optional MCP OAuth authorization server is configured. */
   mcpOAuth?: boolean;
   /** The authorization boundary, used by the isolation report. */
@@ -53,6 +56,7 @@ export function createThebeHttpContext(
     pushOutbox?: ThebeHttpContext["pushOutbox"];
     quietHours?: QuietHoursStore;
     notifications?: ThebeHttpContext["notifications"];
+    im?: ThebeHttpContext["im"];
     mcpOAuth?: boolean;
     workspacePath?: string;
   }
@@ -72,6 +76,7 @@ export function createThebeHttpContext(
     pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
     notifications: options.notifications,
+    im: options.im,
     mcpOAuth: options.mcpOAuth,
     workspacePath: options.workspacePath,
   };
