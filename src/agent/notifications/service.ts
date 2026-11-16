@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { notificationChannels } from "./channels.ts";
 import { createNotificationDigest } from "./digest.ts";
 import { deliverToAdapters } from "./delivery.ts";
 import { createNotificationOutbox } from "./outbox.ts";
@@ -36,8 +37,8 @@ export function createNotificationService(options: {
   onError?: (error: unknown) => void;
 }) {
   const now = options.now ?? (() => new Date());
-  const adapters = options.adapters ?? [];
-  const adapterMap = new Map(adapters.map((adapter) => [adapter.id, adapter]));
+  let adapters = options.adapters ?? [];
+  let adapterMap = new Map(adapters.map((adapter) => [adapter.id, adapter]));
   const settings =
     options.settings ??
     createNotificationSettingsStore({
@@ -81,6 +82,19 @@ export function createNotificationService(options: {
     onError: options.onError,
   });
   routerRef.current = router;
+
+  function setAdapters(next: readonly NotificationAdapter[]): void {
+    const ids = next.map((adapter) => adapter.id);
+    if (ids.some((id) => !id.trim())) {
+      throw new Error("Notification adapter ids must not be empty");
+    }
+    if (new Set(ids).size !== ids.length) {
+      throw new Error("Notification adapter ids must be unique");
+    }
+    adapters = next;
+    adapterMap = new Map(next.map((adapter) => [adapter.id, adapter]));
+    router.setAdapters(next);
+  }
 
   async function notify(
     notification: Notification,
@@ -148,6 +162,8 @@ export function createNotificationService(options: {
     notifyInput,
     test,
     status,
+    setAdapters,
+    channels: () => notificationChannels(adapters),
     settings: settingsView,
     updateSettings,
     flush,

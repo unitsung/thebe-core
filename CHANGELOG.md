@@ -7,6 +7,9 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Changed
 
+- Removed the optional external agent-gateway notification bridge and its compose
+  sidecar. Every notification transport now runs in Core; unsupported services use
+  the generic webhook or Apprise target instead.
 - Goal checkpoints and subagent turns are no longer silently capped at 50.
   `maxIterations` and a profile's `maxTurns` accept any positive integer; the
   defaults remain 8 and 5/8. A worker that reaches its per-run turn budget now
@@ -25,6 +28,7 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Fixed
 
+- A critical notification now passes a normal notice already held for quiet hours in the same target queue. The held notice still waits until the window ends, and a retry still keeps its place.
 - Main Session recall now excludes every internal workflow Session carrying a
   `purpose` label, including container diagnosis, instead of exposing only the
   Eval assessment Session. A direct read of an internal Session is refused just
@@ -36,6 +40,22 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- Notification channel credentials can live in the owner-only
+  `{configDir}/notification-config.json` and are edited with TUI
+  `/notifications` or the App's Channel credentials page. The new
+  `GET/PUT /v1/notifications/config` route masks secrets, restores untouched
+  values, and rebuilds adapters immediately; a file watcher applies TUI saves
+  without restarting Core. Environment variables remain a deployment fallback.
+- Seven more native notification transports: Mattermost and Synology Chat incoming webhooks,
+  LINE push, Zalo Bot, Nextcloud Talk response bots, Twitch Helix chat messages, and one-shot
+  IRC. Their send paths, retry classification, and platform-level refusal checks are implemented
+  in TypeScript; they require no external agent gateway. LINE reuses a deterministic
+  retry key, Nextcloud Talk signs the exact message, and IRC treats a failure after `PRIVMSG` as
+  `unknown` rather than replaying it.
+- Native Weixin ClawBot/iLink two-way IM, integrated from Tencent's MIT-licensed
+  Weixin ClawBot protocol layer. It supports QR
+  login, the phone-PIN step through `POST /v1/im/logins/{loginId}/code`, long-polled direct
+  messages and reply-only sends carrying `context_token`; it never advertises proactive delivery.
 - The two-way IM seam is now platform-neutral. A factory registers a platform,
   declares its credential schema and validation, may expose a QR/link/code
   login adapter, and reports truthful capabilities (`proactive`, `replyOnly`,
@@ -75,18 +95,15 @@ All notable changes to Thebe Core are documented here. The format is based on
   `GET /v1/notifications/status`, `POST /v1/notifications/test` and
   `POST /v1/notifications/send` expose durable owner targets for generic
   webhooks, email, Telegram, WeCom (group robot or application message) and
-  DingTalk. Slack/Discord webhooks are included, an `openclaw` target bridges
-  every channel OpenClaw supports through its Gateway `tools/invoke` API (or a
-  local CLI), and the compose file can start that Gateway as an optional
-  sidecar. An existing Feishu or GitHub Ticket channel can serve as an owner
-  target for any
-  notice. A unified `Notification` carries category, priority, a stable id and
+  DingTalk. Slack/Discord webhooks are included. An existing Feishu or GitHub
+  Ticket channel can serve as an owner target for any notice. A unified `Notification` carries category, priority, a stable id and
   a `thebe://` deep link; the router filters by category/priority, honors
   per-target quiet hours (critical bypasses by default), applies an hourly rate
   limit, and queues one entry per `(notification, target)` in a durable outbox.
   Delivery is serial per target, retries keep the same idempotency key, and a
   send interrupted by a restart is recorded `unknown` and never replayed.
-  Credentials stay in environment variables; `GET settings` masks
+  Credentials come from the notification config file and fall back to
+  environment variables; `GET settings` masks
   credential-shaped address fields and URL query secrets. Goal attention and
   completion, approval, budget, Eval outage and proactive-message events now
   feed the same layer alongside the existing device Push path. A Goal notice

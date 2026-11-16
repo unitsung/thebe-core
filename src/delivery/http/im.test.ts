@@ -356,6 +356,58 @@ describe("IM HTTP routes", () => {
     await gateway.stop();
   });
 
+  it("keeps a PIN challenge alive and submits the code", async () => {
+    let submitted = "";
+    let verified = false;
+    const login: ImLoginAdapter = {
+      async begin() {
+        return {
+          id: "wechat-qr",
+          platform: "telegram",
+          kind: "qr",
+          content: "weixin://qr",
+          expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        };
+      },
+      async poll() {
+        if (!verified)
+          return { state: "need_verifycode", detail: "PIN required" };
+        return { state: "confirmed", credentials: { token: "wx-token" } };
+      },
+      async cancel() {},
+      async submitCode(_id, code) {
+        submitted = code;
+        verified = true;
+      },
+    };
+    const { gateway, call } = await setup({ login });
+    const started = await call("/v1/im/logins", {
+      method: "POST",
+      body: JSON.stringify({ platform: "telegram", label: "Phone" }),
+    });
+    expect(started.status).toBe(201);
+    const id = (started.body.login as { id: string }).id;
+
+    const pin = await call(`/v1/im/logins/${id}`);
+    expect(pin.body.login).toMatchObject({ state: "need_verifycode" });
+
+    const submittedResponse = await call(`/v1/im/logins/${id}/code`, {
+      method: "POST",
+      body: JSON.stringify({ code: "1234" }),
+    });
+    expect(submittedResponse.status).toBe(200);
+    expect(submittedResponse.body.login).toMatchObject({
+      state: "pending",
+      detail: "verification code submitted",
+    });
+    expect(submitted).toBe("1234");
+
+    const confirmed = await call(`/v1/im/logins/${id}`);
+    expect(confirmed.body.login).toMatchObject({ state: "confirmed" });
+    expect(JSON.stringify(confirmed.body)).not.toContain("wx-token");
+    await gateway.stop();
+  });
+
   it("cancels an in-progress login", async () => {
     let cancelled = "";
     const login: ImLoginAdapter = {

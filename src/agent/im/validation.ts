@@ -155,6 +155,14 @@ export function parseLoginStartInput(value: unknown): {
   };
 }
 
+export function parseLoginCodeInput(value: unknown): string {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ImInputError("login code must be an object");
+  }
+  const row = value as Record<string, unknown>;
+  return requiredText(row.code, "code", 128);
+}
+
 export function parseBindInput(value: unknown): {
   accountId: string;
   chat: ImChat;

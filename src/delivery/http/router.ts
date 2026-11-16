@@ -47,6 +47,7 @@ export type ThebeHttpRouterOptions = {
   pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: ThebeHttpContext["quietHours"];
   notifications?: ThebeHttpContext["notifications"];
+  notificationConfig?: ThebeHttpContext["notificationConfig"];
   im?: ThebeHttpContext["im"];
   workspacePath?: string;
   /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */

@@ -12,6 +12,28 @@ afterEach(async () => {
 });
 
 describe("IM integration composition", () => {
+  it("registers Weixin as a QR-login platform", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-im-wechat-"));
+    dirs.push(dir);
+    const gateway = createImIntegration({
+      agent: { askMainSession: async () => ({ text: "" }) },
+      dir,
+      env: {},
+      onError: () => {},
+    });
+    await gateway.start();
+    expect(gateway.platforms()).toEqual(
+      expect.arrayContaining([
+        {
+          platform: "wechat",
+          credentials: [],
+          login: true,
+        },
+      ])
+    );
+    await gateway.stop();
+  });
+
   it("turns THEBE_TELEGRAM_BOT_TOKEN into an environment-owned channel", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-im-app-"));
     dirs.push(dir);

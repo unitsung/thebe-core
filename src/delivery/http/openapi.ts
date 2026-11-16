@@ -196,6 +196,24 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: "/v1/notifications/config",
+    summary:
+      "Read owner-only notification channel credentials with secret fields masked",
+    tag: "system",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/config",
+    summary:
+      "Replace notification channel credentials; a running Core reloads adapters",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationChannelConfigInput",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "get",
     path: "/v1/notifications/status",
     summary: "Read per-target pending, dropped, unknown, and last error state",
     tag: "system",
@@ -281,6 +299,16 @@ const operations: Operation[] = [
       "Poll an IM login; the confirmed response never includes credentials",
     tag: "system",
     parameters: [idParameter("loginId")],
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins/{loginId}/code",
+    summary: "Submit a phone PIN for an IM login that needs one",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    requestBody: { required: true },
+    requestSchema: "ImLoginCodeRequest",
     responseSchema: "ImLoginResult",
   },
   {
@@ -1987,6 +2015,57 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             enabled: { type: "boolean" },
           },
         },
+        NotificationChannelConfigView: {
+          type: "object",
+          required: ["config", "fields"],
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "label", "fields"],
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  fields: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["key", "label"],
+                      properties: {
+                        key: { type: "string" },
+                        label: { type: "string" },
+                        secret: { type: "boolean" },
+                        kind: { type: "string" },
+                        placeholder: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        NotificationChannelConfigInput: {
+          type: "object",
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+          },
+          additionalProperties: true,
+        },
         NotificationSettings: {
           type: "object",
           required: [
@@ -2379,6 +2458,13 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             label: { type: "string" },
           },
         },
+        ImLoginCodeRequest: {
+          type: "object",
+          required: ["code"],
+          properties: {
+            code: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        },
         ImLogin: {
           type: "object",
           required: ["id", "platform", "kind", "expiresAt", "state"],
@@ -2397,6 +2483,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               enum: [
                 "pending",
                 "scanned",
+                "need_verifycode",
                 "confirmed",
                 "expired",
                 "failed",

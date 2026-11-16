@@ -34,6 +34,8 @@ import {
   createNotificationService,
   type NotificationService,
 } from "../agent/notifications/service.ts";
+import { createNotificationChannelConfigService } from "../agent/notifications/channel-config-service.ts";
+import type { NotificationChannelConfig } from "../agent/notifications/channel-config.ts";
 import type {
   NotificationAdapter,
   NotificationTarget,
@@ -97,6 +99,14 @@ export function createThebeApp(options: {
   notificationAdapters?: readonly NotificationAdapter[];
   /** Inject a composed notification service; tests use it to observe or replace delivery. */
   notifications?: NotificationService;
+  /** Rebuild notification adapters when the owner-only channel config changes. */
+  notificationConfig?: {
+    dir: string;
+    build: (
+      config: NotificationChannelConfig
+    ) => readonly NotificationAdapter[];
+    watch?: boolean;
+  };
   /**
    * Two-way IM channels. Omit and the feature is absent; the server passes the host environment,
    * which seeds an environment-owned Telegram account when `THEBE_TELEGRAM_BOT_TOKEN` is set.
@@ -173,17 +183,21 @@ export function createThebeApp(options: {
   const quietHours = createQuietHoursStore({ dir: deviceDir });
   // A Ticket's recorded channel is a default notification target; wrapping the same ChannelAdapter
   // keeps its write-back and idempotency behaviour instead of adding a second delivery stack.
-  const notificationAdapters = [
-    ...(options.notificationAdapters ?? []),
-    ...(options.channelAdapters ?? [])
-      .filter(
-        (adapter) =>
-          !(options.notificationAdapters ?? []).some(
-            (existing) => existing.id === adapter.id
-          )
-      )
-      .map(createChannelNotificationAdapter),
-  ];
+  const ticketNotificationAdapters = (options.channelAdapters ?? []).map(
+    createChannelNotificationAdapter
+  );
+  const combineAdapters = (
+    built: readonly NotificationAdapter[]
+  ): NotificationAdapter[] => {
+    const ids = new Set(built.map((adapter) => adapter.id));
+    return [
+      ...built,
+      ...ticketNotificationAdapters.filter((adapter) => !ids.has(adapter.id)),
+    ];
+  };
+  const notificationAdapters = combineAdapters(
+    options.notificationAdapters ?? []
+  );
   const notifications =
     options.notifications ??
     createNotificationService({
@@ -194,6 +208,16 @@ export function createThebeApp(options: {
       now: clock,
     });
   notifications.start();
+  const notificationConfig = options.notificationConfig
+    ? createNotificationChannelConfigService({
+        dir: options.notificationConfig.dir,
+        buildAdapters: (config) =>
+          combineAdapters(options.notificationConfig!.build(config)),
+        onChange: (adapters) => notifications.setAdapters(adapters),
+        watch: options.notificationConfig.watch,
+      })
+    : undefined;
+  void notificationConfig?.start();
   const notifier = pushNotifier
     ? createQuietHoursNotifier({
         inner: pushNotifier,
@@ -470,6 +494,7 @@ export function createThebeApp(options: {
     quietHours,
     pushOutbox: pushNotifier,
     notifications,
+    notificationConfig,
     im,
     workspacePath: options.workspacePath,
     oauth: options.oauth,

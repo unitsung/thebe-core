@@ -13,6 +13,12 @@ User configuration lives in:
 ~/.thebe/config.json
 ```
 
+Notification channel credentials live in:
+
+```text
+~/.thebe/notification-config.json
+```
+
 Files managed by the Pi runtime adapter (`models.json`, `auth.json`, and so on) live in:
 
 ```text
@@ -50,6 +56,7 @@ In the TUI:
 - `/config` opens `config.json` in your external editor (created safely if missing).
 - `/config path` prints the real paths of the config file, Pi agent directory, workspace, and output directory.
 - `/settings` edits common settings.
+- `/notifications` edits notification channel credentials. Secret input is masked; `/notifications list` shows only whether fields are set, and `/notifications path` prints the file path.
 
 Restart after editing by hand so every setting takes effect.
 
@@ -147,13 +154,16 @@ export THEBE_FEISHU_CHATS=oc_...
 
 `/v1/notifications/*` sends person-facing events to the owner's configured targets. Device push (`/v1/devices` and the Push Relay) remains a separate, parallel channel.
 
-- Settings live in `{agentStoreDir}/notifications/notifications.json` (0600) and the pending queue in `outbox.json` in the same directory. Adapter-level credentials (bot token, SMTP password, WeCom corp secret) come from the environment; an address that embeds its own token (a DingTalk access token or a webhook URL) stays in the owner-only settings file and is masked on read.
-- `NotificationTarget.channel.source` selects the adapter: `webhook`, `slack`, `discord`, `openclaw`, `telegram`, `wecom`, `dingtalk`, or `smtp`. Existing Feishu and GitHub ticket channels also work as owner targets (a non-Ticket notice becomes a plain message/comment). `channel.address` is per channel: webhook `{url, secret?}`; Slack/Discord `{url}`; OpenClaw `{channel, target, account?, threadId?, replyTo?, silent?}`; Telegram `{chatId, threadId?}`; WeCom group robot `{url}` or application message `{toUser}`; DingTalk `{accessToken, secret?}`; email `{to}`.
-- The `openclaw` adapter is protocol-only and never embeds OpenClaw. With `THEBE_OPENCLAW_GATEWAY_URL` (and an optional `THEBE_OPENCLAW_GATEWAY_TOKEN`) it calls the Gateway's `POST /tools/invoke` `message` tool, so one target reaches every channel OpenClaw supports without Core implementing each one. Without a Gateway URL it falls back to an installed `openclaw message send --json` (`THEBE_OPENCLAW_BIN` overrides the executable). The `openclaw` profile in `deploy/docker-compose.yml` wires the Gateway as a sidecar. The OpenClaw npm package is not a Core dependency. The two transports classify errors differently: a timeout, a partial delivery, or a 2xx with no delivery receipt is recorded as `unknown` and never replayed; a missing CLI or an invalid Gateway URL is a permanent discard; recoverable errors (Gateway 408/425/429/5xx, an explicit delivery failure, a CLI rate limit, and an unconfigured channel on the Gateway path) retry indefinitely with exponential backoff (interval capped at 5 minutes); they are not auto-discarded, so fix the configuration or disable the target to stop retrying. Gateway 4xx (auth / policy / tool unavailable) is a permanent discard; only the CLI path treats channel errors such as `unknown channel` / `not configured` as a permanent discard — the Gateway path does not.
+- Settings live in `{agentStoreDir}/notifications/notifications.json` (0600) and the pending queue in `outbox.json` in the same directory. Adapter-level credentials (bot token, SMTP password, WeCom corp secret and so on) come from `{configDir}/notification-config.json` (0600, edited by TUI `/notifications`) and fall back to the environment when unset. An address that embeds its own token (a DingTalk access token or a webhook URL) stays in the owner-only settings file and is masked on read.
+- TUI `/notifications` edits those credentials channel by channel and masks secret input; a running Core reloads the channel automatically; a stopped Core reads the file at next start. `/notifications list` reports only whether fields are set, never their values, and `/notifications path` prints the file path. Environment variables remain a fallback for container and automated deployments.
+- The App's Settings → Notification channels → Channel credentials edits the same file through `GET/PUT /v1/notifications/config`. Reads mask secret fields; a save restores untouched secrets server-side and rebuilds adapters immediately.
+- `NotificationTarget.channel.source` selects the adapter. Native adapters: `webhook`, `slack`, `discord`, `telegram`, `teams`, `googlechat`, `mattermost`, `ntfy`, `bark`, `feishu-webhook`, `dingtalk`, `wecom`, `smtp`, `pushover`, `gotify`, `matrix`, `nextcloud-talk`, `signal`, `whatsapp`, `line`, `zalo`, `twilio`, `bluebubbles`, `synology-chat`, `twitch`, `irc`, `apprise`. Existing Feishu and GitHub ticket channels also work as owner targets (a non-Ticket notice becomes a plain message/comment).
+- `channel.address` is per channel: webhook `{url, secret?}`; Slack, Discord, Teams, Google Chat, Mattermost and Synology Chat `{url}` (Mattermost also accepts `channel?`); Telegram `{chatId, threadId?}`; ntfy `{url?, topic?, token?}`; Bark `{deviceKey, server?}`; Feishu `{url?, secret?}`; DingTalk `{url?, accessToken?, secret?}` (a target may carry the URL); WeCom group robot `{url}` (target or host environment) or application message `{toUser}`; email `{to}`; Pushover `{user}`; Gotify `{token, url?}`; Matrix `{roomId}`; Nextcloud Talk `{roomToken}`; Signal `{recipients}` (comma-separated phone numbers or `group.*` ids); WhatsApp and Twilio `{to}`; BlueBubbles `{chatGuid}`; LINE `{to}`; Zalo Bot `{chatId}`; Twitch `{broadcasterId}`; IRC `{channel}`; Apprise `{token?}`.
+- `GET /v1/notifications/channels` returns the catalog the App renders: id, label, description, address fields, capabilities, whether the host registered the adapter, and a `setup` hint when it did not. The App's Settings → Notification channels edits targets through this route and the settings route, can send a test notice, and never stores adapter credentials locally. Device push (APNs through the Push Relay) has its own page.
 - Categories: `attention`, `completed`, `failed`, `budget`, `watchdog`, `source_health`, `pipeline`. Priorities: `critical`, `normal`, `low`. A target narrows itself with `categories` and `minPriority`.
 - `critical` bypasses quiet hours by default; set `criticalBypassesQuietHours` to `false` to disable that. Normal and low notices enter the queue only when the window ends. `rateLimitPerHour` is a per-target hourly limit (0 means no limit); `critical` is never rate limited, and the rolling window is in memory, so a restart resets it.
 - Delivery is durable, at-least-once, and serial per target. Retrying the same `id` never produces a second notice. A request that was sent but timed out (TimeoutError/AbortError) is recorded as `unknown` and is never replayed, including after a Core restart. A connection failure / disconnect (refused, reset, etc.) is a recoverable error and retries with backoff instead of being recorded as `unknown`.
-- `GET/PUT /v1/notifications/settings`, `GET /v1/notifications/status`, `POST /v1/notifications/test`, and `POST /v1/notifications/send` require the Core token. Writes return 503 while quiesced. `GET settings` masks `secret`/`token`-shaped fields and credentials in URL query strings.
+- `GET/PUT /v1/notifications/settings`, `GET /v1/notifications/channels`, `GET /v1/notifications/status`, `POST /v1/notifications/test`, and `POST /v1/notifications/send` require the Core token. Writes return 503 while quiesced. `GET settings` masks `secret`, `token`, `password`, `apiKey`, Bark `deviceKey` and Pushover `user` fields, plus credentials in URL query strings.
 - `POST /v1/notifications/send` is the external entry point for devloop and similar hosts. It accepts `{id?, category, priority, title, body, deepLink?, ticketId?, goalId?}`. Without a caller-supplied `id` a fresh id is generated, so pass a stable id when retries must be idempotent. It only enqueues and returns 202; the outbox performs delivery.
 - A target with `digest` (`{windowMinutes, categories}`) holds matching `low`/`normal` notices and sends one summary when the window ends; `critical` notices always bypass the window. Digest state is durable (`digests.json`), so a restart keeps an open window and emits one that ended while Core was down. `GET /v1/notifications/status` reports held notices as `digestPending`. A Goal notice also carries the Ticket's recorded `ChannelRef`s as event-specific targets; they are merged with owner targets and deduplicated by channel, and the existing write-back adapter performs the send.
 
@@ -161,9 +171,6 @@ Environment:
 
 ```bash
 # The generic webhook needs no environment variable; each target supplies url (and optional secret) in address.
-# OpenClaw sidecar (omit both when using a local openclaw CLI):
-export THEBE_OPENCLAW_GATEWAY_URL='http://127.0.0.1:18789'
-export THEBE_OPENCLAW_GATEWAY_TOKEN=...
 export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
 export THEBE_WECOM_WEBHOOK_URL='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
 # Or WeCom application messages (a target uses {toUser}):
@@ -174,17 +181,51 @@ export THEBE_DINGTALK_WEBHOOK_URL='https://oapi.dingtalk.com/robot/send?access_t
 export THEBE_DINGTALK_SECRET=SEC...
 export THEBE_SMTP_URL="smtps://smtp.example.com:465"
 export THEBE_SMTP_FROM='thebe@example.com'
+# Additional native adapters (each optional):
+export THEBE_FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/...'
+export THEBE_FEISHU_WEBHOOK_SECRET=...
+export THEBE_GOTIFY_URL='https://gotify.example.com'
+export THEBE_PUSHOVER_TOKEN=...
+export THEBE_MATRIX_HOMESERVER_URL='https://matrix.example.com'
+export THEBE_MATRIX_ACCESS_TOKEN=...
+export THEBE_SIGNAL_URL='http://127.0.0.1:8080'
+export THEBE_SIGNAL_NUMBER='15550104'
+export THEBE_WHATSAPP_ACCESS_TOKEN=...
+export THEBE_WHATSAPP_PHONE_NUMBER_ID=...
+# Optional; defaults to v20.0.
+export THEBE_WHATSAPP_API_VERSION=v20.0
+export THEBE_TWILIO_ACCOUNT_SID=AC...
+export THEBE_TWILIO_AUTH_TOKEN=...
+export THEBE_TWILIO_FROM='15550104'
+export THEBE_BLUEBUBBLES_URL='http://127.0.0.1:1234'
+export THEBE_BLUEBUBBLES_PASSWORD=...
+export THEBE_APPRISE_URL='http://127.0.0.1:8000'
+export THEBE_APPRISE_KEY=apprise-config-key
+export THEBE_LINE_CHANNEL_ACCESS_TOKEN=...
+export THEBE_ZALO_BOT_TOKEN=...
+# Optional, for a proxy or test double; defaults to https://bot-api.zaloplatforms.com.
+export THEBE_ZALO_API_URL='https://bot-api.zaloplatforms.com'
+export THEBE_NEXTCLOUD_TALK_URL='https://cloud.example.com'
+export THEBE_NEXTCLOUD_TALK_BOT_SECRET=...
+export THEBE_TWITCH_CLIENT_ID=...
+export THEBE_TWITCH_USER_ACCESS_TOKEN=...
+export THEBE_TWITCH_SENDER_ID=...
+export THEBE_IRC_HOST='irc.example.com'
+export THEBE_IRC_PORT=6697
+export THEBE_IRC_TLS=true
+export THEBE_IRC_NICK=thebe
+export THEBE_IRC_PASSWORD=...
 ```
 
 An adapter without its credential is not registered; a target pointing at it records `adapter_missing` and does not affect other targets. A test send validates the address and credential and never enters the outbox.
 
-## Two-way IM channels (multi-platform seam; Telegram built in)
+## Two-way IM channels (multi-platform seam; Telegram and Weixin built in)
 
 `/v1/im/*` is a two-way chat integration, parallel to the notification transports above: a notification adapter only writes out, while an IM adapter also receives platform messages. Inbound messages may enter the main Session (`thebe-main`) only from an owner-bound direct chat. The binding also pins the owner's platform sender id, so another sender in the same direct chat is recorded but never reaches the model. Groups and guest bindings are recorded but never reach the model, and an inbound message never gets shell/file tools or bypasses an approval.
 
 - State lives in `{agentStoreDir}/im/im.json` (0600): accounts, bindings, cursors tagged with the bot identity, a 7-day dedupe table, and the accepted inbound queue. Credentials are an opaque per-platform field map in `im-secrets.json` (0600); no HTTP response, log, or error message contains them.
-- `POST /v1/im/channels` accepts `{platform, label?, credentials: {field: value}}`. A platform factory declares required and optional fields plus its own validation. `platform` is a registered id; the only built-in adapter today is `telegram`, while `qq`, `wechat` and `imessage` are known platform names without adapters yet. Telegram still accepts the older `token` shorthand.
-- A platform factory may also provide a QR, link or code login. `POST /v1/im/logins` starts one, `GET /v1/im/logins/{id}` polls it, and `DELETE /v1/im/logins/{id}` cancels it. The QR payload or link appears only in the start response and is never persisted or logged; confirmation returns only the new `accountId`, and the resulting credentials go straight into `im-secrets.json`. The built-in Telegram adapter uses a static token, so it reports `login_not_supported` for these routes.
+- `POST /v1/im/channels` accepts `{platform, label?, credentials: {field: value}}`. A platform factory declares required and optional fields plus its own validation. `platform` is a registered id; the built-in adapters are `telegram` (bot token) and `wechat` (Weixin ClawBot through the iLink protocol), while `qq` and `imessage` are known platform names without adapters yet. Telegram still accepts the older `token` shorthand.
+- A platform factory may also provide a QR, link or code login. `POST /v1/im/logins` starts one, `GET /v1/im/logins/{id}` polls it, `POST /v1/im/logins/{id}/code` submits a phone PIN when the state is `need_verifycode`, and `DELETE /v1/im/logins/{id}` cancels it. The QR payload or link appears only in the start response and is never persisted or logged; confirmation returns only the new `accountId`, and the resulting credentials go straight into `im-secrets.json`. The built-in Telegram adapter uses a static token, so it reports `login_not_supported`; Weixin uses QR login.
 - Routes: `GET /v1/im/platforms` (registered platforms, credential fields and login support), `GET/POST /v1/im/channels`, `DELETE /v1/im/channels/{id}`, `POST /v1/im/channels/{id}/test`, `POST /v1/im/logins`, `GET/DELETE /v1/im/logins/{id}`, `GET /v1/im/status`, `GET /v1/im/conversations`, `POST /v1/im/bind`, `DELETE /v1/im/bind/{id}`, and `POST /v1/im/send`. Writes return 503 while quiesced.
 - Pairing: have the owner message the bot, read `chat.id` from `GET /v1/im/conversations`, then `POST /v1/im/bind` with `chat.kind: "direct"` and `role: "owner"`. A chat that has not been observed returns `chat_not_seen`. `senderId` may be omitted (the last observed sender is pinned); when supplied it must match the observed sender or the request returns `sender_mismatch`. `sessionId` is currently always `thebe-main`; a group can only be bound as a `guest`, a direct chat cannot bind as `guest`, and a group cannot bind as `owner`.
 - Inbound messages are persisted before processing. The same `(platform, account, chat, threadId, messageId)` or `updateId` is handled once. Each chat (including its thread) has one serial queue and different chats run in parallel; accepted messages survive a Core restart and completed ones are never replayed.
@@ -195,12 +236,15 @@ An adapter without its credential is not registered; a target pointing at it rec
 - The Telegram adapter long-polls `getUpdates` (`allowed_updates: ["message"]`) with `update_id + 1` as its cursor and supports forum/topic `message_thread_id` on inbound and outbound messages. It sends plain text without `parse_mode`, chunked at 4096 characters with an `(n/m)` marker. A 429 pauses only that bot token; a 409 (another process polls the same bot) becomes `error` and stops polling instead of reconnecting forever.
 - `GET /v1/health` reports `im` only when at least one channel is configured. `health.state` is `stopped`, `starting`, `connected`, `needs_login`, or `error`, optionally with a safe `code`, `since` and `retryAt`. One channel failing never stops Core or another channel; `GET /v1/im/status` shows the latest safe error without credentials.
 - `THEBE_TELEGRAM_BOT_TOKEN` automatically creates an environment-owned Telegram channel (it cannot be removed through the API). `THEBE_TELEGRAM_API_BASE` points the adapter at a proxy or a test server, and `THEBE_TELEGRAM_POLL_TIMEOUT` sets the long-poll seconds (1–50, default 50).
+- The Weixin adapter uses the official Tencent ClawBot / iLink protocol. Add it with `POST /v1/im/logins` and scan the QR in Weixin. It is reply-only: every send carries the inbound turn's `context_token`, so it can never be selected for a proactive notification. `THEBE_WECHAT_API_BASE` points the adapter at a self-hosted proxy or test double; it defaults to `https://ilinkai.weixin.qq.com`. The protocol layer is derived from Tencent's MIT-licensed Weixin ClawBot protocol layer; Core does not run an external agent runtime.
 
 ```bash
 # One Telegram two-way channel from the environment; the same bot token can still serve a notification target.
 export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
 # Optional: a self-hosted Bot API proxy or a test double.
 export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
+# Optional: a self-hosted Weixin iLink proxy or a test double.
+export THEBE_WECHAT_API_BASE='https://ilinkai.weixin.qq.com'
 ```
 
 ## Model providers and sign-in

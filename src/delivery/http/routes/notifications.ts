@@ -1,6 +1,12 @@
 import { quiescedWrite, type ThebeHttpContext } from "../context.ts";
 import { json, readJson } from "../json.ts";
 import { NotificationInputError } from "../../../agent/notifications/settings.ts";
+import {
+  NOTIFICATION_CHANNEL_CONFIG_GROUPS,
+  NotificationChannelConfigError,
+  redactNotificationChannelConfig,
+  restoreNotificationChannelConfigSecrets,
+} from "../../../agent/notifications/channel-config.ts";
 import { redactToolOutput } from "../../../agent/security/redaction.ts";
 
 /** Settings, test sends, status, and the external `send` entry point for devloop and other hosts. */
@@ -33,6 +39,58 @@ export async function handleNotificationRoutes(
               ok: false,
               error: error.message,
               code: "invalid_notification_settings",
+            },
+            400
+          );
+        }
+        throw error;
+      }
+    }
+    return json(
+      { ok: false, error: "Use GET or PUT", code: "method_not_allowed" },
+      405
+    );
+  }
+  if (path === "/v1/notifications/channels" && request.method === "GET") {
+    return json({ channels: notifications.channels() });
+  }
+  if (path === "/v1/notifications/config") {
+    if (!context.notificationConfig) {
+      return json(
+        { ok: false, error: "notification channel config unavailable" },
+        503
+      );
+    }
+    if (request.method === "GET") {
+      return json({
+        config: redactNotificationChannelConfig(
+          await context.notificationConfig.get()
+        ),
+        fields: NOTIFICATION_CHANNEL_CONFIG_GROUPS,
+      });
+    }
+    if (request.method === "PUT") {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      try {
+        const body = await readJson(request);
+        const value =
+          body.config && typeof body.config === "object" ? body.config : body;
+        const current = await context.notificationConfig.get();
+        const saved = await context.notificationConfig.set(
+          restoreNotificationChannelConfigSecrets(value, current)
+        );
+        return json({
+          config: redactNotificationChannelConfig(saved),
+          fields: NOTIFICATION_CHANNEL_CONFIG_GROUPS,
+        });
+      } catch (error) {
+        if (error instanceof NotificationChannelConfigError) {
+          return json(
+            {
+              ok: false,
+              error: error.message,
+              code: "invalid_notification_channel_config",
             },
             400
           );

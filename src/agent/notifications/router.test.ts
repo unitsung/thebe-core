@@ -153,6 +153,41 @@ describe("notification router", () => {
     expect(sent).toEqual(["critical", "normal"]);
   });
 
+  it("lets a critical notice pass a normal notice already held for quiet hours", async () => {
+    let now = new Date("2026-11-14T23:30:00.000Z");
+    const sent: string[] = [];
+    const outbox = createNotificationOutbox({
+      now: () => now,
+      send: async (input) => {
+        sent.push(input.notification.id);
+        return { status: "sent" };
+      },
+    });
+    const router = createNotificationRouter({
+      now: () => now,
+      settings: store(
+        settingsFor([target("ops", "webhook")], {
+          defaultQuietHours: { start: "23:00", end: "07:00", timeZone: "UTC" },
+        })
+      ),
+      outbox,
+      adapters: [adapter("webhook", async () => ({ status: "sent" }))],
+    });
+
+    // The normal notice is held first; the critical one arrives behind it in the same queue.
+    await router.notify(notice({ id: "normal", priority: "normal" }));
+    await router.notify(notice({ id: "critical", priority: "critical" }));
+    await router.flush();
+    expect(sent).toEqual(["critical"]);
+    expect(
+      (await outbox.pending()).map((entry) => entry.notification.id)
+    ).toEqual(["normal"]);
+
+    now = new Date("2026-11-15T07:00:01.000Z");
+    await router.flush();
+    expect(sent).toEqual(["critical", "normal"]);
+  });
+
   it("holds a critical notice too when the bypass is disabled", async () => {
     let now = new Date("2026-11-14T23:30:00.000Z");
     const outbox = createNotificationOutbox({

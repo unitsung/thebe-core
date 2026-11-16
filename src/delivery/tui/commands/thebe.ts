@@ -2,6 +2,7 @@ import type { ThebeAgent } from "../../../agent/index.ts";
 import type { SlashHost } from "./context.ts";
 import { handleMcpCommand } from "./extensions/mcp.ts";
 import { handleSkillsCommand } from "./extensions/skills.ts";
+import { handleNotificationsCommand } from "./notifications.ts";
 import { handleSubagentCommand } from "./subagents.ts";
 import type { ThebeOAuthConnection } from "../types.ts";
 
@@ -18,6 +19,9 @@ export async function handleThebeCommand(
       return handleSkillsCommand(host, agent, arg);
     case "mcp":
       return handleMcpCommand(host, agent, arg);
+    case "notifications":
+    case "notification":
+      return handleNotificationsCommand(host, arg);
     case "pair":
       await issuePairingCode(host, arg);
       return true;

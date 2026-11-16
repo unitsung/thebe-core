@@ -37,16 +37,7 @@ export function createNotificationRouter(options: {
   onError?: (error: unknown) => void;
 }) {
   const now = options.now ?? (() => new Date());
-  const adapterIds = options.adapters.map((adapter) => adapter.id);
-  if (adapterIds.some((id) => !id.trim())) {
-    throw new Error("Notification adapter ids must not be empty");
-  }
-  if (new Set(adapterIds).size !== adapterIds.length) {
-    throw new Error("Notification adapter ids must be unique");
-  }
-  const adapters = new Map(
-    options.adapters.map((adapter) => [adapter.id, adapter])
-  );
+  let adapters = adapterMap(options.adapters);
   const rateWindows = new Map<string, number[]>();
 
   async function notify(
@@ -231,6 +222,10 @@ export function createNotificationRouter(options: {
     );
   }
 
+  function setAdapters(next: readonly NotificationAdapter[]): void {
+    adapters = adapterMap(next);
+  }
+
   function rateAllows(
     settings: NotificationSettings,
     target: NotificationTarget,
@@ -271,6 +266,7 @@ export function createNotificationRouter(options: {
     notify,
     test,
     status,
+    setAdapters,
     flush: () => options.outbox.flush(),
     start: () => options.outbox.start(),
     stop: () => options.outbox.stop(),
@@ -282,4 +278,17 @@ function channelIdentity(channel: ChannelRef): string {
     ([left], [right]) => left.localeCompare(right)
   );
   return JSON.stringify([channel.source, channel.thread, address]);
+}
+
+function adapterMap(
+  adapters: readonly NotificationAdapter[]
+): Map<string, NotificationAdapter> {
+  const ids = adapters.map((adapter) => adapter.id);
+  if (ids.some((id) => !id.trim())) {
+    throw new Error("Notification adapter ids must not be empty");
+  }
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("Notification adapter ids must be unique");
+  }
+  return new Map(adapters.map((adapter) => [adapter.id, adapter]));
 }

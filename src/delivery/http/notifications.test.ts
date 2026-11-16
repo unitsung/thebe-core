@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNotificationService } from "../../agent/notifications/service.ts";
+import { createNotificationChannelConfigService } from "../../agent/notifications/channel-config-service.ts";
 import type { NotificationAdapter } from "../../agent/notifications/types.ts";
 import { createThebeHttpHandler } from "./handler.ts";
 
@@ -39,10 +40,28 @@ async function setup() {
     dir,
     adapters: [adapter],
   });
+  const notificationConfig = createNotificationChannelConfigService({
+    dir: join(dir, "config"),
+    buildAdapters: (config) => [
+      adapter,
+      ...(config.telegram?.botToken
+        ? [
+            {
+              id: "telegram",
+              accepts: () => true,
+              send: async () => ({ status: "sent" as const }),
+            },
+          ]
+        : []),
+    ],
+    onChange: (adapters) => notifications.setAdapters(adapters),
+    watch: false,
+  });
   const handler = createThebeHttpHandler({
     version: "test",
     token: "secret",
     notifications,
+    notificationConfig,
   });
   async function call(path: string, init: RequestInit = {}) {
     const response = await handler.handle(
@@ -60,7 +79,7 @@ async function setup() {
       body: (await response.json()) as Record<string, unknown>,
     };
   }
-  return { notifications, sent, call };
+  return { notifications, notificationConfig, sent, call };
 }
 
 const target = {
@@ -76,6 +95,29 @@ const target = {
 };
 
 describe("notification HTTP routes", () => {
+  it("lists every channel and marks the ones this host can deliver through", async () => {
+    const { call } = await setup();
+    const response = await call("/v1/notifications/channels");
+    expect(response.status).toBe(200);
+    const channels = response.body.channels as Array<{
+      id: string;
+      available: boolean;
+      addressFields: Array<{ key: string; required: boolean }>;
+    }>;
+    expect(channels.length).toBeGreaterThan(15);
+    expect(channels.find((channel) => channel.id === "webhook")).toMatchObject({
+      available: true,
+    });
+    expect(
+      channels.find((channel) => channel.id === "webhook")?.addressFields
+    ).toContainEqual(expect.objectContaining({ key: "url", required: true }));
+    expect(channels.find((channel) => channel.id === "telegram")).toMatchObject(
+      {
+        available: false,
+      }
+    );
+  });
+
   it("saves settings, redacts credentials, and routes an external send", async () => {
     const { notifications, sent, call } = await setup();
     const saved = await call("/v1/notifications/settings", {
@@ -257,6 +299,42 @@ describe("notification HTTP routes", () => {
     });
     expect(send.status).toBe(400);
     expect(send.body.code).toBe("invalid_notification");
+  });
+
+  it("reads, masks, and updates channel credentials", async () => {
+    const { notificationConfig, notifications, call } = await setup();
+    const empty = await call("/v1/notifications/config");
+    expect(empty.status).toBe(200);
+    expect(empty.body.config).toEqual({});
+    expect(empty.body.fields).toEqual(expect.any(Array));
+
+    const saved = await call("/v1/notifications/config", {
+      method: "PUT",
+      body: JSON.stringify({
+        config: { telegram: { botToken: "do-not-print-me" } },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.body.config).toMatchObject({
+      telegram: { botToken: "***REDACTED***" },
+    });
+    expect(JSON.stringify(saved.body)).not.toContain("do-not-print-me");
+    expect((await notificationConfig.get()).telegram?.botToken).toBe(
+      "do-not-print-me"
+    );
+    expect(
+      notifications.channels().find((channel) => channel.id === "telegram")
+        ?.available
+    ).toBe(true);
+
+    const kept = await call("/v1/notifications/config", {
+      method: "PUT",
+      body: JSON.stringify({ config: saved.body.config }),
+    });
+    expect(kept.status).toBe(200);
+    expect((await notificationConfig.get()).telegram?.botToken).toBe(
+      "do-not-print-me"
+    );
   });
 
   it("reports status without notification bodies", async () => {

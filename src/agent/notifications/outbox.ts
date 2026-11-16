@@ -414,14 +414,35 @@ export function createNotificationOutbox(options: {
 }
 
 function dueHeads(state: OutboxState, now: Date): NotificationOutboxEntry[] {
-  const seen = new Set<string>();
+  const blocked = new Set<string>();
+  const heldForQuiet = new Set<string>();
   const heads: NotificationOutboxEntry[] = [];
   const nowMs = now.getTime();
   for (const entry of state.entries) {
-    if (seen.has(entry.targetId)) continue;
-    seen.add(entry.targetId);
-    if (entry.state === "send_started") continue;
-    if (Date.parse(entry.nextAttemptAt) <= nowMs) heads.push(entry);
+    if (blocked.has(entry.targetId)) continue;
+    if (entry.state === "send_started") {
+      blocked.add(entry.targetId);
+      continue;
+    }
+    if (Date.parse(entry.nextAttemptAt) > nowMs) {
+      // A notice waiting for quiet hours does not hold back a critical notice behind it. A retry does:
+      // the target's older notice must settle before a newer one, or order and dedupe get confusing.
+      if (entry.attempts === 0 && !entry.lastError) {
+        heldForQuiet.add(entry.targetId);
+      } else {
+        blocked.add(entry.targetId);
+      }
+      continue;
+    }
+    if (
+      heldForQuiet.has(entry.targetId) &&
+      entry.notification.priority !== "critical"
+    ) {
+      blocked.add(entry.targetId);
+      continue;
+    }
+    heads.push(entry);
+    blocked.add(entry.targetId);
   }
   return heads;
 }
