@@ -454,7 +454,8 @@ function parseBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
-const SECRET_KEY = /(secret|token|password|passwd|authorization|api[-_]?key)/i;
+const SECRET_KEY =
+  /^(?:secret|token|password|passwd|authorization|user)$|(?:secret|token|password|passwd|authorization|api[-_]?key|device[-_]?key)$/i;
 
 function redactAddress(
   address: Record<string, string>

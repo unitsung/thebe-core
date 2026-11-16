@@ -94,6 +94,38 @@ describe("notification outbox", () => {
     expect((await outbox.pending()).length).toBe(0);
   });
 
+  it("keeps a retry ahead of a later notice even when the later one is critical", async () => {
+    let now = new Date("2026-11-14T10:00:00.000Z");
+    let fail = true;
+    const attempts: string[] = [];
+    const outbox = createNotificationOutbox({
+      now: () => now,
+      retryBaseMs: 1_000,
+      send: async (input) => {
+        attempts.push(input.notification.id);
+        return fail
+          ? { status: "retry", reason: "provider_busy" }
+          : { status: "sent" };
+      },
+    });
+    await outbox.enqueue([
+      { ...target, notification: notice("one") },
+      { ...target, notification: notice("two") },
+    ]);
+
+    await outbox.flush();
+    expect(attempts).toEqual(["one"]);
+    expect(
+      (await outbox.pending()).map((entry) => entry.notification.id)
+    ).toEqual(["one", "two"]);
+
+    fail = false;
+    now = new Date(now.getTime() + 2_000);
+    await outbox.flush();
+    expect(attempts).toEqual(["one", "one", "two"]);
+    expect(await outbox.pending()).toHaveLength(0);
+  });
+
   it("settles an interrupted send as unknown after a restart and never replays it", async () => {
     const dir = await tempDir();
     let now = new Date("2026-11-14T10:00:00.000Z");

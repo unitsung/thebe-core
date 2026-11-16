@@ -182,6 +182,12 @@ export const SLASH_COMMANDS: ThebeSlashCommand[] = [
     description: "List or revoke authorised MCP OAuth connectors",
   },
   {
+    name: "notifications",
+    category: "Thebe",
+    aliases: ["notification"],
+    description: "Configure notification channel credentials",
+  },
+  {
     name: "subagent",
     category: "Thebe",
     aliases: ["subagents"],

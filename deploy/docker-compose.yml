@@ -29,11 +29,6 @@ services:
       THEBE_OUTPUT_DIR: /data/outputs
       THEBE_WORKSPACE_DIR: /workspace
       HOME: /data/home
-      # Notification adapter for OpenClaw-backed targets. The sidecar only
-      # starts with the "openclaw" profile; an ordinary deployment leaves the
-      # URL unused unless a target uses channel.source = "openclaw".
-      THEBE_OPENCLAW_GATEWAY_URL: ${THEBE_OPENCLAW_GATEWAY_URL:-http://openclaw:18789}
-      THEBE_OPENCLAW_GATEWAY_TOKEN: ${THEBE_OPENCLAW_GATEWAY_TOKEN:-}
     ports:
       # Loopback by default. For a home LAN set THEBE_BIND to the host's LAN address in .env
       # (never 0.0.0.0); see docs/DEPLOYMENT.md "Home network mode".
@@ -52,58 +47,3 @@ services:
       - ALL
     # The image already declares the healthcheck (GET /v1/health with
     # X-Thebe-Token); keep it in one place so the two cannot drift apart.
-
-  # Optional multi-channel notification sidecar. Core only speaks the OpenClaw
-  # tools/invoke HTTP API; channel credentials and the platform SDKs stay here.
-  #
-  #   docker compose --profile openclaw up -d --build
-  #
-  # Configure channels once (writes into the openclaw-data volume). Env tokens
-  # alone do NOT register a channel: run channels add for each one. The gateway
-  # must already be up so its entrypoint has initialised the state dir.
-  #
-  #   docker compose --profile openclaw up -d
-  #   docker compose --profile openclaw run -T --rm --entrypoint node openclaw \
-  #     /app/openclaw.mjs channels add --channel telegram --use-env
-  #
-  # Then add an owner target with channel.source = "openclaw" and an address
-  # such as {"channel":"telegram","target":"123456789"}.
-  openclaw:
-    profiles: ["openclaw"]
-    # Official image; pin a version or use a locally built image via OPENCLAW_IMAGE.
-    image: ${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
-    restart: unless-stopped
-    init: true
-    # No host port is published: the Gateway is reachable only as "openclaw"
-    # on the compose network. In a container gateway.bind defaults to 0.0.0.0.
-    environment:
-      HOME: /home/node
-      OPENCLAW_HOME: /home/node
-      OPENCLAW_STATE_DIR: /home/node/.openclaw
-      OPENCLAW_CONFIG_PATH: /home/node/.openclaw/openclaw.json
-      OPENCLAW_CONFIG_DIR: /home/node/.openclaw
-      OPENCLAW_WORKSPACE_DIR: /home/node/.openclaw/workspace
-      OPENCLAW_GATEWAY_PORT: "18789"
-      # Empty is intentional: an unset token must not break a plain
-      # "docker compose up" for deployments that do not enable this profile.
-      # With the profile on, OpenClaw refuses to bind 0.0.0.0 without auth,
-      # so a missing token fails loudly at sidecar startup instead of
-      # exposing an unauthenticated /tools/invoke endpoint.
-      OPENCLAW_GATEWAY_TOKEN: ${THEBE_OPENCLAW_GATEWAY_TOKEN:-}
-      TERM: xterm-256color
-      # Env-backed channel credentials are optional; the channels command above
-      # stores references to them in openclaw.json (see --use-env).
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:-}
-      SLACK_APP_TOKEN: ${SLACK_APP_TOKEN:-}
-      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
-    volumes:
-      - openclaw-data:/home/node/.openclaw
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - NET_RAW
-      - NET_ADMIN
-
-volumes:
-  openclaw-data:

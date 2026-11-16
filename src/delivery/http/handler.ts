@@ -8,6 +8,7 @@ import { createThebeHttpRouter } from "./router.ts";
 import { validateRequestSecurity } from "./security.ts";
 import { bearerChallenge } from "./oauth/metadata.ts";
 import type { OAuthHttpIntegration } from "./oauth/service.ts";
+import type { NotificationChannelConfigService } from "../../agent/notifications/channel-config-service.ts";
 import type {
   AsyncTokenVerifier,
   TokenCaller,
@@ -31,6 +32,7 @@ export type ThebeHttpHandlerOptions = {
   pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: import("../../agent/notifications/quiet-hours.ts").QuietHoursStore;
   notifications?: import("./context.ts").ThebeHttpContext["notifications"];
+  notificationConfig?: NotificationChannelConfigService;
   im?: import("./context.ts").ThebeHttpContext["im"];
   workspacePath?: string;
   /** Calls a minute a scoped token may make over `/mcp`; 0 is no limit. Default: `THEBE_MCP_RATE_LIMIT`, else 120. */
@@ -83,6 +85,7 @@ export function createThebeHttpHandler(options: ThebeHttpHandlerOptions) {
     pushOutbox: options.pushOutbox,
     quietHours: options.quietHours,
     notifications: options.notifications,
+    notificationConfig: options.notificationConfig,
     im: options.im,
     workspacePath: options.workspacePath,
     mcpRateLimit: options.mcpRateLimit,

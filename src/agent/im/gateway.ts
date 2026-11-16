@@ -27,6 +27,7 @@ import {
   parseAddChannelInput,
   parseBindInput,
   parseImCredentials,
+  parseLoginCodeInput,
   parseLoginStartInput,
   parseSendInput,
 } from "./validation.ts";
@@ -1016,7 +1017,11 @@ export function createImGateway(options: ImGatewayOptions) {
         accountId: account.id,
       });
     }
-    if (poll.state !== "pending" && poll.state !== "scanned") {
+    if (
+      poll.state !== "pending" &&
+      poll.state !== "scanned" &&
+      poll.state !== "need_verifycode"
+    ) {
       logins.delete(loginId);
     }
     return loginView(session, poll.state, {
@@ -1024,6 +1029,38 @@ export function createImGateway(options: ImGatewayOptions) {
       ...(poll.retryAfterMs !== undefined
         ? { retryAfterMs: poll.retryAfterMs }
         : {}),
+    });
+  }
+
+  async function submitLoginCode(
+    loginId: string,
+    value: unknown
+  ): Promise<ImLoginView> {
+    await awaitReady();
+    const session = logins.get(loginId);
+    if (!session) {
+      throw new ImInputError("unknown IM login", 404, "not_found");
+    }
+    if (!session.adapter.submitCode) {
+      throw new ImInputError(
+        "this login does not use a verification code",
+        400,
+        "login_code_not_supported"
+      );
+    }
+    const code = parseLoginCodeInput(value);
+    try {
+      await session.adapter.submitCode(session.challenge.id, code);
+    } catch (error) {
+      onError(error);
+      throw new ImInputError(
+        "the login code could not be submitted",
+        502,
+        "login_code_failed"
+      );
+    }
+    return loginView(session, "pending", {
+      detail: "verification code submitted",
     });
   }
 
@@ -1304,6 +1341,7 @@ export function createImGateway(options: ImGatewayOptions) {
     addChannel,
     beginLogin,
     pollLogin,
+    submitLoginCode,
     cancelLogin,
     removeChannel,
     bind,
@@ -1405,6 +1443,7 @@ function isLoginState(value: unknown): value is ImLoginView["state"] {
   return (
     value === "pending" ||
     value === "scanned" ||
+    value === "need_verifycode" ||
     value === "confirmed" ||
     value === "expired" ||
     value === "failed" ||

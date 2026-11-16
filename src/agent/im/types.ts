@@ -239,6 +239,7 @@ export type ImLoginChallenge = {
 export type ImLoginState =
   | "pending"
   | "scanned"
+  | "need_verifycode"
   | "confirmed"
   | "expired"
   | "failed"
@@ -270,6 +271,8 @@ export type ImLoginAdapter = {
   begin(input: { label: string }): Promise<ImLoginChallenge>;
   poll(challengeId: string): Promise<ImLoginPoll>;
   cancel(challengeId: string): Promise<void>;
+  /** Submit a phone PIN when `poll` reports `need_verifycode`; the next poll continues the flow. */
+  submitCode?(challengeId: string, code: string): Promise<void>;
 };
 
 /**

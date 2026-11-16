@@ -1,4 +1,7 @@
-import type { NotificationDeliveryAttempt } from "../../agent/notifications/types.ts";
+import type {
+  NotificationDeliveryAttempt,
+  NotificationSendInput,
+} from "../../agent/notifications/types.ts";
 
 export type HttpResult =
   | { kind: "response"; response: Response; body: unknown; text: string }
@@ -142,4 +145,69 @@ export function addressValue(
 ): string | undefined {
   const value = address?.[key]?.trim();
   return value || undefined;
+}
+
+/** The one text every channel sends: title, body, then the deep link when there is one. */
+export function renderNotice(
+  input: NotificationSendInput,
+  options: { separator?: string; link?: boolean } = {}
+): string {
+  return [
+    input.notification.title,
+    input.notification.body,
+    ...(options.link === false || !input.notification.deepLink
+      ? []
+      : [input.notification.deepLink]),
+  ].join(options.separator ?? "\n\n");
+}
+
+/** An address may name a server; only an absolute HTTP(S) URL with no embedded credentials is one. */
+export function httpUrl(
+  value: string | undefined,
+  options: { allowHttp?: boolean } = {}
+): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    const allowsPlain = options.allowHttp !== false && url.protocol === "http:";
+    if (url.protocol !== "https:" && !allowsPlain) return undefined;
+    if (url.username || url.password) return undefined;
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+export async function postForm(
+  fetchImpl: typeof fetch,
+  url: string,
+  body: URLSearchParams,
+  options: {
+    headers?: Record<string, string>;
+    timeoutMs?: number;
+    method?: string;
+  } = {}
+): Promise<HttpResult> {
+  try {
+    const response = await fetchImpl(url, {
+      method: options.method ?? "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...options.headers,
+      },
+      body: body.toString(),
+      redirect: "error",
+      signal: AbortSignal.timeout(options.timeoutMs ?? 10_000),
+    });
+    const text = await response.text();
+    let parsed: unknown;
+    try {
+      parsed = text ? JSON.parse(text) : undefined;
+    } catch {
+      parsed = undefined;
+    }
+    return { kind: "response", response, body: parsed, text };
+  } catch (error) {
+    return { kind: "error", error };
+  }
 }

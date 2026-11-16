@@ -39,6 +39,7 @@ describe("slash command menu", () => {
       "mcp",
       "pair",
       "connections",
+      "notifications",
       "subagent",
       "quit",
     ]);
@@ -57,8 +58,8 @@ describe("slash command menu", () => {
     expect(resolveSlashName("oauth")).toBe("pair");
     expect(resolveSlashName("connector")).toBe("pair");
     expect(resolveSlashName("grants")).toBe("connections");
-    expect(SLASH_COMMANDS.slice(-6, -1).map((command) => command.name)).toEqual(
-      ["skills", "mcp", "pair", "connections", "subagent"]
+    expect(SLASH_COMMANDS.slice(-7, -1).map((command) => command.name)).toEqual(
+      ["skills", "mcp", "pair", "connections", "notifications", "subagent"]
     );
   });
 

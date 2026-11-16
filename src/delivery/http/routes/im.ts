@@ -98,6 +98,19 @@ export async function handleImRoutes(
       return methodNotAllowed();
     }
     if (
+      parts.length === 5 &&
+      parts[2] === "logins" &&
+      parts[4] === "code" &&
+      request.method === "POST"
+    ) {
+      const blocked = quiescedWrite(context);
+      if (blocked) return blocked;
+      return json({
+        ok: true,
+        login: await im.submitLoginCode(parts[3]!, await readJson(request)),
+      });
+    }
+    if (
       parts.length === 3 &&
       parts[2] === "status" &&
       request.method === "GET"

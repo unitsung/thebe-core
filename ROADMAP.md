@@ -208,4 +208,4 @@ they are not re-raised as omissions:
   tool confirmations use `/v1/permissions`).
 - A second agent loop, or a Thebe-owned transcript store.
 - Client UI code (screens, DTOs) or native provider clients inside Core.
-- Self-hosted inference; Octop / Hermes / ACP as dependencies.
+- Self-hosted inference; external agent gateways or Python sidecars as dependencies.

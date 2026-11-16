@@ -108,6 +108,9 @@ describe("notification settings", () => {
                 url: "https://example.test/hook?access_token=abc&x=1",
                 secret: "very-secret",
                 chatId: "42",
+                deviceKey: "bark-device",
+                user: "pushover-user",
+                toUser: "ops",
               },
             },
             categories: "all",
@@ -121,6 +124,9 @@ describe("notification settings", () => {
     const address = view.targets[0]!.channel.address!;
     expect(address.url).toContain("access_token=***REDACTED***");
     expect(address.secret).toBe("***REDACTED***");
+    expect(address.deviceKey).toBe("***REDACTED***");
+    expect(address.user).toBe("***REDACTED***");
+    expect(address.toUser).toBe("ops");
     expect(address.chatId).toBe("42");
   });
 

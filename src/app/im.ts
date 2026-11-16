@@ -5,6 +5,7 @@ import {
   telegramCursorIdentity,
   validateTelegramCredentials,
 } from "../adapters/im/telegram.ts";
+import { createWechatFactory } from "../adapters/im/wechat/adapter.ts";
 import { redactToolOutput } from "../agent/security/redaction.ts";
 
 /**
@@ -27,6 +28,7 @@ export function createImIntegration(options: {
   const factories: ImAdapterFactory[] = [
     ...(options.factories ?? []),
     telegramFactory(env),
+    createWechatFactory(env),
   ];
   const token = env.THEBE_TELEGRAM_BOT_TOKEN?.trim();
   const seed = token

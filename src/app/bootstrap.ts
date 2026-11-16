@@ -31,7 +31,8 @@ import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createTokenVerifier } from "../delivery/http/token-store.ts";
 import { createThebeApp } from "./create.ts";
-import { createNotificationAdaptersFromEnv } from "./notifications.ts";
+import { createNotificationAdapters } from "./notifications.ts";
+import { loadNotificationChannelConfig } from "../agent/notifications/channel-config.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
@@ -211,6 +212,7 @@ export async function bootstrapThebe(
     createArcaneBackgroundTaskProviderFromEnv();
 
   const version = readPackageVersion(fromDir);
+  const notificationConfig = await loadNotificationChannelConfig(configDir);
   const agentStoreDir =
     process.env.THEBE_AGENT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
@@ -239,7 +241,14 @@ export async function bootstrapThebe(
       parseDailyBackgroundTokenBudgetThresholds(process.env),
     watchdog: userConfig.watchdog,
     pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
-    notificationAdapters: createNotificationAdaptersFromEnv(process.env),
+    notificationAdapters: createNotificationAdapters(
+      process.env,
+      notificationConfig
+    ),
+    notificationConfig: {
+      dir: configDir,
+      build: (config) => createNotificationAdapters(process.env, config),
+    },
     im: { env: process.env },
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
