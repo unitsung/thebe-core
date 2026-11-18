@@ -96,7 +96,7 @@ Core 操作的是你自己运行的服务和你自己的账号，它不提供、
 | 术语与架构                 | [CONTEXT.md](CONTEXT.md)                                       |
 | 参与贡献与安全             | [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) |
 
-开发检查：`npm run typecheck`、`npm run lint`、`npm run format`、`npm test`、`bash scripts/release-check.sh`。
+开发检查：`npm run typecheck`、`npm run lint`、`npm run format`、`npm test`、`bash scripts/check-release.sh`。
 
 ## 许可证
 

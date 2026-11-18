@@ -31,12 +31,11 @@ npm run typecheck                # tsc --noEmit
 npm run lint                     # oxlint
 npm run format                   # oxfmt, writes in place
 npm test                         # vitest run
-bash scripts/release-check.sh    # typecheck + lint + build + tests + live smoke test
+bash scripts/check-release.sh    # typecheck + lint + build + tests + live smoke test
 ```
 
-`scripts/release-check.sh` is the release gate and runs in CI
-(`.github/workflows/verify.yml`) on every push and pull request. Use
-`bash scripts/release-check.sh --no-smoke` to skip the smoke test.
+`scripts/check-release.sh` is the local release gate. Use
+`bash scripts/check-release.sh --no-smoke` to skip the smoke test.
 
 A Husky `pre-commit` hook runs lint-staged (oxfmt on staged files, oxlint on
 staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `commit-msg` hook enforces
@@ -53,7 +52,7 @@ staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `com
 4. Update the focused `docs/` page when a user-visible workflow or configuration
    contract changes.
 5. Sign off every commit (see below).
-6. Confirm `bash scripts/release-check.sh` passes, then open a pull request
+6. Confirm `bash scripts/check-release.sh` passes, then open a pull request
    describing the changed behavior and the checks you ran.
 
 Preserve unrelated work in the tree. Avoid destructive Git operations and broad

@@ -91,7 +91,7 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
 **Deployment**
 
 - One container, backup / restore / upgrade on `/data`, host TLS paths
-  (Tailscale or a reverse proxy), `scripts/smoke.mjs`, `scripts/release-check.sh`,
+  (Tailscale or a reverse proxy), `scripts/smoke.mjs`, `scripts/check-release.sh`,
   and CI.
 
 ## Next

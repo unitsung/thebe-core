@@ -96,7 +96,7 @@ You are responsible for what you ask Core to do with them: make sure you have th
 | Vocabulary and architecture               | [CONTEXT.md](CONTEXT.md)                                       |
 | Contributing and security                 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) |
 
-Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm test`, `bash scripts/release-check.sh`.
+Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm test`, `bash scripts/check-release.sh`.
 
 ## License
 
