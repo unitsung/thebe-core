@@ -460,11 +460,15 @@ export ARCANE_ENVIRONMENT_ID=0   # 可选；0 是 Arcane 的本地环境
 ```
 
 `THEBE_ARCANE_BASE_URL` / `THEBE_ARCANE_API_KEY` / `THEBE_ARCANE_ENVIRONMENT_ID`
-是等价别名。活动来源读取 `/api/environments/{id}/activities`（最近 25 条，倒序），
-映射 `id` / `type` / `name` / 状态与起止时间，错误文本先脱敏再截断；客户端里的“停止”
-调用 `/api/environments/{id}/activities/{activityId}/cancel`，activity 已结束时
-Core 返回 409 与 “already finished” 说明（取消需要 Arcane 版本带活动取消能力，
-旧版本返回 404）。缺少凭据时既不暴露容器能力，也不注册该活动来源。
+是等价别名。Core 同时支持 Arcane 1.x/2.x 与 3.x：读取公开的 `/api/version`，
+1.x/2.x 使用 `/api/environments/{id}/...`，3.x 使用 `/api/agents/{id}/...`；
+如果代理隐藏了版本接口，则探测 3.x 才有的 `/api/agents`。活动来源读取对应环境的
+`activities` 列表（最近 25 条，倒序），映射 `id` / `type` / `name` / 状态与起止时间，
+错误文本先脱敏再截断；客户端里的“停止”在 3.x 调用
+`activities/{activityId}?action=cancel`，旧版本调用
+`activities/{activityId}/cancel`。activity 已结束时 Core 返回 409 与
+“already finished” 说明（取消需要 Arcane 版本带活动取消能力，旧版本返回 404）。
+缺少凭据时既不暴露容器能力，也不注册该活动来源。
 
 ### 不依赖 Arcane 的容器（Docker Engine API 经 docker-socket-proxy）
 

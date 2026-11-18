@@ -16,6 +16,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       pageSize: 10,
       fetch: async (input) => {
@@ -50,6 +51,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       pageSize: 1,
       maxPages: 2,
@@ -88,6 +90,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async (input, init) => {
         seen.push(`${init?.method ?? "GET"} ${String(input)}`);
@@ -105,6 +108,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async (input, init) => {
         const url = String(input);
@@ -144,6 +148,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async () =>
         jsonResponse(200, {
@@ -180,6 +185,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async () =>
         jsonResponse(200, {
@@ -220,6 +226,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async (input) => {
         requestedURL = String(input);
@@ -248,6 +255,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       openLogSocket: async (url, headers) => {
         logsUrl = url;
@@ -281,6 +289,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       openLogSocket: async (url) => {
         logsUrl = url;
         return (async function* () {})();
@@ -296,6 +305,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       now: () => 1_700_000_100,
       fetch: async () =>
@@ -322,6 +332,7 @@ describe("ArcaneAdapter", () => {
       new ArcaneAdapter({
         baseUrl: "https://arcane.internal:3552",
         apiKey: "thebe-key",
+        apiStyle: "legacy",
         environmentId: "0",
         fetch: async () =>
           jsonResponse(status, {
@@ -361,6 +372,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async () => {
         throw new TypeError("ECONNREFUSED 10.0.0.5:3552 secret-host");
@@ -384,6 +396,7 @@ describe("ArcaneAdapter", () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async () => new Response("not-json", { status: 200 }),
     });
@@ -395,10 +408,96 @@ describe("ArcaneAdapter", () => {
     });
   });
 
+  it("uses the Arcane 3 agent route shape and query action", async () => {
+    const seen: string[] = [];
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      apiStyle: "agents",
+      environmentId: "0",
+      fetch: async (input, init) => {
+        seen.push(`${init?.method ?? "GET"} ${String(input)}`);
+        return jsonResponse(200, { success: true, data: {} });
+      },
+    });
+    await adapter.restartContainer("abc123");
+    expect(seen).toEqual([
+      "POST https://arcane.internal:3552/api/agents/0/containers/abc123?action=restart",
+    ]);
+  });
+
+  it("detects Arcane 3 from /api/version before using agent routes", async () => {
+    const seen: string[] = [];
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async (input) => {
+        const url = String(input);
+        seen.push(url);
+        if (url.endsWith("/api/version")) {
+          return jsonResponse(200, { currentVersion: "v3.0.0" });
+        }
+        return jsonResponse(200, {
+          success: true,
+          data: [],
+          pagination: { totalItems: 0, hasNextPage: false },
+        });
+      },
+    });
+
+    await adapter.listContainers();
+
+    expect(seen[0]).toBe("https://arcane.internal:3552/api/version");
+    expect(seen[1]).toContain("/api/agents/0/containers");
+  });
+
+  it("falls back to legacy routes when /api/version is absent", async () => {
+    const seen: string[] = [];
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      environmentId: "0",
+      fetch: async (input) => {
+        const url = String(input);
+        seen.push(url);
+        if (url.endsWith("/api/version")) return jsonResponse(404, {});
+        if (url.includes("/api/agents")) return jsonResponse(404, {});
+        return jsonResponse(200, { success: true, data: [] });
+      },
+    });
+
+    await adapter.listContainers();
+
+    expect(
+      seen.some((url) => url.includes("/api/environments/0/containers"))
+    ).toBe(true);
+  });
+
+  it("reads Arcane 3 container logs from the agent WebSocket path", async () => {
+    let logsUrl = "";
+    const adapter = new ArcaneAdapter({
+      baseUrl: "https://arcane.internal:3552",
+      apiKey: "thebe-key",
+      apiStyle: "agents",
+      environmentId: "0",
+      openLogSocket: async (url) => {
+        logsUrl = url;
+        return (async function* () {})();
+      },
+    });
+
+    await adapter.getContainerLogs("abc123", 50);
+
+    expect(logsUrl).toContain("/api/agents/0/ws/containers/abc123/logs");
+    expect(logsUrl).toContain("tail=50");
+  });
+
   it("reports an Arcane application error instead of returning an empty list", async () => {
     const adapter = new ArcaneAdapter({
       baseUrl: "https://arcane.internal:3552",
       apiKey: "thebe-key",
+      apiStyle: "legacy",
       environmentId: "0",
       fetch: async () =>
         jsonResponse(200, {
