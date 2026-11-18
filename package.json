@@ -29,7 +29,7 @@
     "format:check": "oxfmt --check",
     "cli": "npm run build && node dist/cli.js",
     "smoke": "node scripts/smoke.mjs",
-    "release-check": "bash scripts/release-check.sh",
+    "check:release": "bash scripts/check-release.sh",
     "prepare": "husky"
   },
   "dependencies": {

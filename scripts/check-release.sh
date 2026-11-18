@@ -5,7 +5,7 @@
 # It calls the local binaries directly; CI runs the same checks plus the smoke
 # test, so an operator can reproduce a release gate on a clean host.
 #
-# usage: bash scripts/release-check.sh [--no-smoke]
+# usage: bash scripts/check-release.sh [--no-smoke]
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

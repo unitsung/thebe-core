@@ -45,12 +45,11 @@ FROM ${NODE_IMAGE} AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 # Runtime dependencies only. pi-ai ships inside the pi-coding-agent package and
-# is resolved from there; `node scripts/check-pi-resolution.mjs` verifies it
-# inside the running container.
+# is resolved from there.
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
-COPY scripts/smoke.mjs scripts/check-pi-resolution.mjs ./scripts/
+COPY scripts/smoke.mjs ./scripts/
 RUN mkdir -p /data/config /data/agent /data/store /data/outputs /data/home /workspace \
   && chown -R node:node /data /workspace
 USER node

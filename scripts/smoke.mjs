@@ -232,7 +232,7 @@ async function startCore({ dist, env, timeoutMs }) {
   const entry = join(dist, "serve.js");
   if (!existsSync(entry)) {
     throw new Error(
-      `missing ${entry}; run the release check first (bash scripts/release-check.sh)`
+      `missing ${entry}; run the release check first (bash scripts/check-release.sh)`
     );
   }
   const child = spawn(process.execPath, [entry], {
