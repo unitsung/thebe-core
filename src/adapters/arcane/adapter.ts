@@ -7,6 +7,13 @@ import {
   type HostStatusSummary,
 } from "../../agent/capabilities/containers.ts";
 import { mapDockerHealth } from "../docker-health.ts";
+import {
+  containerActionPath,
+  containerLogsWSPath,
+  detectArcaneApiStyle,
+  environmentPath,
+  type ArcaneApiStyle,
+} from "./api-style.ts";
 
 export type ArcaneLogSocket = AsyncIterable<string>;
 
@@ -24,6 +31,8 @@ export type ArcaneAdapterOptions = {
   pageSize?: number;
   maxPages?: number;
   openLogSocket?: OpenArcaneLogSocket;
+  /** Pin the route shape when the server cannot be detected (tests, nightly builds). */
+  apiStyle?: ArcaneApiStyle;
 };
 
 type Json = Record<string, unknown>;
@@ -41,11 +50,12 @@ const DEFAULT_MAX_PAGES = 1_000;
 const MAX_LOG_TAIL = 200;
 
 export class ArcaneAdapter implements ContainerInfoProvider {
-  // Checked 2026-09-05 against instance v2.10.2 openapi.json:
+  // Checked against Arcane 2.17.3 and 3.0.0:
+  // - 1.x/2.x use /api/environments/{id}/... and action subpaths.
+  // - 3.x uses /api/agents/{id}/... and ?action= query values.
   // list uses pagination.totalItems and names[]; inspect state is {status,running};
   // counts has no paused/exited (paused stays 0, exited uses stoppedContainers).
   // Auth header is X-API-Key (X-Api-Key is equivalent).
-  // Unverified: WS logs path, frame format, default environmentId "0".
   private readonly baseUrl: string;
   private readonly apiKey: string;
   private readonly environmentId: string;
@@ -54,6 +64,7 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   private readonly pageSize: number;
   private readonly maxPages: number;
   private readonly openLogSocket: OpenArcaneLogSocket;
+  private apiStyle: ArcaneApiStyle | undefined;
 
   constructor(options: ArcaneAdapterOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -67,14 +78,16 @@ export class ArcaneAdapter implements ContainerInfoProvider {
       ? Math.max(1, Math.min(Math.floor(maxPages), DEFAULT_MAX_PAGES))
       : DEFAULT_MAX_PAGES;
     this.openLogSocket = options.openLogSocket ?? defaultOpenLogSocket;
+    this.apiStyle = options.apiStyle;
   }
 
   async listContainers(): Promise<ContainerSummary[]> {
+    const style = await this.style();
     const all: ContainerSummary[] = [];
     let start = 0;
     for (let page = 0; page < this.maxPages; page += 1) {
       const body = await this.requestJson(
-        `/api/environments/${this.environmentId}/containers?limit=${this.pageSize}&start=${start}&order=asc`
+        `${environmentPath(style, this.environmentId)}/containers?limit=${this.pageSize}&start=${start}&order=asc`
       );
       const rows = asArray(body.data).map(mapSummary);
       all.push(...rows);
@@ -92,18 +105,22 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   }
 
   async inspectContainer(id: string): Promise<ContainerDetail> {
+    const style = await this.style();
     const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}`
+      `${environmentPath(style, this.environmentId)}/containers/${encodeURIComponent(id)}`
     );
     return mapDetail(asObject(body.data));
   }
 
   async getContainerLogs(id: string, tail?: number): Promise<string> {
+    const style = await this.style();
     const linesWanted = normalizeLogTail(tail);
-    const encodedId = encodeURIComponent(id);
-    const path =
-      `/api/environments/${this.environmentId}/ws/containers/${encodedId}/logs` +
-      `?follow=false&tail=${linesWanted}&timestamps=true&format=json&batched=false`;
+    const path = containerLogsWSPath(
+      style,
+      this.environmentId,
+      id,
+      `follow=false&tail=${linesWanted}&timestamps=true&format=json&batched=false`
+    );
     const url = `${httpToWs(this.baseUrl)}${path}`;
     const headers = { "X-Api-Key": this.apiKey };
     let frames: string[];
@@ -126,15 +143,17 @@ export class ArcaneAdapter implements ContainerInfoProvider {
   }
 
   async restartContainer(id: string): Promise<void> {
+    const style = await this.style();
     await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/${encodeURIComponent(id)}/restart`,
+      containerActionPath(style, this.environmentId, id, "restart"),
       { method: "POST" }
     );
   }
 
   async getStatusSummary(): Promise<HostStatusSummary> {
+    const style = await this.style();
     const body = await this.requestJson(
-      `/api/environments/${this.environmentId}/containers/counts`
+      `${environmentPath(style, this.environmentId)}/containers/counts`
     );
     const counts = asObject(body.data);
     const total = numberField(counts, "totalContainers");
@@ -150,6 +169,17 @@ export class ArcaneAdapter implements ContainerInfoProvider {
       exitedContainers: exited,
       lastUpdated: this.now(),
     };
+  }
+
+  private async style(): Promise<ArcaneApiStyle> {
+    if (this.apiStyle) return this.apiStyle;
+    const detected = await detectArcaneApiStyle({
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      fetchImpl: this.fetchImpl,
+    });
+    if (detected) this.apiStyle = detected;
+    return detected ?? "legacy";
   }
 
   private async requestJson(

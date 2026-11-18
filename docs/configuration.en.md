@@ -265,14 +265,18 @@ export ARCANE_API_KEY=your-arcane-api-key
 export ARCANE_ENVIRONMENT_ID=0   # optional; 0 is Arcane's local environment
 ```
 
-Provides container list, inspect, logs, status summary, restart, and start. With a complete address and key, Arcane's background activities
-(image pulls, updates, scans) also feed the Activity feed as background tasks
-(`provider=arcane`). Core reads `/api/environments/{id}/activities` (latest 25,
-newest first), redacts and truncates error text, and the app's "stop" calls
-`/api/environments/{id}/activities/{activityId}/cancel`. A finished activity
-returns 409 "already finished"; Arcane versions without activity cancellation
-return 404. Without credentials neither the container capabilities nor the
-activity source is registered.
+Provides container list, inspect, logs, status summary, restart, and start.
+Arcane 1.x/2.x and 3.x are both supported: Core reads the public
+`/api/version` endpoint and uses `/api/environments/{id}/...` for 1.x/2.x or
+`/api/agents/{id}/...` for 3.x. If a proxy hides `/api/version`, Core probes
+the v3-only `/api/agents` route. With a complete address and key, Arcane's
+background activities (image pulls, updates, scans) also feed the Activity feed
+as background tasks (`provider=arcane`). Core reads the environment's
+`activities` list (latest 25, newest first), redacts and truncates error text,
+and the app's "stop" calls `activities/{activityId}?action=cancel` on 3.x or
+`activities/{activityId}/cancel` on older servers. A finished activity returns
+409 "already finished"; Arcane versions without activity cancellation return 404. Without credentials neither the container capabilities nor the activity
+source is registered.
 
 ### Containers without Arcane (Docker Engine API via docker-socket-proxy)
 

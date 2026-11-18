@@ -24,12 +24,13 @@ type Request = { url: string; method: string; apiKey: string };
 
 function recordingProvider(
   requests: Request[],
-  handler: (url: string, method: string) => Response,
+  handler: (url: string, method: string) => Response
 ): ArcaneBackgroundTaskProvider {
   return new ArcaneBackgroundTaskProvider({
     baseUrl: "https://arcane.test/",
     apiKey: "arcane-key",
     limit: 25,
+    apiStyle: "legacy",
     fetch: async (input, init) => {
       const url = String(input);
       const method = init?.method ?? "GET";
@@ -46,15 +47,22 @@ function recordingProvider(
 /** Replace the provider transport so env-built providers can be exercised. */
 function stubFetch(
   provider: ArcaneBackgroundTaskProvider,
-  requests: Request[],
+  requests: Request[]
 ): void {
   const mutable = provider as unknown as { fetchImpl: typeof fetch };
   mutable.fetchImpl = async (input, init) => {
+    const url = String(input);
     requests.push({
-      url: String(input),
+      url,
       method: init?.method ?? "GET",
       apiKey: String(new Headers(init?.headers).get("x-api-key")),
     });
+    if (url.endsWith("/api/version")) {
+      return new Response(JSON.stringify({ currentVersion: "v2.17.3" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
     return response([]);
   };
 }
@@ -115,7 +123,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
           startedAt: "2026-09-25T19:00:00Z",
           endedAt: "2026-09-25T19:00:10Z",
         },
-      ]),
+      ])
     );
 
     const tasks = await provider.list();
@@ -168,9 +176,9 @@ describe("ArcaneBackgroundTaskProvider", () => {
     ]);
     // Only activities that name a resource id get a link; a kind alone is not
     // enough to guess a target.
-    expect(tasks.filter((task) => task.resource !== undefined).map((task) => task.id)).toEqual([
-      "act-1",
-    ]);
+    expect(
+      tasks.filter((task) => task.resource !== undefined).map((task) => task.id)
+    ).toEqual(["act-1"]);
     expect(requests).toEqual([
       {
         url: "https://arcane.test/api/environments/0/activities?start=0&limit=25&order=desc",
@@ -185,7 +193,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
     await expect(empty.list()).resolves.toEqual([]);
 
     const rows = recordingProvider([], () =>
-      response([{ type: "image_pull", status: "running" }, "not-an-object"]),
+      response([{ type: "image_pull", status: "running" }, "not-an-object"])
     );
     await expect(rows.list()).resolves.toEqual([]);
   });
@@ -202,7 +210,9 @@ describe("ArcaneBackgroundTaskProvider", () => {
       const error = await provider.list().catch((cause: unknown) => cause);
       expect(error).toBeInstanceOf(ProviderError);
       expect((error as ProviderError).code).toBe(code);
-      expect((error as ProviderError & { status?: number }).status).toBe(status);
+      expect((error as ProviderError & { status?: number }).status).toBe(
+        status
+      );
     }
   });
 
@@ -220,7 +230,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
 
     const invalid = recordingProvider(
       [],
-      () => new Response("<html>nope</html>", { status: 200 }),
+      () => new Response("<html>nope</html>", { status: 200 })
     );
     await expect(invalid.list()).rejects.toMatchObject({ code: "UNKNOWN" });
 
@@ -230,7 +240,7 @@ describe("ArcaneBackgroundTaskProvider", () => {
         new Response(JSON.stringify({ success: false, error: "bad" }), {
           status: 200,
           headers: { "content-type": "application/json" },
-        }),
+        })
     );
     await expect(rejected.list()).rejects.toMatchObject({ code: "UNKNOWN" });
   });
@@ -277,11 +287,70 @@ describe("ArcaneBackgroundTaskProvider", () => {
 
     await provider.stopAll();
 
-    expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+    expect(
+      requests.map((request) => `${request.method} ${request.url}`)
+    ).toEqual([
       "GET https://arcane.test/api/environments/0/activities?start=0&limit=25&order=desc",
       "POST https://arcane.test/api/environments/0/activities/act-1/cancel",
       "POST https://arcane.test/api/environments/0/activities/act-2/cancel",
     ]);
+  });
+
+  it("uses the Arcane 3 agent routes and action query for activities", async () => {
+    const requests: Request[] = [];
+    const provider = new ArcaneBackgroundTaskProvider({
+      baseUrl: "https://arcane.test",
+      apiKey: "arcane-key",
+      apiStyle: "agents",
+      limit: 25,
+      fetch: async (input, init) => {
+        requests.push({
+          url: String(input),
+          method: init?.method ?? "GET",
+          apiKey: String(new Headers(init?.headers).get("x-api-key")),
+        });
+        return response([]);
+      },
+    });
+
+    await provider.list();
+    await provider.stop("act/1");
+
+    expect(
+      requests.map((request) => `${request.method} ${request.url}`)
+    ).toEqual([
+      "GET https://arcane.test/api/agents/0/activities?start=0&limit=25&order=desc",
+      "POST https://arcane.test/api/agents/0/activities/act%2F1?action=cancel",
+    ]);
+  });
+
+  it("detects the agent route shape from /api/version", async () => {
+    const requests: Request[] = [];
+    const provider = new ArcaneBackgroundTaskProvider({
+      baseUrl: "https://arcane.test",
+      apiKey: "arcane-key",
+      limit: 25,
+      fetch: async (input, init) => {
+        const url = String(input);
+        requests.push({
+          url,
+          method: init?.method ?? "GET",
+          apiKey: String(new Headers(init?.headers).get("x-api-key")),
+        });
+        if (url.endsWith("/api/version")) {
+          return new Response(JSON.stringify({ currentVersion: "v3.0.0" }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        return response([]);
+      },
+    });
+
+    await provider.list();
+
+    expect(requests[0]?.url).toBe("https://arcane.test/api/version");
+    expect(requests[1]?.url).toContain("/api/agents/0/activities");
   });
 });
 
@@ -289,7 +358,7 @@ describe("createArcaneBackgroundTaskProviderFromEnv", () => {
   it("requires both credentials and honors environment aliases", () => {
     expect(createArcaneBackgroundTaskProviderFromEnv({})).toBeUndefined();
     expect(
-      createArcaneBackgroundTaskProviderFromEnv({ ARCANE_API_KEY: "key" }),
+      createArcaneBackgroundTaskProviderFromEnv({ ARCANE_API_KEY: "key" })
     ).toBeUndefined();
 
     const withBareNames = createArcaneBackgroundTaskProviderFromEnv({
@@ -306,9 +375,15 @@ describe("createArcaneBackgroundTaskProviderFromEnv", () => {
   });
 
   it("targets the configured Arcane environment", async () => {
-    expect(arcaneEnvironmentIdFromEnv({ ARCANE_ENVIRONMENT_ID: "3" })).toBe("3");
-    expect(arcaneEnvironmentIdFromEnv({ THEBE_ARCANE_ENVIRONMENT_ID: "4" })).toBe("4");
-    expect(arcaneEnvironmentIdFromEnv({ ARCANE_ENVIRONMENT_ID: "  " })).toBeUndefined();
+    expect(arcaneEnvironmentIdFromEnv({ ARCANE_ENVIRONMENT_ID: "3" })).toBe(
+      "3"
+    );
+    expect(
+      arcaneEnvironmentIdFromEnv({ THEBE_ARCANE_ENVIRONMENT_ID: "4" })
+    ).toBe("4");
+    expect(
+      arcaneEnvironmentIdFromEnv({ ARCANE_ENVIRONMENT_ID: "  " })
+    ).toBeUndefined();
 
     const requests: Request[] = [];
     const provider = createArcaneBackgroundTaskProviderFromEnv({
@@ -321,8 +396,8 @@ describe("createArcaneBackgroundTaskProviderFromEnv", () => {
 
     await (provider as ArcaneBackgroundTaskProvider).list();
 
-    expect(requests[0]?.url).toBe(
-      "https://arcane.test/api/environments/3/activities?start=0&limit=25&order=desc",
+    expect(requests.map((request) => request.url)).toContain(
+      "https://arcane.test/api/environments/3/activities?start=0&limit=25&order=desc"
     );
   });
 });
