@@ -11,7 +11,7 @@ possible for development, but the container is the supported release shape.
 > 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；需要接
 > claude.ai / ChatGPT connector 时，在网关端口启用 OAuth；升级 = 换镜像
 >
-> - 保留 `data/`；发布前跑 `bash scripts/release-check.sh`（typecheck/build/test/smoke 一步到位）。
+> - 保留 `data/`；发布前跑 `bash scripts/check-release.sh`（typecheck/build/test/smoke 一步到位）。
 
 ## 1. Quick start (container)
 
@@ -90,8 +90,8 @@ pulled image and does not rebuild; add `--build` only to build the local source
 The release check calls the local binaries directly:
 
 ```bash
-bash scripts/release-check.sh              # typecheck + lint + build + tests + smoke
-bash scripts/release-check.sh --no-smoke   # typecheck + lint + build + tests only
+bash scripts/check-release.sh              # typecheck + lint + build + tests + smoke
+bash scripts/check-release.sh --no-smoke   # typecheck + lint + build + tests only
 
 # equivalently, by hand:
 node_modules/.bin/tsc --noEmit
@@ -119,13 +119,12 @@ unset it generates one, persists it under the config dir, and prints it once
 ### 2.1 Build the container image on this host
 
 `.github/workflows/publish-image.yml` builds and pushes the multi-arch image and
-is the canonical source. To build and verify one locally — fast on a Linux host,
-slower through a Docker VM on macOS — use the helper, which tags the image and
-then runs the pi-ai resolution check and the smoke test inside it:
+is the canonical source. `.github/workflows/ci.yml` builds the image and runs
+the container smoke test on pull requests. To reproduce that locally:
 
 ```bash
-bash scripts/build-image.sh                 # tags thebe-core:local
-bash scripts/build-image.sh thebe-core:dev   # custom tag
+docker build -t thebe-core:local .
+docker run --rm --entrypoint node thebe-core:local scripts/smoke.mjs
 ```
 
 BuildKit is required (the Dockerfile mounts a cache); Docker 23+ and Compose v2
@@ -606,41 +605,14 @@ docker compose run --rm thebe-core node scripts/smoke.mjs # inside the image
 
 Expected output ends with `SMOKE OK (8 checks)`.
 
-Release gate:
+Release check:
 
 ```bash
-bash scripts/release-check.sh     # tsc --noEmit + oxlint + tsdown + vitest run + smoke
+bash scripts/check-release.sh     # tsc --noEmit + oxlint + tsdown + vitest run + smoke
 ```
 
-GitHub Actions does not run this gate on every push.
-`.github/workflows/verify.yml` is manual `workflow_dispatch`, and image
-publishing runs only on version tags.
-
-### Local verification gate
-
-Routine changes reach `dev` through the local `thebe/local-verify` delivery gate
-instead of GitHub Actions on every push:
-
-1. On the NAS, the gate installs from the lockfile with `npm ci` and runs
-   `bash scripts/release-check.sh` — typecheck, lint, build, the full Vitest
-   suite, and the smoke test.
-2. An independent reviewer that does not share the worker's transcript checks
-   the diff against the acceptance criteria and the verifier output.
-3. After that review passes, the change is squash-merged into `dev`
-   automatically as one conventional commit.
-
-A failed check or review blocks the merge; fix the root cause and rerun the
-gate. The same `scripts/release-check.sh` command is the release gate above, so
-a local pass and a manual `verify` dispatch run the same checks.
-
-### Container verification after an upgrade
-
-```bash
-docker compose exec thebe-core node scripts/check-pi-resolution.mjs
-```
-
-It must print `pi-ai OK …`. `MISSING` means the production install lost the
-nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
+Image publishing runs only on version tags and does not rerun the local release
+check.
 
 ## 11. Troubleshooting
 
@@ -651,7 +623,7 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
 | `403` on writes, reads fine                              | `Host` header not in the allowlist and not a local/private name           | Add the client's host name to `THEBE_ALLOWED_HOSTS` and restart. Loopback, private IPs, `.local`, and `.ts.net` are trusted automatically |
 | Client needs the token                                   | First start generated one                                                 | Read it from the startup logs (`THEBE_TOKEN ...`) or `deploy/data/config/token`                                                           |
 | `docker build` fails with `--mount requires BuildKit`    | Legacy (pre-BuildKit) builder                                             | Use Docker 23+/Compose v2, or `DOCKER_BUILDKIT=1 docker build`                                                                            |
-| `Could not find @earendil-works/pi-ai dist`              | Pruned install lost the nested copy                                       | Reinstall with `npm ci --omit=dev`; verify with `scripts/check-pi-resolution.mjs`                                                         |
+| `Could not find @earendil-works/pi-ai dist`              | Pruned install lost the nested copy                                       | Reinstall with `npm ci --omit=dev`                                                                                                        |
 | Agent cannot write files                                 | `/workspace` not writable by uid 1000                                     | `chown 1000:1000` the host folder, or grant group write                                                                                   |
 | OAuth startup says no pre-registered client              | Issuer is set without clients and DCR is off                              | Create `$THEBE_CONFIG_DIR/oauth-clients.json`, set `THEBE_OAUTH_CLIENTS`, or deliberately enable DCR                                      |
 | OAuth rejects the issuer or redirect URI                 | Public URLs need HTTPS, the issuer needs no path, redirects match exactly | Use the connector's exact callback and a stable HTTPS origin; HTTP is accepted only on loopback                                           |
@@ -663,15 +635,13 @@ nested `@earendil-works/pi-ai` copy; reinstall with `npm ci --omit=dev`.
   `oxlint`, `tsdown` (bundling four Node ESM entries into `dist/`), the full
   Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
   including SIGTERM exit `0` and a settings write surviving a Core restart).
-- `scripts/check-pi-resolution.mjs` resolves pi-ai in the current install.
 - OAuth directional tests pass locally, including PKCE, scope narrowing, JWT
   issuer/audience checks, restart persistence, and immediate invalidation after
   refresh-token revocation. No real claude.ai or ChatGPT connector/device
   acceptance run has been completed on this checkout.
 - The container builds and runs. The optimized image (490 MB on disk, 104 MB
   compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
-  `scripts/check-pi-resolution.mjs` and `scripts/smoke.mjs` (8/8) inside the
-  running container.
+  `scripts/smoke.mjs` (8/8) inside the running container.
 - The handwritten Seatbelt, bubblewrap, disposable-Docker and Gondolin checks
   are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime`.
   The container still does not nest that sandbox.

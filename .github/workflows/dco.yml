@@ -1,4 +1,4 @@
-name: dco
+name: DCO
 
 # Every commit in a pull request must carry a Signed-off-by trailer (CONTRIBUTING.md,
 # Developer Certificate of Origin). Direct pushes by maintainers are not checked.
@@ -14,7 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
       - run: bash scripts/check-dco.sh "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
