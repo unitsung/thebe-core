@@ -4,7 +4,7 @@
  * Judged per call (tool and arguments), not per tool: `download_delete` with `deleteFiles: false`
  * only drops the task and is an ordinary write, with `deleteFiles: true` it removes the files too.
  * Over `/mcp` a caller needs the `mcp:irreversible` scope for these; anything unsure counts as
- * irreversible. See docs/research/irreversible-writes-2026-11-03.md for the list and the reasons.
+ * irreversible.
  */
 
 export type IrreversibleCall = {

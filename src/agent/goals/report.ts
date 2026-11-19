@@ -4,8 +4,8 @@ import type { GoalReport, GoalReportState } from "../types.ts";
 
 /**
  * The structured way for a Goal's worker to say where it stands, instead of Core reading a marker
- * out of free text. See docs/research/goal-report-attention-design-2026-11-06.md. The text footer
- * (`GOAL_STATUS:` ...) stays as the fallback when a model does not call the tool.
+ * out of free text. The text footer (`GOAL_STATUS:` ...) stays as the fallback when a model does
+ * not call the tool.
  */
 export const GOAL_REPORT_TOOL_NAME = "goal_report";
 
