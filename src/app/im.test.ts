@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createImIntegration } from "./im.ts";
+import type { ImAdapter, ImAdapterFactory } from "../agent/im/types.ts";
 
 const dirs: string[] = [];
 afterEach(async () => {
@@ -10,6 +11,24 @@ afterEach(async () => {
     dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))
   );
 });
+
+function idleAdapter(platform: string): ImAdapter {
+  return {
+    platform,
+    capabilities: {
+      proactive: false,
+      replyOnly: true,
+      recall: false,
+      media: false,
+      maxTextLength: 1_000,
+    },
+    start: async () => {},
+    stop: async () => {},
+    health: async () => ({ state: "connected" }),
+    send: async () => ({ status: "sent" }),
+    onInbound: () => {},
+  };
+}
 
 describe("IM integration composition", () => {
   it("registers Weixin as a QR-login platform", async () => {
@@ -29,6 +48,65 @@ describe("IM integration composition", () => {
           credentials: [],
           login: true,
         },
+        {
+          platform: "qq",
+          credentials: [
+            { key: "appId", label: "AppID" },
+            { key: "clientSecret", label: "AppSecret", secret: true },
+          ],
+          login: false,
+        },
+        {
+          platform: "imessage",
+          credentials: [
+            { key: "baseUrl", label: "BlueBubbles server URL" },
+            {
+              key: "password",
+              label: "Server password",
+              secret: true,
+            },
+          ],
+          login: false,
+        },
+      ])
+    );
+    await gateway.stop();
+  });
+
+  it("seeds QQ and iMessage accounts from the environment", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-im-seeds-"));
+    dirs.push(dir);
+    const factory = (platform: string): ImAdapterFactory => ({
+      platform,
+      credentials: [],
+      create: () => idleAdapter(platform),
+    });
+    const gateway = createImIntegration({
+      agent: { askMainSession: async () => ({ text: "" }) },
+      dir,
+      env: {
+        THEBE_QQ_APP_ID: "102030",
+        THEBE_QQ_APP_SECRET: "qq-secret",
+        THEBE_BLUEBUBBLES_URL: "https://bluebubbles.test",
+        THEBE_BLUEBUBBLES_PASSWORD: "blue-secret",
+      },
+      factories: [factory("qq"), factory("imessage")],
+      onError: () => {},
+    });
+    await gateway.start();
+    const channels = await gateway.channels();
+    expect(channels).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "qq-env",
+          platform: "qq",
+          source: "environment",
+        }),
+        expect.objectContaining({
+          id: "imessage-env",
+          platform: "imessage",
+          source: "environment",
+        }),
       ])
     );
     await gateway.stop();

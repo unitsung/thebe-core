@@ -43,6 +43,7 @@ import type {
 import { priorityForGoalNotice } from "../agent/notifications/types.ts";
 import type { ChannelRef } from "../agent/sources/types.ts";
 import { createChannelNotificationAdapter } from "../adapters/notifications/channel.ts";
+import { createImNotificationAdapter } from "../adapters/notifications/im.ts";
 import { createImIntegration } from "./im.ts";
 import type { ImGateway } from "../agent/im/gateway.ts";
 import type { ImAdapterFactory } from "../agent/im/types.ts";
@@ -186,14 +187,21 @@ export function createThebeApp(options: {
   const ticketNotificationAdapters = (options.channelAdapters ?? []).map(
     createChannelNotificationAdapter
   );
+  let imNotificationAdapters: NotificationAdapter[] = [];
   const combineAdapters = (
     built: readonly NotificationAdapter[]
   ): NotificationAdapter[] => {
-    const ids = new Set(built.map((adapter) => adapter.id));
-    return [
+    const seen = new Set<string>();
+    const combined = [
       ...built,
-      ...ticketNotificationAdapters.filter((adapter) => !ids.has(adapter.id)),
+      ...imNotificationAdapters,
+      ...ticketNotificationAdapters,
     ];
+    return combined.filter((adapter) => {
+      if (seen.has(adapter.id)) return false;
+      seen.add(adapter.id);
+      return true;
+    });
   };
   const notificationAdapters = combineAdapters(
     options.notificationAdapters ?? []
@@ -207,7 +215,6 @@ export function createThebeApp(options: {
         : undefined,
       now: clock,
     });
-  notifications.start();
   const notificationConfig = options.notificationConfig
     ? createNotificationChannelConfigService({
         dir: options.notificationConfig.dir,
@@ -463,6 +470,16 @@ export function createThebeApp(options: {
     : undefined;
   // Startup is background: a channel that cannot connect must not delay the HTTP listener.
   void im?.start().catch(() => {});
+  if (im) {
+    // The IM gateway exists only after the agent, so add its notification transport once both exist.
+    imNotificationAdapters = [createImNotificationAdapter({ im })];
+    notifications.setAdapters(
+      combineAdapters(options.notificationAdapters ?? [])
+    );
+  }
+  // Start delivery only after every adapter, including the IM transport, is registered. A queued
+  // notice must not be dropped as adapter_missing during startup.
+  notifications.start();
   const prompt: ThebeAppPrompt = async (text) => {
     const result = await agent.prompt(text);
     return { text: result.text, tools: result.tools };
@@ -472,14 +489,15 @@ export function createThebeApp(options: {
   const quiesce = agent.quiesce.bind(agent);
   const unquiesce = agent.unquiesce.bind(agent);
   agent.quiesce = async () => {
-    await im?.stop();
+    // Let an in-flight notice finish while its IM transport is still running, then stop the channel.
     await notifications.stop();
+    await im?.stop();
     await quiesce();
   };
   agent.unquiesce = async () => {
     await unquiesce();
-    notifications.start();
     await im?.start();
+    notifications.start();
   };
   const handler = createThebeHttpHandler({
     version: options.version ?? "0.1.0",

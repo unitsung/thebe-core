@@ -43,6 +43,7 @@ class FakeAdapter implements ImAdapter {
   createdWithCursor?: string;
   reportCursor: (cursor: string) => void = () => {};
   canSendProactively?: (chat: ImChat) => boolean | Promise<boolean>;
+  replyWindowMsFor?: (chat: ImChat) => number | undefined;
   private handler: ((message: ImInbound) => Promise<void>) | undefined;
 
   async start(): Promise<void> {
@@ -232,6 +233,96 @@ describe("IM gateway", () => {
         chat: { kind: "direct", id: "42", title: "@owner" },
       }),
     ]);
+    await gateway.stop();
+  });
+
+  it("keeps the latest inbound reply anchor for notification routing", async () => {
+    const { gateway, channel, adapter } = await setupGateway();
+    expect(
+      gateway.replyAnchor(channel.id, { kind: "direct", id: "42" })
+    ).toBeUndefined();
+    await adapter.emit(
+      inbound({
+        accountId: channel.id,
+        messageId: "9",
+        replyTo: "9",
+        contextToken: "ctx-9",
+        receivedAt: "2026-11-18T10:00:00.000Z",
+      })
+    );
+    expect(
+      gateway.replyAnchor(channel.id, { kind: "direct", id: "42" })
+    ).toEqual({
+      replyTo: "9",
+      contextToken: "ctx-9",
+      receivedAt: "2026-11-18T10:00:00.000Z",
+    });
+    expect(
+      gateway.replyAnchor("missing", { kind: "direct", id: "42" })
+    ).toBeUndefined();
+    await gateway.stop();
+    expect(
+      gateway.replyAnchor(channel.id, { kind: "direct", id: "42" })
+    ).toBeUndefined();
+  });
+
+  it("tests a reply-only channel with its latest inbound anchor", async () => {
+    const { gateway, channel, adapter } = await setupGateway();
+    Object.assign(adapter.capabilities, {
+      proactive: false,
+      replyOnly: true,
+      replyWindowMs: 5 * 60_000,
+    });
+    adapter.replyWindowMsFor = (chat) =>
+      chat.kind === "direct" ? 60 * 60_000 : 5 * 60_000;
+    await adapter.emit(
+      inbound({
+        accountId: channel.id,
+        messageId: "m1",
+        replyTo: "m1",
+        contextToken: "ctx-1",
+        receivedAt: new Date(Date.now() - 10 * 60_000).toISOString(),
+      })
+    );
+    await gateway.bind({
+      accountId: channel.id,
+      chat: { kind: "direct", id: "42", title: "@owner" },
+      role: "owner",
+    });
+    const result = await gateway.testChannel(channel.id);
+    expect(result.status).toBe("sent");
+    expect(adapter.sent.at(-1)).toMatchObject({
+      mode: "reply",
+      replyTo: "m1",
+      contextToken: "ctx-1",
+    });
+    await gateway.stop();
+  });
+
+  it("refuses a reply-only test when no inbound anchor exists", async () => {
+    const { gateway, channel, adapter, adapters } = await setupGateway();
+    Object.assign(adapter.capabilities, {
+      proactive: false,
+      replyOnly: true,
+    });
+    await adapter.emit(inbound({ accountId: channel.id }));
+    await gateway.bind({
+      accountId: channel.id,
+      chat: { kind: "direct", id: "42", title: "@owner" },
+      role: "owner",
+    });
+    // A restart clears the in-memory anchor; keep the rebuilt adapter reply-only.
+    await gateway.stop();
+    await gateway.start();
+    const restarted = adapters.get(channel.id);
+    if (!restarted) throw new Error("adapter was not recreated");
+    Object.assign(restarted.capabilities, {
+      proactive: false,
+      replyOnly: true,
+    });
+    await expect(gateway.testChannel(channel.id)).rejects.toMatchObject({
+      code: "no_reply_anchor",
+    });
     await gateway.stop();
   });
 

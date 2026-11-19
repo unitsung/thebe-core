@@ -47,6 +47,36 @@ const CATALOG: readonly CatalogEntry[] = [
     ],
   },
   {
+    id: "im",
+    label: "Two-way IM",
+    description:
+      "A bound Telegram, Weixin, QQ or iMessage chat. A proactive channel sends directly; a reply-only channel can carry a notice only within its latest inbound reply window.",
+    addressFields: [
+      {
+        key: "accountId",
+        label: "IM channel id",
+        required: true,
+        kind: "text",
+      },
+      {
+        key: "chatKind",
+        label: "Chat kind",
+        required: true,
+        kind: "text",
+        placeholder: "direct",
+      },
+      { key: "chatId", label: "Chat id", required: true, kind: "text" },
+      {
+        key: "threadId",
+        label: "Thread id",
+        required: false,
+        kind: "text",
+      },
+    ],
+    setup:
+      "Add and bind an IM channel in Settings → Channels. QQ and Weixin are reply-only; without a recent inbound message a notice is dropped as window_closed.",
+  },
+  {
     id: "slack",
     label: "Slack",
     description: "Slack incoming webhook.",

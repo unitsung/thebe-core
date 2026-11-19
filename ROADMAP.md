@@ -122,20 +122,19 @@ Work named for the first beta, not yet complete in this checkout.
   and Recall. Still required are live deployment acceptance and real
   external-agent/connector acceptance; those are not claims made by the local
   tests.
-- **IM channel expansion.** The `ImAdapter`/`ImGateway` seam is now
-  platform-neutral: a factory declares credentials and validation, optional
-  QR/link/code login, truthful capabilities and cursor identity; owner
-  bindings pin the sender id; a busy main Session queues an owner message and
-  a streaming turn accepts a `followUp`; chats can carry a thread id. Telegram
-  remains the only built-in adapter: an owner direct chat becomes a main-Session
-  turn, groups/guests are recorded but never reach the model, and the cursor,
-  dedupe table and inbound queue survive a restart. Next are QQ and WeChat
-  adapters (reply-window aware, WeChat using the login seam), iMessage through
-  a Mac bridge, the settings UI, and an `ImNotificationAdapter` so the
-  notification router can choose a proactive or reply-only IM channel by
-  capability. The plan is
-  `docs/research/im-channels-plan-2026-11-14.md`; only the seam and Telegram
-  adapter are implemented.
+- **IM channel expansion.** The `ImAdapter`/`ImGateway` seam is platform-neutral:
+  a factory declares credentials and validation, optional QR/link/code login,
+  truthful capabilities and cursor identity; owner bindings pin the sender id;
+  a busy main Session queues an owner message and a streaming turn accepts a
+  `followUp`; chats can carry a thread id. Telegram (bot token), Weixin
+  ClawBot/iLink (QR login, reply-only), QQ (official Bot AppID/AppSecret,
+  passive replies with `msg_id`/`msg_seq`) and iMessage (BlueBubbles on an
+  always-on Mac) are built in, and the App can add, test, bind and inspect them.
+  Groups/guests are recorded but never reach the model, and the cursor, dedupe
+  table and inbound queue survive a restart. An `im` notification transport
+  sends directly on a proactive channel, and uses a recent inbound anchor on a
+  reply-only QQ/Weixin channel only while its window is open. Still open: live acceptance against real
+  QQ/iMessage accounts, a local `imsg` iMessage backend and media.
 
 ## Later
 
