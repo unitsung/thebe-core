@@ -7,8 +7,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { directEvalId, ticketIdFor } from "./ids.ts";
-import type { Ticket, TicketInput, TicketOrigin } from "./types.ts";
+import { directEvalId, key, ticketIdFor } from "./ids.ts";
+import type {
+  Assignment,
+  AssignmentState,
+  Ticket,
+  TicketInput,
+  TicketOrigin,
+} from "./types.ts";
 import type { ChannelRef, Trigger } from "../sources/types.ts";
 
 export const DEFAULT_TICKET_RETENTION = 500;
@@ -21,6 +27,42 @@ export type TicketStore = {
   getByGoal(goalId: string): Promise<Ticket | undefined>;
   getByDecision(decisionId: string): Promise<Ticket | undefined>;
   list(): Promise<Ticket[]>;
+  /**
+   * Adds the first Assignment to a Ticket, or returns its latest Assignment. Legacy Tickets are
+   * backfilled lazily from `links.legacyGoalId`; a Ticket with no Goal stays pending.
+   */
+  ensureAssignment(
+    id: string,
+    input: {
+      executorId?: string;
+      at: string;
+      state?: AssignmentState;
+      startedAt?: string;
+      endedAt?: string;
+      endedReason?: string;
+    }
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
+  /** Appends a new Assignment for a retry. */
+  createAssignment(
+    id: string,
+    input: { executorId?: string; at: string }
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
+  /** Updates lifecycle fields on one Assignment and persists the Ticket. */
+  updateAssignment(
+    id: string,
+    assignmentId: string,
+    patch: Partial<
+      Pick<
+        Assignment,
+        | "state"
+        | "executorId"
+        | "startedAt"
+        | "endedAt"
+        | "endedReason"
+        | "report"
+      >
+    >
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
   /**
    * Records the Ticket for work a person asked for. Idempotent: the same request gives the same Ticket,
    * so a retry does not create a second one.
@@ -163,6 +205,9 @@ export function createTicketStore(options: {
           parsed.channels = Array.isArray(parsed.channels)
             ? parsed.channels
             : [];
+          parsed.assignments = Array.isArray(parsed.assignments)
+            ? parsed.assignments
+            : [];
           memory.set(parsed.id, parsed);
         }
       } catch {
@@ -213,6 +258,64 @@ export function createTicketStore(options: {
       await ensureLoaded();
       return newestFirst([...memory.values()]);
     },
+    async ensureAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const latest = ticket.assignments.at(-1);
+        if (latest) return { ticket, assignment: latest };
+        const assignment: Assignment = {
+          id: key("assignment", ticket.id, "0"),
+          state: input.state ?? "pending",
+          ...(input.executorId ? { executorId: input.executorId } : {}),
+          createdAt: input.at,
+          ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+          ...(input.endedAt ? { endedAt: input.endedAt } : {}),
+          ...(input.endedReason ? { endedReason: input.endedReason } : {}),
+        };
+        ticket.assignments.push(assignment);
+        await persist(ticket);
+        return { ticket, assignment };
+      });
+    },
+    async createAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const assignment: Assignment = {
+          id: key("assignment", ticket.id, String(ticket.assignments.length)),
+          state: "pending",
+          ...(input.executorId ? { executorId: input.executorId } : {}),
+          createdAt: input.at,
+        };
+        ticket.assignments.push(assignment);
+        await persist(ticket);
+        return { ticket, assignment };
+      });
+    },
+    async updateAssignment(id, assignmentId, patch) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        const assignment = ticket?.assignments.find(
+          (item) => item.id === assignmentId
+        );
+        if (!ticket || !assignment) return undefined;
+        if (patch.state !== undefined) assignment.state = patch.state;
+        if (patch.executorId !== undefined)
+          assignment.executorId = patch.executorId;
+        if (patch.startedAt !== undefined)
+          assignment.startedAt = patch.startedAt;
+        if (patch.endedAt !== undefined) assignment.endedAt = patch.endedAt;
+        if (patch.endedReason !== undefined)
+          assignment.endedReason = patch.endedReason;
+        if (patch.report !== undefined) assignment.report = { ...patch.report };
+        await persist(ticket);
+        return { ticket, assignment };
+      });
+    },
     async recordDirect(input) {
       return serial(async () => {
         await ensureLoaded();
@@ -247,6 +350,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
             ...(input.idempotencyKey
@@ -285,6 +389,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             decisionId: input.decisionId,
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
@@ -317,6 +422,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             decisionId: input.decisionId,
             legacyGoalId: input.goalId,

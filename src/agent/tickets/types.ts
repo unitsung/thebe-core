@@ -77,6 +77,39 @@ export type TicketLinks = {
   decisionId?: string;
 };
 
+/**
+ * The durable binding of a Ticket to one Executor instance. The Executor owns its own run state;
+ * this record owns the assignment identity and lifecycle. Retry ends this Assignment and creates a
+ * new one rather than rewriting history.
+ */
+export type AssignmentState = "pending" | "running" | "ended";
+
+export type AssignmentReportState =
+  | "progress"
+  | "waiting"
+  | "ready"
+  | "blocked"
+  | "failed"
+  | "dropped";
+
+export type AssignmentReport = {
+  state: AssignmentReportState;
+  summary: string;
+  at: string;
+};
+
+export type Assignment = {
+  id: string;
+  state: AssignmentState;
+  /** The Executor instance this Assignment is bound to; the Goal session id today. */
+  executorId?: string;
+  createdAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  endedReason?: string;
+  report?: AssignmentReport;
+};
+
 export type Ticket = {
   id: string;
   title: string;
@@ -89,6 +122,8 @@ export type Ticket = {
   origins: TicketOrigin[];
   /** Write destinations supplied by Sources attached to this Ticket. */
   channels: ChannelRef[];
+  /** Every dispatch of this Ticket, oldest first. At most one is live. */
+  assignments: Assignment[];
   links: TicketLinks;
   createdAt: string;
 };

@@ -20,6 +20,7 @@ function ticket(id: string, goalId?: string): Ticket {
     inputs: [],
     origins: [],
     channels: [],
+    assignments: [],
     links: {
       ...(goalId ? { legacyGoalId: goalId } : {}),
       sessionIds: goalId ? [goalId] : [],

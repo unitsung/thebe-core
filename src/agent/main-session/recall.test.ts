@@ -206,6 +206,7 @@ function ticketView(): TicketTaskView {
     inputs: [],
     origins: [],
     channels: [],
+    assignments: [],
     links: {
       legacyGoalId: GOAL_ID,
       decisionId: "decision-backup",
