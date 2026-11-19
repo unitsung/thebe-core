@@ -148,6 +148,8 @@ export interface ImAdapter {
   onInbound(handler: (message: ImInbound) => Promise<void>): void;
   /** Per-chat proactive permission; a reply-only adapter can close a window for one chat. */
   canSendProactively?(chat: ImChat): boolean | Promise<boolean>;
+  /** Exact reply window when it differs between direct and group chats. */
+  replyWindowMsFor?(chat: ImChat): number | undefined;
 }
 
 export type ImAccount = {
@@ -182,6 +184,15 @@ export type ImConversation = {
   sender: ImSender;
   lastMessageId: string;
   lastSeenAt: string;
+};
+
+/** The most recent inbound anchor a reply-only channel can use for one more reply. */
+export type ImReplyAnchor = {
+  /** Platform message id for a passive reply. */
+  replyTo?: string;
+  /** Short-lived reply token; never persisted or returned by an HTTP route. */
+  contextToken?: string;
+  receivedAt: string;
 };
 
 export type ImChannelView = ImAccount & {

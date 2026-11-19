@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
+import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { notificationChannels } from "../agent/notifications/channels.ts";
+import type { NotificationService } from "../agent/notifications/service.ts";
+import type { NotificationAdapter } from "../agent/notifications/types.ts";
+import { createFakeRuntime } from "../testing/runtime/index.ts";
+import { createThebeApp } from "./create.ts";
 import { createNotificationAdapters } from "./notifications.ts";
+
+const provider: ContainerInfoProvider = {
+  listContainers: async () => [],
+  inspectContainer: async () => {
+    throw new Error("unused");
+  },
+  getContainerLogs: async () => "",
+  getStatusSummary: async () => {
+    throw new Error("unused");
+  },
+};
 
 const ALL_ENV = {
   THEBE_TELEGRAM_BOT_TOKEN: "testTelegramToken",
@@ -81,18 +97,27 @@ describe("notification adapter catalog", () => {
     const adapters = createNotificationAdapters(ALL_ENV);
     const catalog = notificationChannels(adapters);
     expect(new Set(catalog.map((entry) => entry.id)).size).toBe(catalog.length);
-    expect(catalog).toHaveLength(adapters.length);
     for (const adapter of adapters) {
       expect(catalog.some((entry) => entry.id === adapter.id)).toBe(true);
     }
-    expect(catalog.every((entry) => entry.available)).toBe(true);
+    expect(
+      catalog
+        .filter((entry) => entry.id !== "im")
+        .every((entry) => entry.available)
+    ).toBe(true);
+    // The IM transport is registered only after the agent and gateway exist.
+    expect(catalog.find((entry) => entry.id === "im")?.available).toBe(false);
   });
 
   it("registers host-credentialed adapters from the config file", () => {
     const adapters = createNotificationAdapters({}, CONFIG_ONLY);
     const catalog = notificationChannels(adapters);
-    expect(catalog.every((entry) => entry.available)).toBe(true);
-    expect(catalog).toHaveLength(27);
+    expect(
+      catalog
+        .filter((entry) => entry.id !== "im")
+        .every((entry) => entry.available)
+    ).toBe(true);
+    expect(catalog).toHaveLength(28);
   });
 
   it("registers webhook-address adapters without host credentials", () => {
@@ -134,5 +159,29 @@ describe("notification adapter catalog", () => {
         },
       })
     ).toBe(true);
+  });
+
+  it("registers the IM transport before notification delivery starts", async () => {
+    const events: string[] = [];
+    const notifications = {
+      setAdapters: (adapters: readonly NotificationAdapter[]) => {
+        events.push(
+          `adapters:${adapters.map((adapter) => adapter.id).join(",")}`
+        );
+      },
+      start: () => {
+        events.push("start");
+      },
+      stop: async () => {},
+    } as unknown as NotificationService;
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider,
+      notifications,
+      im: { env: {} },
+    });
+    expect(events[0]).toBe("adapters:im");
+    expect(events.at(-1)).toBe("start");
+    await app.im?.stop();
   });
 });

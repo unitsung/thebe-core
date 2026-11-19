@@ -18,6 +18,7 @@ import type {
   ImLoginPoll,
   ImLoginView,
   ImPlatformInfo,
+  ImReplyAnchor,
   ImSendInput,
   ImSendResult,
   ImStatus,
@@ -125,6 +126,7 @@ export function createImGateway(options: ImGatewayOptions) {
   );
   const chatChains = new Map<string, Promise<void>>();
   const outbound = new Map<string, { at: number; result: ImSendResult }>();
+  const replyAnchors = new Map<string, ImReplyAnchor>();
   const logins = new Map<string, LoginSession>();
   const busyRetryMs = options.busy?.retryMs ?? BUSY_RETRY_MS;
   const busyTtlMs = options.busy?.ttlMs ?? BUSY_TTL_MS;
@@ -191,6 +193,7 @@ export function createImGateway(options: ImGatewayOptions) {
     );
     runtimes.clear();
     chatChains.clear();
+    replyAnchors.clear();
     startPromise = undefined;
   }
 
@@ -369,11 +372,36 @@ export function createImGateway(options: ImGatewayOptions) {
       return;
     }
     if (!accepted) return;
+    rememberReplyAnchor(normalized);
     runtime.lastInboundAt = normalized.receivedAt;
     // A message handed over while Core is stopping is still accepted: it is already durable, and the
     // next start resumes it. Skipping persistence here would let a cursor advance lose it.
     if (!started) return;
     scheduleChat(accountId, normalized.chat);
+  }
+
+  /** A reply-only platform can use its latest inbound message for one notification while the window lasts. */
+  function rememberReplyAnchor(inbound: ImInbound): void {
+    const replyTo = inbound.replyTo ?? inbound.messageId;
+    replyAnchors.set(chatKeyOf(inbound.accountId, inbound.chat), {
+      ...(replyTo ? { replyTo } : {}),
+      ...(inbound.contextToken ? { contextToken: inbound.contextToken } : {}),
+      receivedAt: inbound.receivedAt,
+    });
+    if (replyAnchors.size <= 500) return;
+    const oldest = replyAnchors.keys().next().value;
+    if (oldest !== undefined) replyAnchors.delete(oldest);
+  }
+
+  /** A copy of the latest anchor; callers must not persist the short-lived token. */
+  function replyAnchor(
+    accountId: string,
+    chat: ImChat
+  ): ImReplyAnchor | undefined {
+    const runtime = runtimes.get(accountId);
+    if (!runtime || !runtime.account.enabled) return undefined;
+    const anchor = replyAnchors.get(chatKeyOf(accountId, chat));
+    return anchor ? { ...anchor } : undefined;
   }
 
   function resumePending(): void {
@@ -1292,6 +1320,29 @@ export function createImGateway(options: ImGatewayOptions) {
         "no_binding"
       );
     }
+    const capabilities = runtime?.adapter?.capabilities;
+    const mode: "reply" | "proactive" =
+      capabilities && !capabilities.proactive ? "reply" : "proactive";
+    let anchor: ImReplyAnchor | undefined;
+    if (mode === "reply") {
+      anchor = replyAnchors.get(chatKeyOf(channelId, binding.chat));
+      if (!anchor) {
+        throw new ImInputError(
+          "message the bot once before testing a reply-only channel",
+          400,
+          "no_reply_anchor"
+        );
+      }
+      const received = Date.parse(anchor.receivedAt);
+      const windowMs = replyWindowMsFor(channelId, binding.chat) ?? 5 * 60_000;
+      if (!Number.isFinite(received) || now().getTime() - received > windowMs) {
+        throw new ImInputError(
+          "the reply window has closed; message the bot again, then test",
+          400,
+          "reply_window_closed"
+        );
+      }
+    }
     return send({
       platform: account.platform,
       accountId: channelId,
@@ -1301,9 +1352,21 @@ export function createImGateway(options: ImGatewayOptions) {
         ...(binding.chat.threadId ? { threadId: binding.chat.threadId } : {}),
       },
       text: "Thebe IM test. If you can read this, replies work.",
-      mode: "proactive",
+      mode,
+      ...(anchor?.replyTo ? { replyTo: anchor.replyTo } : {}),
+      ...(anchor?.contextToken ? { contextToken: anchor.contextToken } : {}),
       idempotencyKey: `im-test:${randomUUID()}`,
     });
+  }
+
+  function replyWindowMsFor(
+    channelId: string,
+    chat: ImChat
+  ): number | undefined {
+    const adapter = runtimes.get(channelId)?.adapter;
+    return (
+      adapter?.replyWindowMsFor?.(chat) ?? adapter?.capabilities.replyWindowMs
+    );
   }
 
   async function sendFromApi(value: unknown): Promise<ImSendResult> {
@@ -1348,9 +1411,11 @@ export function createImGateway(options: ImGatewayOptions) {
     unbind,
     testChannel,
     send: sendFromApi,
+    replyAnchor,
     capabilitiesFor(channelId: string): ImCapabilities | undefined {
       return runtimes.get(channelId)?.adapter?.capabilities;
     },
+    replyWindowMsFor,
   };
 }
 

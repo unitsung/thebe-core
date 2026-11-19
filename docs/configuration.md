@@ -518,7 +518,7 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 - 设置保存在 `{agentStoreDir}/notifications/notifications.json`（0600），待发送队列保存在同目录的 `outbox.json`。适配器级凭据（bot token、SMTP 密码、企微 corp secret 等）优先来自 `{configDir}/notification-config.json`（0600，TUI `/notifications` 编辑）；未配置时回退到环境变量。地址自身携带的 token（钉钉 access token、webhook URL）保存在 0600 设置文件，读取时会被遮住。
 - TUI 的 `/notifications` 逐个通道编辑这些凭据，密钥输入会遮挡；保存后运行中的 Core 会自动重载；未运行的 Core 在下次启动时读取。`/notifications list` 只显示字段是否已配置，不打印密钥；`/notifications path` 显示文件路径。环境变量仍保留给容器和自动化部署作为回退。
 - App 的“通知通道 → 通道凭据”通过 `GET/PUT /v1/notifications/config` 编辑同一份文件；读取时密钥字段返回遮罩值，保存时 Core 恢复未修改的密钥。保存后适配器立即重建，不需要重启。
-- `NotificationTarget.channel.source` 选择适配器。原生适配器：`webhook`、`slack`、`discord`、`telegram`、`teams`、`googlechat`、`mattermost`、`ntfy`、`bark`、`feishu-webhook`、`dingtalk`、`wecom`、`smtp`、`pushover`、`gotify`、`matrix`、`nextcloud-talk`、`signal`、`whatsapp`、`line`、`zalo`、`twilio`、`bluebubbles`、`synology-chat`、`twitch`、`irc`、`apprise`。现有飞书/GitHub Ticket channel 也可作为 owner target（非 Ticket 通知会作为普通消息/评论发送）。
+- `NotificationTarget.channel.source` 选择适配器。原生适配器：`webhook`、`slack`、`discord`、`telegram`、`teams`、`googlechat`、`mattermost`、`ntfy`、`bark`、`feishu-webhook`、`dingtalk`、`wecom`、`smtp`、`pushover`、`gotify`、`matrix`、`nextcloud-talk`、`signal`、`whatsapp`、`line`、`zalo`、`twilio`、`bluebubbles`、`synology-chat`、`twitch`、`irc`、`apprise`。已绑定的 Telegram、微信、QQ 或 iMessage 会话也可以作为 `im` transport 的通知目标。声明主动发送能力的通道（目前是 iMessage）直接发送；QQ/微信这类仅回复通道会在窗口内使用最近一条入站消息作为回复锚点，窗口关闭后记为 `window_closed`。现有飞书/GitHub Ticket channel 也可作为 owner target（非 Ticket 通知会作为普通消息/评论发送）。
 - `channel.address` 按通道填写：webhook `{url, secret?}`；Slack/Discord/Teams/Google Chat/Mattermost/Synology Chat `{url}`（Mattermost 还接受 `channel?` 覆盖频道）；Telegram `{chatId, threadId?}`；ntfy `{url?, topic?, token?}`；Bark `{deviceKey, server?}`；飞书 `{url?, secret?}`；钉钉 `{url?, accessToken?, secret?}`（URL 可放在目标里）；企业微信群机器人 `{url}`（目标自带或 Core 环境变量）或应用消息 `{toUser}`；邮件 `{to}`；Pushover `{user}`；Gotify `{token, url?}`；Matrix `{roomId}`；Nextcloud Talk `{roomToken}`；Signal `{recipients}`（逗号分隔的电话号码或 `group.*` id）；WhatsApp/Twilio `{to}`；BlueBubbles `{chatGuid}`；LINE `{to}`；Zalo Bot `{chatId}`；Twitch `{broadcasterId}`；IRC `{channel}`；Apprise `{token?}`。
 - `GET /v1/notifications/channels` 返回 App 渲染用的通道目录：id、名称、说明、地址字段、capabilities、主机是否已注册该适配器，以及未注册时的 `setup` 提示。App 的“设置 → 通知通道”通过该接口和 settings 接口编辑目标，并可发送测试通知；适配器凭据不落到 App 本地。设备 Push（APNs，经 Push Relay）仍在独立页面。
 - 类别：`attention`、`completed`、`failed`、`budget`、`watchdog`、`source_health`、`pipeline`。优先级：`critical`、`normal`、`low`。目标用 `categories` 和 `minPriority` 收窄自己。
@@ -580,24 +580,27 @@ export THEBE_IRC_PASSWORD=...
 
 没有配置对应凭据的适配器不会注册；指向它的目标会记录 `adapter_missing`，不影响其他目标。测试发送只验证地址和凭据，不进入 outbox。
 
-## IM 双向通道（多平台接缝；内置 Telegram 和微信 ClawBot）
+## IM 双向通道（多平台接缝；内置 Telegram、微信 ClawBot、QQ 和 iMessage）
 
 `/v1/im/*` 是双向聊天接入，和上面的通知出口是两条并列的路径：通知只写出站，IM 适配器还能接收平台消息。入站消息只允许进入 owner 私聊绑定的主 Session（`thebe-main`）；绑定同时固定 owner 的平台 sender id，同一私聊里的其他 sender 会被记录但不会进入模型。群聊和 guest 绑定只记录、不进入模型，也不会获得 shell/文件工具或跳过审批。
 
 - 状态保存在 `{agentStoreDir}/im/im.json`（0600）：账号、绑定、带 bot 身份标记的游标、7 天去重表和未处理入站队列。凭据是一组平台自定义字段，单独保存在同目录的 `im-secrets.json`（0600），任何 HTTP 响应都不返回；日志和错误信息也不包含凭据。
-- `POST /v1/im/channels` 接受 `{platform, label?, credentials: {字段: 值}}`。每个平台的 factory 声明必填字段、可选字段和校验规则；`platform` 是注册 id，内置适配器是 `telegram`（Bot Token）和 `wechat`（微信 ClawBot / iLink），`qq`、`imessage` 仍是预留平台。Telegram 仍接受旧的 `token` 简写。
+- `POST /v1/im/channels` 接受 `{platform, label?, credentials: {字段: 值}}`。每个平台的 factory 声明必填字段、可选字段和校验规则；`platform` 是注册 id，内置适配器是 `telegram`（Bot Token）、`wechat`（微信 ClawBot / iLink）、`qq`（官方 Bot AppID/AppSecret）和 `imessage`（BlueBubbles 服务器）。Telegram 仍接受旧的 `token` 简写。
 - 平台工厂可选提供扫码/链接/验证码登录。`POST /v1/im/logins` 开始一次登录，`GET /v1/im/logins/{id}` 轮询，`POST /v1/im/logins/{id}/code` 在 `need_verifycode` 状态提交手机 PIN，`DELETE /v1/im/logins/{id}` 取消。二维码/链接只在开始响应里返回一次，不写入状态文件或日志；确认后只返回新建的 `accountId`，凭据直接写入 `im-secrets.json`。内置 Telegram 使用 token，不支持登录流程，会返回 `login_not_supported`；微信使用扫码登录。
 - 路由：`GET /v1/im/platforms`（已注册平台、凭据字段和是否支持登录）、`GET/POST /v1/im/channels`、`DELETE /v1/im/channels/{id}`、`POST /v1/im/channels/{id}/test`、`POST /v1/im/logins`、`GET/DELETE /v1/im/logins/{id}`、`GET /v1/im/status`、`GET /v1/im/conversations`、`POST /v1/im/bind`、`DELETE /v1/im/bind/{id}`、`POST /v1/im/send`。写操作在 quiesce 时返回 503。
 - 绑定：先让 owner 给 bot 发一条消息，从 `/v1/im/conversations` 拿到 `chat.id`，再 `POST /v1/im/bind`，`chat.kind` 为 `direct`、`role` 为 `owner`。未观察过的 chat 返回 `chat_not_seen`；`senderId` 可省略（固定最后观察到的 sender），显式给出时必须与观察值一致，否则返回 `sender_mismatch`。`sessionId` 目前只能是 `thebe-main`；群聊只能绑为 `guest`，私聊不能绑为 `guest`，群聊也不能绑为 `owner`。
 - 入站先持久化再处理；同一 `(platform, account, chat, threadId, messageId)` 或 `updateId` 只处理一次。每个 chat（含 thread）一条串行队列，不同 chat 并行；Core 重启后未处理的入站会继续，已完成的消息不会重放。
 - 主 Session 正在处理另一轮时，owner 消息留在队列里而不是丢弃：默认 5 秒后回一条“排队中”，10 分钟后回一条超时提示并结束该条消息；如果主 Session 正在流式输出，消息会以 `followUp` 加入当前轮。`GET /v1/im/status` 的 `pending` 是队列深度。
 - 每个适配器会如实报告 capabilities：`proactive`、`replyOnly`、`replyWindowMs`、`maxMessagesPerWindow`、`recall`、`media`、`maxTextLength`、`markdown`、`threads`、`typing`。主动发送前 gateway 会检查 `proactive` 和适配器的 `canSendProactively(chat)`；不支持时返回 `proactive_not_supported`，窗口关闭时返回 `window_closed`。回复锚点（`replyTo`、`contextToken`）只属于当轮，持久目标只有 account + chat + 可选 thread。
+- 仅回复通道会在内存中保留最近一条入站回复锚点（消息 id；微信还包括短期 `context_token`）。通知和通道测试只在 capability 窗口内可以使用它；锚点不写入 `im.json`，Core 重启或 quiesce 后丢弃。没有任何入站消息时测试仅回复通道返回 `no_reply_anchor`，窗口关闭后返回 `reply_window_closed`。
 - 入站结构已包含 `threadId`、`mentions`、`media` 和 `replyAuthor`；媒体只记录描述，不下载、不执行。带文本的媒体消息会保留描述；纯媒体消息只记录会话，owner 会收到“暂不支持媒体”的提示，不进入模型。出站媒体在 `media: true` 的适配器真正实现前不会被声明为支持。
 - 游标与 bot/账号身份绑定：token 或账号身份变化时旧游标作废，避免把新 bot 从旧 `update_id` 开始轮询。
 - Telegram 适配器用 `getUpdates` 长轮询（`allowed_updates: ["message"]`），游标是 `update_id + 1`；支持论坛/话题的 `message_thread_id`。发送为纯文本，不设置 `parse_mode`，按 4096 字符分块并带 `(n/m)` 标记。429 只暂停该 bot token，409（另一个进程在轮询同一个 bot）进入 `error` 并停止轮询，不会无限重连。
 - `GET /v1/health` 只在至少配置了一个通道时报告 `im`。`health.state` 为 `stopped` / `starting` / `connected` / `needs_login` / `error`，可带安全的 `code`、`since`、`retryAt`。一个通道失败不会影响 Core 启动或其他通道；`GET /v1/im/status` 显示每个通道的最新错误（不含凭据）。
 - `THEBE_TELEGRAM_BOT_TOKEN` 会自动创建一个 environment 类型的 Telegram 通道（不能通过 API 删除）。`THEBE_TELEGRAM_API_BASE` 可用于自建代理或测试，`THEBE_TELEGRAM_POLL_TIMEOUT` 设置长轮询秒数（1–50，默认 50）。
 - 微信适配器使用腾讯官方 ClawBot / iLink 协议：通过 `POST /v1/im/logins` 扫码登录，登录凭据只写入 Core。它是回复型通道，每条发送都带当轮入站的 `context_token`，不会被通知路由器选为主动推送。`THEBE_WECHAT_API_BASE` 可指向自建代理或测试服务，默认 `https://ilinkai.weixin.qq.com`。协议层移植自腾讯 MIT 许可的 Weixin ClawBot 协议层；Core 不运行外部 Agent 运行时。
+- QQ 适配器使用官方 QQ Bot OpenAPI v2 的 WebSocket 网关。填写 `AppID`、`AppSecret` 后接收 `C2C_MESSAGE_CREATE` 和 `GROUP_AT_MESSAGE_CREATE`，并用入站的 `msg_id` 加递增的 `msg_seq` 发送被动回复。它刻意只做回复：QQ 的主动推送有限频，且用户可关闭。单聊回复窗口为 60 分钟/4 条，群内 @ 为 5 分钟/5 条；文本按 2000 字符分块。`THEBE_QQ_APP_ID`/`THEBE_QQ_APP_SECRET` 可从环境变量预置通道；`THEBE_QQ_API_BASE`、`THEBE_QQ_TOKEN_URL`、`THEBE_QQ_GATEWAY_URL` 可指向代理或测试服务。
+- iMessage 适配器通过一台常开的 Mac 上的 BlueBubbles 服务器工作。填写服务器地址和 password；Core 轮询 `POST /api/v1/message/query`，用 `POST /api/v1/message/text` 发文本。目前只支持文本；Mac 离线时发送会交给通知 outbox 重试，而不是静默丢弃。`THEBE_IMESSAGE_BASE_URL`/`THEBE_IMESSAGE_PASSWORD`（或已有的 `THEBE_BLUEBUBBLES_URL`/`THEBE_BLUEBUBBLES_PASSWORD`）可从环境变量预置通道。
 
 ```bash
 # 只用环境变量接一个 Telegram 双向通道；同一个 bot token 也可以继续作为通知 target
@@ -606,6 +609,12 @@ export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
 export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
 # 可选：自建微信 iLink 代理或测试服务
 export THEBE_WECHAT_API_BASE='https://ilinkai.weixin.qq.com'
+# 从环境变量接一个 QQ 双向通道
+export THEBE_QQ_APP_ID=102030
+export THEBE_QQ_APP_SECRET=...
+# 从环境变量接一个 iMessage（BlueBubbles）通道；同一个服务器也可作为通知 target
+export THEBE_IMESSAGE_BASE_URL='https://bluebubbles.example'
+export THEBE_IMESSAGE_PASSWORD=...
 ```
 
 ## 权限模式
