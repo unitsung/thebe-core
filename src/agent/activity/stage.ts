@@ -1,9 +1,8 @@
 import type { ActivityFeedItem } from "./feed.ts";
 
 /**
- * Where an Activity item stands for the person, derived and never stored. The names are the ticket
- * stages of docs/research/concept-ledger-2026-11-03.md; the first matching rule wins, so the stages
- * never overlap and every item has exactly one:
+ * Where an Activity item stands for the person, derived and never stored. The first matching rule
+ * wins, so the stages never overlap and every item has exactly one:
  *
  *  - `person`: it needs the person now. `approval` is a write waiting for their yes; `failed` is
  *    something that did not finish and has not yet aged out of the window below.

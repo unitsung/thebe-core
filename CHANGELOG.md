@@ -28,6 +28,8 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Fixed
 
+- An IM notification whose gateway cannot start during delivery now returns a retryable failure and stays in the outbox, instead of being reported as sent.
+- The iMessage adapter no longer drops the second of two messages that share the same millisecond timestamp in one poll; it delivers every row in that batch before advancing the cursor.
 - A critical notification now passes a normal notice already held for quiet hours in the same target queue. The held notice still waits until the window ends, and a retry still keeps its place.
 - Main Session recall now excludes every internal workflow Session carrying a
   `purpose` label, including container diagnosis, instead of exposing only the
@@ -40,6 +42,10 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- `/mcp` now speaks MCP `2026-07-28` stateless requests without an `initialize` handshake,
+  including `server/discover`, required protocol/method/name headers, `resultType`, cache hints,
+  deterministic `tools/list` order, and the specification's unsupported-version error. The
+  `2025-11-25` handshake joins the existing `2025-06-18` and `2025-03-26` legacy paths.
 - Notification channel credentials can live in the owner-only
   `{configDir}/notification-config.json` and are edited with TUI
   `/notifications` or the App's Channel credentials page. The new
@@ -56,6 +62,27 @@ All notable changes to Thebe Core are documented here. The format is based on
   Weixin ClawBot protocol layer. It supports QR
   login, the phone-PIN step through `POST /v1/im/logins/{loginId}/code`, long-polled direct
   messages and reply-only sends carrying `context_token`; it never advertises proactive delivery.
+- Native QQ two-way IM over the official Bot OpenAPI v2 and its WebSocket gateway.
+  It receives `C2C_MESSAGE_CREATE` and `GROUP_AT_MESSAGE_CREATE`, identifies with
+  `QQBot <access_token>`, resumes with the gateway session after a disconnect, and
+  sends passive replies with the inbound `msg_id` and an increasing `msg_seq`.
+  Direct replies are limited to 60 minutes/4 messages and group @ replies to
+  5 minutes/5 messages; text is chunked at 2000 characters. It never advertises
+  proactive delivery.
+- Native iMessage two-way IM through a BlueBubbles server on an always-on Mac.
+  Core baselines the newest BlueBubbles message once, then polls `POST /api/v1/message/query` and sends
+  text with `POST /api/v1/message/text`; it skips own messages and tapbacks and
+  reports an offline Mac as a retryable send. `THEBE_IMESSAGE_BASE_URL` and
+  `THEBE_IMESSAGE_PASSWORD` (or the existing `THEBE_BLUEBUBBLES_*` values) seed a
+  channel from the environment.
+- Two-way IM as a notification transport. A target with `source: "im"` names
+  an `accountId`, `chatKind`, `chatId` and optional `threadId`; its notice is
+  sent through the same gateway as an owner reply. A proactive channel
+  (iMessage) sends directly; a reply-only QQ or Weixin target uses the latest
+  inbound anchor while its reply window is still open and is discarded as
+  `window_closed` otherwise, instead of being queued for days. Testing a
+  reply-only channel uses the same anchor and reports `no_reply_anchor` or
+  `reply_window_closed` instead of pretending a proactive test message worked.
 - The two-way IM seam is now platform-neutral. A factory registers a platform,
   declares its credential schema and validation, may expose a QR/link/code
   login adapter, and reports truthful capabilities (`proactive`, `replyOnly`,
