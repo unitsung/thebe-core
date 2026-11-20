@@ -1,4 +1,4 @@
-import { cp, mkdtemp } from "node:fs/promises";
+import { appendFile, cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -86,19 +86,36 @@ function signal() {
   return { promise, resolve };
 }
 
+const placementBenchmark = process.env.THEBE_PLACEMENT_BENCHMARK;
+const placementFixtures = [
+  "verified",
+  "denied",
+  "changed",
+  "mismatch",
+  "crash-after-copy",
+  "crash-before-copy",
+  "stop-pending",
+  "stop-copy",
+] as const;
+const placementCases = placementFixtures
+  .filter(
+    (fixture) =>
+      !placementBenchmark ||
+      ["verified", "mismatch", "crash-after-copy", "stop-copy"].includes(
+        fixture
+      )
+  )
+  .flatMap((fixture) =>
+    (placementBenchmark ? [1, 2] : [1]).map(
+      (executors) => [fixture, executors] as const
+    )
+  );
+
 describe("tickets", () => {
-  it.each([
-    "verified",
-    "denied",
-    "changed",
-    "mismatch",
-    "crash-after-copy",
-    "crash-before-copy",
-    "stop-pending",
-    "stop-copy",
-  ] as const)(
-    "keeps placement intent across restart and records %s",
-    async (outcome) => {
+  it.each(placementCases)(
+    "keeps placement intent across restart and records %s with %i Executors",
+    async (outcome, executors) => {
+      const startedAt = performance.now();
       const dir = await mkdtemp(join(tmpdir(), "thebe-placement-http-"));
       const hash = "a".repeat(40);
       const digest = "b".repeat(64);
@@ -230,10 +247,29 @@ describe("tickets", () => {
         await first.fake.runtime.unquiesce();
       }
       const restarted = open(dir, [], undefined, first.fake, pipeline);
+      let placementState: string | undefined;
+      let secondaryClaim = false;
       try {
         const { body } = await restarted.call(`${ticketPath}/execution`);
         expect(body.receipt.placementAttention).toEqual(attention);
         expect(copy).toHaveBeenCalledTimes(0);
+        if (executors === 2) {
+          restarted.fake.queueTurns([
+            { kind: "text", text: "Placement needs provider evidence." },
+          ]);
+          const reviewer = await restarted.app.agent.spawnSubagent({
+            profileName: "ticket-reviewer",
+            background: true,
+            parentSessionId: body.ticket.links.legacyGoalId,
+            taskPrompt:
+              "Check the planned placement independently. Only report success with destination evidence.",
+          });
+          const checked = await restarted.app.agent.waitSubagent(
+            reviewer.runId
+          );
+          expect(checked.status).toBe("completed");
+          secondaryClaim = /placement verified/i.test(checked.result ?? "");
+        }
         const decision = (
           placementId: unknown,
           token = "placement-owner",
@@ -343,6 +379,7 @@ describe("tickets", () => {
             try {
               const result = (await recovered.call(`${ticketPath}/execution`))
                 .body;
+              placementState = result.receipt.placementReport?.state;
               expect(result.receipt.placementReport).toMatchObject({
                 id: attention.id,
                 state: placed ? "verified" : "uncertain",
@@ -389,6 +426,7 @@ describe("tickets", () => {
           names: ["Film.mkv"],
         });
         const result = (await restarted.call(`${ticketPath}/execution`)).body;
+        placementState = result.receipt.placementReport?.state;
         expect(result.receipt.placementAttention).toBeUndefined();
         if (outcome === "mismatch") {
           expect(result.receipt.placementReport).toMatchObject({
@@ -407,6 +445,27 @@ describe("tickets", () => {
           verifiedAt: expect.any(String),
         });
       } finally {
+        if (placementBenchmark && placementState) {
+          const verified = placementState === "verified";
+          const evidence = placed && outcome !== "mismatch";
+          const usage = await restarted.app.agent.getBackgroundBudgetSummary();
+          const measurement = {
+            benchmark: "nas-placement",
+            fixture: outcome,
+            executors,
+            model: "fake/fake-1",
+            skillDigest: skill.body.contentHash,
+            verifiedSuccess: verified && evidence,
+            unsupportedSuccessClaim: (verified || secondaryClaim) && !evidence,
+            duplicateMutations: Math.max(0, copy.mock.calls.length - 1),
+            elapsedMs: Math.round(performance.now() - startedAt),
+            estimatedTokens: usage.usage.counted,
+          };
+          await appendFile(
+            placementBenchmark,
+            `${JSON.stringify(measurement)}\n`
+          );
+        }
         await restarted.app.agent.quiesce();
       }
     }
