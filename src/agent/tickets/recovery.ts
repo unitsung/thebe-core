@@ -29,7 +29,7 @@ export async function recoverInterruptedTicketGoals(options: {
   }>;
   restore: (goal: GoalRun, events?: StoredGoalEvent[]) => void;
   revalidate: (goalId: string) => Promise<MandateRevalidation>;
-  resume: (goalId: string) => Promise<unknown>;
+  resume: (goalId: string, goal: GoalRun, ticketId: string) => Promise<unknown>;
   onError?: (goalId: string, error: unknown) => void;
 }): Promise<RecoverableTicketGoal[]> {
   const recovered: RecoverableTicketGoal[] = [];
@@ -48,13 +48,14 @@ export async function recoverInterruptedTicketGoals(options: {
     if (goal.status !== "running" && goal.status !== "pausing") continue;
     // `pausing` is a person's (or Watchdog's) deliberate pause in flight, not an interruption.
     // Restoring it keeps the Goal paused where the view can show it; resuming would undo the pause.
-    const interrupted = goal.status === "running";
+    const interrupted =
+      goal.status === "running" && !goal.stopRequested && !goal.attention;
     try {
       options.restore(goal, meta.goalEvents);
       if (!interrupted) continue;
       const revalidation = await options.revalidate(goalId);
       if (!revalidation.allowed) continue;
-      await options.resume(goalId);
+      await options.resume(goalId, goal, ticket.id);
       recovered.push({ ticketId: ticket.id, goalId });
     } catch (error) {
       // A resumed run that cannot start stays paused; the Ticket view shows why instead of

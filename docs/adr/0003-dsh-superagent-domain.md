@@ -36,3 +36,12 @@ model. Existing Tickets gain one Assignment from their legacy Goal. The Goal
 implementation may remain temporarily behind the Executor boundary, but no new
 Goal vocabulary may enter `CONTEXT.md`, HTTP, MCP, or the App. A compatibility
 shim, if needed, must name its removal version and must not own state.
+
+## First workflow and evaluation
+
+Use one existing NAS workflow to validate recovery, approvals, verification,
+and reproducible Skill evaluation end to end. Keep one Executor as the
+production default and evaluate additional Executors with the same fixtures.
+An unresolved external write leaves the Ticket waiting for the person until
+Core can verify the outcome or establish that retrying is safe.
+[Primary sources and pilot acceptance](../SUPERAGENT-EVIDENCE.md)

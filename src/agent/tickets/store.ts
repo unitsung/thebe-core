@@ -48,6 +48,15 @@ export type TicketStore = {
     id: string,
     input: { executorId?: string; at: string }
   ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
+  recoverAssignment(
+    id: string,
+    input: {
+      executorId: string;
+      executorCreatedAt: string;
+      acceptedAssignmentId?: string;
+      at: string;
+    }
+  ): Promise<Assignment | undefined>;
   /** Updates lifecycle fields on one Assignment and persists the Ticket. */
   updateAssignment(
     id: string,
@@ -303,6 +312,54 @@ export function createTicketStore(options: {
         await persist(next);
         memory.set(id, next);
         return { ticket: next, assignment };
+      });
+    },
+    async recoverAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const assignments = ticket.assignments.slice();
+        const last = assignments.at(-1);
+        if (
+          last?.state === "pending" &&
+          assignments.at(-2)?.endedReason === "host_restarted" &&
+          last.id !== input.acceptedAssignmentId
+        ) {
+          // Core stopped after reserving the replacement and before the executor accepted it.
+          return last;
+        }
+        if (!last || last.state !== "ended") {
+          const createdAt = last?.createdAt ?? input.executorCreatedAt;
+          const interrupted: Assignment = {
+            id: last?.id ?? key("assignment", id, "0"),
+            state: "ended",
+            executorId: input.executorId,
+            createdAt,
+            startedAt: last?.startedAt ?? createdAt,
+            endedAt: input.at,
+            endedReason: "host_restarted",
+            report: {
+              state: "failed",
+              summary:
+                "Core restarted before the executor finished its checkpoint.",
+              at: input.at,
+            },
+          };
+          if (last) assignments[assignments.length - 1] = interrupted;
+          else assignments.push(interrupted);
+        }
+        const replacement: Assignment = {
+          id: key("assignment", id, String(assignments.length)),
+          state: "pending",
+          executorId: input.executorId,
+          createdAt: input.at,
+        };
+        assignments.push(replacement);
+        const next = { ...ticket, assignments };
+        await persist(next);
+        memory.set(id, next);
+        return replacement;
       });
     },
     async updateAssignment(id, assignmentId, patch) {

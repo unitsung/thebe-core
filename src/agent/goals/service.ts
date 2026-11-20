@@ -111,6 +111,9 @@ export function createGoalApi(
     ...(run.blocked ? { blocked: true } : {}),
     ...(run.observe ? { observe: true } : {}),
     ...(run.executor ? { executor: run.executor } : {}),
+    ...(run.recoveryAssignmentId
+      ? { recoveryAssignmentId: run.recoveryAssignmentId }
+      : {}),
     ...(run.report ? { report: { ...run.report } } : {}),
     ...(run.attention ? { attention: { ...run.attention } } : {}),
     ...(run.allowAsk ? { allowAsk: true } : {}),
@@ -357,6 +360,7 @@ export function createGoalApi(
     // These would otherwise be lost on restart: what the run was allowed to do, why it stopped, and what
     // it is waiting on the person for.
     if (persisted.blocked) run.blocked = true;
+    run.recoveryAssignmentId = persisted.recoveryAssignmentId;
     if (persisted.report) run.report = { ...persisted.report };
     if (persisted.attention) run.attention = { ...persisted.attention };
     if (persisted.guidance?.length) run.guidance = persisted.guidance.slice();
@@ -1014,7 +1018,10 @@ export function createGoalApi(
       );
     },
 
-    async resumeGoal(thebeSessionId: string): Promise<GoalRun> {
+    async resumeGoal(
+      thebeSessionId: string,
+      recoveryAssignmentId?: string
+    ): Promise<GoalRun> {
       const run = runs.get(thebeSessionId);
       if (!run) throw new Error("no goal found for this session");
       if (run.status !== "paused") return snapshot(run);
@@ -1028,7 +1035,15 @@ export function createGoalApi(
           "attention_open"
         );
       }
-      return continueGoal(run);
+      if (!recoveryAssignmentId) return continueGoal(run);
+      await revalidateBeforeContinue(run);
+      if (run.status !== "paused") return snapshot(run);
+      run.recoveryAssignmentId = recoveryAssignmentId;
+      const recoveryNote =
+        "Core restarted during the previous Assignment. Check current resource state and any existing receipts before repeating external actions. If you cannot determine whether a previous write took effect, do not repeat it. Report the unknown result as a blocker.";
+      if (!run.guidance?.includes(recoveryNote))
+        (run.guidance ??= []).push(recoveryNote);
+      return continueGoal(run, true);
     },
 
     /**
