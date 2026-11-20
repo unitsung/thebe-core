@@ -55,6 +55,7 @@ import {
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
 import { createJobBook } from "../pipeline/job-runner.ts";
+import { createFileJobStore } from "../pipeline/job-store.ts";
 import {
   createPipelineAdvancer,
   DEFAULT_INTERVAL_MS as PIPELINE_ADVANCE_INTERVAL_MS,
@@ -401,7 +402,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             libraries: pipelineProviders.libraries,
             media: pipelineProviders.media,
           },
-          pipelineProviders.jobStore
+          pipelineProviders.jobStore ??
+            (options.agentStoreDir
+              ? createFileJobStore(
+                  join(options.agentStoreDir, "pipeline-jobs.json")
+                )
+              : undefined)
         )
       : undefined;
   const pipelineAdvancer = pipelineBook
@@ -770,12 +776,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   let mandateLookup:
     | ((thebeSessionId: string) => Promise<TicketMandate | undefined>)
     | undefined;
+  let pipelineTicketLookup:
+    | ((sessionId: string) => Promise<string | undefined>)
+    | undefined;
 
   function baseTools(
     toolPolicy = policy,
     toolCallerId = callerId,
     modelResults = false,
-    scopeId?: string
+    scopeId?: string,
+    permissionScopeId = scopeId
   ) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
@@ -857,6 +867,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           policy: toolPolicy,
           callerId: toolCallerId,
           book: pipelineBook,
+          ticketId: permissionScopeId
+            ? () => pipelineTicketLookup?.(permissionScopeId)
+            : undefined,
           onAcquired: (jobId) => pipelineAdvancer?.track(jobId),
         })
       );
@@ -902,7 +915,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     const homeTools = isChatOnly
       ? []
       : (decoration?.customTools ??
-        baseTools(sessionPolicy, sessionCallerId, true, eventSessionId));
+        baseTools(
+          sessionPolicy,
+          sessionCallerId,
+          true,
+          eventSessionId,
+          permissionSessionId
+        ));
     // The tools that ask first say so themselves; the rest of the list is the host's own tools.
     const toolsRequiringApproval = [
       ...TOOLS_REQUIRING_APPROVAL,
@@ -1236,6 +1255,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     },
     runPrompt,
     pipelineAdvancer,
+    pipelineBook,
+    setPipelineTicketLookup(lookup: typeof pipelineTicketLookup) {
+      pipelineTicketLookup = lookup;
+    },
     lookupRemembered,
     takeMandateDenial: permissions.takeMandateDenial,
     registerSubagentParentCanceller,

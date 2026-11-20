@@ -4,7 +4,16 @@ import type { Job, JobStore } from "./job-runner.ts";
 
 /** Jobs are small and few; one atomically replaced JSON file is enough. */
 export function createFileJobStore(path: string): JobStore {
+  function saveStrict(jobs: Job[]) {
+    if (!isReplaceable(path))
+      throw new Error("The acquisition job store is unreadable");
+    mkdirSync(dirname(path), { recursive: true });
+    const temporary = `${path}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(jobs), { mode: 0o600 });
+    renameSync(temporary, path);
+  }
   return {
+    saveStrict,
     load() {
       try {
         const data: unknown = JSON.parse(readFileSync(path, "utf8"));
@@ -23,15 +32,8 @@ export function createFileJobStore(path: string): JobStore {
     save(jobs) {
       // Jobs are rewritten whole. If the old file cannot be parsed, writing
       // here would silently drop every durable job it held.
-      if (!isReplaceable(path)) {
-        console.warn(`[thebe] leaving unreadable job store ${path} in place`);
-        return;
-      }
       try {
-        mkdirSync(dirname(path), { recursive: true });
-        const temporary = `${path}.${process.pid}.tmp`;
-        writeFileSync(temporary, JSON.stringify(jobs), { mode: 0o600 });
-        renameSync(temporary, path);
+        saveStrict(jobs);
       } catch {
         // A full disk must not break the running job; it just will not survive a restart.
       }

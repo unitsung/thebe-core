@@ -33,6 +33,25 @@ first, then update the App. Existing task notification links resolve the
 original session ID through the Ticket catalogue. Retire the legacy Goal
 routes after deployed clients use the Ticket API.
 
+### Acquisition placement approval
+
+An AcquisitionJob started by a Ticket worker with `placementApproval: true`
+waits at file placement. The
+destination directory must exist, and the provider must report a SHA-256
+digest for the source file. The Ticket execution receipt exposes the pending
+operation in `placementAttention`. Submit `placementId` and
+`placementDecision` (`allow` or `deny`) to the Ticket reply route with an
+operator token. The pending decision survives Core restart.
+
+Core rechecks the source identity, destination and Mandate before recording
+dispatch and sending the copy. The operation can dispatch once. The receipt's
+`placementReport` records the decision, dispatch and verification timestamps.
+Verification requires the destination digest to match the approved source.
+An uncertain result is left for the operator.
+The pilot requires a storage backend that publishes SHA-256 for both paths.
+OpenList copies by path. A concurrent source replacement after the final
+identity check can race the copy, and read-back detects a changed result.
+
 ### Source follow-ups
 
 For an active Ticket, an admitted follow-up on a subscribed Thread joins the

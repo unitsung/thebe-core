@@ -84,6 +84,19 @@ export async function handleTicketRoutes(
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
       const input = await readJson(request);
+      if (
+        (input.placementId !== undefined ||
+          input.placementDecision !== undefined) &&
+        !context.caller
+      ) {
+        return json(
+          {
+            error: "An operator token is required to decide placement",
+            code: "unauthorized",
+          },
+          401
+        );
+      }
       return json(
         await agent.replyTicket({
           ...input,
