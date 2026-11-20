@@ -26,6 +26,12 @@ export async function handleTicketRoutes(
   try {
     if (context.path === base) {
       if (request.method === "GET") {
+        if (context.url.searchParams.get("view") === "execution") {
+          const tasks = await agent.listTicketTasks();
+          return json({
+            tickets: tasks.map(({ goal: _goal, ...task }) => task),
+          });
+        }
         return json({ tickets: await agent.listTickets() });
       }
       if (request.method === "POST") {

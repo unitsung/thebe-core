@@ -22,10 +22,16 @@ requeueing does not broaden a Ticket's Mandate.
 current checkpoint progress, available controls, pending permissions and
 receipt. The receipt includes the latest Report and any open Attention. Use
 the same Ticket ID for reply, note, pause, resume, stop and retry.
+`GET /v1/tickets?view=execution` returns the same projection for the catalogue.
 `GET /v1/tickets/{id}/log` returns buffered execution events indexed by
 Ticket ID. Request SSE with `Accept: text/event-stream` or `?follow=true`.
 Pass the returned `next` value to `?after=` to read newer events. SSE resumes
 after the supplied `Last-Event-ID`. Core retains the most recent 50 events.
+
+For the App cutover, deploy the Core version with these Ticket endpoints
+first, then update the App. Existing task notification links resolve the
+original session ID through the Ticket catalogue. Retire the legacy Goal
+routes after deployed clients use the Ticket API.
 
 ### Source follow-ups
 

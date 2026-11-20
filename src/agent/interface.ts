@@ -553,6 +553,7 @@ export interface ThebeAgent {
   listTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
   getTicketTask(id: string): Promise<TicketTaskView | undefined>;
+  listTicketTasks(): Promise<TicketTaskView[]>;
   getTicketLog(
     id: string
   ): Promise<import("./tickets/log.ts").TicketExecutionLog | undefined>;

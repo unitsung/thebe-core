@@ -34,6 +34,7 @@ type Operation = {
   requestBody?: Record<string, unknown>;
   requestSchema?: string;
   responseSchema?: string;
+  alternateResponseSchema?: string;
   extraStatuses?: Array<{
     status: number;
     description: string;
@@ -1016,7 +1017,11 @@ const operations: Operation[] = [
     path: "/v1/tickets",
     summary: "List Tickets, newest first",
     tag: "ticket",
+    parameters: [
+      queryParameter("view", { type: "string", enum: ["execution"] }),
+    ],
     responseSchema: "TicketList",
+    alternateResponseSchema: "TicketExecutionList",
   },
   {
     method: "post",
@@ -1692,7 +1697,14 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             schema:
               operation.responseContentType === "text/event-stream"
                 ? { type: "string" }
-                : schemaRef(operation.responseSchema),
+                : operation.alternateResponseSchema
+                  ? {
+                      anyOf: [
+                        schemaRef(operation.responseSchema),
+                        schemaRef(operation.alternateResponseSchema),
+                      ],
+                    }
+                  : schemaRef(operation.responseSchema),
           },
         },
       },
@@ -4464,6 +4476,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
           additionalProperties: false,
+        },
+        TicketExecutionList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketTask" },
+            },
+          },
         },
         TicketEventPage: {
           type: "object",
