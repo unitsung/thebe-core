@@ -281,9 +281,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async (thebeSessionId) =>
       (await ticketStore.getByGoal(thebeSessionId))?.mandate
   );
-  ctx.setPipelineTicketLookup(
-    async (sessionId) => (await ticketStore.getByGoal(sessionId))?.id
-  );
+  ctx.setPipelinePlacementLookup(async (sessionId) => {
+    const ticket = await ticketStore.getByGoal(sessionId);
+    if (!ticket) return undefined;
+    const skill = await extensions.getSkill("media-acquire");
+    if (!skill?.contentHash) return undefined;
+    return {
+      ticketId: ticket.id,
+      skill: { name: skill.name, digest: skill.contentHash },
+    };
+  });
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,

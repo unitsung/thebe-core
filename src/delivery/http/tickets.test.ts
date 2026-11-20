@@ -51,6 +51,7 @@ function open(
     agentStoreDir,
     now,
     pipeline,
+    workspacePath: pipeline ? process.cwd() : undefined,
     token: pipeline ? "placement-owner" : undefined,
   });
   const call = async (path: string, init?: RequestInit) => {
@@ -187,11 +188,14 @@ describe("tickets", () => {
       );
       let ticketPath = "";
       let attention: Record<string, unknown> = {};
+      const skill = await first.call("/v1/skills/media-acquire/content");
+      expect(skill.status).toBe(200);
+      expect(skill.body.contentHash).toMatch(/^[a-f0-9]{64}$/);
       try {
         const created = await first.call("/v1/tickets", {
           method: "POST",
           body: JSON.stringify({
-            task: "Acquire Film",
+            task: `Acquire Film using the placement pilot.\n\n${skill.body.content}`,
             idempotencyKey: "placement",
           }),
         });
@@ -217,6 +221,7 @@ describe("tickets", () => {
             source: "/incoming/Film.mkv",
             destination: "/library/Film.mkv",
             state: "pending",
+            skill: { name: "media-acquire", digest: skill.body.contentHash },
           });
         });
         expect(copy).toHaveBeenCalledTimes(0);
@@ -396,6 +401,7 @@ describe("tickets", () => {
         expect(result.receipt.placementReport).toMatchObject({
           id: attention.id,
           state: "verified",
+          skill: attention.skill,
           decidedAt: expect.any(String),
           dispatchedAt: expect.any(String),
           verifiedAt: expect.any(String),

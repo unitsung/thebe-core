@@ -52,6 +52,8 @@ On restart, Core reads the destination of a placement that had begun dispatch.
 A matching digest verifies the operation. Missing or inconclusive evidence
 puts the Ticket in Attention. Recovery preserves the operation ID and performs
 only read-back.
+New pilot jobs record the installed `media-acquire` Skill's SHA-256 digest
+at acquisition and retain it in the placement report across restarts.
 The Ticket stop route records a stop before Core accepts another placement
 decision. If the provider already received the copy, Core may still verify
 the destination and preserve the result and stop time in the same report.

@@ -65,6 +65,7 @@ export type Job = Omit<JobSpec, "kind"> & {
   /** Folder or file name of the finished download/transfer. */
   contentName?: string;
   ticketId?: string;
+  placementSkill?: PlacementSkill;
   placement?: Placement;
   attempts: Record<string, number>;
   copiedAt?: number;
@@ -85,7 +86,11 @@ export type Placement = {
   verifiedAt?: string;
   verification?: "sha256";
   stoppedAt?: string;
+  skill?: PlacementSkill;
 };
+
+export type PlacementSkill = { name: string; digest: string };
+export type PlacementContext = { ticketId: string; skill: PlacementSkill };
 
 export type JobDeps = {
   downloads?: DownloadProvider;
@@ -373,6 +378,7 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
             source: join(job.filesSourceDir, name),
             destination: join(job.libraryDir, name),
             digest,
+            skill: job.placementSkill,
             state: "pending",
           };
         }
@@ -677,16 +683,20 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
         return job.id;
       });
     },
-    acquire(spec: JobSpec, ticketId?: string): Promise<Job> {
+    acquire(spec: JobSpec, placement?: PlacementContext): Promise<Job> {
       return serial(async () => {
         const job = createJob(spec, (deps.now ?? (() => new Date()))());
+        const ticketId = placement?.ticketId;
         if (ticketId && !store?.saveStrict)
           throw httpError(
             503,
             "Placement requires durable job storage",
             "placement_store_unavailable"
           );
-        if (ticketId) job.ticketId = ticketId;
+        if (placement) {
+          job.ticketId = placement.ticketId;
+          job.placementSkill = placement.skill;
+        }
         await advanceJob(job, deps);
         jobs.set(job.id, job);
         if (ticketId) {

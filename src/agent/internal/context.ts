@@ -54,7 +54,10 @@ import {
   canRunPipelineJobs,
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
-import { createJobBook } from "../pipeline/job-runner.ts";
+import {
+  createJobBook,
+  type PlacementContext,
+} from "../pipeline/job-runner.ts";
 import { createFileJobStore } from "../pipeline/job-store.ts";
 import {
   createPipelineAdvancer,
@@ -776,8 +779,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   let mandateLookup:
     | ((thebeSessionId: string) => Promise<TicketMandate | undefined>)
     | undefined;
-  let pipelineTicketLookup:
-    | ((sessionId: string) => Promise<string | undefined>)
+  let pipelinePlacementLookup:
+    | ((sessionId: string) => Promise<PlacementContext | undefined>)
     | undefined;
 
   function baseTools(
@@ -867,8 +870,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           policy: toolPolicy,
           callerId: toolCallerId,
           book: pipelineBook,
-          ticketId: permissionScopeId
-            ? () => pipelineTicketLookup?.(permissionScopeId)
+          placementContext: permissionScopeId
+            ? () => pipelinePlacementLookup?.(permissionScopeId)
             : undefined,
           onAcquired: (jobId) => pipelineAdvancer?.track(jobId),
         })
@@ -1256,8 +1259,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     runPrompt,
     pipelineAdvancer,
     pipelineBook,
-    setPipelineTicketLookup(lookup: typeof pipelineTicketLookup) {
-      pipelineTicketLookup = lookup;
+    setPipelinePlacementLookup(lookup: typeof pipelinePlacementLookup) {
+      pipelinePlacementLookup = lookup;
     },
     lookupRemembered,
     takeMandateDenial: permissions.takeMandateDenial,
