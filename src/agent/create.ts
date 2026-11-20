@@ -566,7 +566,22 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     lookup: (goalId) => ctx.lookup(goalId),
     restore: (goal, events) => goals.restoreGoal(goal, events),
     revalidate: revalidateTicketGoal,
-    resume: (goalId) => goals.resumeGoal(goalId),
+    resume: async (goalId, goal, ticketId) => {
+      const assignment = await ticketStore.recoverAssignment(ticketId, {
+        executorId: goalId,
+        executorCreatedAt: goal.createdAt,
+        acceptedAssignmentId: goal.recoveryAssignmentId,
+        at: ctx.now().toISOString(),
+      });
+      if (!assignment) throw new Error("Ticket disappeared during recovery");
+      const resumed = await goals.resumeGoal(goalId, assignment.id);
+      if (resumed.recoveryAssignmentId === assignment.id) {
+        await ticketStore.updateAssignment(ticketId, assignment.id, {
+          state: "running",
+          startedAt: assignment.createdAt,
+        });
+      }
+    },
     onError: () => {
       // The Ticket stays paused and its view carries the error; startup must not fail.
     },

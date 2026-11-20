@@ -181,6 +181,8 @@ export type GoalRun = {
    * what it may change is what the Ticket's Mandate allows.
    */
   executor?: "ticket";
+  /** Assignment accepted by the executor during the latest startup recovery. */
+  recoveryAssignmentId?: string;
   /** The worker's latest structured report. */
   report?: GoalReport;
   /** Set while the Goal is paused waiting for the person; cleared by their answer. */

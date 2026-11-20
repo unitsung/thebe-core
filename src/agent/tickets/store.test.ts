@@ -112,6 +112,43 @@ describe("ticket store", () => {
     ]);
   });
 
+  it("reuses a reserved recovery Assignment until the executor accepts it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-ticket-recovery-"));
+    const store = createTicketStore({ dir });
+    const ticket = await store.recordDirect(request(5));
+    const original = await store.ensureAssignment(ticket.id, {
+      executorId: "s5",
+      at: ticket.createdAt,
+      state: "running",
+    });
+    const input = {
+      executorId: "s5",
+      executorCreatedAt: ticket.createdAt,
+      at: "2026-11-06T10:01:00.000Z",
+    };
+    const reserved = await store.recoverAssignment(ticket.id, input);
+    expect(reserved?.state).toBe("pending");
+
+    const reopened = createTicketStore({ dir });
+    expect(await reopened.recoverAssignment(ticket.id, input)).toEqual(
+      reserved
+    );
+    const next = await reopened.recoverAssignment(ticket.id, {
+      ...input,
+      at: "2026-11-06T10:02:00.000Z",
+      acceptedAssignmentId: reserved?.id,
+    });
+    expect((await reopened.get(ticket.id))?.assignments).toMatchObject([
+      {
+        id: original?.assignment.id,
+        state: "ended",
+        endedReason: "host_restarted",
+      },
+      { id: reserved?.id, state: "ended", endedReason: "host_restarted" },
+      { id: next?.id, state: "pending" },
+    ]);
+  });
+
   it("gives concurrent startup reads the fully loaded store", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-"));
     const first = await createTicketStore({ dir }).recordDirect(request(4));
