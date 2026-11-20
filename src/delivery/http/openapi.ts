@@ -30,6 +30,7 @@ type Operation = {
   tag: string;
   response?: number;
   responseContentType?: string;
+  streamResponse?: boolean;
   requestBody?: Record<string, unknown>;
   requestSchema?: string;
   responseSchema?: string;
@@ -1044,6 +1045,27 @@ const operations: Operation[] = [
     responseSchema: "Ticket",
   },
   {
+    method: "get",
+    path: "/v1/tickets/{id}/execution",
+    summary: "Read Ticket progress, Assignment history, controls and Attention",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}/log",
+    summary: "Read Ticket execution events or follow an SSE log",
+    tag: "ticket",
+    parameters: [
+      idParameter(),
+      queryParameter("follow", { type: "boolean" }),
+      queryParameter("after", { type: "integer", minimum: 0 }),
+    ],
+    responseSchema: "TicketEventPage",
+    streamResponse: true,
+  },
+  {
     method: "post",
     path: "/v1/tickets/{id}/reply",
     summary:
@@ -1663,6 +1685,9 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             ? "Feature is not available"
             : "Successful response",
         content: {
+          ...(operation.streamResponse
+            ? { "text/event-stream": { schema: { type: "string" } } }
+            : {}),
           [operation.responseContentType ?? "application/json"]: {
             schema:
               operation.responseContentType === "text/event-stream"
@@ -4305,6 +4330,35 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "Write destinations recorded from Source events attached to this Ticket.",
             },
+            assignments: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "state", "createdAt"],
+                properties: {
+                  id: { type: "string" },
+                  state: {
+                    type: "string",
+                    enum: ["pending", "running", "ended"],
+                  },
+                  createdAt: { type: "string", format: "date-time" },
+                  startedAt: { type: "string", format: "date-time" },
+                  endedAt: { type: "string", format: "date-time" },
+                  endedReason: { type: "string" },
+                  report: {
+                    type: "object",
+                    required: ["state", "summary", "at"],
+                    properties: {
+                      state: { type: "string" },
+                      summary: { type: "string" },
+                      at: { type: "string", format: "date-time" },
+                      evidence: { type: "string" },
+                      artifactId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
             links: {
               type: "object",
               required: ["sessionIds"],
@@ -4411,6 +4465,27 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           },
           additionalProperties: false,
         },
+        TicketEventPage: {
+          type: "object",
+          required: ["events", "next"],
+          properties: {
+            events: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "ticketId", "type", "at"],
+                properties: {
+                  id: { type: "string" },
+                  ticketId: { type: "string" },
+                  type: { type: "string" },
+                  at: { type: "string", format: "date-time" },
+                },
+                additionalProperties: true,
+              },
+            },
+            next: { type: "integer", minimum: 0 },
+          },
+        },
         TicketTask: {
           type: "object",
           required: ["ticket", "stage", "pendingPermissions", "receipt"],
@@ -4434,6 +4509,38 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: { $ref: "#/components/schemas/PendingPermission" },
             },
+            execution: {
+              type: "object",
+              required: [
+                "status",
+                "phase",
+                "iteration",
+                "maxIterations",
+                "updatedAt",
+                "controls",
+              ],
+              properties: {
+                status: { type: "string" },
+                phase: { type: "string" },
+                progress: { type: "number" },
+                currentStep: { type: "string" },
+                iteration: { type: "integer" },
+                maxIterations: { type: "integer" },
+                updatedAt: { type: "string", format: "date-time" },
+                watchdog: { $ref: "#/components/schemas/GoalWatchdog" },
+                controls: {
+                  type: "object",
+                  required: ["pause", "resume", "stop", "retry", "reply"],
+                  properties: {
+                    pause: { type: "boolean" },
+                    resume: { type: "boolean" },
+                    stop: { type: "boolean" },
+                    retry: { type: "boolean" },
+                    reply: { type: "boolean" },
+                  },
+                },
+              },
+            },
             receipt: {
               type: "object",
               required: ["state", "complete"],
@@ -4453,6 +4560,20 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 },
                 complete: { type: "boolean" },
                 summary: { type: "string" },
+                report: {
+                  $ref: "#/components/schemas/ProductGoal/properties/report",
+                },
+                attention: {
+                  type: "object",
+                  required: ["id", "kind", "question", "askedAt"],
+                  properties: {
+                    id: { type: "string" },
+                    kind: { type: "string", enum: ["answer", "review"] },
+                    question: { type: "string" },
+                    options: { type: "array", items: { type: "string" } },
+                    askedAt: { type: "string", format: "date-time" },
+                  },
+                },
                 finalReport: { type: "string" },
                 artifactId: { type: "string" },
                 error: { type: "string" },

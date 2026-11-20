@@ -38,9 +38,9 @@ const defaultTurns: FakeTurnBatch = [
 function open(
   agentStoreDir?: string,
   turns: FakeTurnBatch = defaultTurns,
-  now?: () => Date
+  now?: () => Date,
+  fake = createFakeRuntime()
 ) {
-  const fake = createFakeRuntime();
   fake.queueTurns(turns);
   const app = createThebeApp({
     runtime: fake.runtime,
@@ -69,6 +69,119 @@ const newGoal = {
 };
 
 describe("tickets", () => {
+  it("keeps log cursors usable after older Ticket events rotate out", async () => {
+    const { app, call } = open(undefined, [{ kind: "hang" }]);
+    try {
+      const created = await call("/v1/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          task: "Check the library",
+          idempotencyKey: "log-rotation",
+        }),
+      });
+      const path = `/v1/tickets/${created.body.ticket.id}`;
+      for (let index = 0; index < 52; index += 1) {
+        const response = await call(`${path}/note`, {
+          method: "POST",
+          body: JSON.stringify({ note: `Check library ${index}` }),
+        });
+        expect(response.status).toBe(200);
+      }
+      const first = (await call(`${path}/log`)).body;
+      expect(first.events).toHaveLength(50);
+      expect(first.next).toBeGreaterThan(50);
+      await call(`${path}/note`, {
+        method: "POST",
+        body: JSON.stringify({ note: "Check one more library" }),
+      });
+      const next = (await call(`${path}/log?after=${first.next}`)).body;
+      expect(next.events.at(-1)).toMatchObject({ type: "ticket_status" });
+      expect(next.next).toBeGreaterThan(first.next);
+    } finally {
+      await app.agent.quiesce();
+    }
+  });
+
+  it("reads progress and answers Attention by Ticket ID after restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-ticket-execution-"));
+    const first = open(dir, [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "ask",
+              question: "Which library should I move?",
+            },
+          },
+        ],
+      },
+    ]);
+    const created = await first.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "execution-restart",
+      }),
+    });
+    const id = created.body.ticket.id;
+    const path = `/v1/tickets/${id}`;
+    try {
+      await vi.waitFor(async () => {
+        const execution = await first.call(`${path}/execution`);
+        expect(execution.status).toBe(200);
+        expect(execution.body).toMatchObject({
+          stage: "attention",
+          execution: { iteration: 1, controls: { resume: false, reply: true } },
+          receipt: { attention: { question: "Which library should I move?" } },
+        });
+      });
+    } finally {
+      await first.app.agent.quiesce();
+      await first.fake.runtime.unquiesce();
+    }
+    const second = open(dir, defaultTurns, undefined, first.fake);
+    try {
+      const waiting = await second.call(`${path}/execution`);
+      const { attention } = waiting.body.receipt;
+      expect(attention).toMatchObject({ kind: "answer" });
+      const log = await second.call(`${path}/log`);
+      expect(log.body.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "ticket_iteration", ticketId: id }),
+        ])
+      );
+      expect(
+        log.body.events.every(
+          (event: Record<string, unknown>) => !("goalId" in event)
+        )
+      ).toBe(true);
+      const reply = await second.call(`${path}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ attentionId: attention.id, answer: "Movies" }),
+      });
+      expect(reply.status).toBe(200);
+      await vi.waitFor(async () => {
+        const finished = await second.call(`${path}/execution`);
+        expect(finished.body).toMatchObject({
+          ticket: {
+            id,
+            assignments: [{ state: "ended", report: { state: "ready" } }],
+          },
+          stage: "completed",
+        });
+      });
+      const stream = await second.app.handler.handle(
+        new Request(`http://127.0.0.1:8787${path}/log?follow=true`)
+      );
+      expect(stream.headers.get("content-type")).toBe("text/event-stream");
+      expect(await stream.text()).toContain("event: ticket_completed");
+    } finally {
+      await second.app.agent.quiesce();
+    }
+  });
+
   it("starts empty, and a Core that has them says so on /v1/health", async () => {
     const { call } = open();
     expect((await call("/v1/tickets")).body).toEqual({ tickets: [] });
@@ -84,6 +197,8 @@ describe("tickets", () => {
         post: expect.any(Object),
       },
       "/v1/tickets/{id}": { get: expect.any(Object) },
+      "/v1/tickets/{id}/execution": { get: expect.any(Object) },
+      "/v1/tickets/{id}/log": { get: expect.any(Object) },
       "/v1/tickets/{id}/reply": { post: expect.any(Object) },
       "/v1/tickets/{id}/note": { post: expect.any(Object) },
       "/v1/tickets/{id}/pause": { post: expect.any(Object) },

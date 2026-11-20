@@ -8,6 +8,7 @@ import {
   type ThebeAgent,
 } from "../../../agent/index.ts";
 import { json } from "../json.ts";
+import type { TicketExecutionLog } from "../../../agent/tickets/log.ts";
 
 export const SESSION_LOG_IDLE_MS = 5 * 60 * 1000;
 export const MAX_SESSION_LOG_STREAMS = 32;
@@ -15,7 +16,9 @@ export const MAX_SESSION_LOG_STREAMS = 32;
 let maxSessionLogStreams = MAX_SESSION_LOG_STREAMS;
 let activeSessionLogStreams = 0;
 
-export function resetSessionLogStreamsForTests(options?: { max?: number }): void {
+export function resetSessionLogStreamsForTests(options?: {
+  max?: number;
+}): void {
   activeSessionLogStreams = 0;
   maxSessionLogStreams = options?.max ?? MAX_SESSION_LOG_STREAMS;
 }
@@ -25,7 +28,7 @@ export function sessionLogStream(
   thebeSessionId: string,
   request: Request,
   after: number,
-  options?: { idleMs?: number; closeOnTerminal?: boolean },
+  options?: { idleMs?: number; closeOnTerminal?: boolean }
 ): Response {
   if (activeSessionLogStreams >= maxSessionLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
@@ -69,8 +72,7 @@ export function sessionLogStream(
         if (closed) {
           return;
         }
-        const line =
-          `id: ${nextId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+        const line = `id: ${nextId}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
         nextId += 1;
         try {
           controller.enqueue(encoder.encode(line));
@@ -128,7 +130,7 @@ export function goalEventStream(
   thebeSessionId: string,
   request: Request,
   after: number,
-  options?: { idleMs?: number },
+  options?: { idleMs?: number }
 ): Response {
   if (activeGoalLogStreams >= maxGoalLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
@@ -177,8 +179,7 @@ export function goalEventStream(
           return;
         }
         const product = toProductGoalEvent(thebeSessionId, event, nextId, at);
-        const line =
-          `id: ${nextId}\nevent: ${product.type}\ndata: ${JSON.stringify(product)}\n\n`;
+        const line = `id: ${nextId}\nevent: ${product.type}\ndata: ${JSON.stringify(product)}\n\n`;
         nextId += 1;
         try {
           controller.enqueue(encoder.encode(line));
@@ -203,9 +204,12 @@ export function goalEventStream(
               type: "goal_completed",
               status: snapshot.status,
               totalIterations: snapshot.iteration,
-              summary: snapshot.summary ?? snapshot.error ?? `Goal ${snapshot.status}.`,
+              summary:
+                snapshot.summary ??
+                snapshot.error ??
+                `Goal ${snapshot.status}.`,
             },
-            snapshot.finishedAt ?? snapshot.createdAt,
+            snapshot.finishedAt ?? snapshot.createdAt
           );
         } else if (snapshot) {
           send(
@@ -219,7 +223,7 @@ export function goalEventStream(
                     : "running",
               message: snapshot.summary,
             },
-            snapshot.finishedAt ?? snapshot.createdAt,
+            snapshot.finishedAt ?? snapshot.createdAt
           );
         }
       }
@@ -251,13 +255,82 @@ export function goalEventStream(
   });
 }
 
+export function ticketEventStream(
+  log: TicketExecutionLog,
+  request: Request,
+  after: number
+): Response {
+  if (activeGoalLogStreams >= maxGoalLogStreams) {
+    return json({ ok: false, error: "too many log streams" }, 429);
+  }
+  activeGoalLogStreams += 1;
+  const encoder = new TextEncoder();
+  let close = () => {};
+  const stream = new ReadableStream({
+    start(controller) {
+      let cursor = after;
+      let closed = false;
+      let idle: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe = () => {};
+      close = () => {
+        if (closed) return;
+        closed = true;
+        clearTimeout(idle);
+        unsubscribe();
+        request.signal.removeEventListener("abort", close);
+        activeGoalLogStreams -= 1;
+        try {
+          controller.close();
+        } catch {
+          // A cancelled stream is already closed.
+        }
+      };
+      const send = () => {
+        if (closed) return;
+        const page = log.read(cursor);
+        for (const event of page.events) {
+          controller.enqueue(
+            encoder.encode(
+              `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`
+            )
+          );
+        }
+        cursor = page.next;
+        if (log.finished()) close();
+        else {
+          clearTimeout(idle);
+          idle = setTimeout(close, GOAL_LOG_IDLE_MS);
+        }
+      };
+      unsubscribe = log.subscribe(send);
+      if (request.signal.aborted) close();
+      else {
+        request.signal.addEventListener("abort", close);
+        send();
+      }
+    },
+    cancel() {
+      close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
+}
+
 export const WORKER_LOG_IDLE_MS = 5 * 60 * 1000;
 export const MAX_WORKER_LOG_STREAMS = 32;
 
 let maxWorkerLogStreams = MAX_WORKER_LOG_STREAMS;
 let activeWorkerLogStreams = 0;
 
-export function resetWorkerLogStreamsForTests(options?: { max?: number }): void {
+export function resetWorkerLogStreamsForTests(options?: {
+  max?: number;
+}): void {
   activeWorkerLogStreams = 0;
   maxWorkerLogStreams = options?.max ?? MAX_WORKER_LOG_STREAMS;
 }
@@ -266,7 +339,7 @@ export function workerEventStream(
   agent: ThebeAgent,
   runId: string,
   request: Request,
-  options?: { idleMs?: number },
+  options?: { idleMs?: number }
 ): Response {
   if (activeWorkerLogStreams >= maxWorkerLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
@@ -304,8 +377,7 @@ export function workerEventStream(
       };
       const send = (snapshot: Parameters<typeof toProductWorker>[0]) => {
         if (closed) return;
-        const line =
-          `id: ${nextId}\nevent: worker_update\ndata: ${JSON.stringify(toProductWorker(snapshot))}\n\n`;
+        const line = `id: ${nextId}\nevent: worker_update\ndata: ${JSON.stringify(toProductWorker(snapshot))}\n\n`;
         nextId += 1;
         try {
           controller.enqueue(encoder.encode(line));
@@ -341,7 +413,12 @@ export function workerEventStream(
 }
 
 function isTerminalWorkerStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled" || status === "interrupted";
+  return (
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "interrupted"
+  );
 }
 
 export const CAPABILITY_RUN_LOG_IDLE_MS = 5 * 60 * 1000;
@@ -350,7 +427,9 @@ export const MAX_CAPABILITY_RUN_LOG_STREAMS = 32;
 let maxCapabilityRunLogStreams = MAX_CAPABILITY_RUN_LOG_STREAMS;
 let activeCapabilityRunLogStreams = 0;
 
-export function resetCapabilityRunLogStreamsForTests(options?: { max?: number }): void {
+export function resetCapabilityRunLogStreamsForTests(options?: {
+  max?: number;
+}): void {
   activeCapabilityRunLogStreams = 0;
   maxCapabilityRunLogStreams = options?.max ?? MAX_CAPABILITY_RUN_LOG_STREAMS;
 }
@@ -359,7 +438,7 @@ export async function capabilityRunEventStream(
   agent: ThebeAgent,
   runId: string,
   request: Request,
-  options?: { idleMs?: number },
+  options?: { idleMs?: number }
 ): Promise<Response> {
   if (activeCapabilityRunLogStreams >= maxCapabilityRunLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
@@ -383,7 +462,10 @@ export async function capabilityRunEventStream(
         closed = true;
         if (idleTimer) clearTimeout(idleTimer);
         unsub();
-        activeCapabilityRunLogStreams = Math.max(0, activeCapabilityRunLogStreams - 1);
+        activeCapabilityRunLogStreams = Math.max(
+          0,
+          activeCapabilityRunLogStreams - 1
+        );
         request.signal.removeEventListener("abort", close);
         try {
           controller.close();
@@ -397,8 +479,7 @@ export async function capabilityRunEventStream(
       };
       const send = (snapshot: CapabilityRun) => {
         if (closed) return;
-        const line =
-          `id: ${nextId}\nevent: capability_update\ndata: ${JSON.stringify(snapshot)}\n\n`;
+        const line = `id: ${nextId}\nevent: capability_update\ndata: ${JSON.stringify(snapshot)}\n\n`;
         nextId += 1;
         try {
           controller.enqueue(encoder.encode(line));
@@ -433,5 +514,7 @@ export async function capabilityRunEventStream(
 }
 
 function isTerminalCapabilityRunStatus(status: string): boolean {
-  return status === "succeeded" || status === "failed" || status === "interrupted";
+  return (
+    status === "succeeded" || status === "failed" || status === "interrupted"
+  );
 }

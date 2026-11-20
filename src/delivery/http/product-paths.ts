@@ -27,6 +27,7 @@ export const PRODUCT_HTTP_SEGMENT = {
   runs: "runs",
   profiles: "profiles",
   log: "log",
+  execution: "execution",
   cancel: "cancel",
   resolve: "resolve",
   reply: "reply",
