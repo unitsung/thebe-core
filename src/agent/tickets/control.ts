@@ -462,9 +462,11 @@ export function createTicketControlApi(options: {
           ? "attention"
           : outcome === "dispatching"
             ? "running"
-            : outcome === "denied" || outcome === "uncertain"
-              ? "blocked"
-              : stageOf(goal, pending);
+            : outcome === "uncertain"
+              ? "attention"
+              : outcome === "denied"
+                ? "blocked"
+                : stageOf(goal, pending);
     const retryable = !placements.length && canRetry(stage, goal);
     const product = goal ? toProductGoal(goal) : undefined;
     let currentRun: NonNullable<TicketTaskView["execution"]>["currentRun"];

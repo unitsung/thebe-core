@@ -48,6 +48,10 @@ dispatch and sending the copy. The operation can dispatch once. The receipt's
 `placementReport` records the decision, dispatch and verification timestamps.
 Verification requires the destination digest to match the approved source.
 An uncertain result is left for the operator.
+On restart, Core reads the destination of a placement that had begun dispatch.
+A matching digest verifies the operation. Missing or inconclusive evidence
+puts the Ticket in Attention. Recovery preserves the operation ID and performs
+only read-back.
 The pilot requires a storage backend that publishes SHA-256 for both paths.
 OpenList copies by path. A concurrent source replacement after the final
 identity check can race the copy, and read-back detects a changed result.

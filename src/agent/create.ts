@@ -602,31 +602,59 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   });
   // A Ticket whose executor was mid-checkpoint when the previous process ended continues without
   // waiting for the person; a paused, stopped, or attention-waiting Ticket is deliberately left alone.
-  const ticketRecovery = recoverInterruptedTicketGoals({
-    tickets: ticketStore,
-    lookup: (goalId) => ctx.lookup(goalId),
-    restore: (goal, events) => goals.restoreGoal(goal, events),
-    revalidate: revalidateTicketGoal,
-    resume: async (goalId, goal, ticketId) => {
-      const assignment = await ticketStore.recoverAssignment(ticketId, {
-        executorId: goalId,
-        executorCreatedAt: goal.createdAt,
-        acceptedAssignmentId: goal.recoveryAssignmentId,
-        at: ctx.now().toISOString(),
-      });
-      if (!assignment) throw new Error("Ticket disappeared during recovery");
-      const resumed = await goals.resumeGoal(goalId, assignment.id);
-      if (resumed.recoveryAssignmentId === assignment.id) {
-        await ticketStore.updateAssignment(ticketId, assignment.id, {
-          state: "running",
-          startedAt: assignment.createdAt,
-        });
-      }
-    },
-    onError: () => {
-      // The Ticket stays paused and its view carries the error; startup must not fail.
-    },
-  }).catch(() => []);
+  const placementRecovery =
+    ctx.pipelineBook?.recoverPlacements() ?? Promise.resolve();
+  const ticketRecovery = placementRecovery
+    .catch(() => {
+      // A placement whose outcome cannot be persisted still cannot dispatch twice.
+    })
+    .then(() =>
+      recoverInterruptedTicketGoals({
+        tickets: ticketStore,
+        lookup: (goalId) => ctx.lookup(goalId),
+        restore: (goal, events) => goals.restoreGoal(goal, events),
+        revalidate: async (goalId) => {
+          const ticket = await ticketStore.getByGoal(goalId);
+          const waitingForPlacement = ctx.pipelineBook
+            ?.status()
+            .some(
+              (job) =>
+                job.ticketId === ticket?.id &&
+                job.placement &&
+                ["pending", "dispatching", "uncertain", "denied"].includes(
+                  job.placement.state
+                )
+            );
+          if (waitingForPlacement)
+            return {
+              allowed: false,
+              reason: "Placement is awaiting an operator",
+            };
+          return revalidateTicketGoal(goalId);
+        },
+        resume: async (goalId, goal, ticketId) => {
+          const assignment = await ticketStore.recoverAssignment(ticketId, {
+            executorId: goalId,
+            executorCreatedAt: goal.createdAt,
+            acceptedAssignmentId: goal.recoveryAssignmentId,
+            at: ctx.now().toISOString(),
+          });
+          if (!assignment)
+            throw new Error("Ticket disappeared during recovery");
+          const resumed = await goals.resumeGoal(goalId, assignment.id);
+          if (resumed.recoveryAssignmentId === assignment.id) {
+            await ticketStore.updateAssignment(ticketId, assignment.id, {
+              state: "running",
+              startedAt: assignment.createdAt,
+            });
+          }
+        },
+        onError: () => {
+          // The Ticket stays paused and its view carries the error; startup must not fail.
+        },
+      })
+    )
+    .catch(() => []);
   ticketReady = ticketRecovery;
   const candidates = createCandidateApi({
     decisions: decisionStore,
