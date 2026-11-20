@@ -53,13 +53,18 @@ export class OpenListFilesProvider implements FilesProvider {
     return payload.data;
   }
 
-  async list(input: { path: string; page?: number; perPage?: number }) {
+  async list(input: {
+    path: string;
+    page?: number;
+    perPage?: number;
+    refresh?: boolean;
+  }) {
     const path = cleanPath(input.path);
     const data = (await this.call("/api/fs/list", {
       path,
       page: input.page ?? 1,
       per_page: Math.min(input.perPage ?? 100, 200),
-      refresh: false,
+      refresh: input.refresh ?? false,
     })) as Json | null;
     const content = Array.isArray(data?.content)
       ? (data!.content as unknown[])
@@ -68,11 +73,23 @@ export class OpenListFilesProvider implements FilesProvider {
       if (!raw || typeof raw !== "object") return [];
       const row = raw as Json;
       if (typeof row.name !== "string") return [];
+      const hashes = row.hash_info;
+      const digest =
+        hashes && typeof hashes === "object" && !Array.isArray(hashes)
+          ? Object.entries(hashes).find(([algorithm]) =>
+              /^sha-?256$/i.test(algorithm)
+            )?.[1]
+          : undefined;
       return [
         {
           name: row.name,
           path: `${path === "/" ? "" : path}/${row.name}`,
           isDirectory: row.is_dir === true,
+          ...(row.is_dir !== true &&
+          typeof digest === "string" &&
+          /^[a-f0-9]{64}$/i.test(digest)
+            ? { sha256: digest.toLowerCase() }
+            : {}),
           sizeBytes: typeof row.size === "number" ? row.size : undefined,
           modifiedAt:
             typeof row.modified === "string" ? row.modified : undefined,

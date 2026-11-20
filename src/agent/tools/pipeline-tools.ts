@@ -20,6 +20,7 @@ import {
   type JobStore,
 } from "../pipeline/job-runner.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
+import { httpError } from "../types.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
 import {
   asObject,
@@ -111,6 +112,11 @@ const JOB_SCHEMAS: Record<string, Record<string, unknown>> = {
         description: "Title to look for in the media server afterwards.",
       },
       year: { type: "integer" },
+      placementApproval: {
+        type: "boolean",
+        description:
+          "Use the single-file placement approval pilot from a Ticket worker.",
+      },
       magnet: {
         type: "string",
         description:
@@ -161,7 +167,7 @@ const JOB_DESCRIPTIONS: Record<string, string> = {
   [RESOURCE_SEARCH_TOOL_NAME]:
     "Search torrent indexers (Prowlarr) for a title. Returns ranked releases with size, seeders, quality and a downloadUrl. Search never downloads; show the best few to the user and let them choose.",
   pipeline_acquire:
-    "Start a deterministic acquisition job for the chosen release: download (or transfer the chosen share from the network drive), copy into the library folder, scan the media server and verify the item appears. Requires approval once for the whole plan. The job advances itself with fixed, bounded retries; call pipeline_advance to move it forward and pipeline_status to inspect it.",
+    "Start a deterministic acquisition job for the chosen release. Set placementApproval when the Ticket calls for the single-file placement pilot. Inspect the job with pipeline_status and advance it with pipeline_advance.",
   pipeline_advance:
     "Advance a job by performing whatever step is possible now (never blocks). Call it repeatedly until stage is done or failed. A failed job carries a reason and advice; fix the cause, then advance again to resume.",
   pipeline_status:
@@ -175,6 +181,7 @@ export function createPipelineTools(
     callerId: string;
     /** Shared book so the background advancer and the tools step one job set. */
     book?: JobBook;
+    ticketId?: () => Promise<string | undefined> | undefined;
     /** Called when a job is acquired, so the advancer can keep it moving. */
     onAcquired?: (jobId: string) => void;
   }
@@ -227,27 +234,44 @@ export function createPipelineTools(
     define(
       "pipeline_acquire",
       async (args) => {
-        const job = await book.acquire({
-          kind:
-            args.kind === "cloud_transfer"
-              ? "cloud_transfer"
-              : args.kind === "torrent"
-                ? "torrent"
+        const ticketId =
+          args.placementApproval === true
+            ? await options.ticketId?.()
+            : undefined;
+        if (args.placementApproval === true && !ticketId) {
+          throw httpError(
+            409,
+            "Placement approval requires a Ticket",
+            "placement_ticket_required"
+          );
+        }
+        const job = await book.acquire(
+          {
+            kind:
+              args.kind === "cloud_transfer"
+                ? "cloud_transfer"
+                : args.kind === "torrent"
+                  ? "torrent"
+                  : undefined,
+            title: requiredString(args.title, "title"),
+            year: integerOptional(args.year),
+            magnet: optionalString(args.magnet),
+            transferSource: optionalString(args.transferSource),
+            transferTool: optionalString(args.transferTool),
+            savePath: optionalString(args.savePath),
+            category: optionalString(args.category),
+            filesSourceDir: requiredString(
+              args.filesSourceDir,
+              "filesSourceDir"
+            ),
+            libraryDir: requiredString(args.libraryDir, "libraryDir"),
+            mediaServer:
+              args.mediaServer === "emby" || args.mediaServer === "jellyfin"
+                ? args.mediaServer
                 : undefined,
-          title: requiredString(args.title, "title"),
-          year: integerOptional(args.year),
-          magnet: optionalString(args.magnet),
-          transferSource: optionalString(args.transferSource),
-          transferTool: optionalString(args.transferTool),
-          savePath: optionalString(args.savePath),
-          category: optionalString(args.category),
-          filesSourceDir: requiredString(args.filesSourceDir, "filesSourceDir"),
-          libraryDir: requiredString(args.libraryDir, "libraryDir"),
-          mediaServer:
-            args.mediaServer === "emby" || args.mediaServer === "jellyfin"
-              ? args.mediaServer
-              : undefined,
-        });
+          },
+          ticketId
+        );
         options.onAcquired?.(job.id);
         return view(job);
       },
@@ -286,15 +310,21 @@ function view(job: import("../pipeline/job-runner.ts").Job) {
     kind: job.kind,
     title: job.title,
     stage: job.stage,
+    ...(job.placement ? { placementState: job.placement.state } : {}),
     failure: job.failure,
     attempts: job.attempts,
     recent: job.log.slice(-6),
     next:
       job.stage === "done"
         ? "Finished. Report the result."
-        : job.stage === "failed"
-          ? "Fix the cause in failure.advice, then call pipeline_advance."
-          : "Call pipeline_advance later to continue.",
+        : job.placement?.state === "pending"
+          ? "The operator must decide the placement in the Ticket."
+          : job.placement?.state === "denied" ||
+              job.placement?.state === "uncertain"
+            ? "Report the placement state and wait for the operator."
+            : job.stage === "failed"
+              ? "Fix the cause in failure.advice, then call pipeline_advance."
+              : "Call pipeline_advance later to continue.",
   };
 }
 

@@ -30,7 +30,12 @@ import { createEvalRoutingApi } from "./eval/routing.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { prepareForEval } from "./eval/preparation.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
-import { inferScope, revalidateMandate } from "./tickets/mandate.ts";
+import {
+  inferScope,
+  mandateAllows,
+  revalidateMandate,
+} from "./tickets/mandate.ts";
+import { httpError } from "./types.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
@@ -275,6 +280,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   ctx.setMandateLookup(
     async (thebeSessionId) =>
       (await ticketStore.getByGoal(thebeSessionId))?.mandate
+  );
+  ctx.setPipelineTicketLookup(
+    async (sessionId) => (await ticketStore.getByGoal(sessionId))?.id
   );
   const evalService = createEvalService({
     policy: policyStore,
@@ -580,6 +588,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   let ticketReady: Promise<unknown> = Promise.resolve();
   const ticketControl = createTicketControlApi({
     store: ticketStore,
+    placements: (id) =>
+      ctx.pipelineBook
+        ?.status()
+        .flatMap((job) =>
+          job.ticketId === id && job.placement ? [job.placement] : []
+        ) ?? [],
     triggers: triggerStore,
     goals,
     sessions,
@@ -796,6 +810,69 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async replyTicket(input) {
       await ticketRecovery;
+      if (
+        input.placementId !== undefined ||
+        input.placementDecision !== undefined
+      ) {
+        if (
+          typeof input.ticketId !== "string" ||
+          typeof input.placementId !== "string" ||
+          (input.placementDecision !== "allow" &&
+            input.placementDecision !== "deny")
+        ) {
+          throw httpError(
+            400,
+            "placementId and an allow or deny placementDecision are required",
+            "invalid_body"
+          );
+        }
+        const ticketId = input.ticketId;
+        const task = await ticketControl.get(ticketId);
+        if (!task) throw httpError(404, "ticket not found", "not_found");
+        const book = ctx.pipelineBook;
+        if (!book)
+          throw httpError(
+            409,
+            "Acquisition pipeline is unavailable",
+            "placement_unavailable"
+          );
+        const jobId = await book.decidePlacement({
+          ticketId,
+          placementId: input.placementId,
+          decision: input.placementDecision,
+          authorize: async () => {
+            const current = await ticketControl.get(ticketId);
+            const goalId = current?.ticket.links.legacyGoalId;
+            if (
+              !current ||
+              !goalId ||
+              current.execution?.phase === "cancelled"
+            ) {
+              throw httpError(
+                409,
+                "Ticket cannot dispatch placement",
+                "ticket_stopped"
+              );
+            }
+            const mandate = current.ticket.mandate;
+            if (
+              !(await revalidateTicketGoal(goalId)).allowed ||
+              (mandate.decidedBy === "eval" &&
+                !mandateAllows(mandate, "files_copy"))
+            ) {
+              throw httpError(
+                409,
+                "The current Mandate does not permit placement",
+                "ticket_mandate_invalid"
+              );
+            }
+            ctx.checkNotQuiesced();
+          },
+        });
+        if (input.placementDecision === "allow")
+          ctx.pipelineAdvancer?.track(jobId);
+        return (await ticketControl.get(ticketId))!;
+      }
       return ticketControl.reply(input);
     },
     async noteTicket(input) {

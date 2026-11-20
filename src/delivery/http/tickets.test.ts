@@ -5,6 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
+import type { PipelineProviders } from "../../agent/tools/pipeline-tools.ts";
+import { downloadItem } from "../../testing/download-item.ts";
 
 const provider: ContainerInfoProvider = {
   listContainers: async () => [],
@@ -39,7 +41,8 @@ function open(
   agentStoreDir?: string,
   turns: FakeTurnBatch = defaultTurns,
   now?: () => Date,
-  fake = createFakeRuntime()
+  fake = createFakeRuntime(),
+  pipeline?: PipelineProviders
 ) {
   fake.queueTurns(turns);
   const app = createThebeApp({
@@ -47,12 +50,18 @@ function open(
     provider,
     agentStoreDir,
     now,
+    pipeline,
+    token: pipeline ? "placement-owner" : undefined,
   });
   const call = async (path: string, init?: RequestInit) => {
     const res = await app.handler.handle(
       new Request(`http://127.0.0.1:8787${path}`, {
         ...init,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(pipeline ? { "x-thebe-token": "placement-owner" } : {}),
+          ...init?.headers,
+        },
       })
     );
     return {
@@ -69,6 +78,202 @@ const newGoal = {
 };
 
 describe("tickets", () => {
+  it.each(["verified", "denied", "changed", "mismatch"] as const)(
+    "keeps placement intent across restart and records %s",
+    async (outcome) => {
+      const dir = await mkdtemp(join(tmpdir(), "thebe-placement-http-"));
+      const hash = "a".repeat(40);
+      const digest = "b".repeat(64);
+      let placed = false;
+      let sourceDigest = digest;
+      const copy = vi.fn(async () => {
+        placed = true;
+        return { taskIds: ["copy-1"] };
+      });
+      const pipeline: PipelineProviders = {
+        downloads: {
+          service: "fixture",
+          add: async () => ({ submitted: 1 }),
+          list: async () => [],
+          get: async () =>
+            downloadItem({
+              hash,
+              name: "Film.mkv",
+              state: "completed",
+              progress: 1,
+            }),
+        },
+        files: {
+          service: "fixture",
+          list: async ({ path }) => {
+            const entries =
+              path === "/incoming" || placed
+                ? [
+                    {
+                      path: `${path}/Film.mkv`,
+                      name: "Film.mkv",
+                      isDirectory: false,
+                      sha256:
+                        path === "/incoming"
+                          ? sourceDigest
+                          : outcome === "mismatch"
+                            ? "c".repeat(64)
+                            : digest,
+                    },
+                  ]
+                : [];
+            return { entries, total: entries.length };
+          },
+          mkdir: async () => {},
+          copy,
+          move: async () => ({ taskIds: [] }),
+          offlineDownload: async () => ({ taskIds: [] }),
+        },
+      };
+      const first = open(
+        dir,
+        [
+          {
+            kind: "tools",
+            calls: [
+              {
+                name: "pipeline_acquire",
+                args: {
+                  title: "Film",
+                  placementApproval: true,
+                  magnet: `magnet:?xt=urn:btih:${hash}`,
+                  filesSourceDir: "/incoming",
+                  libraryDir: "/library",
+                },
+              },
+              {
+                name: "goal_report",
+                args: {
+                  state: "dropped",
+                  reason: "The pipeline owns placement.",
+                },
+              },
+            ],
+          },
+        ],
+        undefined,
+        undefined,
+        pipeline
+      );
+      let ticketPath = "";
+      let attention: Record<string, unknown> = {};
+      try {
+        const created = await first.call("/v1/tickets", {
+          method: "POST",
+          body: JSON.stringify({
+            task: "Acquire Film",
+            idempotencyKey: "placement",
+          }),
+        });
+        expect(created.status).toBe(201);
+        ticketPath = `/v1/tickets/${created.body.ticket.id}`;
+        await vi.waitFor(() =>
+          expect(first.app.agent.listPendingPermissions()).toHaveLength(1)
+        );
+        const [permission] = first.app.agent.listPendingPermissions();
+        const reply = await first.call(`${ticketPath}/reply`, {
+          method: "POST",
+          body: JSON.stringify({
+            permissionId: permission!.id,
+            permissionDecision: "allow",
+          }),
+        });
+        expect(reply.status).toBe(200);
+        await vi.waitFor(async () => {
+          const { body } = await first.call(`${ticketPath}/execution`);
+          attention = body.receipt.placementAttention;
+          expect(attention).toMatchObject({
+            id: expect.any(String),
+            source: "/incoming/Film.mkv",
+            destination: "/library/Film.mkv",
+            state: "pending",
+          });
+        });
+        expect(copy).toHaveBeenCalledTimes(0);
+      } finally {
+        await first.app.agent.quiesce();
+        await first.fake.runtime.unquiesce();
+      }
+      const restarted = open(dir, [], undefined, first.fake, pipeline);
+      try {
+        const { body } = await restarted.call(`${ticketPath}/execution`);
+        expect(body.receipt.placementAttention).toEqual(attention);
+        expect(copy).toHaveBeenCalledTimes(0);
+        const decision = (
+          placementId: unknown,
+          token = "placement-owner",
+          placementDecision = "allow"
+        ) =>
+          restarted.call(`${ticketPath}/reply`, {
+            method: "POST",
+            headers: { "x-thebe-token": token },
+            body: JSON.stringify({ placementId, placementDecision }),
+          });
+        expect((await decision(attention.id, "wrong-token")).status).toBe(401);
+        expect((await decision("stale-id")).status).toBe(409);
+        if (outcome === "denied") {
+          expect(
+            (await decision(attention.id, "placement-owner", "deny")).status
+          ).toBe(200);
+          expect((await decision(attention.id)).status).toBe(409);
+          expect(copy).not.toHaveBeenCalled();
+          expect(
+            (await restarted.call(`${ticketPath}/execution`)).body.receipt
+              .placementReport
+          ).toMatchObject({
+            id: attention.id,
+            state: "denied",
+            decidedAt: expect.any(String),
+          });
+          return;
+        }
+        if (outcome === "changed") {
+          sourceDigest = "d".repeat(64);
+          expect(await decision(attention.id)).toMatchObject({
+            status: 409,
+            body: { code: "placement_changed" },
+          });
+          expect(copy).not.toHaveBeenCalled();
+          return;
+        }
+        const replies = await Promise.all([
+          decision(attention.id),
+          decision(attention.id),
+        ]);
+        expect(replies.map(({ status }) => status).sort()).toEqual([200, 409]);
+        expect(copy).toHaveBeenCalledExactlyOnceWith({
+          sourceDir: "/incoming",
+          destinationDir: "/library",
+          names: ["Film.mkv"],
+        });
+        const result = (await restarted.call(`${ticketPath}/execution`)).body;
+        expect(result.receipt.placementAttention).toBeUndefined();
+        if (outcome === "mismatch") {
+          expect(result.receipt.placementReport).toMatchObject({
+            id: attention.id,
+            state: "uncertain",
+          });
+          expect(result.receipt.placementReport.verifiedAt).toBeUndefined();
+          return;
+        }
+        expect(result.receipt.placementReport).toMatchObject({
+          id: attention.id,
+          state: "verified",
+          decidedAt: expect.any(String),
+          dispatchedAt: expect.any(String),
+          verifiedAt: expect.any(String),
+        });
+      } finally {
+        await restarted.app.agent.quiesce();
+      }
+    }
+  );
+
   it("keeps log cursors usable after older Ticket events rotate out", async () => {
     const { app, call } = open(undefined, [{ kind: "hang" }]);
     try {

@@ -118,6 +118,8 @@ export type FileEntry = {
   isDirectory: boolean;
   sizeBytes?: number;
   modifiedAt?: string;
+  /** Content digest supplied by the storage provider for a regular file. */
+  sha256?: string;
 };
 
 export interface FilesProvider {
@@ -126,6 +128,7 @@ export interface FilesProvider {
     path: string;
     page?: number;
     perPage?: number;
+    refresh?: boolean;
   }): Promise<{ entries: FileEntry[]; total: number }>;
   mkdir(path: string): Promise<void>;
   copy(input: {

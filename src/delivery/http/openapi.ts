@@ -4460,8 +4460,41 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               enum: ["allow", "deny"],
               description: "The decision for permissionId.",
             },
+            placementId: {
+              type: "string",
+              description:
+                "The pending operation id from receipt.placementAttention.",
+            },
+            placementDecision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "The operator decision for placementId.",
+            },
           },
           additionalProperties: false,
+        },
+        TicketPlacement: {
+          type: "object",
+          required: ["id", "source", "destination", "state"],
+          properties: {
+            id: { type: "string" },
+            source: { type: "string" },
+            destination: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "denied",
+                "dispatching",
+                "verified",
+                "uncertain",
+              ],
+            },
+            decidedAt: { type: "string", format: "date-time" },
+            dispatchedAt: { type: "string", format: "date-time" },
+            verifiedAt: { type: "string", format: "date-time" },
+            verification: { type: "string", enum: ["sha256"] },
+          },
         },
         TicketNoteRequest: {
           type: "object",
@@ -4581,6 +4614,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   ],
                 },
                 complete: { type: "boolean" },
+                placementAttention: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
+                placementReport: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
                 summary: { type: "string" },
                 report: {
                   $ref: "#/components/schemas/ProductGoal/properties/report",

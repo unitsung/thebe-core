@@ -415,13 +415,19 @@ describe("OpenList files", () => {
     const { provider, calls } = openlist({
       total: 2,
       content: [
-        { name: "a.mkv", is_dir: false, size: 5 },
+        {
+          name: "a.mkv",
+          is_dir: false,
+          size: 5,
+          hash_info: { sha256: "a".repeat(64) },
+        },
         { name: "Season 1", is_dir: true },
       ],
     });
     const listing = await provider.list({ path: "media//movies/" });
     expect(calls[0]?.body.path).toBe("/media/movies");
     expect(calls[0]?.auth).toBe("tok");
+    expect(listing.entries[0]?.sha256).toBe("a".repeat(64));
     expect(listing.entries[1]).toMatchObject({
       path: "/media/movies/Season 1",
       isDirectory: true,

@@ -6,6 +6,8 @@ import type { Trigger } from "../sources/types.ts";
 import { toProductGoal, type ProductGoal } from "../goals/product.ts";
 import { httpError } from "../types.ts";
 import type { GoalRun } from "../types.ts";
+import type { Placement } from "../pipeline/job-runner.ts";
+import { redactToolOutput } from "../security/redaction.ts";
 import { directTicketId, key } from "./ids.ts";
 import type { TicketStore } from "./store.ts";
 import {
@@ -32,7 +34,17 @@ const MAX_TICKET_LIST_LIMIT = 50;
 const MAX_TASK_CHARS = 16_000;
 const MAX_IDEMPOTENCY_KEY_CHARS = 256;
 
+function publicPlacement({ digest: _digest, ...placement }: Placement) {
+  return {
+    ...placement,
+    source: redactToolOutput(placement.source),
+    destination: redactToolOutput(placement.destination),
+  };
+}
+
 export type TicketReceipt = {
+  placementAttention?: Omit<Placement, "digest">;
+  placementReport?: Omit<Placement, "digest">;
   state: TicketStage;
   complete: boolean;
   canRetry?: boolean;
@@ -163,6 +175,7 @@ export type TicketInvocationSource = "mcp" | "main-session";
 
 export function createTicketControlApi(options: {
   store: TicketStore;
+  placements?: (ticketId: string) => Placement[];
   triggers?: Pick<TriggerStore, "get">;
   goals: GoalPort;
   sessions: SessionPort;
@@ -435,8 +448,24 @@ export function createTicketControlApi(options: {
     goal: GoalRun | undefined,
     pending: ProductPendingPermission[]
   ): TicketTaskView {
-    const stage = stageOf(goal, pending);
-    const retryable = canRetry(stage, goal);
+    const placements = options.placements?.(ticket.id) ?? [];
+    const placement =
+      goal?.status === "cancelled"
+        ? undefined
+        : placements.find((item) => item.state === "pending");
+    const report = placements.findLast((item) => item.state !== "pending");
+    const outcome = placements.at(-1)?.state;
+    const stage =
+      goal?.status === "cancelled"
+        ? "cancelled"
+        : placement
+          ? "attention"
+          : outcome === "dispatching"
+            ? "running"
+            : outcome === "denied" || outcome === "uncertain"
+              ? "blocked"
+              : stageOf(goal, pending);
+    const retryable = !placements.length && canRetry(stage, goal);
     const product = goal ? toProductGoal(goal) : undefined;
     let currentRun: NonNullable<TicketTaskView["execution"]>["currentRun"];
     if (product?.currentRun) {
@@ -470,7 +499,9 @@ export function createTicketControlApi(options: {
               controls: {
                 ...product.controls,
                 retry: retryable,
-                reply: Boolean(product.attention || pending.length),
+                reply: Boolean(
+                  product.attention || pending.length || placement
+                ),
               },
             },
             goal: {
@@ -481,6 +512,10 @@ export function createTicketControlApi(options: {
         : {}),
       pendingPermissions: pending,
       receipt: {
+        ...(placement
+          ? { placementAttention: publicPlacement(placement) }
+          : {}),
+        ...(report ? { placementReport: publicPlacement(report) } : {}),
         state: stage,
         complete:
           stage === "completed" ||
