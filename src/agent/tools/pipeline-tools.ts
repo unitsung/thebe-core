@@ -18,6 +18,7 @@ import {
   createJobBook,
   type JobBook,
   type JobStore,
+  type PlacementContext,
 } from "../pipeline/job-runner.ts";
 import type { CustomToolDefinition } from "../runtime/index.ts";
 import { httpError } from "../types.ts";
@@ -181,7 +182,7 @@ export function createPipelineTools(
     callerId: string;
     /** Shared book so the background advancer and the tools step one job set. */
     book?: JobBook;
-    ticketId?: () => Promise<string | undefined> | undefined;
+    placementContext?: () => Promise<PlacementContext | undefined> | undefined;
     /** Called when a job is acquired, so the advancer can keep it moving. */
     onAcquired?: (jobId: string) => void;
   }
@@ -234,15 +235,15 @@ export function createPipelineTools(
     define(
       "pipeline_acquire",
       async (args) => {
-        const ticketId =
+        const placement =
           args.placementApproval === true
-            ? await options.ticketId?.()
+            ? await options.placementContext?.()
             : undefined;
-        if (args.placementApproval === true && !ticketId) {
+        if (args.placementApproval === true && !placement) {
           throw httpError(
             409,
-            "Placement approval requires a Ticket",
-            "placement_ticket_required"
+            "Placement approval requires a Ticket and the media-acquire Skill",
+            "placement_context_required"
           );
         }
         const job = await book.acquire(
@@ -270,7 +271,7 @@ export function createPipelineTools(
                 ? args.mediaServer
                 : undefined,
           },
-          ticketId
+          placement
         );
         options.onAcquired?.(job.id);
         return view(job);

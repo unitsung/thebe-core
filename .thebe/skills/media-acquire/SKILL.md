@@ -25,3 +25,18 @@ Look for the title with `emby_search` or `jellyfin_search` before searching for 
 ## Report
 
 Say what was started and the job id, then what the job's stage actually is. If the release has no usable magnet, the search returned nothing, or a tool is unavailable, report that plainly instead of substituting a different release.
+
+## Ticket placement pilot
+
+When the Ticket explicitly asks for the single-file placement pilot, use
+`pipeline_acquire` with `placementApproval: true`. The workflow needs a
+download or transfer provider and a file provider that can read SHA-256
+digests and copy into the existing library directory.
+
+1. Give the operator the Ticket ID and wait for their decision on the source
+   and destination shown in the Ticket. A denial ends placement.
+2. Read the same Ticket's placement report. Call placement verified only
+   when Core records `verified` after matching the destination digest.
+   Report `uncertain` as inconclusive and leave further writes to the operator.
+3. Include the operation ID, Skill digest, and verification time from
+   the report. Use pipeline status separately for library scan progress.

@@ -4495,6 +4495,14 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             verifiedAt: { type: "string", format: "date-time" },
             stoppedAt: { type: "string", format: "date-time" },
             verification: { type: "string", enum: ["sha256"] },
+            skill: {
+              type: "object",
+              required: ["name", "digest"],
+              properties: {
+                name: { type: "string" },
+                digest: { type: "string" },
+              },
+            },
           },
         },
         TicketNoteRequest: {
