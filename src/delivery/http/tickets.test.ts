@@ -93,6 +93,8 @@ describe("tickets", () => {
     "mismatch",
     "crash-after-copy",
     "crash-before-copy",
+    "stop-pending",
+    "stop-copy",
   ] as const)(
     "keeps placement intent across restart and records %s",
     async (outcome) => {
@@ -102,7 +104,9 @@ describe("tickets", () => {
       let placed = false;
       let sourceDigest = digest;
       const crashed =
-        outcome === "crash-after-copy" || outcome === "crash-before-copy";
+        outcome === "crash-after-copy" ||
+        outcome === "crash-before-copy" ||
+        outcome === "stop-copy";
       const dispatchReached = signal();
       const finishCopy = signal();
       const copy = vi.fn(async () => {
@@ -237,6 +241,48 @@ describe("tickets", () => {
           });
         expect((await decision(attention.id, "wrong-token")).status).toBe(401);
         expect((await decision("stale-id")).status).toBe(409);
+        if (outcome === "stop-pending") {
+          const stopped = await restarted.call(`${ticketPath}/stop`, {
+            method: "POST",
+          });
+          expect(stopped).toMatchObject({
+            status: 200,
+            body: { stage: "cancelled" },
+          });
+          const snapshot = await mkdtemp(
+            join(tmpdir(), "thebe-placement-stop-")
+          );
+          await cp(dir, snapshot, {
+            recursive: true,
+            filter: (path) => !path.endsWith(".tmp"),
+          });
+          const recovered = open(snapshot, [], undefined, undefined, pipeline);
+          try {
+            expect(
+              (await recovered.call(`${ticketPath}/execution`)).body
+            ).toMatchObject({
+              stage: "cancelled",
+              receipt: {
+                placementReport: {
+                  id: attention.id,
+                  stoppedAt: expect.any(String),
+                },
+              },
+            });
+            const rejected = await recovered.call(`${ticketPath}/reply`, {
+              method: "POST",
+              body: JSON.stringify({
+                placementId: attention.id,
+                placementDecision: "allow",
+              }),
+            });
+            expect(rejected.status).toBe(409);
+            expect(copy).not.toHaveBeenCalled();
+          } finally {
+            await recovered.app.agent.quiesce();
+          }
+          return;
+        }
         if (outcome === "denied") {
           expect(
             (await decision(attention.id, "placement-owner", "deny")).status
@@ -266,6 +312,15 @@ describe("tickets", () => {
           const inFlight = decision(attention.id);
           try {
             await dispatchReached.promise;
+            if (outcome === "stop-copy") {
+              const stopped = await restarted.call(`${ticketPath}/stop`, {
+                method: "POST",
+              });
+              expect(stopped).toMatchObject({
+                status: 200,
+                body: { stage: "cancelled" },
+              });
+            }
             const snapshot = await mkdtemp(
               join(tmpdir(), "thebe-placement-crash-")
             );
@@ -289,6 +344,14 @@ describe("tickets", () => {
                 dispatchedAt: expect.any(String),
               });
               if (!placed) expect(result.stage).toBe("attention");
+              if (outcome === "stop-copy") {
+                expect(result).toMatchObject({
+                  stage: "cancelled",
+                  receipt: {
+                    placementReport: { stoppedAt: expect.any(String) },
+                  },
+                });
+              }
               expect(result.ticket.assignments[0]?.id).toBe(
                 body.ticket.assignments[0]?.id
               );

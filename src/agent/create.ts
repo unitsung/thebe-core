@@ -621,9 +621,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
               (job) =>
                 job.ticketId === ticket?.id &&
                 job.placement &&
-                ["pending", "dispatching", "uncertain", "denied"].includes(
-                  job.placement.state
-                )
+                (job.placement.stoppedAt ||
+                  ["pending", "dispatching", "uncertain", "denied"].includes(
+                    job.placement.state
+                  ))
             );
           if (waitingForPlacement)
             return {
@@ -909,6 +910,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async controlTicket(input) {
       await ticketRecovery;
+      if (
+        input.action === "stop" &&
+        ctx.pipelineBook?.stopPlacements(input.ticketId)
+      ) {
+        const task = await ticketControl.get(input.ticketId);
+        const phase = task?.execution?.phase;
+        if (phase === "running" || phase === "pausing" || phase === "paused") {
+          return ticketControl.control(input);
+        }
+        if (task) return task;
+      }
       return ticketControl.control(input);
     },
     async recordGoalTicket(run, goalOptions) {
