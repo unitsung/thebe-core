@@ -73,8 +73,15 @@ export type TicketTaskView = {
     | "maxIterations"
     | "updatedAt"
     | "watchdog"
+    | "criteria"
+    | "finishedAt"
   > & {
     controls: ProductGoal["controls"] & { retry: boolean; reply: boolean };
+    currentRun?: Omit<
+      NonNullable<ProductGoal["currentRun"]>,
+      "goalId" | "sessionId"
+    >;
+    errorCode?: string;
   };
   pendingPermissions: ProductPendingPermission[];
   receipt: TicketReceipt;
@@ -431,6 +438,15 @@ export function createTicketControlApi(options: {
     const stage = stageOf(goal, pending);
     const retryable = canRetry(stage, goal);
     const product = goal ? toProductGoal(goal) : undefined;
+    let currentRun: NonNullable<TicketTaskView["execution"]>["currentRun"];
+    if (product?.currentRun) {
+      const {
+        goalId: _goalId,
+        sessionId: _sessionId,
+        ...worker
+      } = product.currentRun;
+      currentRun = worker;
+    }
     return {
       ticket,
       stage,
@@ -447,6 +463,10 @@ export function createTicketControlApi(options: {
               maxIterations: product.maxIterations,
               updatedAt: product.updatedAt,
               watchdog: product.watchdog,
+              criteria: product.criteria,
+              finishedAt: product.finishedAt,
+              currentRun,
+              errorCode: product.error?.code,
               controls: {
                 ...product.controls,
                 retry: retryable,
@@ -551,11 +571,13 @@ export function createTicketControlApi(options: {
       .slice(0, limit);
   }
 
-  async function listRecords(): Promise<Ticket[]> {
+  async function listTasks(): Promise<TicketTaskView[]> {
     await backfillGoals();
-    return (await viewsFor(await options.store.list())).map(
-      ({ ticket }) => ticket
-    );
+    return viewsFor(await options.store.list());
+  }
+
+  async function listRecords(): Promise<Ticket[]> {
+    return (await listTasks()).map(({ ticket }) => ticket);
   }
 
   async function related(
@@ -1152,6 +1174,7 @@ export function createTicketControlApi(options: {
   }
 
   return {
+    listTasks,
     invoke,
     get,
     list,

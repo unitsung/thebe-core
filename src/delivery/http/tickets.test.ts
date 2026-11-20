@@ -144,6 +144,8 @@ describe("tickets", () => {
     const second = open(dir, defaultTurns, undefined, first.fake);
     try {
       const waiting = await second.call(`${path}/execution`);
+      const catalogue = await second.call("/v1/tickets?view=execution");
+      expect(catalogue.body.tickets).toEqual([waiting.body]);
       const { attention } = waiting.body.receipt;
       expect(attention).toMatchObject({ kind: "answer" });
       const log = await second.call(`${path}/log`);

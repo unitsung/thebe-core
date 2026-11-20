@@ -765,6 +765,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     sourceHealth: sourceRunner.health,
     listTickets: ticketControl.listRecords,
+    listTicketTasks: ticketControl.listTasks,
     async getTicket(id) {
       return (await ticketControl.get(id))?.ticket;
     },
