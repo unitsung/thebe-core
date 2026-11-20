@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -77,8 +77,23 @@ const newGoal = {
   body: JSON.stringify({ goal: "Move the library", maxIterations: 2 }),
 };
 
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe("tickets", () => {
-  it.each(["verified", "denied", "changed", "mismatch"] as const)(
+  it.each([
+    "verified",
+    "denied",
+    "changed",
+    "mismatch",
+    "crash-after-copy",
+    "crash-before-copy",
+  ] as const)(
     "keeps placement intent across restart and records %s",
     async (outcome) => {
       const dir = await mkdtemp(join(tmpdir(), "thebe-placement-http-"));
@@ -86,8 +101,14 @@ describe("tickets", () => {
       const digest = "b".repeat(64);
       let placed = false;
       let sourceDigest = digest;
+      const crashed =
+        outcome === "crash-after-copy" || outcome === "crash-before-copy";
+      const dispatchReached = signal();
+      const finishCopy = signal();
       const copy = vi.fn(async () => {
-        placed = true;
+        placed = outcome !== "crash-before-copy";
+        dispatchReached.resolve();
+        if (crashed) await finishCopy.promise;
         return { taskIds: ["copy-1"] };
       });
       const pipeline: PipelineProviders = {
@@ -239,6 +260,54 @@ describe("tickets", () => {
             body: { code: "placement_changed" },
           });
           expect(copy).not.toHaveBeenCalled();
+          return;
+        }
+        if (crashed) {
+          const inFlight = decision(attention.id);
+          try {
+            await dispatchReached.promise;
+            const snapshot = await mkdtemp(
+              join(tmpdir(), "thebe-placement-crash-")
+            );
+            await cp(dir, snapshot, {
+              recursive: true,
+              filter: (path) => !path.endsWith(".tmp"),
+            });
+            const recovered = open(
+              snapshot,
+              [],
+              undefined,
+              undefined,
+              pipeline
+            );
+            try {
+              const result = (await recovered.call(`${ticketPath}/execution`))
+                .body;
+              expect(result.receipt.placementReport).toMatchObject({
+                id: attention.id,
+                state: placed ? "verified" : "uncertain",
+                dispatchedAt: expect.any(String),
+              });
+              if (!placed) expect(result.stage).toBe("attention");
+              expect(result.ticket.assignments[0]?.id).toBe(
+                body.ticket.assignments[0]?.id
+              );
+              expect(copy).toHaveBeenCalledTimes(1);
+              const repeated = await recovered.call(`${ticketPath}/reply`, {
+                method: "POST",
+                body: JSON.stringify({
+                  placementId: attention.id,
+                  placementDecision: "allow",
+                }),
+              });
+              expect(repeated.status).toBe(409);
+            } finally {
+              await recovered.app.agent.quiesce();
+            }
+          } finally {
+            finishCopy.resolve();
+            await inFlight;
+          }
           return;
         }
         const replies = await Promise.all([

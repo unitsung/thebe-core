@@ -560,6 +560,18 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
     }
   }
   return {
+    recoverPlacements(): Promise<void> {
+      return serial(async () => {
+        for (const job of jobs.values()) {
+          const placement = job.placement;
+          if (!job.ticketId || placement?.state !== "dispatching") continue;
+          await verifyPlacement(job, placement);
+          if (job.placement?.state === "dispatching") {
+            saveTransition(job, { ...placement, state: "uncertain" });
+          }
+        }
+      });
+    },
     decidePlacement(input: {
       ticketId: string;
       placementId: string;
