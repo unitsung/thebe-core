@@ -14,7 +14,15 @@ export type TicketChannelNotice =
     })
   | (TicketChannelNoticeBase & {
       type: "goal_completed";
+    })
+  | (TicketChannelNoticeBase & {
+      type: "source_acknowledged" | "source_answered";
     });
+
+export type SourceFollowUpNotice = Extract<
+  TicketChannelNotice,
+  { type: "source_acknowledged" | "source_answered" }
+>;
 
 export type ChannelSendInput = {
   channel: ChannelRef;

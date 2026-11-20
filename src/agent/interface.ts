@@ -133,6 +133,10 @@ export type CreateThebeAgentOptions = {
   sourceAdapters?: readonly Source[];
   /** Host supplied, vendor-neutral reply channels for Ticket notices. */
   channelAdapters?: readonly ChannelAdapter[];
+  onSourceFollowUpNotice?: (
+    notice: import("./channels/types.ts").SourceFollowUpNotice,
+    channel: import("./sources/types.ts").ChannelRef
+  ) => Promise<void>;
   /**
    * How many times an hour Eval may ask the model before the rest are recorded as `unavailable`
    * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.

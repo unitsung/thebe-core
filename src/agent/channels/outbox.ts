@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { writeFileAtomic } from "../../atomic-write.ts";
 import type { ChannelRef } from "../sources/types.ts";
 import type { TicketChannelNotice } from "./types.ts";
+import { channelIdentity } from "../notifications/delivery.ts";
 
 export const DEFAULT_CHANNEL_OUTBOX_RETRY_MS = 5_000;
 const MAX_RETRY_MS = 5 * 60_000;
@@ -122,12 +123,20 @@ export function createChannelOutbox(options: {
     if (flushing) return flushing;
     flushing = (async () => {
       const due = await serial(async () =>
-        state!.entries
-          .filter((entry) => Date.parse(entry.nextAttemptAt) <= now().getTime())
-          .map(cloneStoredNotice)
+        state!.entries.map(cloneStoredNotice)
       );
       const outcomes = new Map<string, ChannelDeliveryAttempt>();
+      const blocked = new Set<string>();
       for (const entry of due) {
+        const destination = JSON.stringify([
+          entry.notice.ticketId,
+          channelIdentity(entry.channel),
+        ]);
+        if (blocked.has(destination)) continue;
+        if (Date.parse(entry.nextAttemptAt) > now().getTime()) {
+          blocked.add(destination);
+          continue;
+        }
         let attempt: ChannelDeliveryAttempt;
         try {
           attempt = await options.send(cloneQueuedNotice(entry));
@@ -138,6 +147,7 @@ export function createChannelOutbox(options: {
           };
         }
         outcomes.set(entry.id, attempt);
+        if (attempt.status === "retry") blocked.add(destination);
         await serial(async () => {
           const index = state!.entries.findIndex((row) => row.id === entry.id);
           if (index < 0) return;
@@ -246,7 +256,9 @@ function validQueuedNotice(value: QueuedChannelNotice): boolean {
     typeof value.notice.ticketId === "string" &&
     typeof value.notice.goalId === "string" &&
     (value.notice.type === "goal_needs_person" ||
-      value.notice.type === "goal_completed") &&
+      value.notice.type === "goal_completed" ||
+      value.notice.type === "source_acknowledged" ||
+      value.notice.type === "source_answered") &&
     typeof value.notice.message === "string"
   );
 }

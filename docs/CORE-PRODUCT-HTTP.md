@@ -18,6 +18,30 @@ current Policy, and remove every Ticket subscription to a Thread with
 `thread_unsubscribe`. Attached follow-ups stay with their owning Ticket, and
 requeueing does not broaden a Ticket's Mandate.
 
+### Source follow-ups
+
+For an active Ticket, an admitted follow-up on a subscribed Thread joins the
+next isolated checkpoint. This covers GitHub comments and Feishu group messages
+when the corresponding unaddressed-message option is enabled. Explicit
+mentions and Feishu direct messages continue to route through the main Session.
+Compared with the DSH reference, Core selects active Tickets through its
+existing Source admission rules and uses checkpoint boundaries for delivery.
+
+A replacement Assignment receives an Input left pending by an interruption.
+Completed worker checkpoints advance the saved Input cursor. Core queues a
+fixed acknowledgement when it prepares the checkpoint. The worker may include
+one plain-text `sourceReply` in its Report, addressed by the Input sequence
+from that checkpoint. That answer goes only to the Input's recorded Channel.
+Completion uses the Ticket's recorded destinations. Outbound answers and
+results strip tool logs and redact recognized credentials.
+
+The app's durable outbox holds later notices behind a retry at the same
+destination. Retries reuse the same GitHub comment marker or Feishu UUID.
+GitHub checks existing comments and Feishu deduplicates within its provider
+window. Compared with DSH, the app retains its existing notification policy
+for attempts whose outcome was unknown at process exit. The app also applies
+its configured quiet hours and notification rate limits.
+
 ## Runtime loading updates (2026-10-08)
 
 Service tools and MCP schemas are registered with deferred exposure. Sessions

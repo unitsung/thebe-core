@@ -35,6 +35,7 @@ export type Notification = {
   goalId?: string;
   /** For a Ticket notice, the exact reason so a write-back adapter preserves it. */
   ticketReason?: "answer" | "review" | "blocked" | "stalled";
+  sourceFollowUp?: "source_acknowledged" | "source_answered";
   resource?: { kind: string; id: string };
   /** ISO timestamp. Set once when the business event happens. */
   createdAt: string;

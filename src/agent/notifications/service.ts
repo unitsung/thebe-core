@@ -98,7 +98,10 @@ export function createNotificationService(options: {
 
   async function notify(
     notification: Notification,
-    options: { extraTargets?: readonly NotificationTarget[] } = {}
+    options: {
+      extraTargets?: readonly NotificationTarget[];
+      onlyTargets?: readonly NotificationTarget[];
+    } = {}
   ) {
     return router.notify(notification, options);
   }

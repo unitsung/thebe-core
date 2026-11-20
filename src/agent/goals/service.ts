@@ -19,6 +19,7 @@ import type { StoredGoalEvent } from "../store.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
 import { stripToolLogs, shortenToWords } from "../main-session/proactive.ts";
+import { redactToolOutput } from "../security/redaction.ts";
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { MandateRevalidation } from "../tickets/mandate.ts";
 import type { ChannelRef } from "../sources/types.ts";
@@ -70,6 +71,7 @@ export type GoalApiOptions = {
   ) => Promise<TicketWatchdogContext | undefined>;
   revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
   ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
+  onSourceFollowUp?: Parameters<typeof executeGoal>[1]["onSourceFollowUp"];
   onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
   onCompleted?: (notice: GoalCompletedNotice) => Promise<void> | void;
 };
@@ -483,6 +485,7 @@ export function createGoalApi(
         setTerminal,
         reportInbox,
         ticketInputs: options.ticketInputs,
+        onSourceFollowUp: options.onSourceFollowUp,
         now: ctx.now,
       },
       initialIteration,
@@ -1458,7 +1461,7 @@ function personNotice(
   }
   if (run.status === "failed" && run.blocked) {
     const cleanError = run.error
-      ? shortenToWords(stripToolLogs(run.error), 50)
+      ? shortenToWords(redactToolOutput(stripToolLogs(run.error)), 50)
       : "";
     return {
       id: `${run.thebeSessionId}:blocked:${run.finishedAt ?? run.createdAt}`,
@@ -1477,7 +1480,9 @@ function completionNotice(
 ): Omit<GoalCompletedNotice, "ticketId"> | undefined {
   if (run.status !== "completed") return undefined;
   const report = run.finalReport?.trim() || run.summary?.trim();
-  const clean = report ? shortenToWords(stripToolLogs(report), 50) : "";
+  const clean = report
+    ? shortenToWords(redactToolOutput(stripToolLogs(report)), 50)
+    : "";
   return {
     id: `${run.thebeSessionId}:completed:${run.finishedAt ?? run.createdAt}`,
     goalId: run.thebeSessionId,
