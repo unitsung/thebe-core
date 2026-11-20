@@ -449,14 +449,17 @@ export function createTicketControlApi(options: {
     pending: ProductPendingPermission[]
   ): TicketTaskView {
     const placements = options.placements?.(ticket.id) ?? [];
+    const placementStopped = placements.some((item) => item.stoppedAt);
     const placement =
-      goal?.status === "cancelled"
+      placementStopped || goal?.status === "cancelled"
         ? undefined
         : placements.find((item) => item.state === "pending");
-    const report = placements.findLast((item) => item.state !== "pending");
+    const report = placements.findLast(
+      (item) => item.state !== "pending" || item.stoppedAt
+    );
     const outcome = placements.at(-1)?.state;
     const stage =
-      goal?.status === "cancelled"
+      placementStopped || goal?.status === "cancelled"
         ? "cancelled"
         : placement
           ? "attention"

@@ -84,6 +84,7 @@ export type Placement = {
   dispatchedAt?: string;
   verifiedAt?: string;
   verification?: "sha256";
+  stoppedAt?: string;
 };
 
 export type JobDeps = {
@@ -551,7 +552,9 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
   }
   function saveTransition(job: Job, next: Placement): void {
     const previous = job.placement;
-    job.placement = next;
+    job.placement = previous?.stoppedAt
+      ? { ...next, stoppedAt: previous.stoppedAt }
+      : next;
     try {
       savePlacement();
     } catch (error) {
@@ -560,6 +563,33 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
     }
   }
   return {
+    stopPlacements(ticketId: string): boolean {
+      const jobsForTicket = [...jobs.values()].filter(
+        (job) =>
+          job.ticketId === ticketId &&
+          job.placement &&
+          (job.placement.stoppedAt ||
+            (job.stage !== "done" && job.stage !== "failed"))
+      );
+      if (!jobsForTicket.length) return false;
+      const at = (deps.now ?? (() => new Date()))().toISOString();
+      const previous = jobsForTicket.map((job) => job.placement!);
+      for (const job of jobsForTicket) {
+        job.placement = {
+          ...job.placement!,
+          stoppedAt: job.placement!.stoppedAt ?? at,
+        };
+      }
+      try {
+        savePlacement();
+      } catch (error) {
+        jobsForTicket.forEach((job, index) => {
+          job.placement = previous[index];
+        });
+        throw error;
+      }
+      return true;
+    },
     recoverPlacements(): Promise<void> {
       return serial(async () => {
         for (const job of jobs.values()) {
@@ -585,7 +615,7 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
             row.placement?.id === input.placementId
         );
         const placement = job?.placement;
-        if (!job || placement?.state !== "pending") {
+        if (!job || placement?.state !== "pending" || placement.stoppedAt) {
           throw httpError(
             409,
             "Placement approval is no longer pending",
@@ -622,6 +652,9 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
           );
         }
         await input.authorize();
+        if (job.placement?.stoppedAt) {
+          throw httpError(409, "Placement has been stopped", "ticket_stopped");
+        }
         const at = now().toISOString();
         const dispatched = {
           ...placement,
@@ -676,6 +709,7 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
           await verifyPlacement(previous, previous.placement);
           return previous;
         }
+        if (previous.placement?.stoppedAt) return previous;
         const job = previous.ticketId ? structuredClone(previous) : previous;
         if (job.stage === "failed" && !job.placement) {
           job.failure = undefined;
@@ -688,6 +722,7 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
               : "download";
         }
         await advanceJob(job, deps);
+        if (previous.placement?.stoppedAt) return previous;
         if (job.ticketId) {
           jobs.set(id, job);
           try {

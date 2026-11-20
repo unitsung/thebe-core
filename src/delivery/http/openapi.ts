@@ -4493,6 +4493,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             decidedAt: { type: "string", format: "date-time" },
             dispatchedAt: { type: "string", format: "date-time" },
             verifiedAt: { type: "string", format: "date-time" },
+            stoppedAt: { type: "string", format: "date-time" },
             verification: { type: "string", enum: ["sha256"] },
           },
         },

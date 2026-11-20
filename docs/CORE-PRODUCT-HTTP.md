@@ -52,6 +52,9 @@ On restart, Core reads the destination of a placement that had begun dispatch.
 A matching digest verifies the operation. Missing or inconclusive evidence
 puts the Ticket in Attention. Recovery preserves the operation ID and performs
 only read-back.
+The Ticket stop route records a stop before Core accepts another placement
+decision. If the provider already received the copy, Core may still verify
+the destination and preserve the result and stop time in the same report.
 The pilot requires a storage backend that publishes SHA-256 for both paths.
 OpenList copies by path. A concurrent source replacement after the final
 identity check can race the copy, and read-back detects a changed result.
