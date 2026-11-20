@@ -68,3 +68,23 @@ restart require explicit advancement. [Job runner](../src/agent/pipeline/job-run
 | Approval is pending when Core restarts                | The decision remains tied to the same intent. Duplicate decisions cannot dispatch another write, and a stopped Ticket stays stopped.       |
 | The operator inspects a final Report                  | A Ticket and Assignment can be linked to approval, dispatch and read-back records. Missing evidence yields an inconclusive verdict.        |
 | Single- and multi-Executor runs use the same fixtures | Record verified success, unsupported success claims, duplicate mutations, elapsed time and token use. Production defaults to one Executor. |
+
+## Placement benchmark
+
+Run from the Core checkout with a fresh output path.
+
+```sh
+placement_report=$(mktemp /tmp/thebe-placement.XXXXXX)
+THEBE_PLACEMENT_BENCHMARK="$placement_report" npm test -- src/delivery/http/tickets.test.ts -t 'keeps placement intent'
+cat "$placement_report"
+```
+
+The same Ticket HTTP fixtures exercise matching and mismatched destination
+digests, restart during copy, and stop during copy in both arms. The second
+arm adds a read-only Ticket reviewer to the existing execution. Both arms
+use the scripted fake model, simulated provider, and the digest of the same
+`media-acquire` Skill. Each JSON line records the fixture, model, executor
+count, independent verification, unsupported claims, duplicate copy
+requests, elapsed wall time, and estimated background tokens. These runs
+measure the fixture behavior. Real model quality and NAS latency require
+separate measurements.

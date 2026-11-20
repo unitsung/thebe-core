@@ -389,6 +389,7 @@ export interface ThebeAgent {
     profileName: string;
     taskPrompt: string;
     parentSessionId: string;
+    background?: boolean;
   }): Promise<SubagentRun>;
   listSubagents(parentSessionId?: string): Promise<SubagentRun[]>;
   restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void;
