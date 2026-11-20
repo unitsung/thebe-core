@@ -76,7 +76,9 @@ function githubApi() {
       comments.push(body.body);
       if (loseNextPost) {
         loseNextPost = false;
-        throw new Error("connection reset after the server accepted the comment");
+        throw new Error(
+          "connection reset after the server accepted the comment"
+        );
       }
       return reply({ id: posts.length }, 201);
     }
@@ -115,7 +117,7 @@ const GITHUB_MENTION = {
 };
 
 /** Feishu's Open API, deduplicating text messages by uuid as the real service does. */
-function feishuApi() {
+function feishuApi(chatMode: "p2p" | "group" = "p2p") {
   let messages: unknown[] = [];
   const delivered: Array<{ uuid: string; text: string }> = [];
   const attempts: string[] = [];
@@ -134,7 +136,7 @@ function feishuApi() {
       return reply({ code: 0, tenant_access_token: "t", expire: 7200 });
     }
     if (url.includes("/open-apis/im/v1/chats/")) {
-      return reply({ code: 0, data: { chat_mode: "p2p" } });
+      return reply({ code: 0, data: { chat_mode: chatMode } });
     }
     if (url.includes("/open-apis/im/v1/messages")) {
       if ((init?.method ?? "GET") === "GET") {
@@ -151,7 +153,9 @@ function feishuApi() {
       }
       if (loseNextPost) {
         loseNextPost = false;
-        throw new Error("connection reset after the server accepted the message");
+        throw new Error(
+          "connection reset after the server accepted the message"
+        );
       }
       return reply({ code: 0, data: {} });
     }
@@ -181,17 +185,23 @@ const FEISHU_DIRECT = {
   mentions: [],
 };
 
-async function startApp(input: {
-  source: ReturnType<typeof createGithubSource> | ReturnType<typeof createFeishuSource>;
-  channel: ReturnType<typeof createGithubChannelAdapter> | ReturnType<typeof createFeishuChannelAdapter>;
-}) {
+async function startApp(
+  input: {
+    source:
+      | ReturnType<typeof createGithubSource>
+      | ReturnType<typeof createFeishuSource>;
+    channel:
+      | ReturnType<typeof createGithubChannelAdapter>
+      | ReturnType<typeof createFeishuChannelAdapter>;
+  },
+  dir?: string,
+  fake = createFakeRuntime()
+) {
   vi.useFakeTimers();
-  const dir = await mkdtemp(join(tmpdir(), "direct-source-e2e-"));
-  const fake = createFakeRuntime();
   const app = createThebeApp({
     runtime: fake.runtime,
     provider,
-    agentStoreDir: dir,
+    agentStoreDir: dir ?? (await mkdtemp(join(tmpdir(), "direct-source-e2e-"))),
     sources: { intervalMs: 1000 },
     sourceAdapters: [input.source],
     channelAdapters: [input.channel],
@@ -210,6 +220,195 @@ async function startApp(input: {
  * same idempotency key and must not deliver twice.
  */
 describe("explicit Source event to direct Ticket to idempotent writeback", () => {
+  it.each(["GitHub", "Feishu"])(
+    "hands a pending %s follow-up to the replacement checkpoint and replies in order",
+    async (source) => {
+      const github = githubApi();
+      const feishu = feishuApi("group");
+      const feishuOptions = {
+        appId: "cli_app",
+        appSecret: "secret",
+        chats: ["oc_direct"],
+        fetch: feishu.fetch,
+      };
+      const githubOptions = {
+        repositories: ["acme/thebe"],
+        fetch: github.fetch,
+      };
+      const adapters =
+        source === "GitHub"
+          ? {
+              source: createGithubSource({
+                ...githubOptions,
+                agentLogin: "thebe-agent",
+                admitUnaddressedComments: true,
+              }),
+              channel: createGithubChannelAdapter(githubOptions),
+            }
+          : {
+              source: createFeishuSource({
+                ...feishuOptions,
+                mentionNames: ["Thebe"],
+                admitUnaddressed: true,
+              }),
+              channel: createFeishuChannelAdapter(feishuOptions),
+            };
+      const messages = () =>
+        source === "GitHub"
+          ? github.comments
+          : feishu.delivered.map((item) => item.text);
+      const feishuMessage = (id: string, text: string, minute: string) => ({
+        ...FEISHU_DIRECT,
+        message_id: id,
+        create_time: String(Date.parse(`2026-11-11T09:${minute}:00.000Z`)),
+        body: { content: JSON.stringify({ text }) },
+      });
+      const dir = await mkdtemp(join(tmpdir(), "source-recovery-"));
+      const { app, fake } = await startApp(adapters, dir);
+      const followUp = "Did the Tuesday backup finish?";
+      const { ticket } = await (async () => {
+        if (source === "GitHub") github.open(GITHUB_MENTION);
+        else
+          feishu.post(
+            feishuMessage("om_explicit_1", "@Thebe check the backup.", "00")
+          );
+        await vi.waitFor(async () =>
+          expect(await app.agent.listTriggers()).toHaveLength(1)
+        );
+        const [trigger] = await app.agent.listTriggers();
+        fake.queueTurns([{ kind: "hang" }]);
+        return app.agent.delegateTicket({
+          task: "Check the backup.",
+          idempotencyKey: "source-restart",
+          triggerId: trigger!.id,
+        });
+      })();
+      const goalId = ticket.links.legacyGoalId!;
+      try {
+        await vi.waitFor(async () =>
+          expect(await app.agent.listSubagents(goalId)).toHaveLength(1)
+        );
+        if (source === "GitHub")
+          github.open({
+            ...GITHUB_MENTION,
+            id: "evt-follow-up",
+            created_at: "2026-11-11T09:01:00.000Z",
+            payload: {
+              ...GITHUB_MENTION.payload,
+              comment: {
+                body: followUp,
+                html_url: "https://github.com/acme/thebe/issues/7#c2",
+              },
+            },
+          });
+        else feishu.post(feishuMessage("om_followup", followUp, "01"));
+        await vi.waitFor(async () => {
+          expect((await app.agent.getTicket(ticket.id))?.inputs).toHaveLength(
+            1
+          );
+        });
+      } finally {
+        await app.agent.quiesce();
+        await fake.runtime.unquiesce();
+      }
+      fake.queueTurns([
+        {
+          kind: "tools",
+          calls: [
+            {
+              name: "goal_report",
+              args: {
+                state: "progress",
+                summary: "Checked Tuesday.",
+                sourceReply: {
+                  inputSeq: 1,
+                  message: "Tuesday passed. TOKEN=example-secret",
+                },
+              },
+            },
+          ],
+        },
+        { kind: "text", text: "Checked the schedule." },
+        {
+          kind: "text",
+          text: "VERDICT: revise\nEVIDENCE: Tuesday passed\nREMAINING: verify the current backup",
+        },
+        { kind: "hang" },
+      ]);
+      const { app: restarted } = await startApp(adapters, dir, fake);
+      try {
+        await vi.waitFor(async () => {
+          const workers = (await restarted.agent.listSubagents(goalId)).filter(
+            (run) => run.profileName === "ticket-worker"
+          );
+          expect(workers).toHaveLength(3);
+          expect(
+            workers.filter((worker) => worker.task.includes(followUp))
+          ).toMatchObject([{ status: "completed" }]);
+          expect(messages()).toHaveLength(1);
+        });
+        expect(messages()[0]).toContain("Follow-up received");
+      } finally {
+        await restarted.agent.quiesce();
+        await fake.runtime.unquiesce();
+      }
+      fake.queueTurns([
+        {
+          kind: "text",
+          text: "GOAL_STATUS: complete\nCHECKPOINT: current backup verified\nVERIFICATION: backup history\nREMAINING: none",
+        },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: the current backup is verified\nREMAINING: none",
+        },
+      ]);
+      const { app: deliveryHost } = await startApp(adapters, dir, fake);
+      try {
+        await vi.waitFor(async () => {
+          expect(
+            (await deliveryHost.agent.getTicket(ticket.id))?.assignments
+          ).toMatchObject([
+            { endedReason: "host_restarted" },
+            { endedReason: "host_restarted" },
+            { report: { state: "ready" } },
+          ]);
+        });
+        const current = await deliveryHost.agent.getTicket(ticket.id);
+        expect(current).toMatchObject({
+          origins: ticket.origins,
+          mandate: ticket.mandate,
+          channels: ticket.channels,
+          inputs: [
+            {
+              seq: 1,
+              payload:
+                source === "GitHub" ? { body: followUp } : { text: followUp },
+            },
+          ],
+        });
+        const workers = (await deliveryHost.agent.listSubagents(goalId)).filter(
+          (run) => run.profileName === "ticket-worker"
+        );
+        expect(workers).toHaveLength(4);
+        expect(
+          workers.filter((worker) => worker.task.includes(followUp))
+        ).toHaveLength(1);
+        await vi.advanceTimersByTimeAsync(10_000);
+        await vi.waitFor(() => expect(messages()).toHaveLength(3));
+        expect(messages()[0]).toContain("Follow-up received");
+        expect(messages()[1]).toContain("Tuesday passed. TOKEN=***REDACTED***");
+        expect(messages()[2]).toContain("A task is complete");
+        if (source === "GitHub") expect(github.posts).toHaveLength(3);
+        else
+          expect(
+            feishu.attempts.filter((uuid) => uuid === feishu.delivered[0]!.uuid)
+          ).toHaveLength(2);
+      } finally {
+        await deliveryHost.agent.quiesce();
+      }
+    }
+  );
+
   it("keeps a GitHub @mention's actor, human flag, channel and admission on the Ticket", async () => {
     const api = githubApi();
     const source = createGithubSource({
@@ -418,7 +617,9 @@ describe("explicit Source event to direct Ticket to idempotent writeback", () =>
       await vi.waitFor(() => expect(api.attempts).toHaveLength(1));
       expect(api.delivered).toHaveLength(1);
       expect(api.delivered[0]!.uuid).toMatch(/^[a-f0-9]{32}$/);
-      expect(api.delivered[0]!.text).toContain("A task is blocked and needs you");
+      expect(api.delivered[0]!.text).toContain(
+        "A task is blocked and needs you"
+      );
       expect(api.delivered[0]!.text).toContain("The backup account is missing");
 
       // The retry reuses the same uuid, which is Feishu's idempotency key for a text message.

@@ -250,6 +250,22 @@ export function createThebeApp(options: {
       enabled: true,
     }));
   const agent = createThebeAgent({
+    onSourceFollowUpNotice: async (notice, channel) => {
+      await notifications.notify(
+        {
+          id: notice.id,
+          category: "attention",
+          priority: "normal",
+          title: "Thebe",
+          body: notice.message,
+          ticketId: notice.ticketId,
+          goalId: notice.goalId,
+          sourceFollowUp: notice.type,
+          createdAt: clock().toISOString(),
+        },
+        { onlyTargets: ticketTargets([channel]) }
+      );
+    },
     onPendingApproval: (record) => {
       void notifier?.notify({
         category: "thebe.permission",

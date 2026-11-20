@@ -5,6 +5,7 @@ import { writeFileAtomic } from "../../atomic-write.ts";
 import { redactToolOutput } from "../security/redaction.ts";
 import { key } from "../tickets/ids.ts";
 import type { ChannelRef } from "../sources/types.ts";
+import { channelIdentity } from "./delivery.ts";
 import type {
   Notification,
   NotificationDeliveryAttempt,
@@ -419,7 +420,18 @@ function dueHeads(state: OutboxState, now: Date): NotificationOutboxEntry[] {
   const heads: NotificationOutboxEntry[] = [];
   const nowMs = now.getTime();
   for (const entry of state.entries) {
+    const { ticketId, goalId } = entry.notification;
+    const ticketChannel =
+      ticketId && goalId
+        ? key(
+            "ticket-notification-channel",
+            ticketId,
+            channelIdentity(entry.channel)
+          )
+        : undefined;
+    if (ticketChannel && blocked.has(ticketChannel)) continue;
     if (blocked.has(entry.targetId)) continue;
+    if (ticketChannel) blocked.add(ticketChannel);
     if (entry.state === "send_started") {
       blocked.add(entry.targetId);
       continue;

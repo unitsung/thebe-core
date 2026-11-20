@@ -47,6 +47,19 @@ function channelNotice(
   const message = ticketScoped
     ? notification.body
     : `${notification.title}\n\n${notification.body}`;
+  if (
+    notification.sourceFollowUp &&
+    notification.ticketId &&
+    notification.goalId
+  ) {
+    return {
+      id: notification.id,
+      ticketId: notification.ticketId,
+      goalId: notification.goalId,
+      type: notification.sourceFollowUp,
+      message,
+    };
+  }
   if (notification.category === "completed") {
     return {
       id: notification.id,

@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isQuiet, msUntilQuietEnds } from "./quiet-hours.ts";
-import type { ChannelRef } from "../sources/types.ts";
-import { deliverToAdapters } from "./delivery.ts";
+import { channelIdentity, deliverToAdapters } from "./delivery.ts";
 import type { NotificationDigest } from "./digest.ts";
 import type { NotificationOutbox } from "./outbox.ts";
 import type { NotificationSettingsStore } from "./settings.ts";
@@ -44,15 +43,23 @@ export function createNotificationRouter(options: {
     notification: Notification,
     dispatch: {
       extraTargets?: readonly NotificationTarget[];
+      onlyTargets?: readonly NotificationTarget[];
       /** A digest summary must not be accumulated into another digest. */
       skipDigest?: boolean;
     } = {}
   ): Promise<NotificationDispatchResult> {
     const settings = await options.settings.get();
+    const allowedChannels = dispatch.onlyTargets?.map((target) =>
+      channelIdentity(target.channel)
+    );
     const targets = selectTargets(
       settings,
       notification,
-      dispatch.extraTargets
+      dispatch.onlyTargets ?? dispatch.extraTargets
+    ).filter(
+      (target) =>
+        !allowedChannels ||
+        allowedChannels.includes(channelIdentity(target.channel))
     );
     if (targets.length === 0) {
       return { id: notification.id, targets: [], skipped: 0 };
@@ -271,13 +278,6 @@ export function createNotificationRouter(options: {
     start: () => options.outbox.start(),
     stop: () => options.outbox.stop(),
   };
-}
-
-function channelIdentity(channel: ChannelRef): string {
-  const address = Object.entries(channel.address ?? {}).sort(
-    ([left], [right]) => left.localeCompare(right)
-  );
-  return JSON.stringify([channel.source, channel.thread, address]);
 }
 
 function adapterMap(

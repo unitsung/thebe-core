@@ -6,7 +6,10 @@ import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
 import { recoverInterruptedTicketGoals } from "./tickets/recovery.ts";
 import type { Ticket } from "./tickets/types.ts";
-import { createTicketChannelNotifier } from "./channels/delivery.ts";
+import {
+  createTicketChannelNotifier,
+  sameChannelRef,
+} from "./channels/delivery.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
 import {
   createDownloadCompletedSource,
@@ -149,6 +152,28 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       revalidateMandate: revalidateTicketGoal,
       ticketInputs: async (goalId) =>
         (await ticketStore.getByGoal(goalId))?.inputs ?? [],
+      onSourceFollowUp: async (goalId, input, type, message) => {
+        const ticket = await ticketStore.getByGoal(goalId);
+        if (
+          !ticket?.channels?.some((channel) =>
+            sameChannelRef(channel, input.channel)
+          )
+        )
+          return;
+        const notice = {
+          id: `${ticket.id}:${type}:${input.seq}`,
+          ticketId: ticket.id,
+          goalId,
+          type,
+          message,
+        };
+        if (options.onSourceFollowUpNotice) {
+          await options.onSourceFollowUpNotice(notice, input.channel);
+        } else {
+          await channelNotifier.enqueueFollowUp(notice, input.channel);
+          void channelNotifier.flush().catch(() => {});
+        }
+      },
       onNeedsPerson: async (notice) => {
         if (options.onGoalNeedsPerson) {
           // The app-level notification layer owns both the owner targets and the Ticket's channels.

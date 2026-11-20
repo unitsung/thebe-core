@@ -49,3 +49,10 @@ export function cloneChannel(channel: ChannelRef): ChannelRef {
     ...(channel.address ? { address: { ...channel.address } } : {}),
   };
 }
+
+export function channelIdentity(channel: ChannelRef): string {
+  const address = Object.entries(channel.address ?? {}).sort(
+    ([left], [right]) => left.localeCompare(right)
+  );
+  return JSON.stringify([channel.source, channel.thread, address]);
+}
