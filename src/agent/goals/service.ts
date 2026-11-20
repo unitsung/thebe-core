@@ -1,6 +1,7 @@
 import { normalizeGoalMaxIterations, type GoalEvent } from "../goals/runner.ts";
 import {
   executeGoal,
+  type BufferedGoalEvent,
   type GoalCheckpointInput,
   type GoalSubagentApi,
   type ManagedGoal,
@@ -137,7 +138,11 @@ export function createGoalApi(
     const at = ctx.now().toISOString();
     if (progress) run.progressAt = at;
     run.updatedAt = at;
-    run.events.push({ event, at });
+    run.events.push({
+      event,
+      at,
+      sequence: (run.events.at(-1)?.sequence ?? 0) + 1,
+    });
     if (run.events.length > MAX_GOAL_EVENTS) {
       run.events.splice(0, run.events.length - MAX_GOAL_EVENTS);
     }
@@ -420,6 +425,7 @@ export function createGoalApi(
       const recoveredAt = ctx.now().toISOString();
       run.updatedAt = recoveredAt;
       run.events.push({
+        sequence: (run.events.at(-1)?.sequence ?? 0) + 1,
         event: {
           type: "goal_status",
           status: "paused",
@@ -994,6 +1000,10 @@ export function createGoalApi(
 
     restoreGoal,
 
+    executionEvents(thebeSessionId: string): readonly BufferedGoalEvent[] {
+      return runs.get(thebeSessionId)?.events.slice() ?? [];
+    },
+
     subscribeGoal(
       thebeSessionId: string,
       listener: (event: GoalEvent) => void
@@ -1298,10 +1308,11 @@ export function createGoalApi(
   };
 }
 
-function storedGoalEvents(
-  events: Array<{ event: GoalEvent; at: string }>
-): StoredGoalEvent[] {
-  return events.slice(-MAX_GOAL_EVENTS).map(toStoredGoalEvent);
+function storedGoalEvents(events: BufferedGoalEvent[]): StoredGoalEvent[] {
+  return events.slice(-MAX_GOAL_EVENTS).map((row) => ({
+    ...toStoredGoalEvent(row),
+    sequence: row.sequence,
+  }));
 }
 
 function toStoredGoalEvent(row: {
@@ -1390,7 +1401,7 @@ function toStoredGoalEvent(row: {
 function restoreEvents(
   events: StoredGoalEvent[],
   parentSessionId: string
-): Array<{ event: GoalEvent; at: string }> {
+): BufferedGoalEvent[] {
   return events
     .filter(
       (row) =>
@@ -1400,7 +1411,8 @@ function restoreEvents(
         typeof row.event.type === "string"
     )
     .slice(-MAX_GOAL_EVENTS)
-    .map((row) => ({
+    .map((row, index) => ({
+      sequence: row.sequence ?? index + 1,
       at: row.at,
       event: restoreEvent(row.event, parentSessionId, row.at),
     }));

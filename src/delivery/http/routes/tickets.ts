@@ -7,6 +7,8 @@ import { json, readJson } from "../json.ts";
 import { agentError } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
 import { PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
+import { parseLogCursor } from "../parsing/query.ts";
+import { ticketEventStream } from "../protocol/sse.ts";
 
 /**
  * Ticket HTTP controls. The Ticket is the durable assignment; the Goal behind it still owns progress,
@@ -41,6 +43,31 @@ export async function handleTicketRoutes(
       const ticket = await agent.getTicket(id);
       if (!ticket) return ticketNotFound();
       return json(ticket);
+    }
+    if (
+      id &&
+      context.parts.length === 4 &&
+      (context.parts[3] === PRODUCT_HTTP_SEGMENT.execution ||
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.log)
+    ) {
+      if (request.method !== "GET") return methodNotAllowed();
+      if (context.parts[3] === PRODUCT_HTTP_SEGMENT.execution) {
+        const task = await agent.getTicketTask(id);
+        if (!task) return ticketNotFound();
+        const { goal: _goal, ...execution } = task;
+        return json(execution);
+      }
+
+      const cursor = parseLogCursor(request, context.url);
+      if (!cursor.ok) return json({ error: cursor.error }, 400);
+      const log = await agent.getTicketLog(id);
+      if (!log) return ticketNotFound();
+      const follow =
+        context.url.searchParams.get("follow") === "true" ||
+        (request.headers.get("accept") ?? "").includes("text/event-stream");
+      return follow
+        ? ticketEventStream(log, request, cursor.after)
+        : json(log.read(cursor.after));
     }
     if (
       id &&

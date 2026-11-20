@@ -552,6 +552,10 @@ export interface ThebeAgent {
   /** Tickets: the authorised units of work. The Goal behind one keeps its status, report and attention. */
   listTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
+  getTicketTask(id: string): Promise<TicketTaskView | undefined>;
+  getTicketLog(
+    id: string
+  ): Promise<import("./tickets/log.ts").TicketExecutionLog | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
   /** Delegate one direct Ticket and Goal from the person-facing HTTP API. Idempotent by key. */
   delegateTicket(

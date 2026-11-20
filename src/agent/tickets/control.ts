@@ -63,6 +63,19 @@ export type TicketTaskView = {
   canRetry?: boolean;
   assignment: TicketAssignmentView;
   goal?: ProductGoal & { finalReport?: string };
+  execution?: Pick<
+    ProductGoal,
+    | "status"
+    | "phase"
+    | "progress"
+    | "currentStep"
+    | "iteration"
+    | "maxIterations"
+    | "updatedAt"
+    | "watchdog"
+  > & {
+    controls: ProductGoal["controls"] & { retry: boolean; reply: boolean };
+  };
   pendingPermissions: ProductPendingPermission[];
   receipt: TicketReceipt;
 };
@@ -425,6 +438,21 @@ export function createTicketControlApi(options: {
       assignment: assignmentView(ticket, goal),
       ...(product
         ? {
+            execution: {
+              status: product.status,
+              phase: product.phase,
+              progress: product.progress,
+              currentStep: product.currentStep,
+              iteration: product.iteration,
+              maxIterations: product.maxIterations,
+              updatedAt: product.updatedAt,
+              watchdog: product.watchdog,
+              controls: {
+                ...product.controls,
+                retry: retryable,
+                reply: Boolean(product.attention || pending.length),
+              },
+            },
             goal: {
               ...product,
               ...(goal?.finalReport ? { finalReport: goal.finalReport } : {}),

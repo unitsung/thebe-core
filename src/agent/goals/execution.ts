@@ -36,6 +36,7 @@ export type GoalSubagentApi = {
 };
 
 export type BufferedGoalEvent = {
+  sequence: number;
   event: GoalEvent;
   at: string;
 };

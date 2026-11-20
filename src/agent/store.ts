@@ -5,6 +5,7 @@ import type { GoalRun, SubagentRun, SubagentRunStatus } from "./types.ts";
 import { httpError } from "./types.ts";
 
 export type StoredGoalEvent = {
+  sequence?: number;
   event:
     | {
         type: "goal_started";

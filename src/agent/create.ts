@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
 import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
+import { createTicketExecutionLog } from "./tickets/log.ts";
+import { isTerminalGoalStatus } from "./goals/product.ts";
 import { recoverInterruptedTicketGoals } from "./tickets/recovery.ts";
 import type { Ticket } from "./tickets/types.ts";
 import {
@@ -765,6 +767,22 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     listTickets: ticketControl.listRecords,
     async getTicket(id) {
       return (await ticketControl.get(id))?.ticket;
+    },
+    getTicketTask: ticketControl.get,
+    async getTicketLog(id) {
+      const task = await ticketControl.get(id);
+      if (!task) return undefined;
+      const executorId = task.ticket.links.legacyGoalId;
+      return createTicketExecutionLog(
+        id,
+        () => (executorId ? goals.executionEvents(executorId) : []),
+        (listener) =>
+          executorId ? goals.subscribeGoal(executorId, listener) : () => {},
+        () => {
+          const run = executorId ? goals.getGoal(executorId) : undefined;
+          return !run || isTerminalGoalStatus(run.status);
+        }
+      );
     },
     async getTicketForGoal(goalId) {
       await ticketRecovery;
