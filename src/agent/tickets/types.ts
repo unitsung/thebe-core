@@ -96,6 +96,8 @@ export type AssignmentReport = {
   state: AssignmentReportState;
   summary: string;
   at: string;
+  evidence?: string;
+  artifactId?: string;
 };
 
 export type Assignment = {

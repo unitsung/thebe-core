@@ -442,7 +442,8 @@ describe("tickets", () => {
   });
 
   it("retries blocked work under the same Ticket and Goal", async () => {
-    const { app, call, fake } = open(undefined, [
+    const dir = await mkdtemp(join(tmpdir(), "thebe-http-ticket-history-"));
+    const { app, call, fake } = open(dir, [
       {
         kind: "tools",
         calls: [
@@ -492,6 +493,18 @@ describe("tickets", () => {
     });
     expect(completed.blocked).toBeUndefined();
     expect(app.agent.getGoal(goalId)?.status).toBe("completed");
+    const history = await call(`/v1/tickets/${ticketId}`);
+    expect(history.status).toBe(200);
+    expect(history.body.assignments).toMatchObject([
+      {
+        state: "ended",
+        report: { state: "blocked", summary: "The library is read-only" },
+      },
+      { state: "ended", report: { state: "ready" } },
+    ]);
+    const reopened = await open(dir, []).call(`/v1/tickets/${ticketId}`);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.assignments).toEqual(history.body.assignments);
   });
 
   it("refuses retry after completion or a person stop", async () => {
@@ -641,7 +654,10 @@ describe("tickets", () => {
     expect(retried.status).toBe(200);
     expect(retried.body).toMatchObject({
       reused: true,
-      ticket: { id: created.body.ticket.id },
+      ticket: {
+        id: created.body.ticket.id,
+        assignments: [{ state: "ended", report: { state: "ready" } }],
+      },
       goal: { id: created.body.goal.id },
     });
   });
