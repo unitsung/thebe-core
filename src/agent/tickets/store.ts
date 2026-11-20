@@ -40,6 +40,7 @@ export type TicketStore = {
       startedAt?: string;
       endedAt?: string;
       endedReason?: string;
+      report?: Assignment["report"];
     }
   ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
   /** Appends a new Assignment for a retry. */
@@ -273,10 +274,15 @@ export function createTicketStore(options: {
           ...(input.startedAt ? { startedAt: input.startedAt } : {}),
           ...(input.endedAt ? { endedAt: input.endedAt } : {}),
           ...(input.endedReason ? { endedReason: input.endedReason } : {}),
+          ...(input.report ? { report: { ...input.report } } : {}),
         };
-        ticket.assignments.push(assignment);
-        await persist(ticket);
-        return { ticket, assignment };
+        const next = {
+          ...ticket,
+          assignments: [...ticket.assignments, assignment],
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment };
       });
     },
     async createAssignment(id, input) {
@@ -290,9 +296,13 @@ export function createTicketStore(options: {
           ...(input.executorId ? { executorId: input.executorId } : {}),
           createdAt: input.at,
         };
-        ticket.assignments.push(assignment);
-        await persist(ticket);
-        return { ticket, assignment };
+        const next = {
+          ...ticket,
+          assignments: [...ticket.assignments, assignment],
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment };
       });
     },
     async updateAssignment(id, assignmentId, patch) {
@@ -303,17 +313,27 @@ export function createTicketStore(options: {
           (item) => item.id === assignmentId
         );
         if (!ticket || !assignment) return undefined;
-        if (patch.state !== undefined) assignment.state = patch.state;
-        if (patch.executorId !== undefined)
-          assignment.executorId = patch.executorId;
-        if (patch.startedAt !== undefined)
-          assignment.startedAt = patch.startedAt;
-        if (patch.endedAt !== undefined) assignment.endedAt = patch.endedAt;
-        if (patch.endedReason !== undefined)
-          assignment.endedReason = patch.endedReason;
-        if (patch.report !== undefined) assignment.report = { ...patch.report };
-        await persist(ticket);
-        return { ticket, assignment };
+        // An earlier executor snapshot cannot reopen an ended assignment.
+        if (
+          assignment.state === "ended" &&
+          (assignment.report || !patch.report)
+        ) {
+          return { ticket, assignment };
+        }
+        const updated = {
+          ...assignment,
+          ...(assignment.state === "ended" ? {} : patch),
+          ...(patch.report ? { report: { ...patch.report } } : {}),
+        };
+        const next = {
+          ...ticket,
+          assignments: ticket.assignments.map((item) =>
+            item.id === assignmentId ? updated : item
+          ),
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment: updated };
       });
     },
     async recordDirect(input) {

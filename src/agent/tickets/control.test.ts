@@ -335,10 +335,12 @@ describe("Ticket retry", () => {
       },
     ]);
 
-    const retried = await api.control({
-      ticketId: ticket.id,
-      action: "retry",
-    });
+    const request = { ticketId: ticket.id, action: "retry" } as const;
+    const [retried, duplicate] = await Promise.all([
+      api.control(request),
+      api.control(request),
+    ]);
+    expect(duplicate).toEqual(retried);
     expect(retried).toMatchObject({
       ticket: { id: ticket.id },
       stage: "running",
@@ -348,7 +350,7 @@ describe("Ticket retry", () => {
       { state: "ended", executorId: "goal-retry" },
       { state: "running", executorId: "goal-retry" },
     ]);
-    expect(retryGoal).toHaveBeenCalledWith("goal-retry");
+    expect(retryGoal).toHaveBeenCalledExactlyOnceWith("goal-retry");
 
     current = goal("goal-retry", "max_iterations", "2026-11-10T00:02:30.000Z");
     await expect(

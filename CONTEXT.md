@@ -67,6 +67,12 @@ _Avoid_: deriving Assignment solely from a runtime Goal, storing Ticket stage on
 The port that runs an Assignment. The Executor owns its runtime state and workspace; the Ticket owns authorization, provenance, and the Assignment history. The current Goal loop is the first Executor implementation; its `GoalRun` is an implementation detail, not a domain object.
 _Avoid_: exposing Goal status as the Ticket's status, calling a runtime session a Ticket, or letting an Executor talk to the person directly
 
+**Report**:
+The structured outcome of one ended Assignment. The Report records its result,
+summary, and available evidence or Artifact reference, and stays with that
+Assignment when the Ticket is retried or reopened.
+_Avoid_: treating a later Assignment's outcome as the earlier Report
+
 **AgentRuntime**:
 Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. It is a structural seam, not a claim that a second runtime is integrated.
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code

@@ -581,7 +581,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     policy: policyStore,
     goals: {
       startGoal: goals.startGoal,
-      reopenGoal: goals.reopenGoalForInput,
+      reopenGoal: (id) =>
+        ticketControl.reopenForInput(id, goals.reopenGoalForInput),
     },
     sessions,
     servicesForResource,
@@ -721,14 +722,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return triggerStore.list(query);
     },
     sourceHealth: sourceRunner.health,
-    async listTickets() {
-      await ticketRecovery;
-      await ticketControl.backfillGoals();
-      return ticketStore.list();
-    },
+    listTickets: ticketControl.listRecords,
     async getTicket(id) {
-      await ticketRecovery;
-      return ticketStore.get(id);
+      return (await ticketControl.get(id))?.ticket;
     },
     async getTicketForGoal(goalId) {
       await ticketRecovery;
