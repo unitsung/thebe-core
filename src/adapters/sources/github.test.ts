@@ -410,6 +410,57 @@ describe("GitHub Source", () => {
     expect(requested.some((url) => url.includes("page=3"))).toBe(false);
   });
 
+  it("does not advance the cursor when a poll is cut at the page cap (H7)", async () => {
+    const pages = new Map<string, unknown[]>();
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (!url.includes("/events")) return Response.json([]);
+      const page = new URL(url).searchParams.get("page") ?? "1";
+      return Response.json(pages.get(page) ?? [], {
+        headers: { etag: '"pages"' },
+      });
+    }) as typeof fetch;
+    const mention = (id: string, seconds: number) =>
+      event({
+        id,
+        created_at: new Date(
+          Date.parse("2026-11-11T10:00:00.000Z") + seconds * 1000
+        ).toISOString(),
+        payload: {
+          action: "created",
+          issue: { number: 12, title: "Restart the media container" },
+          comment: { body: "@thebe-agent please restart emby" },
+        },
+      });
+    pages.set("1", [mention("seed", 0)]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      maxPages: 1,
+      fetch: fetcher,
+    });
+    const baseline = await source.read(undefined);
+
+    pages.set(
+      "1",
+      Array.from({ length: 100 }, (_, index) => mention(`p1-${index}`, index))
+    );
+    const read = await source.read(baseline.cursor);
+
+    // The newest events still reach Eval this poll, but the cursor does not move past
+    // the ones it never saw, so the loss is visible instead of silent.
+    expect(read.triggers).toHaveLength(100);
+    const before = JSON.parse(baseline.cursor) as {
+      repos: Record<string, unknown>;
+    };
+    const after = JSON.parse(read.cursor) as {
+      repos: Record<string, unknown>;
+    };
+    expect(after.repos["unitsung/thebe"]).toEqual(
+      before.repos["unitsung/thebe"]
+    );
+  });
+
   it("reports a repository read failure instead of silently advancing", async () => {
     const github = fakeGithub([]);
     github.setStatus(500);
