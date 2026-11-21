@@ -101,6 +101,7 @@ export function createGithubSource(options: GithubSourceOptions): Source {
         repos: { ...previous?.repos },
       };
       const triggers: Trigger[] = [];
+      const warnings: string[] = [];
 
       for (const repo of repositories) {
         const saved = previous?.repos[repo] ?? {
@@ -120,16 +121,25 @@ export function createGithubSource(options: GithubSourceOptions): Source {
 
         const seen = new Set(saved.seen);
         const fresh = result.events.filter((event) => !seen.has(event.id));
-        next.repos[repo] = {
-          ...(result.etag ? { etag: result.etag } : {}),
-          initialized: true,
-          seen: [
-            ...result.events.map((event) => event.id),
-            ...saved.seen.filter(
-              (id) => !result.events.some((e) => e.id === id)
-            ),
-          ].slice(0, MAX_SEEN_EVENTS),
-        };
+        // A truncated read keeps the newest events but not the cursor: moving it would skip past
+        // events the page limit left unread, so the repository stays where it was until a full
+        // window fits and the Source's health says what happened.
+        if (result.truncated) {
+          warnings.push(
+            `GitHub events for ${repo} exceed ${maxPages} page(s) of 100; older events were not read`
+          );
+        } else {
+          next.repos[repo] = {
+            ...(result.etag ? { etag: result.etag } : {}),
+            initialized: true,
+            seen: [
+              ...result.events.map((event) => event.id),
+              ...saved.seen.filter(
+                (id) => !result.events.some((e) => e.id === id)
+              ),
+            ].slice(0, MAX_SEEN_EVENTS),
+          };
+        }
         // The first read is a baseline: it must not announce the repository's history.
         if (!saved.initialized) continue;
 
@@ -144,10 +154,14 @@ export function createGithubSource(options: GithubSourceOptions): Source {
           });
           if (trigger) triggers.push(trigger);
         }
-        next.n += 1;
+        if (!result.truncated) next.n += 1;
       }
 
-      return { triggers, cursor: JSON.stringify(next) };
+      return {
+        triggers,
+        cursor: JSON.stringify(next),
+        ...(warnings.length ? { warning: warnings.join("; ") } : {}),
+      };
     },
   };
 }
@@ -502,10 +516,17 @@ async function readEvents(input: {
   signal?: AbortSignal;
 }): Promise<
   | { notModified: true }
-  | { notModified: false; events: GithubEvent[]; etag?: string }
+  | {
+      notModified: false;
+      events: GithubEvent[];
+      etag?: string;
+      /** The page limit was reached with a full page, and older events remain unread. */
+      truncated: boolean;
+    }
 > {
   const events: GithubEvent[] = [];
   let etag: string | undefined;
+  let lastPageFull = false;
   for (let page = 1; page <= input.maxPages; page += 1) {
     const response = await githubResponse({
       fetcher: input.fetcher,
@@ -537,13 +558,53 @@ async function readEvents(input: {
       .map((entry) => parseEvent(entry, input.repository))
       .filter((event): event is GithubEvent => event !== undefined);
     events.push(...parsed);
-    if (payload.length < 100) break;
+    lastPageFull = payload.length === 100;
+    if (!lastPageFull) break;
   }
+  // A full last page at the limit may be exactly all there is. Ask once for the next page so
+  // an exactly-full feed advances normally and only a real backlog keeps the cursor behind.
+  const truncated = lastPageFull
+    ? await hasOlderEvents({
+        fetcher: input.fetcher,
+        apiBaseUrl: input.apiBaseUrl,
+        repository: input.repository,
+        token: input.token,
+        page: input.maxPages + 1,
+        signal: input.signal,
+      })
+    : false;
   return {
     notModified: false,
     events,
     ...(etag ? { etag } : {}),
+    truncated,
   };
+}
+
+async function hasOlderEvents(input: {
+  fetcher: FetchLike;
+  apiBaseUrl: string;
+  repository: string;
+  token?: string;
+  page: number;
+  signal?: AbortSignal;
+}): Promise<boolean> {
+  try {
+    const response = await githubResponse({
+      fetcher: input.fetcher,
+      apiBaseUrl: input.apiBaseUrl,
+      token: input.token,
+      path: `/repos/${repoPath(input.repository)}/events?per_page=100&page=${input.page}`,
+      signal: input.signal,
+    });
+    if (response.status === 304) return false;
+    // A failed probe says nothing about the feed; staying behind is the safe reading.
+    if (!response.ok) return true;
+    const payload = await response.json();
+    return !Array.isArray(payload) || payload.length > 0;
+  } catch {
+    return true;
+  }
 }
 
 function parseEvent(
