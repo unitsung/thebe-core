@@ -77,6 +77,12 @@ function inferCategory(
   return "other";
 }
 
+/**
+ * How a provider tool is treated when the operator has not named it read: a destructive claim or a
+ * destructive-looking name is `admin`, everything else asks. The server's own `readOnlyHint` is not
+ * trusted here — a server that has been compromised could claim it on a write. The operator confirms
+ * read tools per server (`readTools`, or a server-level `permission: "read"`).
+ */
 function inferPermission(
   name: string,
   description: string,
@@ -88,13 +94,7 @@ function inferPermission(
     /(delete|remove|destroy|admin|credential|permission|shutdown)/.test(value)
   )
     return "admin";
-  if (
-    /(create|update|write|save|submit|download|move|copy|rename|restart|start|stop|pause|resume|schedule|run)/.test(
-      value
-    )
-  )
-    return "confirm";
-  return annotations?.readOnlyHint === true ? "read" : "confirm";
+  return "confirm";
 }
 
 function serverDisabled(
@@ -194,7 +194,9 @@ export function createMcpClientRegistry(
           state.config.category ?? inferCategory(tool.name, description),
         permission:
           state.config.permission ??
-          inferPermission(tool.name, description, annotations),
+          (state.config.readTools?.includes(tool.name)
+            ? "read"
+            : inferPermission(tool.name, description, annotations)),
         service: state.config.service ?? state.config.name,
         source: "external" as const,
         serverName: state.config.name,
@@ -249,6 +251,7 @@ export function createMcpClientRegistry(
         description: config.description,
         exposure: config.exposure,
         permission: config.permission,
+        readTools: config.readTools,
       }));
     },
     async listTools(): Promise<McpToolInfo[]> {

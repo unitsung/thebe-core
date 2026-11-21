@@ -123,6 +123,8 @@ function mcpFixture(
         args: ["-e", script],
         enabled,
         exposure: initial.exposure ?? "deferred",
+        // The operator confirmed these read; the server's own readOnlyHint does not count (H5).
+        readTools: ["catalog", "leak", "env"],
         env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
       },
     ],

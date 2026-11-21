@@ -164,7 +164,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
   - 准入结果随 Trigger 持久化；工单范围（Mandate）和 Core 的审批检查仍是授权边界，来源身份不能扩大范围。
   - 两个适配器目前只有模拟 API 的自动化测试；接入生产账号前，先在测试 Core 上验证凭据和网络。
 
-- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
+- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；`read` 只来自你在 `.thebe/mcp.json` 里为该服务器列出的 `readTools`，或服务器级的 `permission: "read"`，服务器自己声明的 `readOnlyHint` 不算。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
 ## OpenList STRM 修复 provider
@@ -314,7 +314,8 @@ refresh token，吊销 refresh token 后，相关 access token 在下一次 `/mc
 
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
 - URL 服务器可带 `headers`（字符串键值），每个请求都会发送，用来接入需要令牌的服务商自带 MCP，例如 `"headers": { "X-Api-Key": "..." }` 或服务专用头 `{"sqmusic":"<JWT>"}`，Core 不用为它新增厂商适配器。有自带 MCP 的服务优先这样接：把 Core 指向它的 MCP，工具就有了。`headers` 保存在 `.thebe/mcp.json`（权限 `600`），不写日志，也只发给配置的 URL。
-- `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
+- `permission`：`read` 以外的服务器每次调用都要审批；不写时，只有 `readTools` 列出的工具按读处理，其余一律审批。服务器自己的 `readOnlyHint` 不作为依据：失陷的服务器可以对写工具谎称只读。
+- `readTools`（可选，工具名数组，用服务器自己的原名）：你确认这些工具只读。列出的工具在会话里不再逐个审批，经 `/mcp` 调用时也不被 `THEBE_MCP_WRITES` 或 token 的 `mcp:write` 当作写操作。服务器级 `permission: "read"` 相当于把全部工具都列进来。
 - `irreversible`（可选，工具名 → 布尔）：经 `/mcp` 调用时，哪些工具的调用无法撤销。默认只看服务器自己的 `destructiveHint`；你的标注优先：`true` 要求 token 带 `mcp:irreversible`，`false` 把服务器标了 destructive 的工具当普通写。例：`"irreversible": { "delete_movie": true, "clear_cache": false }`。
 - 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
