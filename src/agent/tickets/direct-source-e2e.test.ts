@@ -633,3 +633,94 @@ describe("explicit Source event to direct Ticket to idempotent writeback", () =>
     }
   });
 });
+
+/**
+ * A notice is written back to the same thread every member can read, so a secret a worker or reviewer
+ * quotes in its blocker or evidence must not leave Core verbatim.
+ */
+describe("Ticket notice redaction", () => {
+  async function openMention() {
+    const api = githubApi();
+    const source = createGithubSource({
+      repositories: ["acme/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: api.fetch,
+    });
+    const channel = createGithubChannelAdapter({
+      repositories: ["acme/thebe"],
+      fetch: api.fetch,
+    });
+    const { app, fake } = await startApp({ source, channel });
+    api.open(GITHUB_MENTION);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      expect(await app.agent.listTriggers()).toHaveLength(1);
+    });
+    const [trigger] = await app.agent.listTriggers();
+    return { api, app, fake, trigger: trigger! };
+  }
+
+  it("redacts a secret a worker puts in a blocked notice", async () => {
+    const { api, app, fake, trigger } = await openMention();
+    const secret = "backup-s3cr3t-value";
+    try {
+      fake.queueTurns([
+        {
+          kind: "tools",
+          calls: [
+            {
+              name: "goal_report",
+              args: {
+                state: "blocked",
+                blocker: `Add the backup account: PASSWORD=${secret}`,
+              },
+              id: "call-report",
+            },
+          ],
+        },
+        { kind: "text", text: "Reported the missing account." },
+      ]);
+      await app.agent.delegateTicket({
+        task: "Check the backup",
+        idempotencyKey: "notice-redaction-blocked",
+        triggerId: trigger.id,
+      });
+
+      await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+      expect(api.posts[0]).toContain("A task is blocked and needs you");
+      expect(api.posts[0]).toContain("PASSWORD=***REDACTED***");
+      expect(api.posts.join("\n")).not.toContain(secret);
+    } finally {
+      await app.agent.quiesce();
+    }
+  });
+
+  it("redacts a secret a reviewer puts in a completed notice", async () => {
+    const { api, app, fake, trigger } = await openMention();
+    const secret = "review-s3cr3t-value";
+    try {
+      fake.queueTurns([
+        {
+          kind: "text",
+          text: "GOAL_STATUS: complete\nCHECKPOINT: backup verified\nVERIFICATION: backup history\nREMAINING: none",
+        },
+        {
+          kind: "text",
+          text: `VERDICT: pass\nEVIDENCE: signed in with PASSWORD=${secret}\nREMAINING: none`,
+        },
+      ]);
+      await app.agent.delegateTicket({
+        task: "Check the backup",
+        idempotencyKey: "notice-redaction-completed",
+        triggerId: trigger.id,
+      });
+
+      await vi.waitFor(() => expect(api.posts).toHaveLength(1));
+      expect(api.posts[0]).toContain("A task is complete");
+      expect(api.posts[0]).toContain("PASSWORD=***REDACTED***");
+      expect(api.posts.join("\n")).not.toContain(secret);
+    } finally {
+      await app.agent.quiesce();
+    }
+  });
+});
