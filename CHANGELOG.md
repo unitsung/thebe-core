@@ -5,6 +5,12 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `POST /v1/tickets` accepts `threads` (`["resource:container:emby"]` or
+  `[{kind: "container", id: "emby"}]`) and records them as the Ticket's
+  subscriptions, so a direct Ticket can follow the resources it names.
+
 ### Changed
 
 - Removed the optional external agent-gateway notification bridge and its compose
@@ -26,6 +32,16 @@ All notable changes to Thebe Core are documented here. The format is based on
 - Removed what nothing produces any more: the `policy` approval source on an action receipt (and the client value that selected it) and a Ticket's `links.receiptIds`. A write an executor makes is a plain service call that leaves an audit record; there is no restart receipt for it.
 - **Breaking:** every capability and tool has one name, `<service>_<action>` in lower-case snake case, replacing the dotted ids. Over `/mcp`, `/v1/capabilities` and in the model's own tool list it is the same string, so descriptions and prompts that name a tool name the one the model can call. Examples: `container.list` is `container_list`, `navidrome.playlist.update` is `navidrome_playlist_update`, `download.delete` is `download_delete`, `strm.repair` is `strm_repair`. The generic service tools are now `service_discover`, `service_read` and `service_write` (they were `service_api_*`), the confirm step is `service_confirm`, and the per-operation tools for an allow-listed read operation are `service__<service>__<operation>` (`__` separates the parts, as MCP does for namespaces). Integrations that use the old ids must change them; ids already written to disk (remembered permission answers, old activity records) no longer match and are asked or shown as unknown. The App and `contracts/*.json` were renamed with it. A dotted tool name from an external MCP server is still translated at the Pi boundary.
 
+### Removed
+
+- **Breaking:** the public Goal API is retired. `GET/POST /v1/goals`,
+  `GET /v1/goals/{id}`, its pause/resume/stop/log routes and the session-scoped
+  `/v1/session/{id}/goal*` aliases return `404`; a Goal is internal execution
+  state behind a Ticket. Clients use `GET/POST /v1/tickets`,
+  `GET /v1/tickets/{id}/execution`, `GET /v1/tickets/{id}/log`, and
+  `POST /v1/tickets/{id}/reply|note|pause|resume|stop|retry`. OpenAPI and the
+  operator docs no longer list Goal routes.
+
 ### Fixed
 
 - An IM notification whose gateway cannot start during delivery now returns a retryable failure and stays in the outbox, instead of being reported as sent.
@@ -39,9 +55,41 @@ All notable changes to Thebe Core are documented here. The format is based on
 - An unattended Ticket worker's first Mandate refusal is now carried from permission control to the Goal instead of ending as an ordinary tool error. The Goal stops before the worker's completion claim reaches the reviewer, ends `failed` plus `blocked`, appears in Activity as `person` / `blocked`, and sends one push notice. This covers both a write on a service outside the inferred scope and an irreversible `DELETE` on a covered service.
 - A service connection with no readable OpenAPI description was reported to the model as a failed discovery ("No JSON OpenAPI found"), and a real model then gave up without trying `service_write`, which needs no description. Discovery now says the service has no description and how to call it anyway (a method and a path from its own documentation), and `service_read` works on such a service for the methods the operator listed in `readMethods`. A Ticket's task also says how the Mandate's service is named in a call.
 - Over `/mcp`, `strm.repair` and `sqmusic_download` ran even when the host had set `THEBE_MCP_WRITES=off`, because the write check matched a fixed list of tool names. Core's own tools are now judged by what they declare (the same `effect` that sets their `readOnlyHint`), so any write tool a Core capability adds is held by `THEBE_MCP_WRITES` and by a token's `mcp:write` scope.
+- A host's `bypassPermissions` no longer extends to unattended or background runs: permission
+  control consults the Ticket's Mandate before the session's bypass, so auto execution writes
+  only within what the Ticket asked for.
+- A Feishu group mention counts as an explicit request only when it names the configured bot
+  open ID or a configured mention name. With `THEBE_FEISHU_BOT_OPEN_ID` unset, any member's `@`
+  no longer bypasses Eval and the Policy and reaches the Main Session as a direct request.
+- The Push Relay's registration route is rate-limited per client (10 per minute by default) and
+  bounded in total registrations, so an anonymous caller cannot grow `registrations.json` until
+  the disk fills.
+- Blocked and completed Ticket notices redact their blocker, summary and final report before
+  posting to the Source's thread, the same way tool output is redacted, so a secret a worker or
+  reviewer quoted cannot leak into a public issue or a group chat.
+- A provider MCP server's own `readOnlyHint` no longer makes its tool a read: the operator names
+  read tools per server (`readTools`, or a server-level `permission: "read"`), and every other
+  tool asks for approval and counts as a write over `/mcp`, held by `THEBE_MCP_WRITES` and a
+  token's `mcp:write`.
+- A Ticket Mandate judges a covered call with the same inputs as the `/mcp` gate: HTTP method,
+  the server's `destructiveHint`, the operator's `irreversible` marks, and the body a confirm
+  token will send. Calls that stop or remove what a service runs (`container_stop`,
+  `POST /api/containers/{id}/stop`, `.../remove`) are irreversible, so a Ticket to restart emby
+  cannot use its `container:write` scope to stop, recreate or reconfigure anything.
+- A GitHub events read that stops at the page limit no longer advances that repository's cursor:
+  what it read is stored and dispatched, the cursor stays behind the unread older events, and
+  the Source reports `failing` with a warning in `GET /v1/health` until a full page-window read
+  succeeds. Feishu's ascending time cursor with its one-second overlap was checked and does not
+  lose events.
+- CI runs again on every push to `dev`, and the container job runs the restored
+  `scripts/check-pi-resolution.mjs` against the pruned production install, so a pi-ai layout
+  change fails the build instead of the release.
 
 ### Added
 
+- `.thebe/mcp.json` servers accept `readTools`, the operator's per-tool confirmation that a
+  provider MCP tool only reads; a tool not named there asks first unless the server is
+  `permission: "read"`.
 - `/mcp` now speaks MCP `2026-07-28` stateless requests without an `initialize` handshake,
   including `server/discover`, required protocol/method/name headers, `resultType`, cache hints,
   deterministic `tools/list` order, and the specification's unsupported-version error. The
