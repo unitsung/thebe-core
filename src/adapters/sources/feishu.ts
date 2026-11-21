@@ -139,7 +139,7 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
           : String(
               Math.max(0, Math.floor(now().getTime() / 1000) - 24 * 60 * 60)
             );
-        const messages = await readMessages({
+        const { messages, truncated } = await readMessages({
           fetcher,
           apiBaseUrl,
           token,
@@ -153,11 +153,20 @@ export function createFeishuSource(options: FeishuSourceOptions): Source {
         const fresh = messages.filter(
           (message) => !seen.has(message.messageId)
         );
-        const latest = messages.reduce(
-          (max, message) =>
-            message.createTime > max ? message.createTime : max,
-          saved.lastCreateTime
-        );
+        // When the window was cut at the page cap, do not advance the cursor past messages
+        // this poll never saw: keep it at the oldest message fetched, so the next poll
+        // re-covers the rest of the window instead of silently dropping it. (H7)
+        const latest = truncated
+          ? messages.reduce(
+              (min, message) =>
+                message.createTime < min ? message.createTime : min,
+              messages[0]?.createTime ?? saved.lastCreateTime
+            )
+          : messages.reduce(
+              (max, message) =>
+                message.createTime > max ? message.createTime : max,
+              saved.lastCreateTime
+            );
         if (!saved.initialized) {
           next.chats[chatId] = {
             initialized: true,
@@ -319,9 +328,12 @@ async function toTrigger(
   const named = policy.mentionNames.some((name) =>
     message.text.includes(`@${name}`)
   );
+  // Without a configured botOpenId, a mention in a group cannot prove the message was addressed
+  // to the bot: @someone or @everyone would otherwise count as explicit and skip Eval. Only an
+  // operator-configured @name still counts; a direct chat is explicit by its mode. (H2)
   const mention = policy.botOpenId
     ? message.mentionIds.includes(policy.botOpenId) || named
-    : message.mentionIds.length > 0 || named;
+    : named;
   const explicit = human && (policy.mode === "p2p" || mention);
   const admission: SourceAdmission = !human
     ? "ignore"
@@ -368,25 +380,41 @@ async function readMessages(input: {
   startTime: string;
   endTime: string;
   signal?: AbortSignal;
-}): Promise<FeishuMessage[]> {
-  const data = await feishuRequest({
-    fetcher: input.fetcher,
-    apiBaseUrl: input.apiBaseUrl,
-    token: input.token,
-    now: input.now,
-    path:
-      "/open-apis/im/v1/messages?container_id_type=chat" +
-      `&container_id=${encodeURIComponent(input.chatId)}` +
-      `&start_time=${input.startTime}&end_time=${input.endTime}` +
-      "&sort_type=ByCreateTimeAsc&page_size=50",
-    method: "GET",
-    signal: input.signal,
-  });
-  const items = recordValue(data)?.items;
-  if (!Array.isArray(items)) return [];
-  return items
-    .map((item) => parseMessage(item, input.chatId))
-    .filter((message): message is FeishuMessage => message !== undefined);
+}): Promise<{ messages: FeishuMessage[]; truncated: boolean }> {
+  const messages: FeishuMessage[] = [];
+  let pageToken: string | undefined;
+  // Follow page_token until Feishu says there is no more, so a burst of messages in one window
+  // is not silently cut at 50. The cap bounds one poll; when it is hit the caller keeps the
+  // cursor where it was instead of advancing past messages it never saw. (H7)
+  for (let page = 0; page < 10; page += 1) {
+    const data = await feishuRequest({
+      fetcher: input.fetcher,
+      apiBaseUrl: input.apiBaseUrl,
+      token: input.token,
+      now: input.now,
+      path:
+        "/open-apis/im/v1/messages?container_id_type=chat" +
+        `&container_id=${encodeURIComponent(input.chatId)}` +
+        `&start_time=${input.startTime}&end_time=${input.endTime}` +
+        "&sort_type=ByCreateTimeAsc&page_size=50" +
+        (pageToken ? `&page_token=${encodeURIComponent(pageToken)}` : ""),
+      method: "GET",
+      signal: input.signal,
+    });
+    const record = recordValue(data);
+    const items = record?.items;
+    if (!Array.isArray(items)) return { messages, truncated: false };
+    messages.push(
+      ...items
+        .map((item) => parseMessage(item, input.chatId))
+        .filter((message): message is FeishuMessage => message !== undefined)
+    );
+    const hasMore = record?.has_more === true;
+    const nextToken = stringValue(record?.page_token);
+    if (!hasMore || !nextToken) return { messages, truncated: false };
+    pageToken = nextToken;
+  }
+  return { messages, truncated: true };
 }
 
 function parseMessage(
