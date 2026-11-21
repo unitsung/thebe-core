@@ -49,7 +49,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
-COPY scripts/smoke.mjs ./scripts/
+COPY scripts/smoke.mjs scripts/check-pi-resolution.mjs ./scripts/
 RUN mkdir -p /data/config /data/agent /data/store /data/outputs /data/home /workspace \
   && chown -R node:node /data /workspace
 USER node

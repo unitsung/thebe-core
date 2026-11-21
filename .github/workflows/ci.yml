@@ -3,7 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, dev]
   merge_group:
   workflow_dispatch:
 
@@ -101,6 +101,9 @@ jobs:
 
       - name: Smoke the image
         run: docker run --rm --entrypoint node thebe-core:ci scripts/smoke.mjs
+
+      - name: Check pi-ai resolves in the pruned production install
+        run: docker run --rm --entrypoint node thebe-core:ci scripts/check-pi-resolution.mjs
 
   success:
     name: Success
