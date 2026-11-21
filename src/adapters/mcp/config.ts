@@ -200,6 +200,13 @@ export type McpServerConfig = {
    * marked destructive as an ordinary write. Overrides are the operator's call, so they win.
    */
   irreversible?: Record<string, boolean>;
+  /**
+   * Per tool (by the server's own tool name): the operator's confirmation that it only reads.
+   * A server's own `readOnlyHint` is not trusted on its own, so a tool not named here asks first
+   * and is held by `THEBE_MCP_WRITES` over `/mcp`. A server-level `permission: "read"` covers all
+   * of its tools.
+   */
+  readTools?: string[];
   /** Passed to the runtime's MCP client: how the model reaches this server's tools. */
   exposure?: McpExposure;
   description?: string;
@@ -220,6 +227,14 @@ function booleanMap(value: unknown): Record<string, boolean> | undefined {
     (entry): entry is [string, boolean] => typeof entry[1] === "boolean"
   );
   return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const entries = value.filter(
+    (entry): entry is string => typeof entry === "string" && entry.length > 0
+  );
+  return entries.length ? entries : undefined;
 }
 
 function stringMap(value: unknown): Record<string, string> | undefined {
@@ -277,6 +292,7 @@ export function listConfiguredMcpServersSync(options?: {
               ? s.permission
               : undefined,
             irreversible: booleanMap(s.irreversible),
+            readTools: stringList(s.readTools),
             exposure:
               typeof s.exposure === "string" && EXPOSURES.includes(s.exposure)
                 ? (s.exposure as McpExposure)

@@ -315,6 +315,8 @@ export type RuntimeMcpServer = {
   exposure?: "codemode" | "deferred" | "direct" | "hidden";
   /** Calls beyond `read` need approval. Without it the tool's own annotations decide. */
   permission?: "read" | "confirm" | "admin";
+  /** The tools (by the server's own name) the operator confirmed as read. */
+  readTools?: string[];
 };
 
 export type RuntimeMcpCall = {
