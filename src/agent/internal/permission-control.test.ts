@@ -76,8 +76,10 @@ describe("a write inside a Ticket's Mandate", () => {
     const handler = permissions.permissionHandler("goal1");
     const ask = (toolName: string, args: unknown = {}) =>
       handler.preflight({ ...request(toolName), args });
-    expect(await ask("container_stop", { name: "emby" })).toBe("allow");
+    expect(await ask("container_restart", { name: "emby" })).toBe("allow");
     for (const tool of [
+      // Stopping what the Ticket only asked to restart is not covered by its Mandate.
+      "container_stop",
       "bash",
       "edit",
       "write",
@@ -124,6 +126,37 @@ describe("a write inside a Ticket's Mandate", () => {
     const handler = permissions.permissionHandler("goal1");
     expect(await handler.preflight(request("bash"))).toBe("deny");
     expect(await handler.preflight(request(RESTART))).toBe("allow");
+  });
+
+  it("keeps the Mandate in force for an unattended Ticket under bypass", async () => {
+    const permissions = control({ goal1: covered }, ["goal1"]);
+    permissions.setPermissionMode("bypassPermissions");
+    const handler = permissions.permissionHandler("goal1");
+    // The write the Ticket authorises still runs without asking...
+    expect(await handler.preflight(request(RESTART))).toBe("allow");
+    // ...but bypass does not hand an eval-created executor authority its Mandate never gave it.
+    expect(await handler.preflight(request("bash"))).toBe("deny");
+    expect(await handler.request({ ...request("bash") })).toBe("deny");
+    expect(permissions.takeMandateDenial("goal1")).toMatchObject({
+      toolName: "bash",
+    });
+  });
+
+  it("keeps bypass for the person's own interactive session", async () => {
+    const permissions = control({ goal1: covered });
+    permissions.setPermissionMode("bypassPermissions");
+    const handler = permissions.permissionHandler("chat");
+    expect(await handler.preflight(request("bash"))).toBe("allow");
+    expect(await handler.request({ ...request("bash") })).toBe("allow");
+  });
+
+  it("keeps a background turn under bypass to its Ticket's Mandate", async () => {
+    const permissions = control({ goal1: covered });
+    permissions.setPermissionMode("bypassPermissions");
+    permissions.nonInteractiveRuns.add("goal1");
+    const handler = permissions.permissionHandler("goal1");
+    expect(await handler.preflight(request(RESTART))).toBe("allow");
+    expect(await handler.preflight(request("bash"))).toBe("deny");
   });
 
   it("keeps the first Mandate refusal for the Goal to turn into a blocker", async () => {

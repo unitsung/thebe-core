@@ -63,7 +63,11 @@ import {
   createPipelineAdvancer,
   DEFAULT_INTERVAL_MS as PIPELINE_ADVANCE_INTERVAL_MS,
 } from "../pipeline/advancer.ts";
-import {} from "../capabilities/service-api.ts";
+import {
+  serviceCallContext,
+  SERVICE_API_OPERATION_PREFIX,
+  SERVICE_API_WRITE_TOOL_NAME,
+} from "../capabilities/service-api.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
@@ -479,6 +483,32 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
+  /**
+   * The same classification context the `/mcp` gate resolves for a service call: the operation's
+   * method and the operator's mark. A provider tool keeps its server's own hint, which the runtime
+   * applies to it; a Mandate does not cover it by name.
+   */
+  async function mandateCallContext(request: PermissionRequest) {
+    const { toolName } = request;
+    if (
+      toolName !== SERVICE_API_WRITE_TOOL_NAME &&
+      !toolName.startsWith(SERVICE_API_OPERATION_PREFIX)
+    ) {
+      return undefined;
+    }
+    const args =
+      request.args &&
+      typeof request.args === "object" &&
+      !Array.isArray(request.args)
+        ? (request.args as Record<string, unknown>)
+        : {};
+    return serviceCallContext(
+      options.serviceAPIProviders ?? [],
+      toolName,
+      args
+    );
+  }
+
   const permissions = createPermissionControl({
     initialMode: options.permissionMode,
     sessionMode: sessionModeOf,
@@ -497,7 +527,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       mandateAllows(
         await mandateLookup?.(thebeSessionId),
         request.toolName,
-        request.args
+        request.args,
+        await mandateCallContext(request)
       ),
     unattended: async (thebeSessionId) =>
       isUnattended(await mandateLookup?.(thebeSessionId)),
@@ -505,7 +536,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       mandateRefusal(
         await mandateLookup?.(thebeSessionId),
         request.toolName,
-        request.args
+        request.args,
+        await mandateCallContext(request)
       ),
     preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,

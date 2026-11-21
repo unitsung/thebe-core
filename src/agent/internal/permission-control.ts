@@ -85,6 +85,23 @@ export function createPermissionControl(input: {
     return (await input.unattended?.(thebeSessionId)) === true;
   }
 
+  /**
+   * A bypass the person granted their own session does not follow the work into a turn nobody is
+   * watching: an unattended Ticket executor, or a background run, may still do only what its Mandate
+   * covers. Without that, a host-level bypass would hand automatic work authority over every service.
+   */
+  async function bypassLeavesTheMandate(
+    thebeSessionId: string | undefined,
+    request: PermissionRequest
+  ): Promise<boolean> {
+    if (!thebeSessionId) return false;
+    if (!(await noOneIsThere(thebeSessionId))) return false;
+    const allowed = await input
+      .mandateAllows?.(thebeSessionId, request)
+      .catch(() => false);
+    return allowed !== true;
+  }
+
   function permissionMode(): PermissionMode {
     return mode;
   }
@@ -183,8 +200,13 @@ export function createPermissionControl(input: {
         );
         if (remembered === "deny") return deny(thebeSessionId, request);
         // Bypass lifts the command guard and the sandbox; an explicit remembered
-        // denial and the workspace boundary still win.
-        if (bypass) return "allow";
+        // denial and the workspace boundary still win, and a turn nobody is watching
+        // is still held to its Ticket's Mandate.
+        if (bypass) {
+          if (await bypassLeavesTheMandate(thebeSessionId, request))
+            return deny(thebeSessionId, request);
+          return "allow";
+        }
         if (
           effective === "plan" &&
           !input.workspaceReadTools.includes(request.toolName)
@@ -215,7 +237,11 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return deny(thebeSessionId, request);
-        if (effective === "bypassPermissions") return "allow";
+        if (effective === "bypassPermissions") {
+          if (await bypassLeavesTheMandate(thebeSessionId, request))
+            return deny(thebeSessionId, request);
+          return "allow";
+        }
         if (effective === "plan") {
           return input.workspaceReadTools.includes(request.toolName)
             ? "allow"

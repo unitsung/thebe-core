@@ -3,7 +3,10 @@ import {
   SERVICE_ARGUMENT,
 } from "../capabilities/service-api.ts";
 import type { Policy } from "../eval/types.ts";
-import { irreversibleReason } from "../security/irreversible.ts";
+import {
+  irreversibleReason,
+  type IrreversibleContext,
+} from "../security/irreversible.ts";
 import type { Trigger } from "../sources/types.ts";
 import type { TicketMandate } from "./types.ts";
 
@@ -182,19 +185,22 @@ export function isUnattended(
 export function mandateAllows(
   mandate: Pick<TicketMandate, "scope"> | undefined,
   toolName: string,
-  args?: unknown
+  args?: unknown,
+  context?: IrreversibleContext
 ): boolean {
-  return mandateRefusal(mandate, toolName, args) === undefined;
+  return mandateRefusal(mandate, toolName, args, context) === undefined;
 }
 
 /**
  * Why a Mandate refuses this call, for the executor to report as a blocker. An allowed call has no
- * refusal.
+ * refusal. `context` carries what the `/mcp` gate resolves around the same call — an operation's
+ * method and the operator's mark, or a provider tool's destructive hint — so both judge it alike.
  */
 export function mandateRefusal(
   mandate: Pick<TicketMandate, "scope"> | undefined,
   toolName: string,
-  args?: unknown
+  args?: unknown,
+  context: IrreversibleContext = {}
 ): string | undefined {
   const record =
     args && typeof args === "object" && !Array.isArray(args)
@@ -209,14 +215,17 @@ export function mandateRefusal(
   }
   // A generic service call says its HTTP method; a DELETE is never covered.
   const httpMethod =
-    toolName === SERVICE_API_WRITE_TOOL_NAME &&
+    context.httpMethod ??
+    (toolName === SERVICE_API_WRITE_TOOL_NAME &&
     typeof record.method === "string"
       ? record.method
-      : undefined;
+      : undefined);
   const irreversible = irreversibleReason({
     name: toolName,
-    args: record,
+    args: { ...record, ...context.sends },
     httpMethod,
+    destructiveHint: context.destructiveHint,
+    operatorMark: context.operatorMark,
   });
   if (irreversible) {
     return `${toolName} ${irreversible}, so this Ticket's Mandate does not authorize it.`;
