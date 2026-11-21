@@ -312,9 +312,10 @@ describe("explicit Source event to direct Ticket to idempotent writeback", () =>
       ).toEqual(["ticket-worker"]);
 
       // The blocked notice reaches the issue through the Source's own channel, with its marker.
+      // It carries only the fixed template; the blocker detail stays in Core. (H4)
       await vi.waitFor(() => expect(api.posts).toHaveLength(1));
-      expect(api.posts[0]).toContain("A task is blocked and needs you");
-      expect(api.posts[0]).toContain("The backup account is missing");
+      expect(api.posts[0]).toContain("A task is blocked and needs you.");
+      expect(api.posts[0]).not.toContain("The backup account is missing");
       expect(api.posts[0]).toMatch(/<!-- thebe-notice:[a-f0-9]{32} -->/);
 
       // The first POST was accepted but the client saw a failure. The outbox retries; the marker makes
@@ -418,8 +419,10 @@ describe("explicit Source event to direct Ticket to idempotent writeback", () =>
       await vi.waitFor(() => expect(api.attempts).toHaveLength(1));
       expect(api.delivered).toHaveLength(1);
       expect(api.delivered[0]!.uuid).toMatch(/^[a-f0-9]{32}$/);
-      expect(api.delivered[0]!.text).toContain("A task is blocked and needs you");
-      expect(api.delivered[0]!.text).toContain("The backup account is missing");
+      expect(api.delivered[0]!.text).toContain("A task is blocked and needs you.");
+      expect(api.delivered[0]!.text).not.toContain(
+        "The backup account is missing"
+      );
 
       // The retry reuses the same uuid, which is Feishu's idempotency key for a text message.
       await vi.advanceTimersByTimeAsync(10_000);
