@@ -182,10 +182,40 @@ export function isUnattended(
 export function mandateAllows(
   mandate: Pick<TicketMandate, "scope"> | undefined,
   toolName: string,
-  args?: unknown
+  args?: unknown,
+  context?: MandateIrreversibleContext
 ): boolean {
-  return mandateRefusal(mandate, toolName, args) === undefined;
+  return mandateRefusal(mandate, toolName, args, context) === undefined;
 }
+
+/**
+ * What a caller that knows more about the call can tell the Mandate check: a provider MCP tool's
+ * destructive hint, or the operator's own irreversible mark on a service API operation. Both are
+ * consulted by the /mcp gate already; the Mandate check used to drop them. (H6)
+ */
+export type MandateIrreversibleContext = {
+  destructiveHint?: boolean;
+  operatorMark?: boolean;
+};
+
+/** The destructive hint embedded in a tool call's arguments, if the caller put it there. */
+function destructiveHintFromArgs(
+  args: Record<string, unknown>
+): boolean | undefined {
+  return typeof args.destructiveHint === "boolean"
+    ? args.destructiveHint
+    : undefined;
+}
+
+/** Path segments that make a write a deletion even when the method is not DELETE. */
+const DELETE_PATH_SEGMENTS = new Set([
+  "delete",
+  "remove",
+  "purge",
+  "empty",
+  "trash",
+  "clear",
+]);
 
 /**
  * Why a Mandate refuses this call, for the executor to report as a blocker. An allowed call has no
@@ -194,7 +224,8 @@ export function mandateAllows(
 export function mandateRefusal(
   mandate: Pick<TicketMandate, "scope"> | undefined,
   toolName: string,
-  args?: unknown
+  args?: unknown,
+  context?: MandateIrreversibleContext
 ): string | undefined {
   const record =
     args && typeof args === "object" && !Array.isArray(args)
@@ -213,13 +244,33 @@ export function mandateRefusal(
     typeof record.method === "string"
       ? record.method
       : undefined;
+  // The operator's mark comes only from configuration (an explicit argument here), never from a
+  // tool call's own arguments: a model must not be able to clear it by passing operatorMark: false.
   const irreversible = irreversibleReason({
     name: toolName,
     args: record,
     httpMethod,
+    destructiveHint:
+      context?.destructiveHint ?? destructiveHintFromArgs(record),
+    operatorMark: context?.operatorMark,
   });
   if (irreversible) {
     return `${toolName} ${irreversible}, so this Ticket's Mandate does not authorize it.`;
+  }
+  // A write to a delete-style path (POST /trash/empty, POST /playlists/{id}/delete) deletes
+  // something even though its method is not DELETE, so the Mandate does not cover it either. (H6)
+  if (
+    toolName === SERVICE_API_WRITE_TOOL_NAME &&
+    typeof httpMethod === "string" &&
+    httpMethod.toUpperCase() !== "DELETE" &&
+    typeof record.path === "string" &&
+    record.path
+      .split("/")
+      .some((segment) =>
+        DELETE_PATH_SEGMENTS.has(segment.toLowerCase().split("?")[0] ?? "")
+      )
+  ) {
+    return `${toolName} sends ${httpMethod} to a delete-style path (${record.path}), so this Ticket's Mandate does not authorize it.`;
   }
   return undefined;
 }

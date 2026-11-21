@@ -77,6 +77,8 @@ function mcpFixture(
     block?: string;
     enabled?: boolean;
     exposure?: "codemode" | "deferred";
+    /** What the operator configured for the server; omitted means unconfirmed. */
+    permission?: "read" | "confirm";
   } = {}
 ) {
   const script = [
@@ -124,6 +126,7 @@ function mcpFixture(
         enabled,
         exposure: initial.exposure ?? "deferred",
         env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
+        ...(initial.permission ? { permission: initial.permission } : {}),
       },
     ],
     async beforeCall(call: { toolName: string }) {
@@ -430,9 +433,40 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
-  it("does not ask for a tool the server marks read-only", async () => {
+  it("asks about a provider tool even when the server marks it read-only (H5)", async () => {
     const { faux, runtime } = await piWithFaux();
     const mcp = mcpFixture();
+    const request = vi.fn(async () => "deny" as const);
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "remote catalog", limit: 1 }),
+      ]),
+      fauxAssistantMessage([
+        fauxToolCall("mcp__fixture__catalog", { query: "music" }),
+      ]),
+      fauxAssistantMessage("denied"),
+    ]);
+    const session = await runtime.createSession({
+      customTools: [],
+      builtinTools: ["read"],
+      permissionHandler: { request },
+      mcp: mcp.options,
+    });
+    try {
+      await session.prompt("search");
+      // The server's readOnlyHint is its own claim, so it no longer exempts the call.
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "mcp__fixture__catalog" })
+      );
+      expect(mcp.calls()).not.toContain("catalog");
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("does not ask when the operator confirmed the server read-only", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const mcp = mcpFixture({ permission: "read" });
     const request = vi.fn(async () => "deny" as const);
     faux.setResponses([
       fauxAssistantMessage([
@@ -452,6 +486,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     try {
       await session.prompt("search");
       expect(request).not.toHaveBeenCalled();
+      expect(mcp.calls()).toContain("catalog");
     } finally {
       session.dispose();
     }
@@ -497,7 +532,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     faux.setResponses([
       fauxAssistantMessage([
         fauxToolCall("codemode", {
-          code: "const r = await tools.mcp__fixture__leak({}); text(JSON.stringify(r)); try { await tools.mcp__fixture__publish({ id: 'p' }); } catch (e) { text('publish failed: ' + e.message); }",
+          code: "try { await tools.mcp__fixture__publish({ id: 'p' }); } catch (e) { text('publish failed: ' + e.message); } const r = await tools.mcp__fixture__leak({}); text(JSON.stringify(r));",
         }),
       ]),
       fauxAssistantMessage("done"),
@@ -515,10 +550,16 @@ describe("PiCodingAgentRuntime sessions", () => {
       expect(request).toHaveBeenCalledWith(
         expect.objectContaining({ toolName: "mcp__fixture__publish" })
       );
-      expect(mcp.calls()).toEqual(["leak"]);
+      // A provider tool is asked about even when it claims to be read-only: its readOnlyHint
+      // is its own claim, not the operator's. The denial stops the script before the leak
+      // runs, so nothing reaches the server. (H5)
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "mcp__fixture__leak" })
+      );
+      expect(mcp.calls()).toEqual([]);
       expect(mcp.before.map((call) => call.toolName)).toEqual([
-        "mcp__fixture__leak",
         "mcp__fixture__publish",
+        "mcp__fixture__leak",
       ]);
     } finally {
       session.dispose();

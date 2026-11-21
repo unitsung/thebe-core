@@ -184,13 +184,25 @@ export function createPermissionControl(input: {
         if (remembered === "deny") return deny(thebeSessionId, request);
         // Bypass lifts the command guard and the sandbox; an explicit remembered
         // denial and the workspace boundary still win.
-        if (bypass) return "allow";
         if (
           effective === "plan" &&
           !input.workspaceReadTools.includes(request.toolName)
         )
           return deny(thebeSessionId, request);
         if (policy === "allow" || remembered === "allow") return "allow";
+        // Bypass does not lift the Mandate for an unattended run: a Ticket Eval
+        // accepted on its own must stay inside its Mandate even when the host
+        // runs in bypassPermissions, or an auto executor would inherit full
+        // access with nobody watching. (H1)
+        if (
+          bypass &&
+          thebeSessionId &&
+          (await noOneIsThere(thebeSessionId))
+        ) {
+          const allowed = await input.mandateAllows?.(thebeSessionId, request);
+          if (allowed === false) return deny(thebeSessionId, request);
+        }
+        if (bypass) return "allow";
         if (
           thebeSessionId &&
           (await input.mandateAllows?.(thebeSessionId, request)) === true
@@ -215,7 +227,17 @@ export function createPermissionControl(input: {
           request
         );
         if (remembered === "deny") return deny(thebeSessionId, request);
-        if (effective === "bypassPermissions") return "allow";
+        // As in preflight: bypass does not lift the Mandate for an unattended
+        // run. (H1)
+        if (effective === "bypassPermissions") {
+          if (
+            thebeSessionId &&
+            (await noOneIsThere(thebeSessionId)) &&
+            (await input.mandateAllows?.(thebeSessionId, request)) === false
+          )
+            return deny(thebeSessionId, request);
+          return "allow";
+        }
         if (effective === "plan") {
           return input.workspaceReadTools.includes(request.toolName)
             ? "allow"

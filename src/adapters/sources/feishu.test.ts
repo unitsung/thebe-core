@@ -14,6 +14,7 @@ function message(overrides: {
   senderType?: string;
   senderId?: string;
   mentionBot?: boolean;
+  mentionIds?: string[];
 }): Message {
   return {
     message_id: overrides.id,
@@ -27,7 +28,10 @@ function message(overrides: {
     body: { content: JSON.stringify({ text: overrides.text }) },
     mentions: overrides.mentionBot
       ? [{ id: { open_id: "ou_thebe" }, name: "Thebe" }]
-      : [],
+      : (overrides.mentionIds ?? []).map((id) => ({
+          id: { open_id: id },
+          name: "Someone",
+        })),
   };
 }
 
@@ -264,6 +268,59 @@ describe("Feishu Source", () => {
     const read = await source.read(baseline.cursor);
     expect(read.triggers[0]?.admission).toBe("inferred");
   });
+
+  it("does not treat @anyone as explicit when no BOT_OPEN_ID is configured (H2)", async () => {
+    const feishu = fakeFeishu({});
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_8",
+        text: "@_user_1 please restart emby",
+        time: "1762850700000",
+        mentionIds: ["ou_someone_else"],
+      }),
+      message({
+        id: "om_9",
+        text: "@everyone look at this",
+        time: "1762850800000",
+        mentionIds: ["ou_all"],
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers.map((trigger) => trigger.admission)).toEqual([
+      "ignore",
+      "ignore",
+    ]);
+  });
+
+  it("still treats an operator-configured @name as explicit without BOT_OPEN_ID (H2)", async () => {
+    const feishu = fakeFeishu({});
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      mentionNames: ["thebe"],
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_10",
+        text: "@thebe restart emby",
+        time: "1762850900000",
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers[0]?.admission).toBe("explicit");
+  });
 });
 
 describe("Feishu polling", () => {
@@ -307,6 +364,68 @@ describe("Feishu polling", () => {
 
     expect(first.triggers).toHaveLength(1);
     expect(again.triggers).toEqual([]);
+  });
+
+  it("follows page_token so messages past the first page are not dropped (H7)", async () => {
+    const pages = new Map<string, Message[]>();
+    const requested: string[] = [];
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (url.includes("/auth/v3/tenant_access_token")) {
+        return Response.json({
+          code: 0,
+          tenant_access_token: "token-1",
+          expire: 7200,
+        });
+      }
+      if (url.includes("/im/v1/chats/")) {
+        return Response.json({ code: 0, data: { chat_mode: "group" } });
+      }
+      if (url.includes("/im/v1/messages")) {
+        requested.push(url);
+        const token = new URL(url).searchParams.get("page_token") ?? "";
+        const items = pages.get(token) ?? [];
+        const next = token === "" ? "tok2" : undefined;
+        return Response.json({
+          code: 0,
+          data: {
+            items,
+            ...(next ? { has_more: true, page_token: next } : {}),
+          },
+        });
+      }
+      return Response.json({ code: 404, msg: "not found" });
+    }) as typeof fetch;
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      botOpenId: "ou_thebe",
+      fetch: fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    pages.set("", [
+      message({
+        id: "om_p1",
+        text: "@_user_1 first",
+        mentionBot: true,
+        time: "1762850400000",
+      }),
+    ]);
+    pages.set("tok2", [
+      message({
+        id: "om_p2",
+        text: "@_user_1 second",
+        mentionBot: true,
+        time: "1762850500000",
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers).toHaveLength(2);
+    expect(requested.some((url) => url.includes("page_token=tok2"))).toBe(
+      true
+    );
   });
 });
 

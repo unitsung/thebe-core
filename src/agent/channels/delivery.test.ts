@@ -159,9 +159,52 @@ describe("Ticket channel notifications", () => {
     expect(sent[0]?.notice).toMatchObject({
       type: "goal_completed",
       ticketId: ticket.id,
-      message: "A task is complete: the backup set was verified.",
+      message: "A task is complete.",
     });
     expect(sent[0]?.idempotencyKey).toMatch(/^[a-f0-9]{32}$/);
+    await notifier.stop();
+  });
+
+  it("sends only a fixed template to the channel, never the run's error or report (H4)", async () => {
+    const { tickets, ticket } = await acceptedTicket();
+    const sent: ChannelSendInput[] = [];
+    const notifier = createTicketChannelNotifier({
+      tickets,
+      adapters: [
+        {
+          id: channel.source,
+          accepts: () => true,
+          send: async (input) => {
+            sent.push(input);
+          },
+        },
+      ],
+    });
+
+    await notifier.enqueueNeedsPerson({
+      id: "goal-1:blocked:2026-11-06T10:02:00.000Z",
+      goalId: "goal-1",
+      ticketId: ticket.id,
+      reason: "blocked",
+      message:
+        "A task is blocked and needs you: connect ECONNREFUSED 192.168.1.10:8096 token=sk-secret abc123",
+    });
+    await notifier.enqueueCompleted({
+      id: "goal-1:completed:2026-11-06T10:05:00.000Z",
+      goalId: "goal-1",
+      ticketId: ticket.id,
+      message: "A task is complete: /data/media/library verified, key=sk-secret",
+    });
+    await notifier.flush();
+
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.notice.message).toBe("A task is blocked and needs you.");
+    expect(sent[1]?.notice.message).toBe("A task is complete.");
+    for (const input of sent) {
+      expect(input.notice.message).not.toContain("192.168.1.10");
+      expect(input.notice.message).not.toContain("sk-secret");
+      expect(input.notice.message).not.toContain("/data/media");
+    }
     await notifier.stop();
   });
 

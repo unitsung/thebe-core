@@ -7,6 +7,9 @@ const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 const MAX_BODY = 8 * 1024;
 const MAX_SKEW_SECONDS = 300;
 const EVENTS_PER_MINUTE = 30;
+/** Registrations one client address may make per minute, and the total the relay will hold. */
+const REGISTRATIONS_PER_MINUTE = 30;
+const MAX_REGISTRATIONS = 1000;
 /** How long a delivered event id is remembered. Core retries one notice under one id. */
 const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -83,6 +86,22 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
   const idFor = (token, publicKey) =>
     `rl_${createHash("sha256").update(`${token}\n${publicKey}`).digest("hex").slice(0, 32)}`;
 
+  /** Registration attempts per client address in the last minute, so one address cannot flood
+   * the relay with random tokens. The relay sits behind a reverse proxy in production, so the
+   * proxy should rate-limit too: here every client behind it shares one address. (H3) */
+  const recentRegistrations = new Map();
+  function underRegistrationLimit(address) {
+    const cutoff = now() - 60_000;
+    const key = address ?? "unknown";
+    const stamps = (recentRegistrations.get(key) ?? []).filter(
+      (stamp) => stamp > cutoff
+    );
+    if (stamps.length >= REGISTRATIONS_PER_MINUTE) return false;
+    stamps.push(now());
+    recentRegistrations.set(key, stamps);
+    return true;
+  }
+
   function verifySignature(event, publicKey) {
     try {
       const key = createPublicKey({
@@ -113,7 +132,7 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
   const isText = (value, max) =>
     typeof value === "string" && value.length > 0 && value.length <= max;
 
-  async function register(body) {
+  async function register(body, remoteAddress) {
     const { apnsToken, corePublicKey, environment } = body;
     if (!isText(apnsToken, 200) || !/^[0-9a-fA-F]+$/.test(apnsToken))
       return [400, { error: "apnsToken must be hex" }];
@@ -129,7 +148,22 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     if (environment !== "development" && environment !== "production") {
       return [400, { error: "environment must be development or production" }];
     }
+    if (!underRegistrationLimit(remoteAddress))
+      return [429, { error: "too many registrations" }];
     const id = idFor(apnsToken, corePublicKey);
+    const existing = registrations.get(id);
+    // Re-registering the same device changes nothing: answer without rewriting the whole
+    // registrations file, so a repeat registration is cheap instead of an O(n) sync write. (H3)
+    if (
+      existing &&
+      existing.apnsToken === apnsToken &&
+      existing.corePublicKey === corePublicKey &&
+      existing.environment === environment
+    ) {
+      return [200, { ok: true, relayDeviceId: id }];
+    }
+    if (!existing && registrations.size >= MAX_REGISTRATIONS)
+      return [429, { error: "too many registrations" }];
     registrations.set(id, {
       apnsToken,
       corePublicKey,
@@ -225,12 +259,12 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     return [502, { error: "APNs refused the notice", reason: result.reason }];
   }
 
-  async function route(request, body) {
+  async function route(request, body, remoteAddress) {
     const url = new URL(request.url, "http://relay");
     if (request.method === "GET" && url.pathname === "/healthz")
       return [200, { ok: true }];
     if (request.method === "POST" && url.pathname === "/v1/registrations")
-      return register(body);
+      return register(body, remoteAddress);
     if (request.method === "POST" && url.pathname === "/v1/events")
       return deliver(body);
     const match = /^\/v1\/registrations\/([\w-]+)$/.exec(url.pathname);
@@ -258,7 +292,11 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
         return;
       }
       try {
-        const [status, payload] = await route(request, body ?? {});
+        const [status, payload] = await route(
+          request,
+          body ?? {},
+          request.socket.remoteAddress
+        );
         response
           .writeHead(status, { "content-type": "application/json" })
           .end(JSON.stringify(payload));

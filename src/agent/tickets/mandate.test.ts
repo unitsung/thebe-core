@@ -227,6 +227,70 @@ describe("what a Mandate covers, call by call", () => {
     ).toBe(false);
   });
 
+  it("does not cover a write to a delete-style path, even when its method is not DELETE (H6)", () => {
+    const radarr = { scope: ["radarr:write"] };
+    expect(
+      mandateAllows(radarr, "service_write", {
+        service: "radarr",
+        method: "POST",
+        path: "/api/v3/movie/1/delete",
+      })
+    ).toBe(false);
+    expect(
+      mandateAllows(radarr, "service_write", {
+        service: "radarr",
+        method: "POST",
+        path: "/api/trash/empty",
+      })
+    ).toBe(false);
+    // An ordinary write to a path that merely contains a delete-style word is still covered.
+    expect(
+      mandateAllows(radarr, "service_write", {
+        service: "radarr",
+        method: "POST",
+        path: "/api/v3/movie/1",
+      })
+    ).toBe(true);
+  });
+
+  it("does not drop a destructive hint or an operator mark the caller already knows (H6)", () => {
+    const radarr = { scope: ["radarr:write"] };
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "POST", path: "/api/v3/movie/1" },
+        { destructiveHint: true }
+      )
+    ).toBe(false);
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "POST", path: "/api/v3/movie/1" },
+        { operatorMark: true }
+      )
+    ).toBe(false);
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "POST", path: "/api/v3/movie/1" },
+        { operatorMark: false }
+      )
+    ).toBe(true);
+    // An operator mark never comes from the tool call's own arguments: a model
+    // must not be able to clear it by passing operatorMark: false.
+    expect(
+      mandateAllows(radarr, "service_write", {
+        service: "radarr",
+        method: "POST",
+        path: "/api/v3/movie/1",
+        operatorMark: false,
+      })
+    ).toBe(true);
+  });
+
   it("explains a refusal with the tool and the service boundary", () => {
     expect(
       mandateRefusal({ scope: ["download:write"] }, "service_write", {

@@ -148,7 +148,11 @@ export function createTicketChannelNotifier(options: {
         goalId: notice.goalId,
         type: "goal_needs_person",
         reason: notice.reason,
-        message: notice.message,
+        // The Ticket's channel can be a public GitHub issue or a group chat, so it gets a fixed
+        // template only: the caller-supplied message may quote the run's error or final report,
+        // which can carry hostnames, paths, tokens and other internal detail. The person sees
+        // the detail in Core or on their own push notification instead. (H4)
+        message: channelNoticeMessage(notice.reason),
       },
     });
   }
@@ -164,7 +168,8 @@ export function createTicketChannelNotifier(options: {
         id: notice.id,
         goalId: notice.goalId,
         type: "goal_completed",
-        message: notice.message,
+        // Same fixed-template rule as above: no final-report text leaves Core for a channel. (H4)
+        message: "A task is complete.",
       },
     });
   }
@@ -186,6 +191,22 @@ export function createTicketChannelNotifier(options: {
     flush: outbox.flush,
     pending: outbox.pending,
   };
+}
+
+/** Fixed text for a needs-person notice sent to a Ticket channel. No run detail leaves Core. */
+function channelNoticeMessage(
+  reason: GoalNeedsPersonNotice["reason"]
+): string {
+  switch (reason) {
+    case "blocked":
+      return "A task is blocked and needs you.";
+    case "stalled":
+      return "A task stopped making progress and needs you.";
+    case "review":
+      return "A task finished and is ready for your review.";
+    case "answer":
+      return "A task has a question for you.";
+  }
 }
 
 function ticketChannelNoticeKey(

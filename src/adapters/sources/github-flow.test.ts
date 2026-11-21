@@ -321,10 +321,12 @@ describe("GitHub Source through Eval and the Ticket executor", () => {
     );
 
     // The outbox sends through the same ChannelRef the Source stored on the Ticket, and the
-    // adapter deduplicates retries with the marker it writes into the comment.
+    // adapter deduplicates retries with the marker it writes into the comment. The comment
+    // carries only the fixed template: the blocker detail stays in Core, it does not go to
+    // the issue. (H4)
     await vi.waitFor(() => expect(feed.comments).toHaveLength(1));
-    expect(feed.comments[0]).toContain("A task is blocked and needs you");
-    expect(feed.comments[0]).toContain("The backup account is missing");
+    expect(feed.comments[0]).toContain("A task is blocked and needs you.");
+    expect(feed.comments[0]).not.toContain("The backup account is missing");
     expect(feed.comments[0]).toContain("<!-- thebe-notice:");
 
     await app.agent.quiesce();

@@ -140,3 +140,31 @@ describe("a write inside a Ticket's Mandate", () => {
     expect(permissions.takeMandateDenial("goal1")).toBeUndefined();
   });
 });
+
+describe("bypassPermissions and an unattended run (H1)", () => {
+  const covered = { scope: ["container:write"] };
+
+  it("still allows what the Ticket's Mandate covers", async () => {
+    const permissions = control({ goal1: covered }, ["goal1"]);
+    permissions.setPermissionMode("bypassPermissions");
+    const handler = permissions.permissionHandler("goal1");
+    expect(await handler.preflight(request(RESTART))).toBe("allow");
+  });
+
+  it("does not let an unattended run inherit bypass for what the Mandate does not cover", async () => {
+    const permissions = control({ goal1: covered }, ["goal1"]);
+    permissions.setPermissionMode("bypassPermissions");
+    const handler = permissions.permissionHandler("goal1");
+    expect(await handler.preflight(request("bash"))).toBe("deny");
+    expect(await handler.request({ ...request("bash") })).toBe("deny");
+    expect(await handler.preflight(request("download_add"))).toBe("deny");
+  });
+
+  it("leaves an attended session in bypassPermissions alone", async () => {
+    const permissions = control({ goal1: covered });
+    permissions.setPermissionMode("bypassPermissions");
+    const handler = permissions.permissionHandler("chat");
+    expect(await handler.preflight(request("bash"))).toBe("allow");
+    expect(await handler.request({ ...request("bash") })).toBe("allow");
+  });
+});

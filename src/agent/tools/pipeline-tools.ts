@@ -253,8 +253,13 @@ export function createPipelineTools(
       },
       true
     );
-    define("pipeline_advance", async (args) =>
-      view(await book.advance(requiredString(args.jobId, "jobId")))
+    define(
+      "pipeline_advance",
+      async (args) => view(await book.advance(requiredString(args.jobId, "jobId"))),
+      // Advancing a job performs real external writes (download/copy/scan), so
+      // it must ask like pipeline_acquire does; without this the executor could
+      // advance any pipeline job outside its Ticket's Mandate. (M27)
+      true
     );
     define("pipeline_status", (args) => ({
       jobs: book.status(optionalString(args.jobId)).map(view),
