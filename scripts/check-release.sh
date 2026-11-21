@@ -42,6 +42,9 @@ echo "== lint: $bin/oxlint"
 echo "== build: $bin/tsdown"
 "$bin/tsdown"
 
+echo "== pi layout: node scripts/check-pi-layout.mjs"
+node scripts/check-pi-layout.mjs
+
 echo "== test: $bin/vitest run"
 "$bin/vitest" run
 
