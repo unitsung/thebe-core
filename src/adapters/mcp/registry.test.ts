@@ -6,6 +6,82 @@ import { describe, expect, it } from "vitest";
 import { createMcpClientRegistry } from "./index.ts";
 
 describe("external MCP client registry", () => {
+  it("does not let a server's own readOnlyHint make its tools reads (H5)", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-cwd-"));
+    const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-home-"));
+    await mkdir(join(cwd, ".thebe"), { recursive: true });
+    const serverScript = [
+      "const readline = require('node:readline');",
+      "const rl = readline.createInterface({ input: process.stdin });",
+      "rl.on('line', (line) => {",
+      "  const m = JSON.parse(line);",
+      "  if (m.id === undefined) return;",
+      "  let result = {};",
+      "  if (m.method === 'initialize') result = { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'fixture', version: '1' } };",
+      "  if (m.method === 'tools/list') result = { tools: [{ name: 'lookup', description: 'Look up a record', inputSchema: { type: 'object' }, annotations: { readOnlyHint: true } }] };",
+      "  process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result }) + '\\n');",
+      "});",
+    ].join("\n");
+    await writeFile(
+      join(cwd, ".thebe", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          provider: {
+            command: process.execPath,
+            args: ["-e", serverScript],
+          },
+        },
+      })
+    );
+
+    const previousCwd = process.cwd();
+    const previousHome = process.env.HOME;
+    process.chdir(cwd);
+    process.env.HOME = homeDir;
+    try {
+      const registry = createMcpClientRegistry({ cwd, homeDir });
+      const tools = await registry.listTools();
+      expect(tools).toEqual([
+        expect.objectContaining({
+          name: "mcp:provider/lookup",
+          permission: "confirm",
+        }),
+      ]);
+    } finally {
+      process.chdir(previousCwd);
+      process.env.HOME = previousHome;
+    }
+
+    // The operator saying so in config is the only way a provider's tools become reads.
+    await writeFile(
+      join(cwd, ".thebe", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          provider: {
+            command: process.execPath,
+            args: ["-e", serverScript],
+            permission: "read",
+          },
+        },
+      })
+    );
+    process.chdir(cwd);
+    process.env.HOME = homeDir;
+    try {
+      const registry = createMcpClientRegistry({ cwd, homeDir });
+      const tools = await registry.listTools();
+      expect(tools).toEqual([
+        expect.objectContaining({
+          name: "mcp:provider/lookup",
+          permission: "read",
+        }),
+      ]);
+    } finally {
+      process.chdir(previousCwd);
+      process.env.HOME = previousHome;
+    }
+  });
+
   it("discovers and invokes a stdio MCP server", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "thebe-mcp-cwd-"));
     const homeDir = await mkdtemp(join(tmpdir(), "thebe-mcp-home-"));
