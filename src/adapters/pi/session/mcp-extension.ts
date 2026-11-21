@@ -70,8 +70,9 @@ export function createMcpGuardExtension(sdk: PiSdk, mcp: RuntimeMcpOptions, perm
 
       const server = serverFor(event.toolName);
       if (!server) return undefined; // MCP resource tools only read.
-      const hints = pi.getAllTools().find((tool) => tool.name === event.toolName)?.annotations;
-      const needsApproval = server.permission ? server.permission !== "read" : hints?.readOnlyHint !== true;
+      // A provider's readOnlyHint is its own claim about its tools, so it never exempts a
+      // call: only the operator setting permission: "read" for the server does. (H5)
+      const needsApproval = server.permission !== "read";
       if (!needsApproval || !permission) return undefined;
 
       const request: PermissionRequest = {
