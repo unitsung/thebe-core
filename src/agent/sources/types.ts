@@ -66,5 +66,11 @@ export type Source = {
   ): Promise<{
     triggers: Trigger[];
     cursor: string;
+    /**
+     * Set when the read covered only part of what the Source can see and left the cursor behind:
+     * what it read is stored and dispatched, but the Source reports `failing` until a full read
+     * succeeds, so a truncated feed is an alert rather than silent loss.
+     */
+    warning?: string;
   }>;
 };

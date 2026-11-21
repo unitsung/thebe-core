@@ -247,6 +247,55 @@ describe("Feishu Source", () => {
     expect(settled.triggers).toEqual([]);
   });
 
+  it("does not treat any group mention as the bot when no bot id is configured", async () => {
+    const feishu = fakeFeishu({ mode: "group" });
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_other",
+        text: "@张三点评一下",
+        time: "1762850200000",
+        mentionBot: true,
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    // Without `botOpenId` the mention could be anyone: it cannot be an explicit request to Thebe.
+    expect(read.triggers[0]?.admission).toBe("ignore");
+    expect(read.triggers[0]?.addressed).toBe("direct");
+  });
+
+  it("treats a configured mention name as the bot in a group", async () => {
+    const feishu = fakeFeishu({ mode: "group" });
+    const source = createFeishuSource({
+      appId: "app",
+      appSecret: "secret",
+      chats: ["oc_home"],
+      mentionNames: ["Thebe"],
+      fetch: feishu.fetcher,
+      now: () => new Date("2026-11-11T10:00:00Z"),
+    });
+    const baseline = await source.read(undefined);
+    feishu.setMessages([
+      message({
+        id: "om_named",
+        text: "@Thebe restart emby",
+        time: "1762850300000",
+      }),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers[0]).toMatchObject({
+      admission: "explicit",
+      addressed: "mention",
+    });
+  });
+
   it("marks unaddressed group messages inferred only when asked", async () => {
     const feishu = fakeFeishu({});
     const source = createFeishuSource({

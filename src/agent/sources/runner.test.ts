@@ -247,6 +247,40 @@ describe("Source runner concurrency", () => {
     });
   });
 
+  it("reports a Source that could only read part of its feed as failing, after storing what it read", async () => {
+    const warning =
+      "GitHub events for a/b exceed 2 pages; older events were not read";
+    const partial: Source = {
+      id: "partial",
+      scope: "partial source",
+      async read() {
+        return {
+          triggers: [triggerFor("partial", 1)],
+          cursor: "partial-1",
+          warning,
+        };
+      },
+    };
+    const errors: unknown[] = [];
+    const runner = createSourceRunner({
+      sources: [partial],
+      store: createTriggerStore({}),
+      now: fixedNow,
+      onError: (_id, error) => errors.push(error),
+    });
+
+    expect(await runner.pollOnce()).toEqual([triggerFor("partial", 1)]);
+    expect(runner.health()[0]).toMatchObject({
+      id: "partial",
+      state: "failing",
+      consecutiveFailures: 1,
+      lastAttemptAt: AT,
+      lastFailureAt: AT,
+      lastError: warning,
+    });
+    expect(errors).toHaveLength(1);
+  });
+
   it("shares one in-flight poll across overlapping calls", async () => {
     const gates = [gate(), gate()];
     let reads = 0;

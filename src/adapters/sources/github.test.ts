@@ -421,6 +421,79 @@ describe("GitHub Source", () => {
       "GitHub events for unitsung/thebe failed: 500"
     );
   });
+
+  it("keeps the cursor behind and warns when the page limit leaves older events unread", async () => {
+    const pages = new Map<string, unknown[]>();
+    const requested: string[] = [];
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (!url.includes("/events")) return Response.json([]);
+      requested.push(url);
+      const page = new URL(url).searchParams.get("page") ?? "1";
+      return Response.json(pages.get(page) ?? [], {
+        headers: { etag: '"pages"' },
+      });
+    }) as typeof fetch;
+    const mention = (id: string, seconds: number) =>
+      event({
+        id,
+        created_at: new Date(
+          Date.parse("2026-11-11T10:00:00.000Z") + seconds * 1000
+        ).toISOString(),
+        payload: {
+          action: "created",
+          issue: { number: 12 },
+          comment: { body: "@thebe-agent please restart emby" },
+        },
+      });
+    pages.set("1", [
+      event({
+        id: "1000",
+        created_at: "2026-11-11T09:00:00.000Z",
+        payload: {
+          action: "created",
+          issue: { number: 12 },
+          comment: { body: "just a note" },
+        },
+      }),
+    ]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: fetcher,
+      maxPages: 2,
+    });
+    const baseline = await source.read(undefined);
+
+    // A long gap: both allowed pages are full, and an older mention waits beyond them.
+    pages.set(
+      "1",
+      Array.from({ length: 100 }, (_, index) =>
+        mention(`p1-${index}`, 1000 + index)
+      )
+    );
+    pages.set(
+      "2",
+      Array.from({ length: 100 }, (_, index) =>
+        mention(`p2-${index}`, 2000 + index)
+      )
+    );
+    pages.set("3", [mention("p3-0", 10)]);
+    const read = await source.read(baseline.cursor);
+
+    // The newest requests are still announced, but the cursor does not move past events
+    // that were never read, and the warning says so.
+    expect(read.triggers).toHaveLength(200);
+    expect(read.cursor).toBe(baseline.cursor);
+    expect(read.warning).toMatch(/older events/);
+    expect(requested.some((url) => url.includes("page=3"))).toBe(true);
+
+    // Once the backlog fits the window again, the cursor advances and the warning clears.
+    pages.set("2", []);
+    const caughtUp = await source.read(read.cursor);
+    expect(caughtUp.warning).toBeUndefined();
+    expect(caughtUp.cursor).not.toBe(baseline.cursor);
+  });
 });
 
 describe("GitHub Channel", () => {

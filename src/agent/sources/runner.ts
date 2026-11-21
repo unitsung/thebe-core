@@ -147,14 +147,30 @@ export function createSourceRunner(options: {
       // already durable, and leaving the cursor behind would replay it without dispatching it.
       const fresh = await options.store.add(triggers);
       await options.store.setCursor(source.id, result.cursor);
-      statuses.set(source.id, {
-        id: source.id,
-        scope: source.scope,
-        state: "healthy",
-        consecutiveFailures: 0,
-        lastAttemptAt: attemptedAt,
-        lastSuccessAt: now().toISOString(),
-      });
+      // A read that covered only part of the feed keeps what it read but never reports healthy:
+      // the operator has to see that a burst or an outage left events the Source could not reach.
+      const warning = result.warning?.trim();
+      if (warning) {
+        statuses.set(source.id, {
+          id: source.id,
+          scope: source.scope,
+          state: "failing",
+          consecutiveFailures: status.consecutiveFailures + 1,
+          lastAttemptAt: attemptedAt,
+          lastFailureAt: now().toISOString(),
+          lastError: warning,
+        });
+        options.onError?.(source.id, new Error(warning));
+      } else {
+        statuses.set(source.id, {
+          id: source.id,
+          scope: source.scope,
+          state: "healthy",
+          consecutiveFailures: 0,
+          lastAttemptAt: attemptedAt,
+          lastSuccessAt: now().toISOString(),
+        });
+      }
       return fresh;
     } catch (error) {
       if (signal.aborted) return [];
@@ -257,7 +273,9 @@ function validateSourceResult(
   if (
     !result ||
     typeof result.cursor !== "string" ||
-    !Array.isArray(result.triggers)
+    !Array.isArray(result.triggers) ||
+    (result.warning !== undefined &&
+      (typeof result.warning !== "string" || !result.warning.trim()))
   ) {
     throw new Error(`Source ${source.id} returned an invalid read result`);
   }
