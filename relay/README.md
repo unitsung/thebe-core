@@ -17,15 +17,17 @@ An optional, separately deployed service. It holds the APNs credentials so a sel
 | ---------------- | ------------------------------------------------------------------------------------------------------------ |
 | `APNS_KEY_FILE`  | Path to the `.p8` key from the Apple Developer account (Keys, with Apple Push Notifications service enabled) |
 | `APNS_KEY_ID`    | The key's 10-character ID                                                                                    |
-| `APNS_TEAM_ID`   | The team ID (`5PY7FY4MQK`)                                                                                   |
+| `APNS_TEAM_ID`   | The team ID (for example `TEAMID12345`)                                                                      |
 | `APNS_TOPIC`     | The bundle ID, default `com.unitsung.thebe`                                                                  |
 | `RELAY_DATA_DIR` | Where registrations and delivered ids are kept, default `./data`                                             |
 | `RELAY_PORT`     | Port on `127.0.0.1`, default 8788                                                                            |
 
 The relay listens on loopback only. Put TLS in front of it (Tailscale Serve, Caddy, a reverse proxy) and give that HTTPS address to Core as `THEBE_PUSH_RELAY_URL`. The App only accepts an `https` relay address (or localhost for testing).
 
+Registrations are rate-limited to 30 per minute per client address, and the relay holds at most 1000 registrations; past either limit it answers 429. The limit is per address the relay sees, so a reverse proxy in front of it should rate-limit registrations too — every client behind the proxy otherwise shares one bucket.
+
 ```bash
-APNS_KEY_FILE=/secrets/AuthKey_ABC123DEFG.p8 APNS_KEY_ID=ABC123DEFG APNS_TEAM_ID=5PY7FY4MQK npm start
+APNS_KEY_FILE=/secrets/AuthKey_ABC123DEFG.p8 APNS_KEY_ID=ABC123DEFG APNS_TEAM_ID=TEAMID12345 npm start
 ```
 
 ## Tests
