@@ -336,17 +336,18 @@ describe("push app composition", () => {
     );
     const created = (await (
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/v1/goals", {
+        new Request("http://127.0.0.1:8787/v1/tickets", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            goal: "Move the library",
+            task: "Move the library",
+            idempotencyKey: "push-library",
             allowAsk: true,
           }),
         })
       )
-    ).json()) as Record<string, unknown>;
-    await app.agent.waitGoal(String(created.id));
+    ).json()) as Record<string, any>;
+    await app.agent.waitGoal(created.goal.id);
     await vi.waitFor(() => {
       expect(calls).toHaveLength(1);
     });
@@ -355,7 +356,7 @@ describe("push app composition", () => {
       category: "thebe.activity",
       body: "A task has a question for you.",
       deepLink: expect.stringContaining("thebe://goal/"),
-      ticket: created.ticketId,
+      ticket: created.ticket.id,
       seq: 1,
     });
   });

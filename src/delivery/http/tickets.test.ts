@@ -73,11 +73,6 @@ function open(
   return { app, call, fake };
 }
 
-const newGoal = {
-  method: "POST",
-  body: JSON.stringify({ goal: "Move the library", maxIterations: 2 }),
-};
-
 function signal() {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -96,6 +91,7 @@ const placementFixtures = [
   "crash-before-copy",
   "stop-pending",
   "stop-copy",
+  "restart-verified",
 ] as const;
 const placementCases = placementFixtures
   .filter(
@@ -299,9 +295,9 @@ describe("tickets", () => {
           });
           const recovered = open(snapshot, [], undefined, undefined, pipeline);
           try {
-            expect(
-              (await recovered.call(`${ticketPath}/execution`)).body
-            ).toMatchObject({
+            const reopened = (await recovered.call(`${ticketPath}/execution`))
+              .body;
+            expect(reopened).toMatchObject({
               stage: "cancelled",
               receipt: {
                 placementReport: {
@@ -310,6 +306,7 @@ describe("tickets", () => {
                 },
               },
             });
+            expect(reopened.ticket.assignments).toHaveLength(1);
             const rejected = await recovered.call(`${ticketPath}/reply`, {
               method: "POST",
               body: JSON.stringify({
@@ -337,6 +334,7 @@ describe("tickets", () => {
             id: attention.id,
             state: "denied",
             decidedAt: expect.any(String),
+            skill: attention.skill,
           });
           return;
         }
@@ -429,21 +427,59 @@ describe("tickets", () => {
         placementState = result.receipt.placementReport?.state;
         expect(result.receipt.placementAttention).toBeUndefined();
         if (outcome === "mismatch") {
-          expect(result.receipt.placementReport).toMatchObject({
-            id: attention.id,
-            state: "uncertain",
+          expect(result).toMatchObject({
+            stage: "attention",
+            receipt: {
+              placementReport: {
+                id: attention.id,
+                state: "uncertain",
+                skill: attention.skill,
+              },
+            },
           });
           expect(result.receipt.placementReport.verifiedAt).toBeUndefined();
           return;
         }
-        expect(result.receipt.placementReport).toMatchObject({
+        const verifiedReport = result.receipt.placementReport;
+        expect(verifiedReport).toMatchObject({
           id: attention.id,
           state: "verified",
           skill: attention.skill,
+          verification: "sha256",
           decidedAt: expect.any(String),
           dispatchedAt: expect.any(String),
           verifiedAt: expect.any(String),
         });
+        if (outcome === "restart-verified") {
+          const snapshot = await mkdtemp(
+            join(tmpdir(), "thebe-placement-verified-")
+          );
+          await cp(dir, snapshot, {
+            recursive: true,
+            filter: (path) => !path.endsWith(".tmp"),
+          });
+          const recovered = open(snapshot, [], undefined, undefined, pipeline);
+          try {
+            const reopened = (await recovered.call(`${ticketPath}/execution`))
+              .body;
+            expect(reopened).toMatchObject({
+              receipt: { placementReport: verifiedReport },
+            });
+            expect(reopened.receipt.placementAttention).toBeUndefined();
+            expect(reopened.stage).not.toBe("attention");
+            expect(reopened.ticket.assignments).toEqual(
+              result.ticket.assignments
+            );
+            expect(copy).toHaveBeenCalledTimes(1);
+            const retry = await recovered.call(`${ticketPath}/retry`, {
+              method: "POST",
+            });
+            expect(retry.status).toBe(409);
+            expect(copy).toHaveBeenCalledTimes(1);
+          } finally {
+            await recovered.app.agent.quiesce();
+          }
+        }
       } finally {
         if (placementBenchmark && placementState) {
           const verified = placementState === "verified";
@@ -586,6 +622,39 @@ describe("tickets", () => {
     }
   });
 
+  it("subscribes a direct Ticket to the threads it names", async () => {
+    const { call } = open();
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Watch the media servers",
+        idempotencyKey: "ticket-threads",
+        threads: ["container:emby", { kind: "container", id: "sonarr" }],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const ticket = (await call(`/v1/tickets/${created.body.ticket.id}`)).body;
+    expect(ticket.subscriptions).toEqual(
+      expect.arrayContaining([
+        "resource:container:emby",
+        "resource:container:sonarr",
+      ])
+    );
+  });
+
+  it("does not serve the retired public Goal API", async () => {
+    const { call } = open();
+    expect((await call("/v1/goals")).status).toBe(404);
+    expect((await call("/v1/goals/abc")).status).toBe(404);
+    expect((await call("/v1/session/abc/goal")).status).toBe(404);
+    const spec = await call("/openapi.json");
+    expect(
+      Object.keys(spec.body.paths).filter(
+        (path) => path.startsWith("/v1/goals") || path.endsWith("/goal")
+      )
+    ).toEqual([]);
+  });
+
   it("starts empty, and a Core that has them says so on /v1/health", async () => {
     const { call } = open();
     expect((await call("/v1/tickets")).body).toEqual({ tickets: [] });
@@ -620,34 +689,32 @@ describe("tickets", () => {
     });
   });
 
-  it("makes an explicit, direct Ticket for a task the person asks for, and links it from the task", async () => {
+  it("makes an explicit, direct Ticket for a task the person asks for", async () => {
     const { app, call } = open();
-    const created = await call("/v1/goals", newGoal);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "direct-library",
+        maxIterations: 2,
+      }),
+    });
     expect(created.status).toBe(201);
-    await app.agent.waitGoal(created.body.id);
+    const goalId = created.body.goal.id as string;
+    await app.agent.waitGoal(goalId);
 
-    const ticketId = created.body.ticketId as string;
+    const ticketId = created.body.ticket.id as string;
     expect(ticketId).toMatch(/^[a-f0-9]{32}$/);
-    expect((await call(`/v1/goals/${created.body.id}`)).body.ticketId).toBe(
-      ticketId
-    );
-    const listed = (await call("/v1/goals")).body.goals as Array<
-      Record<string, any>
-    >;
-    expect(listed.find((g) => g.id === created.body.id)?.ticketId).toBe(
-      ticketId
-    );
-
     const tickets = (await call("/v1/tickets")).body.tickets as Array<
       Record<string, any>
     >;
-    expect(tickets).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.id)).toEqual([ticketId]);
     const ticket = (await call(`/v1/tickets/${ticketId}`)).body;
     expect(ticket).toMatchObject({
       id: ticketId,
       title: "Move the library",
-      mandate: { strength: "explicit", decidedBy: "direct", requester: "chat" },
-      links: { legacyGoalId: created.body.id, sessionIds: [created.body.id] },
+      mandate: { strength: "explicit", decidedBy: "direct", requester: "http" },
+      links: { legacyGoalId: goalId, sessionIds: [goalId] },
     });
     // The Ticket does not copy what the Goal owns.
     expect(ticket).not.toHaveProperty("status");
@@ -677,14 +744,20 @@ describe("tickets", () => {
   it("keeps its Tickets across a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-http-"));
     const first = open(dir);
-    const created = await first.call("/v1/goals", newGoal);
-    await first.app.agent.waitGoal(created.body.id);
+    const created = await first.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "restart-ticket",
+      }),
+    });
+    await first.app.agent.waitGoal(created.body.goal.id);
 
     const second = open(dir);
     const tickets = (await second.call("/v1/tickets")).body.tickets as Array<
       Record<string, any>
     >;
-    expect(tickets.map((t) => t.id)).toEqual([created.body.ticketId]);
+    expect(tickets.map((t) => t.id)).toEqual([created.body.ticket.id]);
   });
 
   it("backfills existing Goals once without changing their Goal identity", async () => {
@@ -729,11 +802,9 @@ describe("tickets", () => {
       },
       createdAt: run.createdAt,
     });
-    const goal = (await second.call(`/v1/goals/${run.thebeSessionId}`)).body;
-    expect(goal).toMatchObject({
-      id: run.thebeSessionId,
-      ticketId: firstRead[0]?.id,
-    });
+    expect(
+      (await second.app.agent.getTicketForGoal(run.thebeSessionId))?.id
+    ).toBe(firstRead[0]?.id);
   });
 
   it("delegates idempotently and replies to the Ticket's attention", async () => {
@@ -809,7 +880,7 @@ describe("tickets", () => {
     });
     expect(
       (
-        await call(`/v1/goals/${goalId}/stop`, {
+        await call(`/v1/tickets/${ticketId}/stop`, {
           method: "POST",
           body: "{}",
         })

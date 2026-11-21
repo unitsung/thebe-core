@@ -1153,79 +1153,6 @@ const operations: Operation[] = [
     responseSchema: "Ok",
   },
   {
-    method: "post",
-    path: "/v1/goals",
-    summary: "Create a session and start a Goal",
-    tag: "goal",
-    response: 201,
-    requestBody: { required: true },
-    requestSchema: "GoalCreateRequest",
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "get",
-    path: "/v1/goals",
-    summary: "List persisted Goals",
-    tag: "goal",
-    responseSchema: "ProductGoalList",
-  },
-  {
-    method: "get",
-    path: "/v1/goals/{id}",
-    summary: "Read one Goal (id is thebeSessionId)",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/pause",
-    summary: "Pause a running Goal after the current checkpoint",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/resume",
-    summary:
-      "Resume a paused Goal (409 attention_open while it waits on an answer or review: use /answer; 409 ticket_mandate_invalid when the current Policy no longer authorizes an Eval Ticket)",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/answer",
-    summary:
-      "Answer the question a paused Goal is waiting on, or accept / send back a result waiting for review (409 ticket_mandate_invalid when continuing an Eval Ticket no longer follows the current Policy)",
-    tag: "goal",
-    parameters: [idParameter()],
-    requestBody: { required: true },
-    requestSchema: "GoalAnswerRequest",
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/stop",
-    summary: "Cancel a Goal",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "get",
-    path: "/v1/goals/{id}/log",
-    summary: "Read Goal events or follow an SSE log",
-    tag: "goal",
-    parameters: [
-      idParameter(),
-      queryParameter("follow", { type: "boolean" }),
-      queryParameter("after", { type: "integer", minimum: 0 }),
-    ],
-    responseContentType: "text/event-stream",
-  },
-  {
     method: "get",
     path: "/v1/session",
     summary: "List sessions",
@@ -1839,7 +1766,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "goal",
         description:
-          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
+          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Read and control it through the Ticket that carries it.",
       },
       {
         name: "compatibility",
@@ -3913,54 +3840,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
           },
         },
-        GoalCreateRequest: {
-          type: "object",
-          required: ["goal"],
-          properties: {
-            goal: { type: "string", minLength: 1 },
-            criteria: {
-              type: "array",
-              items: { type: "string", minLength: 1 },
-            },
-            maxIterations: {
-              type: "integer",
-              minimum: 1,
-              description:
-                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
-            },
-            observe: {
-              type: "boolean",
-              description:
-                "Run read-only: the worker has no edit, write or shell tool and reports what it found and would do.",
-            },
-            allowAsk: {
-              type: "boolean",
-              description:
-                "Let the worker ask the person one question mid-run (the Goal pauses with an `attention`). Without it, a need becomes a blocker.",
-            },
-            reviewBeforeDone: {
-              type: "boolean",
-              description:
-                "After the independent review passes, pause with a review `attention` and wait for the person to accept or send it back.",
-            },
-            threads: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Thread keys this task concerns, e.g. resource:container:emby. While the task is open, later triggers on these threads attach as inputs without a new assessment.",
-            },
-            model: {
-              type: "object",
-              required: ["providerId", "modelId"],
-              description:
-                "Model for a new Goal session; its workers and reviewer use it. Ignored when the Goal is started on an existing session.",
-              properties: {
-                providerId: { type: "string" },
-                modelId: { type: "string" },
-              },
-            },
-          },
-        },
         GoalScheduleInput: {
           type: "object",
           required: ["title", "goal", "startAt"],
@@ -4429,6 +4308,25 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "After independent review passes, wait for the person to accept the result.",
             },
+            threads: {
+              type: "array",
+              description:
+                "Thread keys this Ticket concerns, e.g. resource:container:emby or {kind, id}. While it is open, later triggers on these threads attach as inputs without a new assessment.",
+              items: {
+                oneOf: [
+                  { type: "string", minLength: 1 },
+                  {
+                    type: "object",
+                    required: ["kind", "id"],
+                    additionalProperties: false,
+                    properties: {
+                      kind: { type: "string", minLength: 1 },
+                      id: { type: "string", minLength: 1 },
+                    },
+                  },
+                ],
+              },
+            },
           },
           additionalProperties: false,
         },
@@ -4817,7 +4715,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             attention: {
               type: "object",
               description:
-                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/goals/{id}/answer.",
+                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/tickets/{id}/reply.",
               required: ["id", "kind", "question", "askedAt"],
               properties: {
                 id: { type: "string" },
@@ -4888,29 +4786,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             since: { type: "string", format: "date-time" },
             at: { type: "string", format: "date-time" },
             summary: { type: "string" },
-          },
-        },
-        GoalAnswerRequest: {
-          type: "object",
-          required: ["attentionId"],
-          properties: {
-            attentionId: {
-              type: "string",
-              description:
-                "The `attention.id` being answered; a stale or already answered one is 409.",
-            },
-            answer: {
-              type: "string",
-              maxLength: 4000,
-              description:
-                "The answer to a question, or the note when sending a result back.",
-            },
-            decision: {
-              type: "string",
-              enum: ["accept", "reject"],
-              description:
-                "For a review request: accept finishes the Goal; reject needs an answer saying what to change.",
-            },
           },
         },
       },

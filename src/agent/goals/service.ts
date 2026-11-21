@@ -1043,8 +1043,8 @@ export function createGoalApi(
         throw httpError(
           409,
           run.attention.kind === "review"
-            ? "this task is waiting for your review; accept it or say what to change with POST /v1/goals/{id}/answer"
-            : "this task is waiting for your answer; give it with POST /v1/goals/{id}/answer",
+            ? "this task is waiting for your review; accept it or say what to change from its Ticket"
+            : "this task is waiting for your answer; give it from its Ticket",
           "attention_open"
         );
       }

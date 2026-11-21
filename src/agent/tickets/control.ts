@@ -716,6 +716,14 @@ export function createTicketControlApi(options: {
       }
     }
     const criteria = parseCriteria(input.criteria);
+    const threads = parseThreads(input.threads);
+    if (input.threads !== undefined && threads === undefined) {
+      throw httpError(
+        400,
+        "threads must be an array of strings or {kind, id} objects",
+        "invalid_body"
+      );
+    }
     const requester = origin.requester;
     const requestId = sourceTrigger
       ? key(origin.requestIdNamespace, "trigger", sourceTrigger.id)
@@ -815,6 +823,7 @@ export function createTicketControlApi(options: {
         requester,
         goalId: session.thebeSessionId,
         sessionIds: [session.thebeSessionId],
+        ...(threads ? { subscriptions: threads } : {}),
         ...(sourceTrigger ? { triggers: [sourceTrigger] } : {}),
       });
       const withAssignment = await ensureAssignmentFor(ticket, undefined);
@@ -1258,6 +1267,34 @@ function parseCriteria(value: unknown): string[] | undefined {
     criteria.push(item.trim());
   }
   return criteria.length > 0 ? criteria : undefined;
+}
+
+function parseThreads(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const threads: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      const trimmed = item.trim();
+      if (trimmed.startsWith("resource:")) {
+        threads.push(trimmed);
+      } else if (trimmed.includes(":")) {
+        threads.push(`resource:${trimmed}`);
+      } else {
+        threads.push(`resource:container:${trimmed}`);
+      }
+    } else if (item && typeof item === "object") {
+      const { kind, id } = item as Record<string, unknown>;
+      if (typeof kind === "string" && typeof id === "string" && kind && id) {
+        threads.push(`resource:${kind}:${id}`);
+      } else {
+        return undefined;
+      }
+    } else {
+      return undefined;
+    }
+  }
+  return [...new Set(threads)];
 }
 
 function explicitTriggerContext(trigger: Trigger): string {

@@ -268,8 +268,10 @@ describe("auto, end to end on a Core with a Docker stand-in", () => {
     const subagentsBefore = await app.agent.listSubagents(goalId);
 
     await app.agent.setPolicy({ rules: [] });
+    const ticket = await app.agent.getTicketForGoal(goalId);
+    expect(ticket).toBeDefined();
     const response = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/goals/${goalId}/resume`, {
+      new Request(`http://127.0.0.1:8787/v1/tickets/${ticket!.id}/resume`, {
         method: "POST",
       })
     );
