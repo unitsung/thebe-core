@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign } from "node:crypto";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import http2 from "node:http2";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -323,4 +323,67 @@ test("a delivered event id is remembered for a day, not for ever", async () => {
   const next = signedEvent(id, { id: "day-old" });
   assert.equal((await post("/v1/events", next)).status, 200);
   assert.equal(received.length, 2);
+});
+
+test("registrations from one address are rate-limited (H3)", async () => {
+  const fresh = mkdtempSync(join(tmpdir(), "thebe-relay-limit-"));
+  const limited = createRelay({ dataDir: fresh, apns: apnsClient, now: () => clock });
+  await new Promise((resolve) =>
+    limited.server.listen(0, "127.0.0.1", resolve)
+  );
+  try {
+    const url = `http://127.0.0.1:${limited.server.address().port}/v1/registrations`;
+    const statuses = [];
+    for (let index = 0; index < 31; index += 1) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          apnsToken: index.toString(16).padStart(64, "0"),
+          corePublicKey,
+          environment: "development",
+        }),
+      });
+      statuses.push(response.status);
+    }
+    assert.deepEqual(statuses.slice(0, 30), Array(30).fill(200));
+    assert.equal(statuses[30], 429);
+  } finally {
+    limited.server.close();
+  }
+});
+
+test("re-registering the same device does not rewrite the registrations file (H3)", async () => {
+  const fresh = mkdtempSync(join(tmpdir(), "thebe-relay-reregister-"));
+  const again = createRelay({ dataDir: fresh, apns: apnsClient, now: () => clock });
+  await new Promise((resolve) =>
+    again.server.listen(0, "127.0.0.1", resolve)
+  );
+  try {
+    const url = `http://127.0.0.1:${again.server.address().port}/v1/registrations`;
+    const body = JSON.stringify({
+      apnsToken: token,
+      corePublicKey,
+      environment: "development",
+    });
+    const first = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    assert.equal(first.status, 200);
+    const { mtimeMs } = statSync(join(fresh, "registrations.json"));
+    const second = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+    assert.equal(second.status, 200);
+    assert.equal(
+      statSync(join(fresh, "registrations.json")).mtimeMs,
+      mtimeMs
+    );
+  } finally {
+    again.server.close();
+  }
 });
