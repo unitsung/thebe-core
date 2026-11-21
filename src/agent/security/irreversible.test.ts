@@ -70,6 +70,46 @@ describe("irreversibleReason", () => {
     expect(call("container_restart", { id: "c1" })).toBe(undefined);
   });
 
+  it("counts a call that stops or removes what a service runs, however it is named", () => {
+    // A tool whose own name says it stops or removes its service's work.
+    expect(call("container_stop", { id: "emby" })).toMatch(/stops|removes/);
+    // A mutating service call whose path names a destructive action.
+    expect(
+      call("service_write", {
+        service: "arcane",
+        method: "POST",
+        path: "/api/containers/emby/stop",
+      })
+    ).toBeDefined();
+    expect(
+      call("service_write", {
+        service: "arcane",
+        method: "PUT",
+        path: "/api/containers/emby/remove",
+      })
+    ).toBeDefined();
+    // Restarting and starting are how a Ticket does its work.
+    expect(
+      call("service_write", {
+        service: "arcane",
+        method: "POST",
+        path: "/api/containers/emby/restart",
+      })
+    ).toBeUndefined();
+    // A read that mentions the action is still a read.
+    expect(
+      call("service_read", { method: "GET", path: "/api/containers/emby/stop" })
+    ).toBeUndefined();
+    // Holding a download is the recommended way to wait, so a tool doing it stays ordinary.
+    expect(call("download_pause", { hashes: ["a"] })).toBeUndefined();
+  });
+
+  it("keeps judging download_delete by deleteFiles, not by its name", () => {
+    expect(call("download_delete", { hashes: ["a"], deleteFiles: false })).toBe(
+      undefined
+    );
+  });
+
   it("names the scope that would allow it", () => {
     expect(irreversibleRefusal("x", "deletes a playlist")).toContain(
       "--scope mcp:irreversible"

@@ -111,6 +111,83 @@ export function serviceOperationExposable(
   );
 }
 
+/** What Core knows about a service call beyond its arguments: its method, and the operator's mark. */
+export type ServiceCallContext = {
+  httpMethod?: string;
+  operatorMark?: boolean;
+};
+
+function operationPathPattern(path: string): RegExp {
+  const pattern = path
+    .split(/(\{[^}]+\})/)
+    .map((part) =>
+      part.startsWith("{")
+        ? "[^/]+"
+        : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    )
+    .join("");
+  return new RegExp(`^${pattern}/?$`);
+}
+
+/**
+ * The classification context of one service call, from the same operation catalogue the `/mcp`
+ * gate reads: an operation tool by its name, a generic write by the method and path it names. A
+ * call no configured operation matches yields only the method its arguments state.
+ */
+export async function serviceCallContext(
+  providers: readonly ServiceAPIProvider[],
+  name: string,
+  params: Record<string, unknown>
+): Promise<ServiceCallContext> {
+  const fromOperation = (
+    operation: ServiceAPIOperation
+  ): ServiceCallContext => ({
+    httpMethod: operation.method,
+    ...(operation.irreversible === undefined
+      ? {}
+      : { operatorMark: operation.irreversible }),
+  });
+  const operationsOf = async (
+    provider: ServiceAPIProvider
+  ): Promise<ServiceAPIOperation[]> => {
+    if (!provider.operations) return [];
+    try {
+      return await provider.operations();
+    } catch {
+      return []; // an unreachable service classifies nothing
+    }
+  };
+  if (name === SERVICE_API_WRITE_TOOL_NAME) {
+    const method =
+      typeof params.method === "string" ? params.method : undefined;
+    if (!method) return {};
+    const provider = providers.find(
+      (candidate) => candidate.id === params.service
+    );
+    const path =
+      typeof params.path === "string" ? params.path.split("?")[0] : undefined;
+    if (!provider || !path) return { httpMethod: method };
+    const operation = (await operationsOf(provider)).find(
+      (candidate) =>
+        candidate.method.toUpperCase() === method.toUpperCase() &&
+        operationPathPattern(candidate.path).test(path)
+    );
+    return operation ? fromOperation(operation) : { httpMethod: method };
+  }
+  if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
+    const rest = name.slice(SERVICE_API_OPERATION_PREFIX.length);
+    const separator = rest.indexOf(SERVICE_API_OPERATION_SEPARATOR);
+    const serviceId = separator > 0 ? rest.slice(0, separator) : "";
+    const provider = providers.find((candidate) => candidate.id === serviceId);
+    if (!provider) return {};
+    const operation = (await operationsOf(provider)).find(
+      (candidate) => serviceOperationToolName(serviceId, candidate.id) === name
+    );
+    return operation ? fromOperation(operation) : {};
+  }
+  return {};
+}
+
 /** Whether an operation can be exposed as a preview + confirm write tool. */
 export function serviceOperationWritable(
   operation: ServiceAPIOperation
