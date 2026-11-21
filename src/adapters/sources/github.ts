@@ -63,7 +63,8 @@ export type GithubSourceOptions = {
   apiBaseUrl?: string;
   fetch?: FetchLike;
   now?: () => Date;
-  /** Pages of 100 events to read per repository per poll. */
+  /** Pages of 100 events to read per repository per poll. Defaults to 3, which covers GitHub's
+   * 300-event retention in one poll; lower values risk silently dropping older events. */
   maxPages?: number;
   /** Treat issue/PR comments that do not mention the agent as events for Eval. Off by default. */
   admitUnaddressedComments?: boolean;
@@ -87,7 +88,7 @@ export function createGithubSource(options: GithubSourceOptions): Source {
   const fetcher = options.fetch ?? fetch;
   const now = options.now ?? (() => new Date());
   const apiBaseUrl = trimSlash(options.apiBaseUrl ?? DEFAULT_API_BASE_URL);
-  const maxPages = Math.max(1, Math.min(5, options.maxPages ?? 2));
+  const maxPages = Math.max(1, Math.min(10, options.maxPages ?? 3));
 
   return {
     id: GITHUB_SOURCE_ID,
@@ -114,22 +115,31 @@ export function createGithubSource(options: GithubSourceOptions): Source {
           token: options.token,
           etag: saved.etag,
           maxPages,
+          seen: new Set(saved.seen),
           signal,
         });
         if (result.notModified) continue;
 
         const seen = new Set(saved.seen);
         const fresh = result.events.filter((event) => !seen.has(event.id));
-        next.repos[repo] = {
-          ...(result.etag ? { etag: result.etag } : {}),
-          initialized: true,
-          seen: [
-            ...result.events.map((event) => event.id),
-            ...saved.seen.filter(
-              (id) => !result.events.some((e) => e.id === id)
-            ),
-          ].slice(0, MAX_SEEN_EVENTS),
-        };
+        // When the poll was cut at the page cap with unprocessed events still
+        // waiting, do not advance the cursor past them: keep the previous etag
+        // and seen set, so the loss is visible as a repeated poll instead of
+        // silent. (H7)
+        if (result.truncated) {
+          next.repos[repo] = saved;
+        } else {
+          next.repos[repo] = {
+            ...(result.etag ? { etag: result.etag } : {}),
+            initialized: true,
+            seen: [
+              ...result.events.map((event) => event.id),
+              ...saved.seen.filter(
+                (id) => !result.events.some((e) => e.id === id)
+              ),
+            ].slice(0, MAX_SEEN_EVENTS),
+          };
+        }
         // The first read is a baseline: it must not announce the repository's history.
         if (!saved.initialized) continue;
 
@@ -499,13 +509,23 @@ async function readEvents(input: {
   token?: string;
   etag?: string;
   maxPages: number;
+  seen?: ReadonlySet<string>;
   signal?: AbortSignal;
 }): Promise<
   | { notModified: true }
-  | { notModified: false; events: GithubEvent[]; etag?: string }
+  | {
+      notModified: false;
+      events: GithubEvent[];
+      etag?: string;
+      truncated: boolean;
+    }
 > {
   const events: GithubEvent[] = [];
   let etag: string | undefined;
+  let truncated = false;
+  // Stop early once a whole page was already seen: in steady state a poll is one page, and a
+  // catch-up poll pages until it reaches the already-processed window instead of stopping at an
+  // arbitrary page count and silently dropping the older events. (H7)
   for (let page = 1; page <= input.maxPages; page += 1) {
     const response = await githubResponse({
       fetcher: input.fetcher,
@@ -537,12 +557,17 @@ async function readEvents(input: {
       .map((entry) => parseEvent(entry, input.repository))
       .filter((event): event is GithubEvent => event !== undefined);
     events.push(...parsed);
-    if (payload.length < 100) break;
+    const allSeen =
+      parsed.length > 0 &&
+      parsed.every((event) => input.seen?.has(event.id) === true);
+    if (payload.length < 100 || allSeen) break;
+    if (page === input.maxPages) truncated = true;
   }
   return {
     notModified: false,
     events,
     ...(etag ? { etag } : {}),
+    truncated,
   };
 }
 
