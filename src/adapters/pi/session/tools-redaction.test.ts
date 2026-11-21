@@ -42,8 +42,10 @@ async function piProduct(provider: ContainerInfoProvider) {
   const models = createModels();
   models.setProvider(faux.provider);
   const { ModelRuntime } = await loadPiSdk();
+  // A machine's own ~/.pi/agent/models.json must not choose the model under test.
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -56,7 +58,10 @@ async function piProduct(provider: ContainerInfoProvider) {
     agentDir: join(dir, "agent"),
     inMemory: false,
     modelRuntime,
-    model: faux.getModel(),
+    model: {
+      providerId: faux.getModel().provider,
+      modelId: faux.getModel().id,
+    },
   });
   const agent = createThebeAgent({
     runtime,

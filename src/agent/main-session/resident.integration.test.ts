@@ -137,6 +137,10 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+// These cases wait on Source and Session turns that advance under fake intervals; a loaded full-suite
+// worker can miss the default 5s budget even when the behavior is correct.
+vi.setConfig({ testTimeout: 15_000 });
+
 describe("resident main Session integration", () => {
   it("merges one Source batch into one Main Session turn", async () => {
     const state = await harness();

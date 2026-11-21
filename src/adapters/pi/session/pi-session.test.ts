@@ -53,8 +53,10 @@ async function piWithFaux(sessionDir?: string) {
   const models = createModels();
   models.setProvider(faux.provider);
   const { ModelRuntime } = await loadPiSdk();
+  // A machine's own ~/.pi/agent/models.json must not choose the model under test.
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -65,7 +67,10 @@ async function piWithFaux(sessionDir?: string) {
     sessionDir,
     inMemory: !sessionDir,
     modelRuntime,
-    model: faux.getModel(),
+    model: {
+      providerId: faux.getModel().provider,
+      modelId: faux.getModel().id,
+    },
     agentDir: sessionDir ? join(sessionDir, "agent") : undefined,
   });
   return { faux, runtime, modelRuntime };
@@ -558,6 +563,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     const { ModelRuntime } = await loadPiSdk();
     const modelRuntime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
