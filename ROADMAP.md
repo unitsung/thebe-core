@@ -199,7 +199,8 @@ Named after the first beta.
 Explicit non-ships from `CONTEXT.md` and `docs/CORE-PRODUCT-HTTP.md`, kept here so
 they are not re-raised as omissions:
 
-- A Goal identity rewrite or `GET /v1/goals/{id}/runs`.
+- A public Goal API (retired in favor of Tickets), a Goal identity rewrite, or
+  `GET /v1/goals/{id}/runs`.
 - Replacing raw `/mcp` for integrations.
 - Skill file or arbitrary extension code editing.
 - Arbitrary filesystem browsing, uploads, or unrestricted Artifact paths.

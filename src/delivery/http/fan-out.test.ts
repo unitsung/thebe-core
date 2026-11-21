@@ -135,15 +135,16 @@ describe("subscriptions and fan-out", () => {
 
     // Worker creates a task paused on attention, subscribed to emby container
     t.fake.queueTurns(ASKING_REPORT);
-    const goalRes = await t.post("/v1/goals", {
-      goal: "Check emby health",
+    const goalRes = await t.post("/v1/tickets", {
+      task: "Check emby health",
+      idempotencyKey: "fan-out-emby-health",
       threads: ["resource:container:emby"],
       allowAsk: true,
     });
     expect(goalRes.status).toBe(201);
-    const ticketId = goalRes.body.ticketId as string;
+    const ticketId = goalRes.body.ticket.id as string;
     expect(ticketId).toBeDefined();
-    await t.app.agent.waitGoal(goalRes.body.id);
+    await t.app.agent.waitGoal(goalRes.body.goal.id);
 
     // Verify ticket has subscription and empty inputs
     const ticketBefore = (await t.call(`/v1/tickets/${ticketId}`)).body;
@@ -206,13 +207,14 @@ describe("subscriptions and fan-out", () => {
 
     // Ticket is only subscribed to emby
     t.fake.queueTurns(ASKING_REPORT);
-    const goalRes = await t.post("/v1/goals", {
-      goal: "Fix emby",
+    const goalRes = await t.post("/v1/tickets", {
+      task: "Fix emby",
+      idempotencyKey: "fan-out-fix-emby",
       threads: ["resource:container:emby"],
       allowAsk: true,
     });
-    const ticketId = goalRes.body.ticketId as string;
-    await t.app.agent.waitGoal(goalRes.body.id);
+    const ticketId = goalRes.body.ticket.id as string;
+    await t.app.agent.waitGoal(goalRes.body.goal.id);
 
     // Queue assessment answer for when sonarr goes down
     t.fake.queueTurns([
@@ -262,17 +264,18 @@ describe("subscriptions and fan-out", () => {
         text: "VERDICT: pass\nEVIDENCE: all good\nREMAINING: none",
       },
     ]);
-    const goalRes = await t.post("/v1/goals", {
-      goal: "Check emby once",
+    const goalRes = await t.post("/v1/tickets", {
+      task: "Check emby once",
+      idempotencyKey: "fan-out-check-emby",
       threads: ["resource:container:emby"],
       maxIterations: 1,
     });
-    const ticketId = goalRes.body.ticketId as string;
-    await t.app.agent.waitGoal(goalRes.body.id);
+    const ticketId = goalRes.body.ticket.id as string;
+    await t.app.agent.waitGoal(goalRes.body.goal.id);
 
-    // Goal is now complete (ended)
-    const goal = (await t.call(`/v1/goals/${goalRes.body.id}`)).body;
-    expect(goal.status).toBe("succeeded");
+    // The Ticket is now complete.
+    const task = (await t.call(`/v1/tickets/${ticketId}/execution`)).body;
+    expect(task.execution.status).toBe("succeeded");
 
     // Queue assessment response for when emby goes down now
     t.fake.queueTurns([
@@ -304,24 +307,26 @@ describe("subscriptions and fan-out", () => {
     t.fake.queueTurns([...ASKING_REPORT, ...ASKING_REPORT]);
 
     // Create first ticket
-    const goal1 = await t.post("/v1/goals", {
-      goal: "First monitor",
+    const goal1 = await t.post("/v1/tickets", {
+      task: "First monitor",
+      idempotencyKey: "fan-out-first-monitor",
       threads: ["resource:container:emby"],
       allowAsk: true,
     });
-    const ticket1 = goal1.body.ticketId;
-    await t.app.agent.waitGoal(goal1.body.id);
+    const ticket1 = goal1.body.ticket.id;
+    await t.app.agent.waitGoal(goal1.body.goal.id);
 
     // Advance 5 seconds and create second ticket
     await vi.advanceTimersByTimeAsync(5000);
-    const goal2 = await t.post("/v1/goals", {
-      goal: "Second monitor",
+    const goal2 = await t.post("/v1/tickets", {
+      task: "Second monitor",
+      idempotencyKey: "fan-out-second-monitor",
       threads: ["resource:container:emby"],
       allowAsk: true,
     });
-    const ticket2 = goal2.body.ticketId;
+    const ticket2 = goal2.body.ticket.id;
     expect(ticket2).not.toBe(ticket1);
-    await t.app.agent.waitGoal(goal2.body.id);
+    await t.app.agent.waitGoal(goal2.body.goal.id);
 
     // Emby goes down
     t.world.containers.emby = "exited";
@@ -346,13 +351,14 @@ describe("subscriptions and fan-out", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     t1.fake.queueTurns(ASKING_REPORT);
-    const goal = await t1.post("/v1/goals", {
-      goal: "Maintain emby",
+    const goal = await t1.post("/v1/tickets", {
+      task: "Maintain emby",
+      idempotencyKey: "fan-out-maintain-emby",
       threads: ["resource:container:emby"],
       allowAsk: true,
     });
-    const ticketId = goal.body.ticketId;
-    await t1.app.agent.waitGoal(goal.body.id);
+    const ticketId = goal.body.ticket.id;
+    await t1.app.agent.waitGoal(goal.body.goal.id);
 
     // Trigger an event before restart
     t1.world.containers.emby = "exited";

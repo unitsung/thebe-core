@@ -1,9 +1,6 @@
 import {
-  isTerminalGoalStatus,
   toProductWorker,
-  toProductGoalEvent,
   type CapabilityRun,
-  type GoalEvent,
   type NormalizedEvent,
   type ThebeAgent,
 } from "../../../agent/index.ts";
@@ -114,145 +111,17 @@ export function sessionLogStream(
   });
 }
 
-export const GOAL_LOG_IDLE_MS = 5 * 60 * 1000;
-export const MAX_GOAL_LOG_STREAMS = 32;
+export const TICKET_LOG_IDLE_MS = 5 * 60 * 1000;
+export const MAX_TICKET_LOG_STREAMS = 32;
 
-let maxGoalLogStreams = MAX_GOAL_LOG_STREAMS;
-let activeGoalLogStreams = 0;
+let maxTicketLogStreams = MAX_TICKET_LOG_STREAMS;
+let activeTicketLogStreams = 0;
 
-export function resetGoalLogStreamsForTests(options?: { max?: number }): void {
-  activeGoalLogStreams = 0;
-  maxGoalLogStreams = options?.max ?? MAX_GOAL_LOG_STREAMS;
-}
-
-export function goalEventStream(
-  agent: ThebeAgent,
-  thebeSessionId: string,
-  request: Request,
-  after: number,
-  options?: { idleMs?: number }
-): Response {
-  if (activeGoalLogStreams >= maxGoalLogStreams) {
-    return json({ ok: false, error: "too many log streams" }, 429);
-  }
-  const run = agent.getGoal(thebeSessionId);
-  if (!run) {
-    return json({ ok: false, error: "goal not found" }, 404);
-  }
-  activeGoalLogStreams += 1;
-  const idleMs = options?.idleMs ?? GOAL_LOG_IDLE_MS;
-  const encoder = new TextEncoder();
-  let close: () => void = () => {};
-  const stream = new ReadableStream({
-    start(controller) {
-      let nextId = after;
-      let closed = false;
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      let unsub: () => void = () => {};
-      close = () => {
-        if (closed) {
-          return;
-        }
-        closed = true;
-        if (idleTimer) {
-          clearTimeout(idleTimer);
-        }
-        unsub();
-        activeGoalLogStreams = Math.max(0, activeGoalLogStreams - 1);
-        request.signal.removeEventListener("abort", close);
-        try {
-          controller.close();
-        } catch {
-          // already closed
-        }
-      };
-      const bumpIdle = () => {
-        if (idleTimer) {
-          clearTimeout(idleTimer);
-        }
-        if (idleMs > 0) {
-          idleTimer = setTimeout(close, idleMs);
-        }
-      };
-      const send = (event: GoalEvent, at: string) => {
-        if (closed) {
-          return;
-        }
-        const product = toProductGoalEvent(thebeSessionId, event, nextId, at);
-        const line = `id: ${nextId}\nevent: ${product.type}\ndata: ${JSON.stringify(product)}\n\n`;
-        nextId += 1;
-        try {
-          controller.enqueue(encoder.encode(line));
-          bumpIdle();
-        } catch {
-          close();
-          return;
-        }
-        if (event.type === "goal_completed") {
-          close();
-        }
-      };
-      const buffered = agent.goalEvents(thebeSessionId).slice(after);
-      for (const row of buffered) {
-        send(row.event, row.at);
-      }
-      if (buffered.length === 0) {
-        const snapshot = agent.getGoal(thebeSessionId);
-        if (snapshot && isTerminalGoalStatus(snapshot.status)) {
-          send(
-            {
-              type: "goal_completed",
-              status: snapshot.status,
-              totalIterations: snapshot.iteration,
-              summary:
-                snapshot.summary ??
-                snapshot.error ??
-                `Goal ${snapshot.status}.`,
-            },
-            snapshot.finishedAt ?? snapshot.createdAt
-          );
-        } else if (snapshot) {
-          send(
-            {
-              type: "goal_status",
-              status:
-                snapshot.status === "pausing"
-                  ? "pausing"
-                  : snapshot.status === "paused"
-                    ? "paused"
-                    : "running",
-              message: snapshot.summary,
-            },
-            snapshot.finishedAt ?? snapshot.createdAt
-          );
-        }
-      }
-      const current = agent.getGoal(thebeSessionId);
-      if (current && isTerminalGoalStatus(current.status)) {
-        close();
-        return;
-      }
-      unsub = agent.subscribeGoal(thebeSessionId, (event) => {
-        send(event, new Date().toISOString());
-      });
-      bumpIdle();
-      if (request.signal.aborted) {
-        close();
-        return;
-      }
-      request.signal.addEventListener("abort", close);
-    },
-    cancel() {
-      close();
-    },
-  });
-  return new Response(stream, {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      connection: "keep-alive",
-    },
-  });
+export function resetTicketLogStreamsForTests(options?: {
+  max?: number;
+}): void {
+  activeTicketLogStreams = 0;
+  maxTicketLogStreams = options?.max ?? MAX_TICKET_LOG_STREAMS;
 }
 
 export function ticketEventStream(
@@ -260,10 +129,10 @@ export function ticketEventStream(
   request: Request,
   after: number
 ): Response {
-  if (activeGoalLogStreams >= maxGoalLogStreams) {
+  if (activeTicketLogStreams >= maxTicketLogStreams) {
     return json({ ok: false, error: "too many log streams" }, 429);
   }
-  activeGoalLogStreams += 1;
+  activeTicketLogStreams += 1;
   const encoder = new TextEncoder();
   let close = () => {};
   const stream = new ReadableStream({
@@ -278,7 +147,7 @@ export function ticketEventStream(
         clearTimeout(idle);
         unsubscribe();
         request.signal.removeEventListener("abort", close);
-        activeGoalLogStreams -= 1;
+        activeTicketLogStreams -= 1;
         try {
           controller.close();
         } catch {
@@ -299,7 +168,7 @@ export function ticketEventStream(
         if (log.finished()) close();
         else {
           clearTimeout(idle);
-          idle = setTimeout(close, GOAL_LOG_IDLE_MS);
+          idle = setTimeout(close, TICKET_LOG_IDLE_MS);
         }
       };
       unsubscribe = log.subscribe(send);

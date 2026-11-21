@@ -10,7 +10,6 @@ import { handleArtifactRoutes } from "./routes/artifacts.ts";
 import { handleAuditRoutes } from "./routes/audit.ts";
 import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
-import { handleGoalRoutes } from "./routes/goal.ts";
 import { handleTicketRoutes } from "./routes/tickets.ts";
 import { handleMainSessionRoutes } from "./routes/main-session.ts";
 import { handleEvalRoutes } from "./routes/eval.ts";
@@ -180,10 +179,6 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (ticketResponse) return ticketResponse;
       const mainSessionResponse = await handleMainSessionRoutes(context);
       if (mainSessionResponse) return mainSessionResponse;
-      const goalResponse = await handleGoalRoutes(context);
-      if (goalResponse) {
-        return goalResponse;
-      }
       const scheduleResponse = await handleScheduleRoutes(context);
       if (scheduleResponse) return scheduleResponse;
       if (isAgentRoute(context.path)) {
@@ -239,7 +234,6 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
     path.startsWith("/v1/auth") ||
-    path === PRODUCT_HTTP_PATH.capabilities ||
-    path.startsWith("/v1/goals")
+    path === PRODUCT_HTTP_PATH.capabilities
   );
 }
