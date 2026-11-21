@@ -94,7 +94,10 @@ function inferPermission(
     )
   )
     return "confirm";
-  return annotations?.readOnlyHint === true ? "read" : "confirm";
+  // A server's own readOnlyHint is its own claim about its tools, so it never makes a tool a
+  // read on its own: an unclassified tool is a confirm, and only the operator saying so in
+  // config (permission: "read" for the server) makes its tools reads. (H5)
+  return "confirm";
 }
 
 function serverDisabled(
