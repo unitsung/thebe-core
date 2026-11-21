@@ -277,8 +277,9 @@ describe("Feishu Source through Eval and the Ticket executor", () => {
     expect(sent.receive_id).toBe("oc_chat");
     expect(sent.uuid).toBeTruthy();
     const content = JSON.parse(String(sent.content)) as { text?: string };
-    expect(content.text).toContain("A task is blocked and needs you");
-    expect(content.text).toContain("The backup drive is offline");
+    // Only the fixed template reaches the group chat; the blocker detail stays in Core. (H4)
+    expect(content.text).toBe("A task is blocked and needs you.");
+    expect(content.text).not.toContain("The backup drive is offline");
 
     await app.agent.quiesce();
   });
