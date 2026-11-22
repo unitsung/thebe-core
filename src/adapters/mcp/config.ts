@@ -16,6 +16,7 @@ import type {
   HomelabCapabilityPermission,
   McpServerRegistration,
 } from "../../agent/extensions/mcp.ts";
+import { presetMcpServers } from "./presets.ts";
 
 export function validateMcpRegistration(input: McpServerRegistration): void {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(input.name))
@@ -67,12 +68,25 @@ export function validateMcpRegistration(input: McpServerRegistration): void {
       throw new Error("MCP environment and headers must contain string values");
     }
   }
+  if (
+    input.readTools !== undefined &&
+    (!Array.isArray(input.readTools) ||
+      input.readTools.some(
+        (tool) => typeof tool !== "string" || tool.trim().length === 0
+      ))
+  ) {
+    throw new Error("MCP readTools must be non-empty tool names");
+  }
 }
 
 /** Persist a new disabled server while preserving unrelated configuration. */
 export async function addConfiguredMcpServer(
   input: McpServerRegistration,
-  options: { cwd?: string; homeDir?: string }
+  options: {
+    cwd?: string;
+    homeDir?: string;
+    env?: Record<string, string | undefined>;
+  }
 ): Promise<void> {
   validateMcpRegistration(input);
   if (
@@ -127,7 +141,11 @@ export class McpConfigurationConflict extends Error {
  */
 export async function removeConfiguredMcpServer(
   name: string,
-  options: { cwd?: string; homeDir?: string }
+  options: {
+    cwd?: string;
+    homeDir?: string;
+    env?: Record<string, string | undefined>;
+  }
 ): Promise<boolean> {
   const root = await realpath(options.cwd ?? options.homeDir ?? homedir());
   const path = join(root, ".thebe", "mcp.json");
@@ -169,7 +187,11 @@ export async function removeConfiguredMcpServer(
 
 async function failIfConfiguredElsewhere(
   name: string,
-  options: { cwd?: string; homeDir?: string }
+  options: {
+    cwd?: string;
+    homeDir?: string;
+    env?: Record<string, string | undefined>;
+  }
 ): Promise<false> {
   if (
     (await listConfiguredMcpServers(options)).some(
@@ -251,6 +273,7 @@ function stringMap(value: unknown): Record<string, string> | undefined {
 export function listConfiguredMcpServersSync(options?: {
   cwd?: string;
   homeDir?: string;
+  env?: Record<string, string | undefined>;
 }): McpServerConfig[] {
   const cwd = options && "cwd" in options ? options.cwd : process.cwd();
   const home = options?.homeDir ?? homedir();
@@ -307,12 +330,19 @@ export function listConfiguredMcpServersSync(options?: {
     }
   }
 
+  // Presets stand in for configuration files: an explicit entry of the same name wins, including a
+  // disabled one, so an operator can turn the built-in attachment off without unsetting env.
+  for (const preset of presetMcpServers(options?.env)) {
+    if (!configs.has(preset.name)) configs.set(preset.name, preset);
+  }
+
   return [...configs.values()];
 }
 
 export async function listConfiguredMcpServers(options?: {
   cwd?: string;
   homeDir?: string;
+  env?: Record<string, string | undefined>;
 }): Promise<McpServerConfig[]> {
   return listConfiguredMcpServersSync(options);
 }
