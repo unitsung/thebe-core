@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { bootstrapThebe } from "../../app/bootstrap.ts";
 import { parseCliArgs } from "./args.ts";
 import { runCliCommand } from "./commands/dispatch.ts";
+import { isStorageCliCommand, runStorageCommand } from "./commands/storage.ts";
 import { startThebeTui } from "../tui/app.ts";
 import { loadThebeConfig } from "../tui/settings/config.ts";
 
@@ -31,6 +32,11 @@ if (command.kind === "tui" && (!process.stdin.isTTY || !process.stdout.isTTY)) {
 if (command.kind === "doctor") {
   const { runDoctor } = await import("./commands/doctor.ts");
   process.exit(await runDoctor());
+}
+
+if (isStorageCliCommand(command)) {
+  // Storage management touches only config.json; do not start the agent for it.
+  process.exit(await runStorageCommand(command));
 }
 
 const {

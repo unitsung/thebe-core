@@ -135,17 +135,54 @@ export interface FilesProvider {
     sourceDir: string;
     destinationDir: string;
     names: string[];
-  }): Promise<{ taskIds: string[] }>;
+  }): Promise<{ taskIds?: string[] }>;
   move(input: {
     sourceDir: string;
     destinationDir: string;
     names: string[];
-  }): Promise<{ taskIds: string[] }>;
-  offlineDownload(input: {
+  }): Promise<{ taskIds?: string[] }>;
+  /** Optional. Providers without it simply do not expose files_rename. */
+  rename?(input: { dir: string; name: string; newName: string }): Promise<void>;
+  /** Optional. Providers without it simply do not expose files_remove. */
+  remove?(input: {
+    dir: string;
+    names: string[];
+    /** Required to delete a folder that still has contents. */
+    recursive?: boolean;
+  }): Promise<void>;
+  /** Optional. Copy a local file into the storage; providers without it do not expose files_upload. */
+  upload?(input: {
+    dir: string;
+    name: string;
+    sourcePath: string;
+  }): Promise<void>;
+  /** Optional. Providers without it simply do not expose files_offline_download. */
+  offlineDownload?(input: {
     urls: string[];
     destinationDir: string;
     tool?: string;
   }): Promise<{ taskIds: string[] }>;
+}
+
+/** A live set of file backends, rebuilt by the composition root when configuration changes. */
+export interface FilesProviderSnapshot {
+  providers: FilesProvider[];
+  /** The backend used when a tool call omits `provider`. */
+  defaultProvider?: FilesProvider;
+  /** Configured id of the default backend, when it is known. */
+  defaultId?: string;
+  /** Where the current set came from: the config file, legacy environment, or nowhere. */
+  source?: "config" | "env" | "none";
+  /** Non-fatal problems, one human-readable line each. */
+  issues?: string[];
+}
+
+/**
+ * Read through this on every tool call, not once when a session opens: storage
+ * configuration must apply to sessions that are already running.
+ */
+export interface FilesProviderRegistry {
+  snapshot(): FilesProviderSnapshot;
 }
 
 export interface LibraryRefreshProvider {
@@ -195,6 +232,9 @@ export const PIPELINE_WRITE_TOOL_NAMES = [
   "files_mkdir",
   "files_copy",
   "files_move",
+  "files_rename",
+  "files_remove",
+  "files_upload",
   "files_offline_download",
   "library_scan",
   "library_refresh_item",
@@ -213,6 +253,14 @@ const stringArray = (description: string) => ({
   maxItems: 20,
   description,
 });
+
+const providerField = {
+  provider: {
+    type: "string",
+    description:
+      "Storage backend from files_list (openlist, local, webdav). Required when several are configured.",
+  },
+};
 
 export const PIPELINE_TOOL_SCHEMAS: Record<
   PipelineToolName,
@@ -314,6 +362,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       },
       page: { type: "integer", minimum: 1 },
       perPage: { type: "integer", minimum: 1, maximum: 200 },
+      ...providerField,
     },
     required: ["path"],
   },
@@ -324,6 +373,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
         type: "string",
         description: "Directory to create (parents are created too).",
       },
+      ...providerField,
     },
     required: ["path"],
   },
@@ -333,6 +383,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       sourceDir: { type: "string" },
       destinationDir: { type: "string" },
       names: stringArray("File or folder names inside sourceDir."),
+      ...providerField,
     },
     required: ["sourceDir", "destinationDir", "names"],
   },
@@ -342,8 +393,66 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       sourceDir: { type: "string" },
       destinationDir: { type: "string" },
       names: stringArray("File or folder names inside sourceDir."),
+      ...providerField,
     },
     required: ["sourceDir", "destinationDir", "names"],
+  },
+  files_rename: {
+    type: "object",
+    properties: {
+      dir: {
+        type: "string",
+        description: "Directory that holds the entry.",
+      },
+      name: {
+        type: "string",
+        description: "Current file or folder name inside dir.",
+      },
+      newName: {
+        type: "string",
+        description:
+          "New name in the same directory. Must not contain a slash.",
+      },
+      ...providerField,
+    },
+    required: ["dir", "name", "newName"],
+  },
+  files_remove: {
+    type: "object",
+    properties: {
+      dir: {
+        type: "string",
+        description: "Directory that holds the entries.",
+      },
+      names: stringArray("File or folder names inside dir."),
+      recursive: {
+        type: "boolean",
+        description:
+          "Must be stated. true deletes a folder and its contents; false refuses a folder that is not empty.",
+      },
+      ...providerField,
+    },
+    required: ["dir", "names", "recursive"],
+  },
+  files_upload: {
+    type: "object",
+    properties: {
+      destinationDir: {
+        type: "string",
+        description: "Directory in the file manager that receives the file.",
+      },
+      name: {
+        type: "string",
+        description:
+          "Name in the destination. Defaults to the source file name.",
+      },
+      sourcePath: {
+        type: "string",
+        description: "Local file inside the workspace or outputs directory.",
+      },
+      ...providerField,
+    },
+    required: ["destinationDir", "sourcePath"],
   },
   files_offline_download: {
     type: "object",
@@ -357,6 +466,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
         description:
           "Downloader name configured in the file manager, e.g. qBittorrent, aria2, SimpleHttp.",
       },
+      ...providerField,
     },
     required: ["urls", "destinationDir"],
   },
@@ -405,9 +515,15 @@ export const PIPELINE_TOOL_DESCRIPTIONS: Record<PipelineToolName, string> = {
     "List a directory in the file manager (OpenList). Read-only. Use it to inspect a share or the library folder before copying.",
   files_mkdir: "Create a directory in the file manager. Requires approval.",
   files_copy:
-    "Copy files or folders between directories in the file manager (asynchronous task). Requires approval.",
+    "Copy files or folders between directories in the file manager. Requires approval. An asynchronous backend returns taskIds; verify with files_list.",
   files_move:
-    "Move files or folders between directories in the file manager (asynchronous task). Requires approval. Prefer copy until the result is verified.",
+    "Move files or folders between directories in the file manager. Requires approval. Prefer copy until the result is verified.",
+  files_rename:
+    "Rename one file or folder in place. Requires approval. Refuses to overwrite an existing name. Verify with files_list.",
+  files_remove:
+    "Delete files or folders. Irreversible and requires approval. recursive must be stated: false refuses a folder that is not empty, true deletes it with its contents. Use files_list first. Verify afterwards.",
+  files_upload:
+    "Upload a local file from the workspace or outputs directory into the file manager. Requires approval. Refuses to overwrite an existing name. Verify with files_list.",
   files_offline_download:
     "Ask the file manager to download URLs into a directory with its offline downloader (asynchronous task). Requires approval.",
   library_scan:

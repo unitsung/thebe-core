@@ -1,5 +1,26 @@
 export type CliModel = { providerId: string; modelId: string };
 
+export type StorageCliBackend =
+  | {
+      id: string;
+      type: "openlist";
+      baseUrl: string;
+      token?: string;
+    }
+  | {
+      id: string;
+      type: "local";
+      roots: string[];
+    }
+  | {
+      id: string;
+      type: "webdav";
+      url: string;
+      username?: string;
+      password?: string;
+      token?: string;
+    };
+
 export type CliCommand =
   | { kind: "help" }
   | { kind: "doctor" }
@@ -55,4 +76,14 @@ export type CliCommand =
   | { kind: "mcp-enable"; name: string }
   | { kind: "mcp-disable"; name: string }
   | { kind: "mcp-remove"; name: string }
+  | { kind: "storage-list" }
+  | {
+      kind: "storage-add";
+      backend: StorageCliBackend;
+      makeDefault?: boolean;
+    }
+  | { kind: "storage-remove"; id: string }
+  | { kind: "storage-default"; id: string }
+  | { kind: "storage-test"; id?: string }
+  | { kind: "storage-import-env" }
   | { kind: "error"; message: string };

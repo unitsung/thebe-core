@@ -13,8 +13,8 @@ import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
 import { createAria2DownloadProviderFromEnv } from "../adapters/pipeline/aria2-downloads.ts";
 import { createDownloadHub } from "../adapters/pipeline/download-hub.ts";
-import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
-import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/openlist-transfer.ts";
+import { loadStorageConfig, StorageRegistry } from "./storage-config.ts";
+import { createOpenListTransferProvider } from "../adapters/pipeline/openlist-transfer.ts";
 import { createFileJobStore } from "../agent/pipeline/job-store.ts";
 import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowlarr-search.ts";
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
@@ -39,8 +39,9 @@ import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
 import {
-  createOpenListBackgroundTaskProviderFromEnv,
-  createOpenListStrmRepairProviderFromEnv,
+  createOpenListBackgroundTaskProvider,
+  createOpenListStrmRepairProvider,
+  openListCredentialsFromEnv,
 } from "../adapters/openlist/index.ts";
 import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbittorrent/tasks.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
@@ -200,14 +201,35 @@ export async function bootstrapThebe(
             : {}),
         })
       : (dockerEngineProvider ?? stubProvider());
-  const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
+  // Storage is re-read on every file tool call; environment variables remain a
+  // fallback only until config.json gains a storage section.
+  const storage = new StorageRegistry();
+  for (const issue of storage.snapshot().issues ?? [])
+    console.warn(`storage: ${issue}`);
+  // One OpenList backend powers STRM repair, transfer, and background tasks,
+  // not just the file tools, so derive its credentials from the same section.
+  const loadedStorage = loadStorageConfig();
+  const configuredOpenList =
+    loadedStorage.backends.find(
+      (backend) =>
+        backend.type === "openlist" && backend.id === loadedStorage.defaultId
+    ) ?? loadedStorage.backends.find((backend) => backend.type === "openlist");
+  const openList = loadedStorage.configured
+    ? configuredOpenList?.type === "openlist"
+      ? { baseUrl: configuredOpenList.baseUrl, token: configuredOpenList.token }
+      : undefined
+    : openListCredentialsFromEnv(process.env);
+  const strmRepairProvider = openList
+    ? createOpenListStrmRepairProvider(openList)
+    : undefined;
   const navidrome = createNavidromeProviderFromEnv();
   const releaseSearch = createProwlarrSearchProviderFromEnv();
   const emby = createMediaBrowserProviderFromEnv("emby");
   const jellyfin = createMediaBrowserProviderFromEnv("jellyfin");
   const immich = createImmichProviderFromEnv();
-  const openListBackgroundTaskProvider =
-    createOpenListBackgroundTaskProviderFromEnv();
+  const openListBackgroundTaskProvider = openList
+    ? createOpenListBackgroundTaskProvider(openList)
+    : undefined;
   const arcaneBackgroundTaskProvider =
     createArcaneBackgroundTaskProviderFromEnv();
 
@@ -276,8 +298,9 @@ export async function bootstrapThebe(
           isIndexerAddress: (url) => releaseSearch?.ownsAddress(url) === true,
         }
       ),
-      transfer: createOpenListTransferProviderFromEnv(),
-      files: createOpenListFilesProviderFromEnv(),
+      transfer: openList ? createOpenListTransferProvider(openList) : undefined,
+      storage,
+      uploadRoots: [workspacePath, outputDirectory],
       libraries: createLibraryRefreshProvidersFromEnv(),
       search: releaseSearch,
       media: { ...(emby ? { emby } : {}), ...(jellyfin ? { jellyfin } : {}) },

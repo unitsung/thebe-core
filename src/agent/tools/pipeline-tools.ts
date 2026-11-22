@@ -1,3 +1,5 @@
+import { stat, realpath } from "node:fs/promises";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import {
   PIPELINE_TOOL_DESCRIPTIONS,
   PIPELINE_TOOL_SCHEMAS,
@@ -6,6 +8,7 @@ import {
   type DownloadCapability,
   type DownloadProvider,
   type FilesProvider,
+  type FilesProviderRegistry,
   type LibraryRefreshProvider,
   type PipelineToolName,
 } from "../capabilities/pipeline.ts";
@@ -37,7 +40,17 @@ export type PipelineProviders = {
   downloads?: DownloadProvider;
   /** Network-drive transfer backend for `kind: "cloud_transfer"` acquisition jobs. */
   transfer?: CloudTransferProvider;
+  /** Default file backend for jobs and for tool calls that omit `provider`. */
   files?: FilesProvider;
+  /** Every configured file backend; defaults to `files` alone. */
+  fileProviders?: FilesProvider[];
+  /**
+   * Live storage configuration. Read on every tool call, so backends added,
+   * edited, or removed in config.json apply to already-open sessions.
+   */
+  storage?: FilesProviderRegistry;
+  /** Local roots that `files_upload` may read from. Empty hides the tool. */
+  uploadRoots?: string[];
   libraries?: LibraryRefreshProvider[];
   search?: ReleaseSearchProvider;
   /** Media server lookups used to verify that a finished job really landed in the library. */
@@ -45,8 +58,54 @@ export type PipelineProviders = {
   jobStore?: JobStore;
 };
 
+type FileState = {
+  list: FilesProvider[];
+  default?: FilesProvider;
+  dynamic: boolean;
+};
+
+/** One registry read per call, merged with any providers passed in explicitly. */
+function fileState(providers: PipelineProviders): FileState {
+  let fromStorage: FilesProvider[] = [];
+  let storageDefault: FilesProvider | undefined;
+  if (providers.storage) {
+    try {
+      const snapshot = providers.storage.snapshot();
+      fromStorage = snapshot.providers;
+      storageDefault = snapshot.defaultProvider;
+    } catch {
+      // A broken storage configuration must not take the whole session down.
+      fromStorage = [];
+    }
+  }
+  const all = [
+    ...(providers.fileProviders ?? []),
+    ...fromStorage,
+    ...(providers.files ? [providers.files] : []),
+  ];
+  const seen = new Set<string>();
+  const list = all.filter((provider) => {
+    if (seen.has(provider.service)) return false;
+    seen.add(provider.service);
+    return true;
+  });
+  return {
+    list,
+    default: providers.files ?? storageDefault ?? list[0],
+    dynamic: providers.storage !== undefined,
+  };
+}
+
+function fileProviders(providers: PipelineProviders): FilesProvider[] {
+  return fileState(providers).list;
+}
+
+function defaultFiles(providers: PipelineProviders): FilesProvider | undefined {
+  return fileState(providers).default;
+}
+
 const canRunJobs = (providers: PipelineProviders) =>
-  !!(providers.files && (providers.downloads || providers.transfer));
+  !!(defaultFiles(providers) && (providers.downloads || providers.transfer));
 
 /** Whether the configured providers can back the durable acquisition jobs. */
 export function canRunPipelineJobs(providers: PipelineProviders): boolean {
@@ -63,14 +122,23 @@ export function availablePipelineTools(
   if (providers.downloads?.pause) names.push("download_pause");
   if (providers.downloads?.resume) names.push("download_resume");
   if (providers.downloads?.remove) names.push("download_delete");
-  if (providers.files)
-    names.push(
-      "files_list",
-      "files_mkdir",
-      "files_copy",
-      "files_move",
-      "files_offline_download"
-    );
+  const { list: files, dynamic } = fileState(providers);
+  if (files.length || dynamic) {
+    names.push("files_list", "files_mkdir", "files_copy", "files_move");
+    // With a live registry every built-in backend supports these, and the tool
+    // must already be present when a backend is added to a running session.
+    if (dynamic || files.some((provider) => provider.rename))
+      names.push("files_rename");
+    if (dynamic || files.some((provider) => provider.remove))
+      names.push("files_remove");
+    if (
+      providers.uploadRoots?.length &&
+      (dynamic || files.some((provider) => provider.upload))
+    )
+      names.push("files_upload");
+    if (files.some((provider) => provider.offlineDownload))
+      names.push("files_offline_download");
+  }
   if (providers.libraries?.length)
     names.push("library_scan", "library_refresh_item");
   return names;
@@ -194,7 +262,7 @@ export function createPipelineTools(
           {
             downloads: providers.downloads,
             transfer: providers.transfer,
-            files: providers.files!,
+            files: defaultFiles(providers)!,
             libraries: providers.libraries,
             media: providers.media,
           },
@@ -413,34 +481,109 @@ async function run(
         (await providers.downloads!.get(requiredString(args.hash, "hash"))) ??
         null
       );
-    case "files_list":
-      return providers.files!.list({
+    case "files_list": {
+      const files = pickFiles(providers, args.provider);
+      const listing = await files.list({
         path: requiredString(args.path, "path"),
         page: integerOptional(args.page),
         perPage: integerOptional(args.perPage),
       });
-    case "files_mkdir":
-      await providers.files!.mkdir(requiredString(args.path, "path"));
-      return { created: true };
+      const all = fileProviders(providers);
+      return all.length > 1
+        ? {
+            provider: files.service,
+            providers: all.map((provider) => provider.service),
+            ...listing,
+          }
+        : listing;
+    }
+    case "files_mkdir": {
+      const files = pickFiles(providers, args.provider);
+      await files.mkdir(requiredString(args.path, "path"));
+      return { provider: files.service, created: true };
+    }
     case "files_copy":
+    case "files_move": {
+      const files = pickFiles(providers, args.provider);
+      const result = await (name === "files_copy"
+        ? files.copy(transfer(args))
+        : files.move(transfer(args)));
       return {
-        ...(await providers.files!.copy(transfer(args))),
-        note: "Asynchronous. Verify with files_list.",
+        provider: files.service,
+        ...result,
+        note: result.taskIds?.length
+          ? "Asynchronous. Verify with files_list."
+          : "Completed. Verify with files_list.",
       };
-    case "files_move":
+    }
+    case "files_rename": {
+      const files = pickFiles(providers, args.provider);
+      if (!files.rename)
+        throw new Error(`${files.service} does not support renaming`);
+      const dir = requiredString(args.dir, "dir");
+      const entry = requiredString(args.name, "name");
+      const newName = requiredString(args.newName, "newName");
+      await files.rename({ dir, name: entry, newName });
       return {
-        ...(await providers.files!.move(transfer(args))),
-        note: "Asynchronous. Verify with files_list.",
+        provider: files.service,
+        renamed: true,
+        dir,
+        name: entry,
+        newName,
       };
-    case "files_offline_download":
+    }
+    case "files_remove": {
+      const files = pickFiles(providers, args.provider);
+      if (!files.remove)
+        throw new Error(`${files.service} does not support removal`);
+      if (typeof args.recursive !== "boolean")
+        throw new Error("recursive must be stated as true or false");
+      const dir = requiredString(args.dir, "dir");
+      const names = stringArray(args.names, "names");
+      await files.remove({ dir, names, recursive: args.recursive });
       return {
-        ...(await providers.files!.offlineDownload({
+        provider: files.service,
+        removed: names.length,
+        names,
+        recursive: args.recursive,
+        note: "Removal is irreversible. Confirm with files_list.",
+      };
+    }
+    case "files_upload": {
+      const files = pickFiles(providers, args.provider);
+      if (!files.upload)
+        throw new Error(`${files.service} does not support uploads`);
+      const sourcePath = await resolveUploadSource(
+        requiredString(args.sourcePath, "sourcePath"),
+        providers.uploadRoots ?? []
+      );
+      const destinationDir = requiredString(
+        args.destinationDir,
+        "destinationDir"
+      );
+      const name = optionalString(args.name) ?? basename(sourcePath);
+      await files.upload({ dir: destinationDir, name, sourcePath });
+      return {
+        provider: files.service,
+        uploaded: true,
+        path: joinPath(destinationDir, name),
+        sourcePath,
+      };
+    }
+    case "files_offline_download": {
+      const files = pickFiles(providers, args.provider);
+      if (!files.offlineDownload)
+        throw new Error(`${files.service} does not support offline downloads`);
+      return {
+        provider: files.service,
+        ...(await files.offlineDownload({
           urls: stringArray(args.urls, "urls"),
           destinationDir: requiredString(args.destinationDir, "destinationDir"),
           tool: optionalString(args.tool),
         })),
         note: "Asynchronous. Verify with files_list.",
       };
+    }
     case "library_scan": {
       const provider = pickLibrary(providers, args.provider);
       await provider.scan();
@@ -480,6 +623,74 @@ function pickLibrary(
         : "provider is required when several media servers are configured"
     );
   return found;
+}
+
+function pickFiles(
+  providers: PipelineProviders,
+  requested: unknown
+): FilesProvider {
+  const list = fileProviders(providers);
+  if (list.length === 0)
+    throw new Error(
+      "No storage backend is configured; add one with `thebe storage add`"
+    );
+  const wanted = optionalString(requested);
+  if (wanted) {
+    const found = list.find((provider) => provider.service === wanted);
+    if (!found)
+      throw new Error(
+        `${wanted} is not configured; choose ${list.map((provider) => provider.service).join(", ")}`
+      );
+    return found;
+  }
+  if (list.length > 1)
+    throw new Error(
+      `provider is required when several file managers are configured: ${list.map((provider) => provider.service).join(", ")}`
+    );
+  return list[0]!;
+}
+
+function joinPath(dir: string, name: string): string {
+  return `${dir.replace(/\/+$/, "")}/${name}`;
+}
+
+const MAX_UPLOAD_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Resolve an upload source inside the workspace or outputs directory, so the model cannot
+ * read an arbitrary host file into a remote share.
+ */
+async function resolveUploadSource(
+  raw: string,
+  roots: string[]
+): Promise<string> {
+  if (roots.length === 0)
+    throw new Error("Upload is unavailable: no workspace or output directory");
+  const realRoots = await Promise.all(
+    roots.map(async (root) => {
+      const absolute = resolve(root);
+      return realpath(absolute).catch(() => absolute);
+    })
+  );
+  const candidate = isAbsolute(raw)
+    ? resolve(raw)
+    : resolve(realRoots[0]!, raw);
+  const real = await realpath(candidate).catch(() => undefined);
+  if (!real) throw new Error(`Upload source not found: ${raw}`);
+  if (!realRoots.some((root) => isInside(root, real)))
+    throw new Error(
+      "Upload source must be inside the workspace or outputs directory"
+    );
+  const info = await stat(real);
+  if (!info.isFile()) throw new Error("Upload source must be a regular file");
+  if (info.size > MAX_UPLOAD_BYTES)
+    throw new Error("Upload source is larger than 1 GiB");
+  return real;
+}
+
+function isInside(root: string, candidate: string): boolean {
+  const path = relative(root, candidate);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path));
 }
 
 function transfer(args: Record<string, unknown>) {

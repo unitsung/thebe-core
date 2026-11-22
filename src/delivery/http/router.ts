@@ -21,6 +21,7 @@ import { handleMemoryRoutes } from "./routes/memory.ts";
 import { handleNotificationRoutes } from "./routes/notifications.ts";
 import { handleImRoutes } from "./routes/im.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
+import { handleStorageRoutes } from "./routes/storage.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
@@ -165,6 +166,8 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       }
       const imResponse = await handleImRoutes(context);
       if (imResponse) return imResponse;
+      const storageResponse = await handleStorageRoutes(context);
+      if (storageResponse) return storageResponse;
       const settingsResponse = await handleSettingsRoutes(context);
       if (settingsResponse) {
         return settingsResponse;

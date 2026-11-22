@@ -417,20 +417,158 @@ export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 ```
 
-(`OPENLIST_BASE_URL` and `OPENLIST_TOKEN` also work.) This registers the
-`strm_repair` capability and the file tools. It uses OpenList's `/api/fs/get`,
+The preferred place for these credentials is the `storage` section below
+(`thebe storage add openlist ...`); the environment variables remain as a
+fallback. Either source registers the `strm_repair` capability and the file
+tools. It uses OpenList's `/api/fs/get`,
 `/api/fs/search`, and `/api/fs/put` to find candidates (regular media plus HLS
 `.m3u8` and DASH `.mpd` playlists), write the STRM back, and read it again to
 verify. The token is used only by the adapter.
 
+OpenList also ships an official MCP server. Enable it in OpenList's own
+configuration (`"mcp": { "enable": true }`), restart OpenList, and let Core attach
+it:
+
+```bash
+export THEBE_OPENLIST_MCP=on
+```
+
+Core then adds a deferred `openlist` MCP server at `<THEBE_OPENLIST_BASE_URL>/mcp`
+with the user token in `Authorization` verbatim (OpenList rejects a `Bearer`
+prefix). The preset lists `openlist.fs.list`, `openlist.fs.get` and
+`openlist.fs.link` as read tools, so `/mcp` clients do not treat them as writes.
+It is off by default because the native adapters above cover the same reads; an
+explicit `openlist` entry in `.thebe/mcp.json` wins over the environment preset.
+To attach it by hand instead:
+
+```bash
+thebe mcp add openlist --url https://openlist.example.com/mcp --header "Authorization: <token>"
+```
+
 With qBittorrent (`THEBE_QBITTORRENT_URL`, `_USERNAME`, `_PASSWORD`), OpenList,
 and an Emby or Jellyfin API key configured, Core exposes the acquisition tools:
 `download_add/list/status/pause/resume/delete`,
-`files_list/mkdir/copy/move/offline_download`, `library_scan`, and
-`library_refresh_item`. With `THEBE_PROWLARR_URL` and `THEBE_PROWLARR_API_KEY` it
-also exposes `resource_search` and `pipeline_acquire/advance/status`: a
-deterministic job (download, copy, scan, verify) with bounded retries, persisted
-in `<agent store>/pipeline-jobs.json`. Writes need approval.
+`files_list/mkdir/copy/move/rename/remove/upload/offline_download`,
+`library_scan`, and `library_refresh_item`. With `THEBE_PROWLARR_URL` and
+`THEBE_PROWLARR_API_KEY` it also exposes `resource_search` and
+`pipeline_acquire/advance/status`: a deterministic job (download, copy, scan,
+verify) with bounded retries, persisted in `<agent store>/pipeline-jobs.json`.
+Writes need approval.
+
+#### File storage backends
+
+File storage lives in `~/.thebe/config.json` (or `$THEBE_CONFIG_DIR/config.json`),
+not in a pile of environment variables. The `storage` section is authoritative:
+
+```json
+{
+  "storage": {
+    "default": "media",
+    "backends": [
+      {
+        "id": "openlist",
+        "type": "openlist",
+        "baseUrl": "https://openlist.example.com",
+        "token": "your-openlist-token"
+      },
+      { "id": "media", "type": "local", "roots": ["/mnt/media"] },
+      {
+        "id": "nas",
+        "type": "webdav",
+        "url": "https://dav.example.com/dav",
+        "username": "user",
+        "password": "secret"
+      }
+    ]
+  }
+}
+```
+
+Manage it with the CLI; every command writes the file atomically with mode
+`0600` and leaves unrelated config keys alone:
+
+```bash
+thebe storage list
+thebe storage add openlist openlist --url https://openlist.example.com --token <token> --default
+thebe storage add local media --roots /mnt/media,/mnt/backup
+thebe storage add webdav nas --url https://dav.example.com/dav --username user --password secret
+thebe storage test media
+thebe storage default media
+thebe storage remove openlist
+```
+
+`thebe storage test` lists `/` on one backend (or all of them) and reports the
+entry count. `storage add` with an existing id replaces that backend; a secret
+you omit keeps the stored one, so editing a URL does not require re-entering a
+token. `--password` can be used with `--username`; use `--token` for
+a WebDAV bearer token instead.
+
+The same settings are available over the product HTTP API for the web UI:
+
+- `GET /v1/settings/storage` returns the backends with secrets redacted
+  (`hasToken`/`hasPassword`), plus the config path, source, default and any
+  issues.
+- `PUT /v1/settings/storage` replaces the list; an omitted secret keeps the
+  stored secret for the same id and type. `default: null` picks the first
+  backend and omitting `default` keeps the current one.
+- `POST /v1/settings/storage/test` with an optional `{ "id": "media" }` tests
+  one or all backends.
+
+Changes apply without restarting Core. Every `files_*` tool call re-reads the
+configuration, so an open session sees a backend that was added, edited, or
+removed while it was running. Acquisition jobs capture the default backend when
+the session opens: open a new session after changing the default if you want
+existing jobs to use the new one.
+
+When more than one backend is configured, each file tool call takes a
+`provider` argument (the backend `id`), and `files_list` reports the configured
+ids. When only one exists it is used automatically. A backend that does not
+support an operation does not expose that tool.
+
+A `local` backend exposes host directories through the same tools — an NFS or
+SMB share the host has already mounted, or any local path. Roots must be
+absolute paths. Every path must resolve inside one of these roots; `..` and
+symlinks that leave a root are refused or hidden. Listing `/` on this backend
+shows the configured roots themselves. The Core container sees only what the
+host mounts into it, so mount the share (Docker bind mount / compose `volumes`)
+and pass the container path.
+
+A `webdav` backend speaks PROPFIND, MKCOL, COPY, MOVE, DELETE and PUT, sends
+`Overwrite: F`, and refuses a destination that already exists. `token` sends a
+bearer token; otherwise `username` and `password` send Basic auth.
+
+Native SMB and NFS clients are not built in: mount the share on the host and use
+a `local` backend (OpenList's own SMB/WebDAV drivers remain the richer path when
+OpenList manages the storage).
+
+`files_remove` requires an explicit `recursive` boolean and refuses a non-empty
+folder unless it is `true`. `files_upload` reads only from the workspace or
+outputs directory (1 GiB limit) and refuses an existing destination name.
+
+An OpenList backend, whether it comes from the config section or the
+environment, also registers `strm_repair`, cloud transfer, and OpenList
+background tasks. Those long-lived providers read the OpenList address and
+token when Core starts; the `files_*` tools always read the current config.
+Restart Core after changing the OpenList address or token to apply it to
+acquisition and transfer.
+
+##### Legacy environment variables
+
+`THEBE_OPENLIST_BASE_URL`/`THEBE_OPENLIST_TOKEN`,
+`THEBE_FILES_LOCAL_ROOTS`, and
+`THEBE_WEBDAV_URL`/`_USERNAME`/`_PASSWORD`/`_TOKEN` still work, but only while
+`config.json` has no `storage` section. Once a section exists, the environment
+is ignored — that is what makes removing a backend reliable. To keep the
+environment setup, materialize it once:
+
+```bash
+thebe storage import-env
+```
+
+The environment supplies the ids `openlist`, `local`, and `webdav`. The optional
+OpenList MCP server enabled with `THEBE_OPENLIST_MCP=on` still reads
+`THEBE_OPENLIST_BASE_URL/TOKEN`; you can also add it by hand with
+`thebe mcp add openlist --url ... --header "Authorization: <token>"`.
 
 `THEBE_ARIA2_URL` (and `THEBE_ARIA2_SECRET`, aria2's `rpc-secret`, when it has one) adds aria2 as a second
 download engine behind the same `download_*` tools. `download_add` sends magnets and `.torrent` links to

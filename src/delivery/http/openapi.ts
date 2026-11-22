@@ -805,6 +805,31 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Read file storage backends (secrets redacted)",
+    tag: "settings",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "put",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Replace file storage backends",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "StorageSettingsWrite",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.storageSettings}/test`,
+    summary: "Test one or all file storage backends",
+    tag: "settings",
+    requestBody: { required: false },
+    requestSchema: "StorageTestRequest",
+    responseSchema: "StorageTestResult",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.memory,
     summary: "Read Thebe Memory",
     tag: "settings",
@@ -3816,6 +3841,109 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sandboxEnabled: { type: "boolean" },
             sandboxAllowedDomains: { type: "array", items: { type: "string" } },
             sandboxDeniedDomains: { type: "array", items: { type: "string" } },
+          },
+        },
+        StorageBackend: {
+          type: "object",
+          required: ["id", "type"],
+          properties: {
+            id: { type: "string" },
+            type: { type: "string", enum: ["openlist", "local", "webdav"] },
+            baseUrl: { type: "string" },
+            url: { type: "string" },
+            roots: { type: "array", items: { type: "string" } },
+            username: { type: "string" },
+            hasToken: { type: "boolean" },
+            hasPassword: { type: "boolean" },
+          },
+        },
+        StorageSettings: {
+          type: "object",
+          required: ["path", "source", "backends", "issues"],
+          properties: {
+            path: { type: "string" },
+            source: {
+              type: "string",
+              enum: ["config", "env", "none"],
+            },
+            default: { type: "string" },
+            backends: {
+              type: "array",
+              items: { $ref: "#/components/schemas/StorageBackend" },
+            },
+            issues: { type: "array", items: { type: "string" } },
+          },
+        },
+        StorageSettingsWrite: {
+          type: "object",
+          required: ["backends"],
+          additionalProperties: false,
+          properties: {
+            default: {
+              type: "string",
+              nullable: true,
+              description:
+                "Backend id; null picks the first. Omit to keep the current default.",
+            },
+            backends: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type"],
+                additionalProperties: true,
+                properties: {
+                  id: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: ["openlist", "local", "webdav"],
+                  },
+                  baseUrl: { type: "string" },
+                  url: { type: "string" },
+                  roots: { type: "array", items: { type: "string" } },
+                  username: { type: "string" },
+                  token: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored token for the same id and type.",
+                  },
+                  password: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored password for the same id and type.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        StorageTestRequest: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "Omit to test every backend." },
+          },
+        },
+        StorageTestResult: {
+          type: "object",
+          required: ["ok", "results"],
+          properties: {
+            ok: { type: "boolean" },
+            issues: { type: "array", items: { type: "string" } },
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type", "ok"],
+                properties: {
+                  id: { type: "string" },
+                  type: { type: "string" },
+                  ok: { type: "boolean" },
+                  total: { type: "integer" },
+                  entries: { type: "array", items: { type: "string" } },
+                  error: { type: "string" },
+                },
+              },
+            },
           },
         },
         ProductGoalRun: {

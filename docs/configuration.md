@@ -169,15 +169,17 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 
 ## OpenList STRM 修复 provider
 
-Core 可以在启动时注册一个 provider-owned `strm_repair` 实现。配置完整的
-OpenList 地址和 token 后，能力会自动出现在 Core capability catalog；缺少任一
-变量时不会暴露该写能力：
+Core 可以在启动时注册一个 provider-owned `strm_repair` 实现。OpenList 凭据的推荐
+位置是下文的 `storage` 段（`thebe storage add openlist ...`）；下面的环境变量仍是
+兼容回退。配置完整的 OpenList 地址和 token 后，能力会自动出现在 Core capability
+catalog；缺少任一凭据时不会暴露该写能力：
 
 ```bash
 export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 # With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
-# Core exposes the acquisition pipeline tools: download_add/list/status/pause/resume, files_list/mkdir/copy/move/offline_download,
+# Core exposes the acquisition pipeline tools: download_add/list/status/pause/resume,
+# files_list/mkdir/copy/move/rename/remove/upload/offline_download,
 # library_scan and library_refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource_search,
 # and pipeline_acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
 # persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
@@ -199,10 +201,126 @@ Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBitto
 自己推进本进程内新建的任务（每分钟一次），所以手机休眠时
 也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline_advance`；失败的任务不会自动重试。
 
+### 文件存储后端
+
+文件存储配置放在 `~/.thebe/config.json`（或 `$THEBE_CONFIG_DIR/config.json`），
+不再依赖一组环境变量。`storage` 段是唯一事实来源：
+
+```json
+{
+  "storage": {
+    "default": "media",
+    "backends": [
+      {
+        "id": "openlist",
+        "type": "openlist",
+        "baseUrl": "https://openlist.example.com",
+        "token": "your-openlist-token"
+      },
+      { "id": "media", "type": "local", "roots": ["/mnt/media"] },
+      {
+        "id": "nas",
+        "type": "webdav",
+        "url": "https://dav.example.com/dav",
+        "username": "user",
+        "password": "secret"
+      }
+    ]
+  }
+}
+```
+
+用 CLI 管理；每条命令都原子写入该文件（权限 `0600`），并保留其他配置键：
+
+```bash
+thebe storage list
+thebe storage add openlist openlist --url https://openlist.example.com --token <token> --default
+thebe storage add local media --roots /mnt/media,/mnt/backup
+thebe storage add webdav nas --url https://dav.example.com/dav --username user --password secret
+thebe storage test media
+thebe storage default media
+thebe storage remove openlist
+```
+
+`thebe storage test` 会列出指定后端（或全部后端）的 `/` 并报告条目数。用已存在的
+id 执行 `storage add` 会替换该后端；省略某个密钥则保留已存的值，所以改地址不需要
+重新输入 token。WebDAV 可以 `--username` + `--password` 使用 Basic
+认证，也可以只用 `--token` 使用 Bearer。
+
+同一套配置通过产品 HTTP API 提供给 Web UI：
+
+- `GET /v1/settings/storage` 返回后端列表、配置路径、来源、默认后端和问题列表；
+  密钥会脱敏为 `hasToken`/`hasPassword`。
+- `PUT /v1/settings/storage` 替换整个列表；省略密钥时沿用同 id、同类型后端已存的
+  密钥。`default: null` 选择第一个后端，省略 `default` 则保留当前默认值。
+- `POST /v1/settings/storage/test` 可带 `{ "id": "media" }`，测试单个或全部后端。
+
+配置修改无需重启 Core。每次 `files_*` 工具调用都会重新读取配置，所以运行中的会话
+能立即看到新增、修改或删除的后端。采集任务在会话打开时确定默认后端：修改默认值后
+请开新会话，已有任务才会使用新的默认后端。
+
+配置多个后端时，每次文件工具调用都要带 `provider` 参数（即后端 `id`），
+`files_list` 会返回当前配置的 id；只配置一个时自动使用它。某个后端不支持的操作
+不会出现对应工具。
+
+`local` 后端把宿主机目录接入同一套文件工具，适合宿主机已经挂载好的 NFS/SMB 共享
+或任意本地路径。根目录必须是绝对路径。传给工具的路径必须解析到这些根目录之内；
+`..` 和逃出根目录的符号链接会被拒绝或隐藏。在该后端列出 `/` 时返回的是配置的根
+目录本身。Core 容器只能看到宿主机挂载进来的目录，所以要先挂载共享（Docker bind
+mount / compose `volumes`），再传容器内路径。
+
+`webdav` 后端使用 PROPFIND、MKCOL、COPY、MOVE、DELETE 和 PUT，发送
+`Overwrite: F`，目标已存在时拒绝覆盖。`token` 发送 bearer token；否则
+`username` + `password` 发送 Basic 认证。
+
+Core 不内置 SMB/NFS 客户端：在宿主机挂载共享后使用 `local` 后端（如果存储本身由
+OpenList 管理，OpenList 自带的 SMB/WebDAV 驱动仍是功能更全的路径）。
+
+`files_remove` 必须明确给出 `recursive` 布尔值，非空目录只有传 `true` 才会删除。
+`files_upload` 只读取工作区或输出目录（上限 1 GiB），并拒绝覆盖已存在的目标名。
+
+一个 OpenList 后端（无论来自配置还是环境变量）除了文件工具，还会注册
+`strm_repair`、网盘转存和 OpenList 后台任务。这些长生命周期 provider 在 Core
+启动时读取 OpenList 地址与 token；`files_*` 工具则始终读取当前配置。修改 OpenList
+后端的地址或 token 后，要让采集/转存相关功能生效需重启 Core。
+
+##### 兼容的环境变量
+
+`THEBE_OPENLIST_BASE_URL`/`THEBE_OPENLIST_TOKEN`、`THEBE_FILES_LOCAL_ROOTS`，以及
+`THEBE_WEBDAV_URL`/`_USERNAME`/`_PASSWORD`/`_TOKEN` 仍然可用，但只在
+`config.json` 没有 `storage` 段时生效。一旦存在该段，环境变量会被忽略——这样删除
+后端才是可靠的。想保留现有的环境变量配置，执行一次导入：
+
+```bash
+thebe storage import-env
+```
+
+环境变量对应的 id 是 `openlist`、`local` 和 `webdav`。`THEBE_OPENLIST_MCP=on`
+开启的 OpenList MCP preset 仍读取环境变量；也可以手动执行
+`thebe mcp add openlist --url ... --header "Authorization: <token>"`。
+
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
+
+OpenList 还自带官方 MCP server。先在 OpenList 自己的配置里开启
+`"mcp": { "enable": true }` 并重启，再让 Core 挂载：
+
+```bash
+export THEBE_OPENLIST_MCP=on
+```
+
+Core 会在 `<THEBE_OPENLIST_BASE_URL>/mcp` 添加一个 deferred 的 `openlist` MCP
+server，并把用户 token 原样放进 `Authorization`（OpenList 不接受 `Bearer`
+前缀）。预设把 `openlist.fs.list`、`openlist.fs.get` 和 `openlist.fs.link` 声明为
+只读工具，因此 `/mcp` 客户端不会把它们当成写操作。该预设默认关闭，因为上面的
+原生 adapter 已覆盖同样的读取；`.thebe/mcp.json` 里显式定义的 `openlist`
+条目优先于环境变量预设。也可以手动添加：
+
+```bash
+thebe mcp add openlist --url https://openlist.example.com/mcp --header "Authorization: <token>"
+```
 
 ## MCP OAuth 网关
 
