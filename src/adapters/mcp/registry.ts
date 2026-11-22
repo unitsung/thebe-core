@@ -116,6 +116,8 @@ export function createMcpClientRegistry(
     homeDir?: string;
     timeoutMs?: number;
     serverStates?: readonly McpServerState[];
+    /** Environment for built-in presets; defaults to the process environment. */
+    env?: Record<string, string | undefined>;
   } = {}
 ) {
   const states = new Map<string, ServerState>();
