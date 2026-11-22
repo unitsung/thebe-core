@@ -125,6 +125,8 @@ type GoalExecutionDeps = {
   ) => Promise<GoalRun>;
   reportInbox: GoalReportInbox;
   ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
+  /** Resolves once the consumed-input cursor is durable on disk. */
+  persistInputCursor?: (run: ManagedGoal) => Promise<void>;
   onSourceFollowUp?: (
     goalId: string,
     input: GoalCheckpointInput & { channel: ChannelRef },
@@ -297,7 +299,12 @@ export async function executeGoal(
           await notifySource(repliedTo, "source_answered", sourceReply.message);
         }
         const lastInput = checkpoint.inputs.at(-1);
-        if (lastInput) run.ticketInputSeq = lastInput.seq;
+        if (lastInput) {
+          run.ticketInputSeq = lastInput.seq;
+          // Durable before the next checkpoint can start: a restart that loses this cursor
+          // re-delivers an input the worker already consumed.
+          await deps.persistInputCursor?.(run);
+        }
         const report = checkpointReport;
         if (report) {
           const { sourceReply: _sourceReply, ...statusReport } = report;

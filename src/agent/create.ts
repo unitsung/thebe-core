@@ -146,75 +146,74 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       enabledSources,
     });
   }
-  const { watchdog: goalWatchdog, ...goals } = createGoalApi(
-    ctx,
-    subagents,
-    artifactStore,
-    reportInbox,
-    {
-      watchdog: options.watchdog,
-      getTicketIdForGoal: async (goalId) =>
-        (await ticketStore.getByGoal(goalId))?.id,
-      getTicketForGoal: (goalId) => ticketStore.getByGoal(goalId),
-      revalidateMandate: revalidateTicketGoal,
-      ticketInputs: async (goalId) =>
-        (await ticketStore.getByGoal(goalId))?.inputs ?? [],
-      onSourceFollowUp: async (goalId, input, type, message) => {
-        const ticket = await ticketStore.getByGoal(goalId);
-        if (
-          !ticket?.channels?.some((channel) =>
-            sameChannelRef(channel, input.channel)
-          )
+  const goalsApi = createGoalApi(ctx, subagents, artifactStore, reportInbox, {
+    watchdog: options.watchdog,
+    getTicketIdForGoal: async (goalId) =>
+      (await ticketStore.getByGoal(goalId))?.id,
+    getTicketForGoal: (goalId) => ticketStore.getByGoal(goalId),
+    revalidateMandate: revalidateTicketGoal,
+    ticketInputs: async (goalId) =>
+      (await ticketStore.getByGoal(goalId))?.inputs ?? [],
+    onSourceFollowUp: async (goalId, input, type, message) => {
+      const ticket = await ticketStore.getByGoal(goalId);
+      if (
+        !ticket?.channels?.some((channel) =>
+          sameChannelRef(channel, input.channel)
         )
-          return;
-        const notice = {
-          id: `${ticket.id}:${type}:${input.seq}`,
-          ticketId: ticket.id,
-          goalId,
-          type,
-          message,
-        };
-        if (options.onSourceFollowUpNotice) {
-          await options.onSourceFollowUpNotice(notice, input.channel);
-        } else {
-          await channelNotifier.enqueueFollowUp(notice, input.channel);
-          void channelNotifier.flush().catch(() => {});
-        }
-      },
-      onNeedsPerson: async (notice) => {
-        if (options.onGoalNeedsPerson) {
-          // The app-level notification layer owns both the owner targets and the Ticket's channels.
-          await options.onGoalNeedsPerson({
-            ...notice,
-            channels: await ticketChannels(notice.ticketId, notice.goalId),
-          });
-          return;
-        }
-        // A host that only installed channel adapters keeps the older writeback path.
-        try {
-          await channelNotifier.enqueueNeedsPerson(notice);
-          void channelNotifier.flush().catch(() => {});
-        } catch {
-          // Delivery is supplementary and never changes Goal state.
-        }
-      },
-      onCompleted: async (notice) => {
-        if (options.onGoalCompleted) {
-          await options.onGoalCompleted({
-            ...notice,
-            channels: await ticketChannels(notice.ticketId, notice.goalId),
-          });
-          return;
-        }
-        try {
-          await channelNotifier.enqueueCompleted(notice);
-          void channelNotifier.flush().catch(() => {});
-        } catch {
-          // Delivery is supplementary and never changes Goal state.
-        }
-      },
-    }
-  );
+      )
+        return;
+      const notice = {
+        id: `${ticket.id}:${type}:${input.seq}`,
+        ticketId: ticket.id,
+        goalId,
+        type,
+        message,
+      };
+      if (options.onSourceFollowUpNotice) {
+        await options.onSourceFollowUpNotice(notice, input.channel);
+      } else {
+        await channelNotifier.enqueueFollowUp(notice, input.channel);
+        void channelNotifier.flush().catch(() => {});
+      }
+    },
+    onNeedsPerson: async (notice) => {
+      if (options.onGoalNeedsPerson) {
+        // The app-level notification layer owns both the owner targets and the Ticket's channels.
+        await options.onGoalNeedsPerson({
+          ...notice,
+          channels: await ticketChannels(notice.ticketId, notice.goalId),
+        });
+        return;
+      }
+      // A host that only installed channel adapters keeps the older writeback path.
+      try {
+        await channelNotifier.enqueueNeedsPerson(notice);
+        void channelNotifier.flush().catch(() => {});
+      } catch {
+        // Delivery is supplementary and never changes Goal state.
+      }
+    },
+    onCompleted: async (notice) => {
+      if (options.onGoalCompleted) {
+        await options.onGoalCompleted({
+          ...notice,
+          channels: await ticketChannels(notice.ticketId, notice.goalId),
+        });
+        return;
+      }
+      try {
+        await channelNotifier.enqueueCompleted(notice);
+        void channelNotifier.flush().catch(() => {});
+      } catch {
+        // Delivery is supplementary and never changes Goal state.
+      }
+    },
+  });
+  const {
+    watchdog: goalWatchdog,
+    flushPersistence: flushGoalPersistence,
+    ...goals
+  } = goalsApi;
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
@@ -961,6 +960,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       await channelNotifier.stop();
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
+      // A Goal snapshot queued just before the restart must reach disk, or recovery resumes
+      // from a stale cursor and re-delivers Ticket inputs the worker already consumed.
+      await flushGoalPersistence();
       await options.runtime.quiesce();
     },
     async unquiesce() {

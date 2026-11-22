@@ -321,6 +321,11 @@ export function createGoalApi(
     }
   }
 
+  /** Resolves once every queued Goal snapshot has reached the store. */
+  async function flushPersistence(): Promise<void> {
+    await Promise.all(persistChains.values());
+  }
+
   function queueGoalPersistence(
     run: GoalRun | undefined,
     thebeSessionId: string,
@@ -491,6 +496,12 @@ export function createGoalApi(
         setTerminal,
         reportInbox,
         ticketInputs: options.ticketInputs,
+        persistInputCursor: (current) =>
+          queueGoalPersistence(
+            snapshot(current),
+            current.thebeSessionId,
+            storedGoalEvents(current.events)
+          ),
         onSourceFollowUp: options.onSourceFollowUp,
         now: ctx.now,
       },
@@ -1304,6 +1315,7 @@ export function createGoalApi(
       run.listeners.clear();
       void queueGoalPersistence(undefined, thebeSessionId);
     },
+    flushPersistence,
     watchdog,
   };
 }
