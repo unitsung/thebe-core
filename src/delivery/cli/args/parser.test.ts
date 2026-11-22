@@ -169,6 +169,98 @@ describe("parseCliArgs", () => {
     });
   });
 
+  it("parses storage management commands", () => {
+    expect(parseCliArgs(["storage"])).toEqual({ kind: "storage-list" });
+    expect(parseCliArgs(["storage", "list"])).toEqual({ kind: "storage-list" });
+    expect(parseCliArgs(["storage", "remove", "nas"])).toEqual({
+      kind: "storage-remove",
+      id: "nas",
+    });
+    expect(parseCliArgs(["storage", "default", "nas"])).toEqual({
+      kind: "storage-default",
+      id: "nas",
+    });
+    expect(parseCliArgs(["storage", "test", "nas"])).toEqual({
+      kind: "storage-test",
+      id: "nas",
+    });
+    expect(parseCliArgs(["storage", "import-env"])).toEqual({
+      kind: "storage-import-env",
+    });
+    expect(
+      parseCliArgs([
+        "storage",
+        "add",
+        "openlist",
+        "ol",
+        "--url",
+        "http://openlist.local:5244",
+        "--token",
+        "t",
+        "--default",
+      ])
+    ).toEqual({
+      kind: "storage-add",
+      makeDefault: true,
+      backend: {
+        id: "ol",
+        type: "openlist",
+        baseUrl: "http://openlist.local:5244",
+        token: "t",
+      },
+    });
+    expect(
+      parseCliArgs([
+        "storage",
+        "add",
+        "media",
+        "--type",
+        "local",
+        "--roots",
+        "/mnt/a,/mnt/b",
+        "--roots",
+        "/mnt/c",
+      ])
+    ).toEqual({
+      kind: "storage-add",
+      makeDefault: false,
+      backend: {
+        id: "media",
+        type: "local",
+        roots: ["/mnt/a", "/mnt/b", "/mnt/c"],
+      },
+    });
+    expect(
+      parseCliArgs([
+        "storage",
+        "add",
+        "webdav",
+        "nas",
+        "--url",
+        "https://nas.local/dav",
+        "--username",
+        "thebe",
+        "--password",
+        "secret",
+      ])
+    ).toMatchObject({
+      kind: "storage-add",
+      backend: {
+        id: "nas",
+        type: "webdav",
+        url: "https://nas.local/dav",
+        username: "thebe",
+        password: "secret",
+      },
+    });
+    expect(parseCliArgs(["storage", "add", "media"])).toMatchObject({
+      kind: "error",
+    });
+    expect(parseCliArgs(["storage", "watch"])).toMatchObject({
+      kind: "error",
+    });
+  });
+
   it("parses a stdio mcp add with args and env, and rejects bad shapes", () => {
     expect(
       parseCliArgs([

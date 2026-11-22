@@ -11,6 +11,12 @@ Usage:
   thebe mcp list|tools                Inventory from ~/.thebe / .thebe/mcp.json
   thebe mcp add <name> --url <url|--command <cmd>> [--header K=V]...
   thebe mcp enable|disable|remove <name>
+  thebe storage list             File backends in ~/.thebe/config.json
+  thebe storage add openlist <id> --url <url> --token <token> [--default]
+  thebe storage add local <id> --roots <dir>[,<dir>] [--default]
+  thebe storage add webdav <id> --url <url> [--username <u> --password <p>]
+  thebe storage add webdav <id> --url <url> --token <token> [--default]
+  thebe storage remove|default <id> | test [<id>] | import-env
   thebe doctor                   Report the effective isolation posture
 
 Options:
@@ -33,6 +39,11 @@ Options:
   --header K=V             MCP request header; repeatable (mcp add)
   --env K=V                MCP stdio env; repeatable (mcp add)
   --arg <value>            MCP stdio argument; repeatable (mcp add)
+  --roots <dirs>           Local storage roots; repeatable or comma-separated
+  --token <token>          Storage token (openlist, webdav)
+  --username <user>        WebDAV Basic auth user
+  --password <password>   WebDAV Basic auth password
+  --default                Make the added storage backend the default
   -h, --help               Show help
 
 Architecture: embeds Pi via createAgentSession / AgentRuntime. Does not spawn

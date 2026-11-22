@@ -7,12 +7,33 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- File storage backends are managed in the `storage` section of
+  `~/.thebe/config.json`: OpenList, host-mounted local roots, and native WebDAV.
+  `thebe storage list|add|remove|default|test|import-env` edits the section
+  atomically (mode `0600`), and `GET/PUT /v1/settings/storage` plus
+  `POST /v1/settings/storage/test` expose it to clients. Every `files_*` tool call
+  re-reads the section, so adding, editing, or removing a backend applies without
+  restarting Core or reopening a session.
+- `files_rename`, `files_remove`, and `files_upload` extend the file tools, and
+  `local` and `webdav` backends join OpenList behind the same `FilesProvider`
+  seam. Uploads read only from the workspace or outputs directory; local paths
+  must stay inside a configured root; WebDAV refuses overwrites.
+- OpenList's built-in MCP server can be attached as a deferred `openlist` preset
+  with `THEBE_OPENLIST_MCP=on`. Its three `openlist.fs.*` tools are marked
+  read-only, and an explicit `openlist` entry in `.thebe/mcp.json` overrides the
+  preset.
 - `POST /v1/tickets` accepts `threads` (`["resource:container:emby"]` or
   `[{kind: "container", id: "emby"}]`) and records them as the Ticket's
   subscriptions, so a direct Ticket can follow the resources it names.
 
 ### Changed
 
+- OpenList credentials now come from the `storage` section when it exists and
+  also power STRM repair, cloud transfer, and background tasks, so the file
+  tools and acquisition providers share one address. The
+  `THEBE_OPENLIST_*`, `THEBE_FILES_LOCAL_ROOTS`, and `THEBE_WEBDAV_*` variables
+  remain a fallback only while the section is absent; `thebe storage import-env`
+  materializes them.
 - Removed the optional external agent-gateway notification bridge and its compose
   sidecar. Every notification transport now runs in Core; unsupported services use
   the generic webhook or Apprise target instead.

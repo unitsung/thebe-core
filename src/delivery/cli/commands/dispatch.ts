@@ -308,9 +308,15 @@ export async function runCliCommand(
       log(`removed ${command.name}`);
       return 0;
     }
-    case "doctor": {
-      // `doctor` runs in main.ts before bootstrap, so it never reaches dispatch.
-      error("doctor is handled before the agent starts");
+    case "doctor":
+    case "storage-list":
+    case "storage-add":
+    case "storage-remove":
+    case "storage-default":
+    case "storage-test":
+    case "storage-import-env": {
+      // These run in main.ts before bootstrap, so they never reach dispatch.
+      error(`${command.kind} is handled before the agent starts`);
       return 1;
     }
     default: {

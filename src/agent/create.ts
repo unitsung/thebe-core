@@ -122,7 +122,11 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       .map((service) => service.id);
     if (kind === "download" && options.pipeline) {
       services.push("download");
-      if (options.pipeline.files) services.push("files");
+      if (
+        options.pipeline.files ||
+        (options.pipeline.storage?.snapshot().providers.length ?? 0) > 0
+      )
+        services.push("files");
       if (options.pipeline.libraries?.length) services.push("library");
       if (canRunPipelineJobs(options.pipeline)) services.push("pipeline");
     }
