@@ -306,6 +306,22 @@ export interface ThebeAgent {
   recentEvents(
     limit?: number
   ): Array<NormalizedEvent & { thebeSessionId: string }>;
+  /** App-control calls waiting for the paired Thebe App. */
+  listClientToolRequests(
+    thebeSessionId: string
+  ): Promise<import("./app-control/client-tools.ts").ClientToolRequest[]>;
+  getClientToolRequest(
+    thebeSessionId: string,
+    requestId: string
+  ): Promise<
+    import("./app-control/client-tools.ts").ClientToolRequest | undefined
+  >;
+  /** The App's result for one pending App-control call; false when it is no longer pending. */
+  resolveClientToolRequest(
+    thebeSessionId: string,
+    requestId: string,
+    result: import("./app-control/client-tools.ts").ClientToolResult
+  ): Promise<boolean>;
 
   createSession(init?: CreateSessionInput): Promise<AgentSessionMeta>;
   listSessions(query?: {

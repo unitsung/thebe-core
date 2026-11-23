@@ -61,6 +61,16 @@ export type NormalizedEvent =
       risk?: "high" | "standard";
     }
   | {
+      /** A Core tool whose work must happen in the paired Thebe App. */
+      type: "client_tool_requested";
+      requestId: string;
+      sessionId: string;
+      toolName: string;
+      /** Redacted, truncated rendering; the App fetches the exact arguments separately. */
+      argsSummary?: string;
+      requiresApproval: boolean;
+    }
+  | {
       type: "tool_watchdog_timeout";
       toolCallId: string;
       toolName: string;
