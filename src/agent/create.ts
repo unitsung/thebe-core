@@ -762,6 +762,22 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     getMainSession: mainSession.getMainSession,
     askMainSession: mainSession.askMainSession,
     onProactiveMessage: options.onProactiveMessage,
+    async listClientToolRequests(thebeSessionId: string) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.list(thebeSessionId);
+    },
+    async getClientToolRequest(thebeSessionId: string, requestId: string) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.get(thebeSessionId, requestId);
+    },
+    async resolveClientToolRequest(
+      thebeSessionId: string,
+      requestId: string,
+      result: import("./app-control/client-tools.ts").ClientToolResult
+    ) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.resolve(thebeSessionId, requestId, result);
+    },
     ...prompts,
     ...sessions,
     ...goals,

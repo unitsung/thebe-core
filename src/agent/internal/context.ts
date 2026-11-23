@@ -87,6 +87,11 @@ import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createAutoSummary } from "./auto-summary.ts";
+import {
+  APP_CONTROL_TOOL_NAMES,
+  createAppControlTools,
+  createClientToolBridge,
+} from "../app-control/client-tools.ts";
 export { DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./auto-summary.ts";
 import { createEventLog } from "./event-log.ts";
 import { createPermissionControl } from "./permission-control.ts";
@@ -426,6 +431,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     : undefined;
 
   const eventLog = createEventLog();
+  const clientToolBridge = createClientToolBridge({ now });
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
 
@@ -923,6 +929,18 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
       })
     );
+    // A subagent uses its own run id for events but its parent's permission scope. It must not
+    // operate the person's App on the parent session's behalf.
+    if (permissionScopeId && scopeId === permissionScopeId) {
+      const sessionId = permissionScopeId;
+      tools.push(
+        ...createAppControlTools({
+          sessionId,
+          bridge: clientToolBridge,
+          emit: (event) => eventLog.appendEvent(sessionId, event),
+        })
+      );
+    }
     return tools;
   }
 
@@ -1211,7 +1229,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   // The policy allows exactly the tools the host builds: no second list to keep in step with them.
-  policy.registerTools(baseTools().map((tool) => tool.name));
+  policy.registerTools([
+    ...baseTools().map((tool) => tool.name),
+    ...APP_CONTROL_TOOL_NAMES,
+  ]);
 
   return {
     options,
@@ -1273,6 +1294,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       registry.requestStop = value;
     },
     checkNotQuiesced,
+    clientToolBridge,
     resourcesNeedingReload,
     baseTools,
     setMandateLookup(

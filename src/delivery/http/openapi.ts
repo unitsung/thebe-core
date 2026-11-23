@@ -1354,6 +1354,28 @@ const operations: Operation[] = [
     requestBody: { required: true },
   },
   {
+    method: "get",
+    path: "/v1/session/{id}/client-tools",
+    summary: "List App-control calls waiting for the paired Thebe App",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Read one pending App-control call and its exact arguments",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Return the paired App's result for one App-control call",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
+    requestBody: { required: true },
+  },
+  {
     method: "post",
     path: "/v1/session/{id}/tool-call/{toolCallId}/stop",
     summary: "Stop one tool call",
