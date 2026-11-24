@@ -17,7 +17,8 @@ import {
 export const MAX_IM_TEXT = 16_000;
 export const MAX_IM_MEDIA_ITEMS = 8;
 export const MAX_IM_MEDIA_BYTES = 2_000_000;
-export const MAX_IM_MEDIA_TOTAL_BYTES = 8_000_000;
+/** Keeps the worst-case base64 JSON below the HTTP listener's 10 MB body cap. */
+export const MAX_IM_MEDIA_TOTAL_BYTES = 7_000_000;
 const MAX_IM_MEDIA_BASE64 = Math.ceil((MAX_IM_MEDIA_BYTES * 4) / 3) + 4;
 const MAX_ID = 200;
 const MAX_LABEL = 100;

@@ -41,6 +41,8 @@ try {
     process.exitCode = 1;
   }
 } finally {
+  force ??= setTimeout(() => process.exit(1), 8_000);
+  force.unref?.();
   await cleanup();
   if (force) clearTimeout(force);
   process.removeListener("SIGINT", stop);

@@ -13,6 +13,7 @@ import type {
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
+import { MediaDownloadLimitError, readBoundedResponseBody } from "./media.ts";
 
 export const TELEGRAM_MAX_TEXT = 4_096;
 const DEFAULT_POLL_TIMEOUT_SECONDS = 50;
@@ -531,15 +532,19 @@ export function createTelegramImAdapter(input: {
         "telegram file download failed"
       );
     }
-    const declared = response.headers.get("content-length");
-    if (declared && Number(declared) > 2_000_000) {
-      throw new TelegramRequestError(
-        "bad_request",
-        "telegram file is too large"
-      );
+    let bytes: Uint8Array;
+    try {
+      bytes = await readBoundedResponseBody(response, 2_000_000);
+    } catch (error) {
+      if (error instanceof MediaDownloadLimitError) {
+        throw new TelegramRequestError(
+          "bad_request",
+          "telegram file is too large"
+        );
+      }
+      throw error;
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > 2_000_000) {
+    if (bytes.byteLength === 0) {
       throw new TelegramRequestError(
         "bad_request",
         "telegram file is too large"
@@ -651,7 +656,12 @@ function parseUpdate(
         ? "group"
         : undefined;
   if (!kind) return undefined;
-  const text = typeof message.text === "string" ? message.text.trim() : "";
+  const text =
+    typeof message.text === "string"
+      ? message.text.trim()
+      : typeof message.caption === "string"
+        ? message.caption.trim()
+        : "";
   const media = telegramMedia(message);
   if (!text && media.length === 0) return undefined;
   const chatId = numericId(chat.id);
@@ -700,17 +710,17 @@ function parseUpdate(
 
 function telegramMedia(message: Record<string, unknown>): ImMediaRef[] {
   if (Array.isArray(message.photo)) {
-    const photo = message.photo
-      .flatMap((entry) => {
-        const row = record(entry);
-        const id = typeof row.file_id === "string" ? row.file_id : "";
-        return id ? [row] : [];
-      })
-      .sort(
-        (left, right) =>
-          (numeric(right.file_size) ?? 0) - (numeric(left.file_size) ?? 0)
-      )
-      .at(0);
+    const photos = message.photo.flatMap((entry) => {
+      const row = record(entry);
+      const id = typeof row.file_id === "string" ? row.file_id : "";
+      return id ? [row] : [];
+    });
+    const photo = photos.some((row) => numeric(row.file_size) !== undefined)
+      ? photos.sort(
+          (left, right) =>
+            (numeric(right.file_size) ?? 0) - (numeric(left.file_size) ?? 0)
+        )[0]
+      : photos.at(-1);
     const id = typeof photo?.file_id === "string" ? photo.file_id : "";
     if (id) {
       return [
@@ -731,6 +741,7 @@ function telegramMedia(message: Record<string, unknown>): ImMediaRef[] {
     ["voice", "audio"],
     ["video", "video"],
     ["video_note", "video"],
+    ["animation", "video"],
     ["sticker", "image"],
   ] as const) {
     const row = record(message[key]);

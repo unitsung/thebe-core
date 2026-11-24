@@ -80,6 +80,8 @@ export async function serveMcpStdio(options: {
     terminal: false,
   });
   const maxBytes = options.maxLineBytes ?? MAX_STDIO_MESSAGE_BYTES;
+  const abort = () => input.close();
+  options.signal?.addEventListener("abort", abort, { once: true });
   try {
     for await (const line of input) {
       if (options.signal?.aborted) break;
@@ -96,6 +98,7 @@ export async function serveMcpStdio(options: {
       if (options.signal?.aborted) break;
     }
   } finally {
+    options.signal?.removeEventListener("abort", abort);
     closeReadline(input);
   }
 }

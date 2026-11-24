@@ -16,6 +16,7 @@ import type {
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
+import { MediaDownloadLimitError, readBoundedResponseBody } from "./media.ts";
 
 export const QQ_MAX_TEXT = 2_000;
 export const QQ_C2C_REPLY_WINDOW_MS = 60 * 60_000;
@@ -713,12 +714,16 @@ export function createQqImAdapter(input: {
     if (!response.ok) {
       throw new QqRequestError("network", "QQ media download failed");
     }
-    const declared = response.headers.get("content-length");
-    if (declared && Number(declared) > 2_000_000) {
-      throw new QqRequestError("bad_request", "QQ media is too large");
+    let data: Uint8Array;
+    try {
+      data = await readBoundedResponseBody(response, 2_000_000);
+    } catch (error) {
+      if (error instanceof MediaDownloadLimitError) {
+        throw new QqRequestError("bad_request", "QQ media is too large");
+      }
+      throw error;
     }
-    const data = new Uint8Array(await response.arrayBuffer());
-    if (data.byteLength === 0 || data.byteLength > 2_000_000) {
+    if (data.byteLength === 0) {
       throw new QqRequestError("bad_request", "QQ media is too large");
     }
     let urlFilename = "";

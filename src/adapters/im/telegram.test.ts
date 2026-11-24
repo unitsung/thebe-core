@@ -167,6 +167,7 @@ describe("Telegram IM adapter", () => {
             result: [
               messageUpdate({
                 text: undefined,
+                caption: "look at this",
                 photo: [
                   { file_id: "small", file_size: 2 },
                   { file_id: "large", file_size: png.length },
@@ -204,6 +205,7 @@ describe("Telegram IM adapter", () => {
         size: png.length,
       },
     ]);
+    expect(updates[0]?.text).toBe("look at this");
     const fetched = await adapter.fetchMedia?.({
       accountId: "im-telegram-test",
       chat: updates[0]!.chat,

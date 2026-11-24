@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ImInbound } from "../../agent/im/types.ts";
 import {
   createImsgLocalAdapter,
+  createNodeImsgRunner,
   imsgCursorIdentity,
   validateImsgCredentials,
   type ImsgCliRunner,
@@ -194,5 +195,112 @@ describe("local imsg IM adapter", () => {
     expect(factory.cursorIdentity?.({ backend: "imsg", cliPath: "/a" })).toBe(
       imsgCursorIdentity({ cliPath: "/a" })
     );
+  });
+
+  it("returns unknown rather than retrying a send that timed out", async () => {
+    const adapter = createImsgLocalAdapter({
+      account: {
+        id: "im-imsg-test",
+        platform: "imessage",
+        label: "iMessage",
+        enabled: true,
+        createdAt: "2026-11-24T00:00:00Z",
+      },
+      credentials: { cliPath: "/opt/homebrew/bin/imsg" },
+      runner: {
+        async watch() {},
+        async send(input) {
+          await new Promise<void>((resolve) => {
+            if (input.signal.aborted) {
+              resolve();
+              return;
+            }
+            input.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+          return { code: null, stdout: "", stderr: "" };
+        },
+      },
+      sendTimeoutMs: 5,
+      onCursor: () => {},
+    });
+
+    await expect(
+      adapter.send({
+        platform: "imessage",
+        accountId: "im-imsg-test",
+        chat: { kind: "direct", id: "7" },
+        text: "slow",
+        mode: "proactive",
+        idempotencyKey: "slow",
+      })
+    ).resolves.toMatchObject({ status: "unknown" });
+  });
+
+  it("drains inbound persistence before writing the cursor and stopping", async () => {
+    const fake = runner();
+    const cursors: string[] = [];
+    let release!: () => void;
+    const handled = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter = createImsgLocalAdapter({
+      account: {
+        id: "im-imsg-test",
+        platform: "imessage",
+        label: "iMessage",
+        enabled: true,
+        createdAt: "2026-11-24T00:00:00Z",
+      },
+      credentials: { cliPath: "/opt/homebrew/bin/imsg" },
+      runner: fake.cli,
+      onCursor: (value) => cursors.push(value),
+    });
+    adapter.onInbound(async () => handled);
+
+    await adapter.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const stopped = adapter.stop();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(cursors).toEqual([]);
+
+    release();
+    await stopped;
+    expect(cursors).toEqual(["42"]);
+  });
+
+  it("applies the 1MB output bound per watch message, not for the process lifetime", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-imsg-output-"));
+    const cli = join(dir, "imsg");
+    await writeFile(
+      cli,
+      `#!/usr/bin/env node
+for (let index = 0; index < 2; index += 1) {
+  process.stdout.write(JSON.stringify({ padding: "x".repeat(600000) }) + "\\n");
+}
+setInterval(() => {}, 1000);
+`,
+      { mode: 0o700 }
+    );
+    await chmod(cli, 0o700);
+    const controller = new AbortController();
+    const lines: string[] = [];
+    const finished = new Promise<void>((resolve) => {
+      const watching = createNodeImsgRunner().watch({
+        cliPath: cli,
+        args: ["watch", "--json"],
+        signal: controller.signal,
+        onLine: (line) => {
+          lines.push(line);
+          if (lines.length === 2) controller.abort();
+        },
+        onDiagnostic: () => {},
+      });
+      void watching.then(() => resolve());
+    });
+
+    await finished;
+    expect(lines).toHaveLength(2);
   });
 });

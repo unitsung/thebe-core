@@ -626,7 +626,11 @@ export function createImGateway(options: ImGatewayOptions) {
         continue;
       }
       try {
-        const fetched = await fetchMedia(item);
+        const fetched = await withTimeout(
+          fetchMedia(item),
+          20_000,
+          "IM media fetch timed out"
+        );
         const mediaType = normalizeMediaType(fetched.mediaType, fetched.data);
         if (
           !mediaType ||
@@ -1573,6 +1577,27 @@ export function createImGateway(options: ImGatewayOptions) {
     },
     replyWindowMsFor,
   };
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  message: string
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    timer.unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 export type ImGateway = ReturnType<typeof createImGateway>;

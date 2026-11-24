@@ -81,6 +81,7 @@ export function createImsgLocalAdapter(input: {
   runner?: ImsgCliRunner;
   now?: () => Date;
   retryMs?: number;
+  sendTimeoutMs?: number;
   /** Tests and non-default Messages homes. Default: ~/Library/Messages/Attachments. */
   attachmentRoots?: readonly string[];
 }): ImAdapter {
@@ -90,6 +91,7 @@ export function createImsgLocalAdapter(input: {
     expandHome(input.credentials.dbPath?.trim() || "") || undefined;
   const runner = input.runner ?? createNodeImsgRunner();
   const retryMs = Math.max(1, input.retryMs ?? DEFAULT_RETRY_MS);
+  const sendTimeoutMs = Math.max(1, input.sendTimeoutMs ?? 30_000);
   const attachmentRoots = input.attachmentRoots ?? [
     join(homedir(), "Library", "Messages", "Attachments"),
   ];
@@ -142,24 +144,28 @@ export function createImsgLocalAdapter(input: {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
     const row = parsed as Record<string, unknown>;
     const message = parseImsgMessage(row, input.account.id, now());
-    if (message) {
-      setHealth({ state: "connected", since: now().toISOString() });
-      const handler = inbound;
-      if (handler) {
-        inboundChain = inboundChain
-          .then(() => handler(message))
-          .catch(() => {
-            // The gateway persists the message first; one poison row must not stop the watcher.
-          });
-      }
-    }
-    if (row.type === undefined) {
+    const advance = () => {
+      if (row.type !== undefined) return;
       const next = numeric(row.id);
       if (next !== undefined && (cursor === undefined || next > cursor)) {
         cursor = next;
         input.onCursor(String(next));
       }
+    };
+    if (message && inbound) {
+      inboundChain = inboundChain
+        .then(async () => {
+          await inbound!(message);
+          setHealth({ state: "connected", since: now().toISOString() });
+          advance();
+        })
+        .catch(() => {
+          // A poison row must not stop the watcher; its cursor still advances once handled.
+          advance();
+        });
+      return;
     }
+    advance();
   }
 
   async function watchLoop(active: AbortController): Promise<void> {
@@ -221,6 +227,7 @@ export function createImsgLocalAdapter(input: {
     async stop() {
       controller?.abort();
       await loop?.catch(() => undefined);
+      await inboundChain.catch(() => undefined);
       loop = undefined;
       controller = undefined;
       setHealth({ state: "stopped" });
@@ -240,6 +247,8 @@ export function createImsgLocalAdapter(input: {
         return { status: "discard", reason: "invalid_credentials" };
       }
       const active = controller ?? new AbortController();
+      const timeout = AbortSignal.timeout(sendTimeoutMs);
+      const sendSignal = AbortSignal.any([active.signal, timeout]);
       let temporaryDirectory: string | undefined;
       try {
         let file: string | undefined;
@@ -267,12 +276,16 @@ export function createImsgLocalAdapter(input: {
             "--json",
             ...baseArgs(),
           ],
-          signal: active.signal,
+          signal: sendSignal,
         });
         if (result.code !== 0) {
           const detail = (result.stderr || result.stdout).trim().slice(0, 300);
           return {
-            status: /not found|no such/i.test(detail) ? "discard" : "retry",
+            status: timeout.aborted
+              ? "unknown"
+              : /not found|no such/i.test(detail)
+                ? "discard"
+                : "retry",
             reason: detail || `imsg exited ${result.code ?? "without status"}`,
           };
         }
@@ -340,8 +353,12 @@ export function createImsgLocalAdapter(input: {
       if (!details.isFile() || details.size <= 0 || details.size > 2_000_000) {
         throw new Error("imsg attachment is too large");
       }
+      const data = await readFile(target);
+      if (data.byteLength === 0 || data.byteLength > 2_000_000) {
+        throw new Error("imsg attachment is too large");
+      }
       return {
-        data: new Uint8Array(await readFile(target)),
+        data: new Uint8Array(data),
         mediaType:
           mediaInput.media.mimeType ??
           mediaTypeForFile(target) ??
@@ -436,7 +453,7 @@ function mediaOf(value: unknown): ImMediaRef[] {
   return found;
 }
 
-function createNodeImsgRunner(): ImsgCliRunner {
+export function createNodeImsgRunner(): ImsgCliRunner {
   return {
     watch({ cliPath, args, signal, onLine, onDiagnostic }) {
       return new Promise<void>((resolve, reject) => {
@@ -453,21 +470,26 @@ function createNodeImsgRunner(): ImsgCliRunner {
           crlfDelay: Infinity,
           terminal: false,
         });
-        let bytes = 0;
         lines.on("line", (line) => {
-          bytes += Buffer.byteLength(line);
-          if (bytes <= MAX_OUTPUT_BYTES) onLine(line);
+          if (Buffer.byteLength(line) <= MAX_OUTPUT_BYTES) onLine(line);
           else onDiagnostic("imsg watch output exceeded 1MB");
         });
         errors.on("line", onDiagnostic);
-        const stop = () => child.kill("SIGTERM");
+        let killTimer: NodeJS.Timeout | undefined;
+        const stop = () => {
+          child.kill("SIGTERM");
+          killTimer ??= setTimeout(() => child.kill("SIGKILL"), 2_000);
+          killTimer.unref?.();
+        };
         signal.addEventListener("abort", stop, { once: true });
         child.once("error", (error) => {
           signal.removeEventListener("abort", stop);
+          if (killTimer) clearTimeout(killTimer);
           reject(error);
         });
         child.once("close", (code, exitSignal) => {
           signal.removeEventListener("abort", stop);
+          if (killTimer) clearTimeout(killTimer);
           lines.close();
           errors.close();
           if (signal.aborted) resolve();
@@ -482,9 +504,12 @@ function createNodeImsgRunner(): ImsgCliRunner {
     },
     send({ cliPath, args, signal }) {
       return new Promise((resolve, reject) => {
+        if (signal.aborted) {
+          reject(new Error("imsg send stopped before it started"));
+          return;
+        }
         const child = spawn(cliPath, args, {
           stdio: ["ignore", "pipe", "pipe"],
-          ...(signal.aborted ? {} : {}),
         });
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];
@@ -494,14 +519,21 @@ function createNodeImsgRunner(): ImsgCliRunner {
         child.stderr.on("data", (chunk: Buffer) => {
           if (total(stderr) < MAX_OUTPUT_BYTES) stderr.push(chunk);
         });
-        const stop = () => child.kill("SIGTERM");
+        let killTimer: NodeJS.Timeout | undefined;
+        const stop = () => {
+          child.kill("SIGTERM");
+          killTimer ??= setTimeout(() => child.kill("SIGKILL"), 2_000);
+          killTimer.unref?.();
+        };
         signal.addEventListener("abort", stop, { once: true });
         child.once("error", (error) => {
           signal.removeEventListener("abort", stop);
+          if (killTimer) clearTimeout(killTimer);
           reject(error);
         });
         child.once("close", (code) => {
           signal.removeEventListener("abort", stop);
+          if (killTimer) clearTimeout(killTimer);
           resolve({
             code,
             stdout: Buffer.concat(stdout).toString("utf8"),
