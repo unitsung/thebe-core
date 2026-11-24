@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -104,6 +104,7 @@ describe("notification digest", () => {
     });
     await first.add(target, notice("one"));
     await first.stop();
+    expect((await stat(join(dir, "digests.json"))).mode & 0o777).toBe(0o600);
 
     const emitted: Notification[] = [];
     now = new Date("2026-11-14T10:10:01.000Z");

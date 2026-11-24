@@ -155,7 +155,10 @@ export function createNotificationOutbox(options: {
   async function persist(): Promise<void> {
     if (!file || !state) return;
     await mkdir(options.dir!, { recursive: true });
-    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, "utf8");
+    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
   function finish(
@@ -234,15 +237,17 @@ export function createNotificationOutbox(options: {
             .map(cloneEntry)
         );
         if (due.length === 0) return outcomes;
-        for (const entry of due) {
-          running.add(entry.targetId);
-          try {
-            const attempt = await deliver(entry);
-            outcomes.set(entry.id, attempt);
-          } finally {
-            running.delete(entry.targetId);
-          }
-        }
+        await Promise.all(
+          due.map(async (entry) => {
+            running.add(entry.targetId);
+            try {
+              const attempt = await deliver(entry);
+              outcomes.set(entry.id, attempt);
+            } finally {
+              running.delete(entry.targetId);
+            }
+          })
+        );
       }
     })().finally(() => {
       flushing = undefined;

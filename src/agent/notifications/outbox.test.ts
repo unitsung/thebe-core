@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -126,6 +133,71 @@ describe("notification outbox", () => {
     expect(await outbox.pending()).toHaveLength(0);
   });
 
+  it("delivers independent targets concurrently while preserving target order", async () => {
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    let markSecondStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const secondStarted = new Promise<void>((resolve) => {
+      markSecondStarted = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const events: string[] = [];
+    const outbox = createNotificationOutbox({
+      send: async (input) => {
+        events.push(`start:${input.targetId}`);
+        if (input.targetId === "first") {
+          markFirstStarted();
+          await blocked;
+        } else {
+          markSecondStarted();
+        }
+        events.push(`end:${input.targetId}`);
+        return { status: "sent" };
+      },
+    });
+    const firstTarget = {
+      target: {
+        ...target.target,
+        id: "first",
+        channel: { ...target.target.channel, thread: "first" },
+      },
+    };
+    const secondTarget = {
+      target: {
+        ...target.target,
+        id: "second",
+        channel: { ...target.target.channel, thread: "second" },
+      },
+    };
+    await outbox.enqueue([
+      { ...firstTarget, notification: notice("one") },
+      { ...secondTarget, notification: notice("two") },
+    ]);
+
+    const flushing = outbox.flush();
+    await firstStarted;
+    let concurrent = false;
+    await Promise.race([
+      secondStarted.then(() => {
+        concurrent = true;
+      }),
+      new Promise<void>((resolve) => setTimeout(resolve, 500)),
+    ]);
+    releaseFirst();
+    await flushing;
+
+    expect(concurrent).toBe(true);
+    expect(events.indexOf("end:second")).toBeLessThan(
+      events.indexOf("end:first")
+    );
+    expect(await outbox.pending()).toEqual([]);
+  });
+
   it("settles an interrupted send as unknown after a restart and never replays it", async () => {
     const dir = await tempDir();
     let now = new Date("2026-11-14T10:00:00.000Z");
@@ -240,8 +312,10 @@ describe("notification outbox", () => {
       send: async () => ({ status: "sent" }),
     });
     await outbox.enqueue([{ ...target, notification: notice("one") }]);
-    const state = JSON.parse(await readFile(join(dir, "outbox.json"), "utf8"));
+    const file = join(dir, "outbox.json");
+    const state = JSON.parse(await readFile(file, "utf8"));
     expect(state.entries).toHaveLength(1);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
     await outbox.stop();
     await mkdir(dir, { recursive: true });
   });
