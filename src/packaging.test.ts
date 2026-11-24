@@ -36,6 +36,19 @@ describe("Node packaging", () => {
     ).toBe("1.6.0");
   });
 
+  it("keeps sandbox runtime on the patched Zod release", async () => {
+    const pkg = JSON.parse(
+      await readFile(join(root, "package.json"), "utf8")
+    ) as {
+      overrides?: Record<string, { zod?: string }>;
+    };
+    expect(pkg.overrides?.["@anthropic-ai/sandbox-runtime"]?.zod).toBe("4.6.7");
+    const lock = JSON.parse(
+      await readFile(join(root, "package-lock.json"), "utf8")
+    ) as { packages?: Record<string, { version?: string }> };
+    expect(lock.packages?.["node_modules/zod"]?.version).toBe("4.6.7");
+  });
+
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {
     const names = await readdir(join(root, "dist"));
     expect(names).toEqual(
