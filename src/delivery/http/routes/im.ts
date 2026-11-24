@@ -163,6 +163,21 @@ export async function handleImRoutes(
       }
       return methodNotAllowed();
     }
+    if (parts.length === 3 && parts[2] === "recall") {
+      if (request.method === "POST") {
+        const blocked = quiescedWrite(context);
+        if (blocked) return blocked;
+        const result = await im.recall(await readJson(request));
+        return json({
+          ok: result.status === "recalled",
+          status: result.status,
+          ...(result.status !== "recalled"
+            ? { reason: redactToolOutput(result.reason) }
+            : {}),
+        });
+      }
+      return methodNotAllowed();
+    }
     return undefined;
   } catch (error) {
     if (error instanceof ImInputError) {

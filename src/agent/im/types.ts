@@ -39,10 +39,33 @@ export type ImSender = {
 
 export type ImMediaRef = {
   kind: "image" | "audio" | "video" | "file";
-  /** Platform media id or URL; never executed or opened by Core. */
+  /** Platform media id or URL. Only a media-capable adapter may fetch it, and Core never executes it. */
   id: string;
   mimeType?: string;
   size?: number;
+  filename?: string;
+};
+
+export type ImMediaFetchInput = {
+  accountId: string;
+  chat: ImChat;
+  messageId: string;
+  media: ImMediaRef;
+};
+
+export type ImMediaFetchResult = {
+  data: Uint8Array;
+  mediaType: string;
+  filename?: string;
+};
+
+/** Outbound bytes are base64 on the API seam; adapters never receive a caller-supplied local path. */
+export type ImOutboundMedia = {
+  kind: ImMediaRef["kind"];
+  mediaType: string;
+  /** Standard base64, bounded by the IM input validator. */
+  data: string;
+  filename?: string;
 };
 
 /**
@@ -60,7 +83,7 @@ export type ImCapabilities = {
   maxMessagesPerWindow?: number;
   /** Supports an interactive recall/reminder. */
   recall: boolean;
-  /** Supports images or files. False until media sending is actually implemented. */
+  /** Fetches inbound media and sends bounded images or files in both message directions. */
   media: boolean;
   /** Characters accepted in one platform message; adapters still chunk defensively. */
   maxTextLength: number;
@@ -103,6 +126,7 @@ export type ImSendInput = {
   accountId: string;
   chat: Pick<ImChat, "kind" | "id" | "threadId">;
   text: string;
+  media?: readonly ImOutboundMedia[];
   mode: ImSendMode;
   /** Only for `reply`; stripped before a proactive send. */
   replyTo?: string;
@@ -115,6 +139,21 @@ export type ImSendInput = {
 /** `unknown` means the request may have reached the platform and must not be replayed blindly. */
 export type ImSendResult =
   | { status: "sent"; platformMessageId?: string }
+  | { status: "retry"; reason: string; retryAfterMs?: number }
+  | { status: "discard"; reason: string }
+  | { status: "unknown"; reason: string };
+
+export type ImRecallInput = {
+  platform: ImPlatform;
+  accountId: string;
+  chat: Pick<ImChat, "kind" | "id" | "threadId">;
+  /** The platform id of a message Core sent or observed. */
+  messageId: string;
+};
+
+/** Recall is idempotent from Core's perspective, but the platform decides whether the target is still eligible. */
+export type ImRecallResult =
+  | { status: "recalled" }
   | { status: "retry"; reason: string; retryAfterMs?: number }
   | { status: "discard"; reason: string }
   | { status: "unknown"; reason: string };
@@ -145,6 +184,10 @@ export interface ImAdapter {
   stop(): Promise<void>;
   health(): Promise<ImHealth>;
   send(input: ImSendInput): Promise<ImSendResult>;
+  /** Download one inbound attachment for the Main Session. Core still enforces MIME and size. */
+  fetchMedia?(input: ImMediaFetchInput): Promise<ImMediaFetchResult>;
+  /** Withdraw an eligible platform message. Absent unless the platform truly supports recall. */
+  recall?(input: ImRecallInput): Promise<ImRecallResult>;
   onInbound(handler: (message: ImInbound) => Promise<void>): void;
   /** Per-chat proactive permission; a reply-only adapter can close a window for one chat. */
   canSendProactively?(chat: ImChat): boolean | Promise<boolean>;

@@ -343,6 +343,9 @@ describe("iMessage helpers", () => {
     expect(validateImessageCredentials({ baseUrl: "nope" })).toBe(
       "baseUrl must be an http or https URL"
     );
+    expect(validateImessageCredentials({ backend: "carrier-pigeon" })).toBe(
+      "backend must be imsg or bluebubbles"
+    );
   });
 
   it("truncates long text and hashes only the bridge URL for a cursor", () => {

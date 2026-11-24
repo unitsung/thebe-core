@@ -1,0 +1,198 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import type { ImInbound } from "../../agent/im/types.ts";
+import {
+  createImsgLocalAdapter,
+  imsgCursorIdentity,
+  validateImsgCredentials,
+  type ImsgCliRunner,
+} from "./imsg.ts";
+import { createImessageFactory } from "./imessage.ts";
+
+function runner() {
+  const watchArgs: string[][] = [];
+  const sendArgs: string[][] = [];
+  const sentFileData: Buffer[] = [];
+  const cli: ImsgCliRunner = {
+    async watch(input) {
+      watchArgs.push(input.args);
+      input.onLine(
+        JSON.stringify({
+          id: 42,
+          guid: "message-guid",
+          chat_id: 7,
+          chat_guid: "iMessage;-;+15550100",
+          chat_identifier: "+15550100",
+          chat_name: "Owner",
+          is_group: false,
+          sender: "+15550100",
+          sender_name: "Owner",
+          is_from_me: false,
+          text: "hello from Messages",
+          created_at: "2026-11-24T10:00:00.000Z",
+          attachments: [],
+        })
+      );
+      await new Promise<void>((resolve) => {
+        input.signal.addEventListener("abort", () => resolve(), {
+          once: true,
+        });
+      });
+    },
+    async send(input) {
+      sendArgs.push(input.args);
+      const index = input.args.indexOf("--file");
+      if (index >= 0) {
+        sentFileData.push(await readFile(input.args[index + 1]!));
+      }
+      return {
+        code: 0,
+        stdout: '{"status":"sent","id":99,"guid":"sent-guid"}\n',
+        stderr: "",
+      };
+    },
+  };
+  return { cli, watchArgs, sendArgs, sentFileData };
+}
+
+describe("local imsg IM adapter", () => {
+  it("streams Messages through imsg watch and sends text by stable chat id", async () => {
+    const fake = runner();
+    const inbound: ImInbound[] = [];
+    const cursors: string[] = [];
+    const adapter = createImsgLocalAdapter({
+      account: {
+        id: "im-imsg-test",
+        platform: "imessage",
+        label: "iMessage",
+        enabled: true,
+        createdAt: "2026-11-24T00:00:00Z",
+      },
+      credentials: { cliPath: "/opt/homebrew/bin/imsg" },
+      runner: fake.cli,
+      onCursor: (value) => cursors.push(value),
+      now: () => new Date("2026-11-24T10:01:00.000Z"),
+    });
+    adapter.onInbound(async (message) => {
+      inbound.push(message);
+    });
+
+    await adapter.start();
+    await vi.waitFor(() => expect(inbound).toHaveLength(1));
+    expect(inbound[0]).toMatchObject({
+      platform: "imessage",
+      accountId: "im-imsg-test",
+      chat: { kind: "direct", id: "7", title: "Owner" },
+      sender: { id: "+15550100", name: "Owner" },
+      messageId: "message-guid",
+      text: "hello from Messages",
+    });
+    expect(fake.watchArgs[0]).toEqual(["watch", "--json"]);
+    expect(cursors).toEqual(["42"]);
+
+    const sent = await adapter.send({
+      platform: "imessage",
+      accountId: "im-imsg-test",
+      chat: { kind: "direct", id: "7" },
+      text: "reply",
+      mode: "proactive",
+      idempotencyKey: "notice-1",
+    });
+    expect(sent).toEqual({ status: "sent", platformMessageId: "sent-guid" });
+    expect(fake.sendArgs[0]).toEqual([
+      "send",
+      "--chat-id",
+      "7",
+      "--text",
+      "reply",
+      "--json",
+    ]);
+
+    await adapter.stop();
+    expect((await adapter.health()).state).toBe("stopped");
+  });
+
+  it("reads only bounded Messages attachments and sends media through a temporary file", async () => {
+    const fake = runner();
+    const root = await mkdtemp(join(tmpdir(), "thebe-imsg-files-"));
+    const attachment = join(root, "photo.png");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    await writeFile(attachment, bytes);
+    const adapter = createImsgLocalAdapter({
+      account: {
+        id: "im-imsg-test",
+        platform: "imessage",
+        label: "iMessage",
+        enabled: true,
+        createdAt: "2026-11-24T00:00:00Z",
+      },
+      credentials: { cliPath: "/opt/homebrew/bin/imsg" },
+      runner: fake.cli,
+      attachmentRoots: [root],
+      onCursor: () => {},
+    });
+
+    const fetched = await adapter.fetchMedia?.({
+      accountId: "im-imsg-test",
+      chat: { kind: "direct", id: "7" },
+      messageId: "message-guid",
+      media: { kind: "image", id: attachment, mimeType: "image/png" },
+    });
+    expect(fetched).toMatchObject({
+      mediaType: "image/png",
+      filename: "photo.png",
+    });
+    expect([...fetched!.data]).toEqual([...bytes]);
+
+    const sent = await adapter.send({
+      platform: "imessage",
+      accountId: "im-imsg-test",
+      chat: { kind: "direct", id: "7" },
+      text: "chart",
+      media: [
+        {
+          kind: "image",
+          mediaType: "image/png",
+          data: bytes.toString("base64"),
+          filename: "chart.png",
+        },
+      ],
+      mode: "proactive",
+      idempotencyKey: "media-1",
+    });
+    expect(sent.status).toBe("sent");
+    expect(fake.sendArgs.at(-1)).toEqual([
+      "send",
+      "--chat-id",
+      "7",
+      "--text",
+      "chart",
+      "--file",
+      expect.stringContaining("chart.png"),
+      "--json",
+    ]);
+    expect(fake.sentFileData.at(-1)).toEqual(bytes);
+    expect(adapter.capabilities.media).toBe(true);
+  });
+
+  it("bounds local configuration and scopes its cursor to the CLI database", () => {
+    expect(validateImsgCredentials({ cliPath: "imsg" })).toBeUndefined();
+    expect(
+      validateImsgCredentials({ cliPath: "imsg --not-an-argument" })
+    ).toContain("cliPath");
+    expect(imsgCursorIdentity({ cliPath: "/opt/homebrew/bin/imsg" })).toBe(
+      imsgCursorIdentity({ cliPath: "/opt/homebrew/bin/imsg", dbPath: "" })
+    );
+    expect(
+      imsgCursorIdentity({ cliPath: "/a", dbPath: "/tmp/chat.db" })
+    ).not.toBe(imsgCursorIdentity({ cliPath: "/a", dbPath: "/tmp/other.db" }));
+
+    const factory = createImessageFactory({});
+    expect(factory.validateCredentials?.({ backend: "imsg" })).toBeUndefined();
+    expect(factory.cursorIdentity?.({ backend: "imsg", cliPath: "/a" })).toBe(
+      imsgCursorIdentity({ cliPath: "/a" })
+    );
+  });
+});

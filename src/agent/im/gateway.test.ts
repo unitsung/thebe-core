@@ -15,6 +15,10 @@ import type {
   ImHealth,
   ImInbound,
   ImLoginAdapter,
+  ImMediaFetchInput,
+  ImMediaFetchResult,
+  ImRecallInput,
+  ImRecallResult,
   ImSendInput,
   ImSendResult,
   ImSender,
@@ -37,6 +41,8 @@ class FakeAdapter implements ImAdapter {
     maxTextLength: 4096,
   };
   sent: ImSendInput[] = [];
+  recalled: ImRecallInput[] = [];
+  mediaFetches: ImMediaFetchInput[] = [];
   started = false;
   stopped = false;
   healthValue: ImHealth = { state: "connected" };
@@ -63,6 +69,20 @@ class FakeAdapter implements ImAdapter {
   async send(input: ImSendInput): Promise<ImSendResult> {
     this.sent.push(input);
     return { status: "sent", platformMessageId: `m${this.sent.length}` };
+  }
+
+  async recall(input: ImRecallInput): Promise<ImRecallResult> {
+    this.recalled.push(input);
+    return { status: "recalled" };
+  }
+
+  async fetchMedia(input: ImMediaFetchInput): Promise<ImMediaFetchResult> {
+    this.mediaFetches.push(input);
+    return {
+      data: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      mediaType: "image/png",
+      filename: "photo.png",
+    };
   }
 
   onInbound(handler: (message: ImInbound) => Promise<void>): void {
@@ -108,8 +128,15 @@ function setup(options: SetupOptions = {}) {
     },
   };
   const prompts: string[] = [];
+  const promptInputs: Array<{ text: string; files?: unknown[] }> = [];
   const agent: ImGatewayAgent = {
-    async askMainSession(text, askOptions) {
+    async askMainSession(input, askOptions) {
+      const text = typeof input === "string" ? input : input.text;
+      promptInputs.push(
+        typeof input === "string"
+          ? { text: input }
+          : { text: input.text, ...(input.files ? { files: input.files } : {}) }
+      );
       prompts.push(askOptions?.mode ? `${askOptions.mode}:${text}` : text);
       return options.ask
         ? options.ask(text, askOptions)
@@ -118,7 +145,7 @@ function setup(options: SetupOptions = {}) {
     isMainSessionBusy: () => options.busy?.() ?? false,
     isMainSessionStreaming: () => options.streaming?.() ?? false,
   };
-  return { adapters, factory, prompts, agent };
+  return { adapters, factory, prompts, promptInputs, agent };
 }
 
 async function waitFor(
@@ -156,10 +183,12 @@ async function setupGateway(
   const dir = await mkdtemp(join(tmpdir(), "thebe-im-"));
   dirs.push(dir);
   const fake = setup(options);
+  const errors: unknown[] = [];
   const gateway = createImGateway({
     agent: fake.agent,
     dir,
     factories: [fake.factory],
+    onError: (error) => errors.push(error),
     ...(options.busyConfig ? { busy: options.busyConfig } : {}),
   });
   const channel = await gateway.addChannel({
@@ -170,7 +199,7 @@ async function setupGateway(
   await gateway.start();
   const adapter = fake.adapters.get(channel.id);
   if (!adapter) throw new Error("adapter was not created");
-  return { dir, gateway, channel, adapter, ...fake };
+  return { dir, gateway, channel, adapter, errors, ...fake };
 }
 
 /** A binding may now be created only for a chat the adapter has already observed. */
@@ -212,6 +241,33 @@ describe("IM gateway", () => {
       source: "settings",
       bindings: 0,
     });
+    await gateway.stop();
+  });
+
+  it("recalls only through an adapter that truthfully declares support", async () => {
+    const { gateway, channel, adapter } = await setupGateway();
+    const input = {
+      accountId: channel.id,
+      chat: { kind: "direct" as const, id: "42" },
+      messageId: "m7",
+    };
+
+    await expect(gateway.recall(input)).resolves.toEqual({
+      status: "discard",
+      reason: "recall_not_supported",
+    });
+    adapter.capabilities.recall = true;
+    await expect(gateway.recall(input)).resolves.toEqual({
+      status: "recalled",
+    });
+    expect(adapter.recalled).toEqual([
+      {
+        platform: "telegram",
+        accountId: channel.id,
+        chat: { kind: "direct", id: "42" },
+        messageId: "m7",
+      },
+    ]);
     await gateway.stop();
   });
 
@@ -417,7 +473,7 @@ describe("IM gateway", () => {
   });
 
   it("records a media-only message without prompting the model", async () => {
-    const { gateway, channel, adapter, prompts } = await setupGateway();
+    const { gateway, channel, adapter, prompts, errors } = await setupGateway();
     await adapter.emit(
       inbound({
         accountId: channel.id,
@@ -450,9 +506,58 @@ describe("IM gateway", () => {
         updateId: "117",
       })
     );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (errors.length) throw errors[0];
     await waitFor(() => adapter.sent.length === 1, "media notice");
     expect(prompts).toEqual([]);
     expect(adapter.sent[0]!.text).toContain("cannot read");
+    await gateway.stop();
+  });
+
+  it("turns an owner image into a bounded model attachment", async () => {
+    const { gateway, channel, adapter, prompts, promptInputs, errors } =
+      await setupGateway();
+    await observeChat(gateway, adapter, channel.id);
+    await gateway.bind({
+      accountId: channel.id,
+      chat: { kind: "direct", id: "42" },
+      role: "owner",
+    });
+    adapter.capabilities.media = true;
+
+    await adapter.emit(
+      inbound({
+        accountId: channel.id,
+        text: "",
+        media: [
+          {
+            kind: "image",
+            id: "photo-3",
+            mimeType: "image/png",
+            size: 6,
+          },
+        ],
+        messageId: "18",
+        updateId: "118",
+      })
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    if (errors.length) throw errors[0];
+    await waitFor(() => adapter.sent.length === 1, "media reply");
+    expect(adapter.mediaFetches).toHaveLength(1);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain("attached 1 file");
+    expect(promptInputs[0]).toMatchObject({
+      text: expect.stringContaining("untrusted message content"),
+      files: [
+        {
+          mediaType: "image/png",
+          filename: "photo.png",
+          data: expect.any(String),
+        },
+      ],
+    });
     await gateway.stop();
   });
 

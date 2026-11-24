@@ -10,6 +10,8 @@ import type {
   ImHealth,
   ImInbound,
   ImLoginAdapter,
+  ImRecallInput,
+  ImRecallResult,
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
@@ -32,6 +34,7 @@ class FakeAdapter implements ImAdapter {
     maxTextLength: 4096,
   };
   sent: ImSendInput[] = [];
+  recalled: ImRecallInput[] = [];
   private handler: ((message: ImInbound) => Promise<void>) | undefined;
 
   async start(): Promise<void> {}
@@ -42,6 +45,10 @@ class FakeAdapter implements ImAdapter {
   async send(input: ImSendInput): Promise<ImSendResult> {
     this.sent.push(input);
     return { status: "sent", platformMessageId: "m1" };
+  }
+  async recall(input: ImRecallInput): Promise<ImRecallResult> {
+    this.recalled.push(input);
+    return { status: "recalled" };
   }
   onInbound(handler: (message: ImInbound) => Promise<void>): void {
     this.handler = handler;
@@ -171,6 +178,82 @@ describe("IM HTTP routes", () => {
         },
       ],
     });
+    await gateway.stop();
+  });
+
+  it("recalls an eligible message through the configured IM adapter", async () => {
+    const { gateway, adapters, call } = await setup();
+    const created = await call("/v1/im/channels", {
+      method: "POST",
+      body: JSON.stringify({
+        platform: "telegram",
+        label: "Phone",
+        token: "test-token",
+      }),
+    });
+    const channel = created.body.channel as { id: string };
+    const adapter = adapters.get(channel.id)!;
+    adapter.capabilities.recall = true;
+
+    const recalled = await call("/v1/im/recall", {
+      method: "POST",
+      body: JSON.stringify({
+        accountId: channel.id,
+        chat: { kind: "direct", id: "42" },
+        messageId: "m1",
+      }),
+    });
+
+    expect(recalled.status).toBe(200);
+    expect(recalled.body).toEqual({
+      ok: true,
+      status: "recalled",
+    });
+    expect(adapter.recalled).toHaveLength(1);
+    await gateway.stop();
+  });
+
+  it("accepts bounded base64 media without exposing a caller filesystem path", async () => {
+    const { gateway, adapters, call } = await setup();
+    const created = await call("/v1/im/channels", {
+      method: "POST",
+      body: JSON.stringify({
+        platform: "telegram",
+        label: "Phone",
+        token: "test-token",
+      }),
+    });
+    const channel = created.body.channel as { id: string };
+    const adapter = adapters.get(channel.id)!;
+    const sent = await call("/v1/im/send", {
+      method: "POST",
+      body: JSON.stringify({
+        accountId: channel.id,
+        chat: { kind: "direct", id: "42" },
+        media: [
+          {
+            kind: "image",
+            mediaType: "image/png",
+            data: "iVBORw0KGgo=",
+            filename: "chart.png",
+          },
+        ],
+      }),
+    });
+
+    expect(sent.status).toBe(200);
+    expect(sent.body).toMatchObject({ ok: true, status: "sent" });
+    expect(adapter.sent[0]).toMatchObject({
+      text: "",
+      media: [
+        {
+          kind: "image",
+          mediaType: "image/png",
+          filename: "chart.png",
+        },
+      ],
+    });
+    expect(JSON.stringify(adapter.sent[0])).not.toContain("/tmp/");
     await gateway.stop();
   });
 

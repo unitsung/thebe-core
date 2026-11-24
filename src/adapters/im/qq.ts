@@ -9,6 +9,10 @@ import type {
   ImHealth,
   ImInbound,
   ImMediaRef,
+  ImMediaFetchInput,
+  ImMediaFetchResult,
+  ImRecallInput,
+  ImRecallResult,
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
@@ -137,9 +141,8 @@ export function createQqImAdapter(input: {
     // The group window is the conservative value; a C2C chat has a longer one.
     replyWindowMs: QQ_GROUP_REPLY_WINDOW_MS,
     maxMessagesPerWindow: QQ_C2C_MAX_REPLIES,
-    recall: false,
-    // Text is implemented; QQ media needs a separate upload.
-    media: false,
+    recall: true,
+    media: true,
     maxTextLength: QQ_MAX_TEXT,
     markdown: false,
     threads: false,
@@ -598,6 +601,9 @@ export function createQqImAdapter(input: {
     }
     const claimed = claimReply(message.replyTo, message.chat.kind);
     if (!claimed) return { status: "discard", reason: "window_closed" };
+    if (message.media?.length) {
+      return sendMedia(message, claimed);
+    }
     const chunks = chunkQqText(message.text, QQ_MAX_TEXT, claimed.remaining);
     if (chunks.length === 0) return { status: "discard", reason: "empty_text" };
     const path =
@@ -632,6 +638,127 @@ export function createQqImAdapter(input: {
       status: "sent",
       ...(lastId ? { platformMessageId: lastId } : {}),
     };
+  }
+
+  async function sendMedia(
+    message: ImSendInput,
+    claimed: { seq: number; remaining: number }
+  ): Promise<ImSendResult> {
+    const items = message.media ?? [];
+    if (items.length !== 1) {
+      return { status: "discard", reason: "one_media_per_message" };
+    }
+    if (message.text.trim().length > QQ_MAX_TEXT) {
+      return { status: "discard", reason: "media_caption_too_long" };
+    }
+    const item = items[0]!;
+    const bytes = Buffer.from(item.data, "base64");
+    if (bytes.length === 0 || bytes.length > 2_000_000) {
+      return { status: "discard", reason: "invalid_media" };
+    }
+    const scope =
+      message.chat.kind === "group"
+        ? `/v2/groups/${encodeURIComponent(message.chat.id)}`
+        : `/v2/users/${encodeURIComponent(message.chat.id)}`;
+    try {
+      const uploaded = await apiRequest("POST", `${scope}/files`, {
+        file_type: qqFileType(item.mediaType, item.kind),
+        file_data: item.data,
+        ...(item.filename ? { file_name: item.filename } : {}),
+        srv_send_msg: false,
+      });
+      const fileInfo =
+        stringValue(uploaded.file_info) ?? stringValue(uploaded.fileInfo);
+      if (!fileInfo) {
+        return { status: "retry", reason: "QQ returned no file_info" };
+      }
+      const reply = await apiRequest("POST", `${scope}/messages`, {
+        content: message.text.trim().slice(0, QQ_MAX_TEXT),
+        msg_type: 7,
+        media: { file_info: fileInfo },
+        msg_id: message.replyTo,
+        msg_seq: claimed.seq,
+      });
+      setHealth({ state: "connected", since: now().toISOString() });
+      return {
+        status: "sent",
+        ...(stringValue(reply.id)
+          ? { platformMessageId: stringValue(reply.id) }
+          : {}),
+      };
+    } catch (error) {
+      const failure =
+        error instanceof QqRequestError
+          ? error
+          : new QqRequestError("network", "QQ media send failed");
+      return classificationFor(failure, false);
+    }
+  }
+
+  async function fetchMedia(
+    mediaInput: ImMediaFetchInput
+  ): Promise<ImMediaFetchResult> {
+    const url = qqMediaUrl(mediaInput.media.id);
+    if (!url) {
+      throw new QqRequestError("bad_request", "QQ media URL is not trusted");
+    }
+    const signal = controller
+      ? AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        ])
+      : AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    // File URLs can be bearer-signed blobs on shared CDN domains. Never attach the bot token.
+    const response = await sendFetch(url, { redirect: "error", signal });
+    if (!response.ok) {
+      throw new QqRequestError("network", "QQ media download failed");
+    }
+    const declared = response.headers.get("content-length");
+    if (declared && Number(declared) > 2_000_000) {
+      throw new QqRequestError("bad_request", "QQ media is too large");
+    }
+    const data = new Uint8Array(await response.arrayBuffer());
+    if (data.byteLength === 0 || data.byteLength > 2_000_000) {
+      throw new QqRequestError("bad_request", "QQ media is too large");
+    }
+    let urlFilename = "";
+    try {
+      urlFilename = decodeURIComponent(url.pathname.split("/").pop() ?? "");
+    } catch {
+      // A malformed CDN path is metadata only; the MIME and bytes remain usable.
+    }
+    const filename = mediaInput.media.filename ?? urlFilename;
+    return {
+      data,
+      mediaType:
+        response.headers.get("content-type")?.split(";")[0]?.trim() ??
+        mediaInput.media.mimeType ??
+        "application/octet-stream",
+      ...(filename ? { filename: filename.slice(0, 120) } : {}),
+    };
+  }
+
+  async function recallMessage(
+    message: ImRecallInput
+  ): Promise<ImRecallResult> {
+    if (!appId || !clientSecret) {
+      return { status: "discard", reason: "credentials_missing" };
+    }
+    const path =
+      message.chat.kind === "group"
+        ? `/v2/groups/${encodeURIComponent(message.chat.id)}/messages/${encodeURIComponent(message.messageId)}`
+        : `/v2/users/${encodeURIComponent(message.chat.id)}/messages/${encodeURIComponent(message.messageId)}`;
+    try {
+      await apiRequest("DELETE", path);
+      setHealth({ state: "connected", since: now().toISOString() });
+      return { status: "recalled" };
+    } catch (error) {
+      const failure =
+        error instanceof QqRequestError
+          ? error
+          : new QqRequestError("network", "QQ recall failed");
+      return recallClassificationFor(failure);
+    }
   }
 
   return {
@@ -675,6 +802,15 @@ export function createQqImAdapter(input: {
       );
       return run;
     },
+    async recall(message) {
+      const run = sendChain.then(() => recallMessage(message));
+      sendChain = run.then(
+        () => undefined,
+        () => undefined
+      );
+      return run;
+    },
+    fetchMedia,
     onInbound(handler) {
       inbound = handler;
     },
@@ -754,6 +890,36 @@ export function chunkQqText(
   return parts.map(
     (part, index) => `${part}\n\n(${index + 1}/${parts.length})`
   );
+}
+
+function qqFileType(
+  mediaType: string,
+  kind: NonNullable<ImSendInput["media"]>[number]["kind"]
+): 1 | 2 | 3 | 4 {
+  if (kind === "image" || mediaType.startsWith("image/")) return 1;
+  if (kind === "video" || mediaType.startsWith("video/")) return 2;
+  if (kind === "audio" || mediaType.startsWith("audio/")) return 3;
+  return 4;
+}
+
+function qqMediaUrl(value: string): URL | undefined {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password) {
+      return undefined;
+    }
+    const host = url.hostname.toLowerCase();
+    const trusted = [
+      "qq.com",
+      "qq.com.cn",
+      "qpic.cn",
+      "gtimg.cn",
+      "myqcloud.com",
+    ].some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+    return trusted ? url : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function parseMessage(
@@ -928,6 +1094,14 @@ function classificationFor(
       : { status: "retry", reason: "QQ is temporarily unavailable" };
   }
   return { status: "unknown", reason: "QQ response was lost" };
+}
+
+function recallClassificationFor(failure: QqRequestError): ImRecallResult {
+  const classified = classificationFor(failure, false);
+  if (classified.status === "sent") {
+    return { status: "unknown", reason: "QQ recall returned no status" };
+  }
+  return classified;
 }
 
 function retryAfterFrom(

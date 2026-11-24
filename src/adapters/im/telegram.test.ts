@@ -9,7 +9,9 @@ import type { ImInbound, ImSendInput } from "../../agent/im/types.ts";
 
 type FetchCall = {
   url: string;
+  method: string;
   body: Record<string, unknown>;
+  formData?: FormData;
   signal?: AbortSignal;
 };
 
@@ -23,11 +25,15 @@ function jsonBody(value: unknown, status = 200): Response {
 function fakeFetch(handler: (call: FetchCall) => Promise<Response> | Response) {
   const calls: FetchCall[] = [];
   const fn = (async (input: string | URL, init?: RequestInit) => {
+    const formData = init?.body instanceof FormData ? init.body : undefined;
     const call: FetchCall = {
       url: String(input),
-      body: init?.body
-        ? (JSON.parse(String(init.body)) as Record<string, unknown>)
-        : {},
+      method: init?.method ?? "GET",
+      body:
+        init?.body && !formData
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : {},
+      ...(formData ? { formData } : {}),
       ...(init?.signal ? { signal: init.signal } : {}),
     };
     calls.push(call);
@@ -141,11 +147,111 @@ describe("Telegram IM adapter", () => {
     expect(adapter.capabilities).toMatchObject({
       proactive: true,
       replyOnly: false,
-      media: false,
+      media: true,
       markdown: false,
       threads: true,
       typing: false,
     });
+  });
+
+  it("parses the largest inbound photo and downloads it for the model", async () => {
+    const updates: ImInbound[] = [];
+    let first = true;
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+    const { adapter, calls } = adapterWith(
+      (call) => {
+        if (call.url.endsWith("/getUpdates") && first) {
+          first = false;
+          return jsonBody({
+            ok: true,
+            result: [
+              messageUpdate({
+                text: undefined,
+                photo: [
+                  { file_id: "small", file_size: 2 },
+                  { file_id: "large", file_size: png.length },
+                ],
+              }),
+            ],
+          });
+        }
+        if (call.url.endsWith("/getFile")) {
+          return jsonBody({
+            ok: true,
+            result: { file_path: "photos/photo-1.png" },
+          });
+        }
+        if (call.url.endsWith("/file/bottest-token/photos/photo-1.png")) {
+          return new Response(png, {
+            headers: { "content-type": "image/png" },
+          });
+        }
+        return new Promise<Response>((_, reject) => {
+          call.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError"))
+          );
+        });
+      },
+      { onInbound: (message) => updates.push(message) }
+    );
+    await adapter.start();
+    await waitFor(() => updates.length === 1, "photo inbound");
+    expect(updates[0]?.media).toEqual([
+      {
+        kind: "image",
+        id: "large",
+        mimeType: "image/jpeg",
+        size: png.length,
+      },
+    ]);
+    const fetched = await adapter.fetchMedia?.({
+      accountId: "im-telegram-test",
+      chat: updates[0]!.chat,
+      messageId: "5",
+      media: updates[0]!.media![0]!,
+    });
+    expect(fetched?.mediaType).toBe("image/png");
+    expect([...fetched!.data]).toEqual([...png]);
+    expect(calls.find((call) => call.url.endsWith("/getFile"))?.body).toEqual({
+      file_id: "large",
+    });
+    await adapter.stop();
+  });
+
+  it("uploads an image as multipart and preserves its reply anchor", async () => {
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]).toString("base64");
+    const { adapter, calls } = adapterWith(() =>
+      jsonBody({ ok: true, result: { message_id: 902 } })
+    );
+    const result = await adapter.send({
+      platform: "telegram",
+      accountId: "im-telegram-test",
+      chat: { kind: "direct", id: "42" },
+      text: "chart",
+      media: [
+        {
+          kind: "image",
+          mediaType: "image/png",
+          data: png,
+          filename: "chart.png",
+        },
+      ],
+      mode: "reply",
+      replyTo: "5",
+      idempotencyKey: "media-1",
+    });
+    expect(result).toEqual({ status: "sent", platformMessageId: "902" });
+    const call = calls.find((entry) => entry.url.endsWith("/sendPhoto"));
+    expect(call).toBeDefined();
+    expect(call!.method).toBe("POST");
+    expect(call!.formData!.get("chat_id")).toBe("42");
+    expect(call!.formData!.get("caption")).toBe("chart");
+    expect(JSON.parse(String(call!.formData!.get("reply_parameters")))).toEqual(
+      { message_id: 5, allow_sending_without_reply: true }
+    );
+    expect((call!.formData!.get("photo") as File).name).toBe("chart.png");
   });
 
   it("keeps a forum thread on inbound and outbound messages", async () => {
