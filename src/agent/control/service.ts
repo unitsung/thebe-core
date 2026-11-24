@@ -371,6 +371,8 @@ export function createControlApi(
     operatorMark?: boolean;
     /** What the call will really send, when its own arguments only name it (a confirm token). */
     sends?: Record<string, unknown>;
+    service?: string;
+    operationId?: string;
   }> {
     if (name === SERVICE_API_CONFIRM_TOOL_NAME) {
       // The confirm is the call that executes, whoever made the preview: judge the request it will send.
@@ -381,6 +383,8 @@ export function createControlApi(
             httpMethod: pending.request.method,
             operatorMark: pending.irreversible,
             sends: { body: pending.request.body },
+            service: pending.service,
+            operationId: pending.operationId,
           }
         : {};
     }
@@ -488,6 +492,23 @@ export function createControlApi(
       );
     }
     const params = (args ?? {}) as Record<string, unknown>;
+    if (name === SERVICE_API_CONFIRM_TOOL_NAME && caller.scopeAllows) {
+      const { service, operationId } = await irreversibleContext(name, params);
+      if (
+        service &&
+        !caller.scopeAllows(
+          serviceOperationToolName(service, operationId ?? ""),
+          "write",
+          service
+        )
+      ) {
+        throw httpError(
+          403,
+          `This token may not confirm ${service} writes. Add --scope mcp:service:${service}:write or the matching operation tool scope.`,
+          "mcp_scope_required"
+        );
+      }
+    }
     if (!caller.irreversible) {
       const { sends, ...context } = await irreversibleContext(name, params);
       const reason = irreversibleReason({

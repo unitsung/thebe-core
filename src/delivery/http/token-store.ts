@@ -199,6 +199,26 @@ export function tokenMayCallTool(
   return false;
 }
 
+/** Whether any broad or target scope grants at least this effect. */
+export function tokenHasAnyAccess(
+  caller: TokenCaller | undefined,
+  required: TokenAccessLevel
+): boolean {
+  if (!caller?.scopes) return true;
+  for (const raw of caller.scopes) {
+    const scope = parseTokenScope(raw);
+    if (!scope) continue;
+    const granted = scope.slice(scope.lastIndexOf(":") + 1) as TokenAccessLevel;
+    if (
+      TOKEN_ACCESS_LEVELS.includes(granted) &&
+      accessAtLeast(granted, required)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** What the HTTP handler asks: whose token is this, if it is one of ours. */
 export type TokenVerifier = {
   verify(received: string): TokenCaller | undefined;

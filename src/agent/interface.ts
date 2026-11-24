@@ -268,6 +268,12 @@ export type McpCaller = {
   irreversible: boolean;
   /** A target-scope refusal prepared by the authenticated HTTP caller, audited by invokeMcpTool. */
   scopeError?: string;
+  /** Checks a dynamically discovered target, such as the service behind a confirm token. */
+  scopeAllows?: (
+    tool: string,
+    required: "read" | "write" | "irreversible",
+    service?: string
+  ) => boolean;
 };
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */

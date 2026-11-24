@@ -1,6 +1,12 @@
 import type { ThebeHttpContext } from "../context.ts";
 import { CONTAINER_TOOL_NAMES } from "../../../agent/capabilities/containers.ts";
 import {
+  SERVICE_API_CONFIRM_TOOL_NAME,
+  SERVICE_API_TOOL_NAMES,
+  SERVICE_API_WRITE_TOOL_NAME,
+  SERVICE_ARGUMENT,
+} from "../../../agent/capabilities/service-api.ts";
+import {
   DIAGNOSE_FROM_EVENTS_TOOL,
   LIST_CORE_EVENTS_TOOL,
   capabilityChangesThings,
@@ -14,6 +20,9 @@ import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
 import {
   tokenMayCallTool,
+  tokenMayDeleteIrreversibly,
+  tokenHasAnyAccess,
+  tokenMayWrite,
   type TokenAccessLevel,
   type TokenCaller,
 } from "../token-store.ts";
@@ -297,7 +306,8 @@ function requiredAccess(tool: McpToolInfo): TokenAccessLevel {
 function scopedCaller(
   caller: TokenCaller | undefined,
   tool: McpToolInfo | undefined,
-  requestedName: string
+  requestedName: string,
+  args?: unknown
 ): McpCaller {
   if (!caller?.scopes) {
     return {
@@ -314,7 +324,28 @@ function scopedCaller(
       scopeError: `The token may not call unknown MCP tool ${requestedName}.`,
     };
   }
-  const service = toolService(tool);
+  if (tool.name === SERVICE_API_CONFIRM_TOOL_NAME) {
+    return {
+      name: caller.name,
+      writes:
+        tokenMayWrite(caller) ||
+        caller.scopes.some(
+          (scope) => scope.endsWith(":write") || scope.endsWith(":irreversible")
+        ),
+      irreversible:
+        tokenMayDeleteIrreversibly(caller) ||
+        caller.scopes.some((scope) => scope.endsWith(":irreversible")),
+      scopeAllows: (name, required, service) =>
+        tokenMayCallTool(caller, name, required, service),
+    };
+  }
+  const requestedService = asObject(args)?.[SERVICE_ARGUMENT];
+  const service =
+    (SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name) &&
+    typeof requestedService === "string" &&
+    requestedService.trim()
+      ? requestedService.trim().toLowerCase()
+      : toolService(tool);
   const required = requiredAccess(tool);
   const mayRead = tokenMayCallTool(caller, tool.name, "read", service);
   const mayWrite = tokenMayCallTool(caller, tool.name, "write", service);
@@ -334,6 +365,8 @@ function scopedCaller(
     name: caller.name,
     writes: mayWrite,
     irreversible: mayIrreversible,
+    scopeAllows: (name, level, service) =>
+      tokenMayCallTool(caller, name, level, service),
     ...(!allowed && {
       scopeError: `This token may not call ${tool.name}. Grant --scope mcp:write, or narrow it with --scope mcp:tool:${tool.name}:${required}${
         service ? ` or --scope mcp:service:${service}:${required}` : ""
@@ -342,14 +375,36 @@ function scopedCaller(
   };
 }
 
+function callerHasTargetedWrite(caller: TokenCaller): boolean {
+  return (
+    caller.scopes?.some(
+      (scope) => scope.endsWith(":write") || scope.endsWith(":irreversible")
+    ) === true
+  );
+}
+
 function listedForCaller(
   capabilities: readonly McpToolInfo[],
   caller: TokenCaller | undefined
 ): McpToolInfo[] {
   if (!caller?.scopes) return [...capabilities];
-  return capabilities.filter((tool) =>
-    tokenMayCallTool(caller, tool.name, requiredAccess(tool), toolService(tool))
-  );
+  return capabilities.filter((tool) => {
+    if (tool.name === SERVICE_API_CONFIRM_TOOL_NAME) {
+      return tokenMayWrite(caller) || callerHasTargetedWrite(caller);
+    }
+    if ((SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name)) {
+      return tokenHasAnyAccess(
+        caller,
+        tool.name === SERVICE_API_WRITE_TOOL_NAME ? "write" : "read"
+      );
+    }
+    return tokenMayCallTool(
+      caller,
+      tool.name,
+      requiredAccess(tool),
+      toolService(tool)
+    );
+  });
 }
 
 async function listedTools(
@@ -507,7 +562,7 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
         agent,
         name,
         params.arguments,
-        scopedCaller(context.caller, tool, name)
+        scopedCaller(context.caller, tool, name, params.arguments)
       );
       const result = toolResult(text, isError);
       return json({
