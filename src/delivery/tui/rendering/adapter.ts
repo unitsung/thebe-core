@@ -110,7 +110,7 @@ export type ToolRenderer = {
     result: ToolRenderResult,
     options: { expanded: boolean; isPartial: boolean },
     theme: Theme,
-    context?: { args?: unknown },
+    context?: { args?: unknown }
   ) => Component;
 };
 
@@ -130,7 +130,7 @@ export class ToolExecutionComponent extends Container {
     _options: unknown,
     private readonly renderer: ToolRenderer | undefined,
     private readonly tui: TUI,
-    private readonly cwd: string,
+    private readonly cwd: string
   ) {
     super();
     this.args = args;
@@ -163,7 +163,7 @@ export class ToolExecutionComponent extends Container {
     this.invalidate();
   }
 
-  render(width: number): string[] {
+  render(width: number): readonly string[] {
     const theme = getRenderingTheme(activeThemeName);
     const call = this.renderer?.renderCall?.(this.args, theme);
     const lines = call?.render(width) ?? [
@@ -176,11 +176,13 @@ export class ToolExecutionComponent extends Container {
       this.result,
       { expanded: this.expanded, isPartial: this.partial },
       theme,
-      { args: this.args },
+      { args: this.args }
     );
     const renderedResult = result.render(width);
     // Leave the same breathing row as the previous interactive renderer.
-    return this.expanded ? [...lines, ...renderedResult] : [...lines, ...renderedResult, ""];
+    return this.expanded
+      ? [...lines, ...renderedResult]
+      : [...lines, ...renderedResult, ""];
   }
 
   // These fields are part of the adapter's diagnostic surface and make it
@@ -209,14 +211,14 @@ export class BashExecutionComponent extends Container {
   constructor(
     private readonly command: string,
     tui: TUI,
-    private readonly excludeFromContext = false,
+    private readonly excludeFromContext = false
   ) {
     super();
     this.loader = new Loader(
       tui,
       (value) => chalk.cyan(value),
       (value) => chalk.dim(value),
-      "Working 0s",
+      "Working 0s"
     );
     this.loader.start();
   }
@@ -248,22 +250,27 @@ export class BashExecutionComponent extends Container {
           : `exit ${this.exitCode}`
       : "running";
     const output = this.output.join("").trimEnd();
-    const rows = [`${chalk.green(`${prefix}${this.command}`)} · ${chalk.dim(status)}`];
+    const rows = [
+      `${chalk.green(`${prefix}${this.command}`)} · ${chalk.dim(status)}`,
+    ];
     if (output) rows.push(...new Text(output, 0, 0).render(width));
     return rows;
   }
 }
 
 export async function copyToClipboard(text: string): Promise<void> {
-  const command = process.platform === "darwin"
-    ? "pbcopy"
-    : process.platform === "win32"
-      ? "clip"
-      : "xclip";
+  const command =
+    process.platform === "darwin"
+      ? "pbcopy"
+      : process.platform === "win32"
+        ? "clip"
+        : "xclip";
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, [], { stdio: ["pipe", "ignore", "ignore"] });
     child.once("error", reject);
-    child.once("close", (code) => code === 0 ? resolve() : reject(new Error("clipboard unavailable")));
+    child.once("close", (code) =>
+      code === 0 ? resolve() : reject(new Error("clipboard unavailable"))
+    );
     child.stdin.end(text);
   });
 }
