@@ -236,8 +236,8 @@ describe("resident main Session integration", () => {
         },
         { kind: "text", text: "Attached the event to the existing Ticket." },
       ]);
-      await state.agent.setDailyBackgroundTokenBudget(1_000_000);
       await state.agent.askMainSession("Continue.");
+      await state.agent.setDailyBackgroundTokenBudget(1_000_000);
       await vi.advanceTimersByTimeAsync(100);
       await vi.waitFor(async () => {
         const current = await state.agent.getTicket(ticket.ticket.id);
