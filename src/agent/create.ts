@@ -594,7 +594,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     .then(async (requeues) => {
       for (const requeue of requeues) {
         const trigger = await triggerStore.get(requeue.triggerId);
-        if (trigger) evalService.requeue(trigger, requeue.id);
+        if (trigger) {
+          await correlationStore.record([trigger]);
+          evalService.requeue(trigger, requeue.id);
+        }
       }
     })
     .catch(() => {
@@ -832,6 +835,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return candidates.dismiss(input.decisionId, input.reason);
     },
     async requeueTrigger(triggerId) {
+      const trigger = await triggerStore.get(triggerId);
+      if (trigger) await correlationStore.record([trigger]);
       return evalRouting.requeueTrigger(triggerId, "api");
     },
     async unsubscribeThread(thread) {
