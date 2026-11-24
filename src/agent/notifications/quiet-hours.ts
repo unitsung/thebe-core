@@ -148,6 +148,33 @@ function matchingLocalInstants(
     .sort((left, right) => left.getTime() - right.getTime());
 }
 
+function offsetTransitions(start: Date, end: Date, timeZone?: string): Date[] {
+  const transitions: Date[] = [];
+  const step = 60 * 60_000;
+  let cursor = start.getTime();
+  let previousOffset = offsetMs(start, timeZone);
+  while (cursor < end.getTime()) {
+    const next = Math.min(cursor + step, end.getTime());
+    const nextOffset = offsetMs(new Date(next), timeZone);
+    if (nextOffset !== previousOffset) {
+      let low = cursor;
+      let high = next;
+      while (high - low > 1) {
+        const middle = Math.floor((low + high) / 2);
+        if (offsetMs(new Date(middle), timeZone) === previousOffset) {
+          low = middle;
+        } else {
+          high = middle;
+        }
+      }
+      transitions.push(new Date(high));
+      previousOffset = nextOffset;
+    }
+    cursor = next;
+  }
+  return transitions;
+}
+
 export function isQuiet(window: QuietHours, at: Date): boolean {
   const now = minuteOfDay(at, window.timeZone);
   const start = toMinutes(window.start);
@@ -175,7 +202,16 @@ export function msUntilQuietEnds(window: QuietHours, at: Date): number {
     window.timeZone
   ).filter((candidate) => candidate.getTime() > at.getTime());
   const endAt = candidates.find((candidate) => !isQuiet(window, candidate));
-  if (endAt) return Math.max(1000, endAt.getTime() - at.getTime());
+  if (endAt) {
+    const transition = offsetTransitions(at, endAt, window.timeZone).find(
+      (candidate) =>
+        candidate.getTime() > at.getTime() && !isQuiet(window, candidate)
+    );
+    if (transition) {
+      return Math.max(1000, transition.getTime() - at.getTime());
+    }
+    return Math.max(1000, endAt.getTime() - at.getTime());
+  }
 
   // A DST gap can skip the configured local end time. Fall back to the first
   // real minute that is outside the window.

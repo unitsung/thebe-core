@@ -65,6 +65,12 @@ describe("quiet hours window", () => {
     expect(msUntilQuietEnds(newYork, new Date("2026-03-08T06:00:00Z"))).toBe(
       5 * 60 * 60_000
     );
+    expect(
+      msUntilQuietEnds(
+        { start: "01:30", end: "02:00", timeZone: "America/New_York" },
+        new Date("2026-11-01T05:50:00Z")
+      )
+    ).toBe(10 * 60_000);
   });
 
   it("refuses what it cannot read instead of guessing", () => {
