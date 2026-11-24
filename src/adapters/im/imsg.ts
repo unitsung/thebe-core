@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   ImAccount,
@@ -94,7 +94,10 @@ export function createImsgLocalAdapter(input: {
   const retryMs = Math.max(1, input.retryMs ?? DEFAULT_RETRY_MS);
   const sendTimeoutMs = Math.max(1, input.sendTimeoutMs ?? 30_000);
   const attachmentRoots = input.attachmentRoots ?? [
-    join(homedir(), "Library", "Messages", "Attachments"),
+    ...new Set([
+      join(homedir(), "Library", "Messages", "Attachments"),
+      ...(dbPath ? [join(dirname(dbPath), "Attachments")] : []),
+    ]),
   ];
   const capabilities: ImCapabilities = {
     proactive: true,

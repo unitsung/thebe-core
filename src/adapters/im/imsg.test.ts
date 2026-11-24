@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -118,7 +118,8 @@ describe("local imsg IM adapter", () => {
   it("reads only bounded Messages attachments and sends media through a temporary file", async () => {
     const fake = runner();
     const root = await mkdtemp(join(tmpdir(), "thebe-imsg-files-"));
-    const attachment = join(root, "photo.png");
+    await mkdir(join(root, "Attachments"));
+    const attachment = join(root, "Attachments", "photo.png");
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     await writeFile(attachment, bytes);
     const adapter = createImsgLocalAdapter({
@@ -129,9 +130,11 @@ describe("local imsg IM adapter", () => {
         enabled: true,
         createdAt: "2026-11-24T00:00:00Z",
       },
-      credentials: { cliPath: "/opt/homebrew/bin/imsg" },
+      credentials: {
+        cliPath: "/opt/homebrew/bin/imsg",
+        dbPath: join(root, "chat.db"),
+      },
       runner: fake.cli,
-      attachmentRoots: [root],
       onCursor: () => {},
     });
 
@@ -173,6 +176,8 @@ describe("local imsg IM adapter", () => {
       "--file",
       expect.stringContaining("chart.png"),
       "--json",
+      "--db",
+      join(root, "chat.db"),
     ]);
     expect(fake.sentFileData.at(-1)).toEqual(bytes);
     expect(adapter.capabilities.media).toBe(true);
