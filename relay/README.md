@@ -34,4 +34,4 @@ APNS_KEY_FILE=/secrets/AuthKey_ABC123DEFG.p8 APNS_KEY_ID=ABC123DEFG APNS_TEAM_ID
 npm test
 ```
 
-The tests run the relay against a local HTTP/2 server that stands in for APNs. Real delivery needs the APNs key and a device build that carries the Push entitlement; it has not been tried.
+The tests run the relay against a local HTTP/2 server that stands in for APNs.

@@ -181,6 +181,8 @@ export type GoalRun = {
    * what it may change is what the Ticket's Mandate allows.
    */
   executor?: "ticket";
+  /** Assignment accepted by the executor during the latest startup recovery. */
+  recoveryAssignmentId?: string;
   /** The worker's latest structured report. */
   report?: GoalReport;
   /** Set while the Goal is paused waiting for the person; cleared by their answer. */
@@ -197,6 +199,11 @@ export type GoalRun = {
   progressAt?: string;
   /** Set while Watchdog is checking, retrying, or waiting for the person. */
   watchdog?: GoalWatchdogState;
+  /**
+   * A person stopped this Goal while a worker was active. Persisted so a restart finishes the stop
+   * instead of resuming work the person already ended.
+   */
+  stopRequested?: boolean;
 };
 
 /** @deprecated Use ThebePromptResult */

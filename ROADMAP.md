@@ -1,7 +1,8 @@
 # Thebe Core — Roadmap
 
-> 中文速览：这是 Core 的路线图。已交付见 **Shipped**；内测前待办见 **Next**；内测后见
-> **Later**；已识别但未排期的方向见 **Candidate directions**，其中包含**目前没有的 web 界面**；
+> 中文速览：这是 Core 的路线图。0.1.0 已交付见 **Shipped**；0.1.0 后已接受的能力见
+> **Accepted after 0.1.0**；首个 beta 待办见 **Next**；内测后见 **Later**；已识别但未排期的
+> 方向见 **Candidate directions**，其中包含**目前没有的 web 界面**；
 > 明确不做见 **Not planned**。Core 目前是 API-first：用终端、HTTP API 或 MCP 使用；除了 `/docs`
 > 的 API 参考页（Swagger UI），没有任何 web 界面。
 
@@ -94,34 +95,34 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   (Tailscale or a reverse proxy), `scripts/smoke.mjs`, `scripts/check-release.sh`,
   and CI.
 
+## Accepted after 0.1.0
+
+- `/mcp` serves the current stateless 2026-07-28 protocol and keeps the
+  2025-11-25, 2025-06-18, and 2025-03-26 handshakes (#18).
+- Automatic container health (#41), the ticket watchdog (#43), connected OAuth
+  client management (#45), and the authorization-model review (#20) were
+  accepted on 2026-11-23.
+- Real claude.ai and ChatGPT connector acceptance (#46) was confirmed by the
+  owner on 2026-11-23; external evidence is not stored in this checkout.
+- OpenList MCP instance acceptance was confirmed on 2026-11-23.
+- Main Session continuity, long-task delegation, recovery, and Recall are in
+  place. Live deployment and external-agent checks are operator steps in
+  [DEPLOYMENT.md](docs/DEPLOYMENT.md).
+- Two-way IM channels are implemented for Telegram, Weixin, QQ, and iMessage
+  through BlueBubbles. Owner-bound messages reach the durable Main Session;
+  queues, cursors, deduplication, reply-window-aware notifications, and App
+  management are in place.
+- Remote push is implemented through the optional Push Relay. The App carries
+  the production entitlement, and Core signs events and stores device
+  registrations.
+
 ## Next
 
 Work named for the first beta, not yet complete in this checkout.
 
-- **Real-provider and deployment acceptance.** OpenList, Arcane, qBittorrent and
-  the other providers are wired but not verified against live instances. The
-  container image is now built and pushed to GHCR (linux/amd64 + arm64) by
-  `.github/workflows/publish-image.yml`; its first green run and a live
-  `scripts/smoke.mjs` against a real deployment are still pending.
-- **Real MCP OAuth connector acceptance.** The embedded authorization server,
-  pairing flow, scope narrowing, JWT validation, persistence, revocation and
-  listener isolation have local integration coverage. A real claude.ai and
-  ChatGPT connector login through the public HTTPS listener is still required.
-- **Main Session continuity and external acceptance.** The local long-task
-  slice is in place over both `/mcp` and HTTP: callers can list and inspect
-  Tickets, idempotently delegate a Goal, answer its Attention, approve or deny a
-  pending worker permission, and recover failed work. The persistent main
-  Session is in place behind `/v1/main-session`, with lazy creation, restart
-  recovery, executor tools disabled, approval-gated Decision/routing/Ticket
-  writes, the generic Session routes available for inspection, and Recall
-  through both conversational `session_search` and typed `recall` references.
-  Resident Source-event pickup, batching, restart recovery and daily-budget
-  enforcement are also in place. The native Ask Thebe client already targets
-  the same `thebe-main` conversation, with local client and Core integration
-  coverage for lazy creation, reuse, recovery, delegation requester evidence
-  and Recall. Still required are live deployment acceptance and real
-  external-agent/connector acceptance; those are not claims made by the local
-  tests.
+First-beta feature work is complete in this checkout. Operator-only release
+checks are documented in [DEPLOYMENT.md](docs/DEPLOYMENT.md); they are not
+roadmap tasks.
 
 ## Later
 
@@ -133,6 +134,9 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
+- **IM media and local bridges.** QQ recall, a local `imsg` iMessage backend,
+  and inbound or outbound media on IM channels remain later phases. Live
+  acceptance against real accounts is an operator check.
 - **Scoped tokens.** Shipped in part: `thebe token create <name> --scope mcp:read|mcp:write`
   limits a token to `/mcp`, read-only or with writes; full access stays the default so nothing
   changes for existing tokens. The shipped scopes also include `mcp:irreversible`, filter
@@ -156,15 +160,6 @@ Named after the first beta.
   external agents on `/mcp`. Check each vendor's current terms before offering
   subscription sign-in. Revisit only if users ask to chat through their own
   Claude or Codex subscription; the `/mcp` item above covers most needs first.
-- **Remote push.** APNs delivery through an optional, separately deployed Thebe
-  Push Relay that Core signs minimal events for; a self-hosted Core never embeds
-  Thebe's APNs credentials.
-- **Open-source release prep.** Done in the tree: README set, security policy,
-  contributing guide with a DCO sign-off check, a trademark note, internal audit and
-  research notes moved out, and a scan of tracked files and history for credentials
-  (none found). Decided: the existing history is published as it is. Still open: create the
-  public default branch, turn on private vulnerability reporting, tag `v0.1.0`, make the GHCR
-  package public, and run a live acceptance against real providers.
 - **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
   `@anthropic-ai/sandbox-runtime`. The release container does not nest it.
 
@@ -186,7 +181,8 @@ Named after the first beta.
 Explicit non-ships from `CONTEXT.md` and `docs/CORE-PRODUCT-HTTP.md`, kept here so
 they are not re-raised as omissions:
 
-- A Goal identity rewrite or `GET /v1/goals/{id}/runs`.
+- A public Goal API (retired in favor of Tickets), a Goal identity rewrite, or
+  `GET /v1/goals/{id}/runs`.
 - Replacing raw `/mcp` for integrations.
 - Skill file or arbitrary extension code editing.
 - Arbitrary filesystem browsing, uploads, or unrestricted Artifact paths.
@@ -194,4 +190,4 @@ they are not re-raised as omissions:
   tool confirmations use `/v1/permissions`).
 - A second agent loop, or a Thebe-owned transcript store.
 - Client UI code (screens, DTOs) or native provider clients inside Core.
-- Self-hosted inference; Octop / Hermes / ACP as dependencies.
+- Self-hosted inference; external agent gateways or Python sidecars as dependencies.

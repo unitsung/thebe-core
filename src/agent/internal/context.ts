@@ -54,12 +54,20 @@ import {
   canRunPipelineJobs,
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
-import { createJobBook } from "../pipeline/job-runner.ts";
+import {
+  createJobBook,
+  type PlacementContext,
+} from "../pipeline/job-runner.ts";
+import { createFileJobStore } from "../pipeline/job-store.ts";
 import {
   createPipelineAdvancer,
   DEFAULT_INTERVAL_MS as PIPELINE_ADVANCE_INTERVAL_MS,
 } from "../pipeline/advancer.ts";
-import {} from "../capabilities/service-api.ts";
+import {
+  serviceCallContext,
+  SERVICE_API_OPERATION_PREFIX,
+  SERVICE_API_WRITE_TOOL_NAME,
+} from "../capabilities/service-api.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
@@ -79,6 +87,11 @@ import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createAutoSummary } from "./auto-summary.ts";
+import {
+  APP_CONTROL_TOOL_NAMES,
+  createAppControlTools,
+  createClientToolBridge,
+} from "../app-control/client-tools.ts";
 export { DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./auto-summary.ts";
 import { createEventLog } from "./event-log.ts";
 import { createPermissionControl } from "./permission-control.ts";
@@ -401,7 +414,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             libraries: pipelineProviders.libraries,
             media: pipelineProviders.media,
           },
-          pipelineProviders.jobStore
+          pipelineProviders.jobStore ??
+            (options.agentStoreDir
+              ? createFileJobStore(
+                  join(options.agentStoreDir, "pipeline-jobs.json")
+                )
+              : undefined)
         )
       : undefined;
   const pipelineAdvancer = pipelineBook
@@ -413,6 +431,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     : undefined;
 
   const eventLog = createEventLog();
+  const clientToolBridge = createClientToolBridge({ now });
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
 
@@ -470,6 +489,32 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
+  /**
+   * The same classification context the `/mcp` gate resolves for a service call: the operation's
+   * method and the operator's mark. A provider tool keeps its server's own hint, which the runtime
+   * applies to it; a Mandate does not cover it by name.
+   */
+  async function mandateCallContext(request: PermissionRequest) {
+    const { toolName } = request;
+    if (
+      toolName !== SERVICE_API_WRITE_TOOL_NAME &&
+      !toolName.startsWith(SERVICE_API_OPERATION_PREFIX)
+    ) {
+      return undefined;
+    }
+    const args =
+      request.args &&
+      typeof request.args === "object" &&
+      !Array.isArray(request.args)
+        ? (request.args as Record<string, unknown>)
+        : {};
+    return serviceCallContext(
+      options.serviceAPIProviders ?? [],
+      toolName,
+      args
+    );
+  }
+
   const permissions = createPermissionControl({
     initialMode: options.permissionMode,
     sessionMode: sessionModeOf,
@@ -488,7 +533,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       mandateAllows(
         await mandateLookup?.(thebeSessionId),
         request.toolName,
-        request.args
+        request.args,
+        await mandateCallContext(request)
       ),
     unattended: async (thebeSessionId) =>
       isUnattended(await mandateLookup?.(thebeSessionId)),
@@ -496,7 +542,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       mandateRefusal(
         await mandateLookup?.(thebeSessionId),
         request.toolName,
-        request.args
+        request.args,
+        await mandateCallContext(request)
       ),
     preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,
@@ -770,12 +817,16 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   let mandateLookup:
     | ((thebeSessionId: string) => Promise<TicketMandate | undefined>)
     | undefined;
+  let pipelinePlacementLookup:
+    | ((sessionId: string) => Promise<PlacementContext | undefined>)
+    | undefined;
 
   function baseTools(
     toolPolicy = policy,
     toolCallerId = callerId,
     modelResults = false,
-    scopeId?: string
+    scopeId?: string,
+    permissionScopeId = scopeId
   ) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
@@ -857,6 +908,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           policy: toolPolicy,
           callerId: toolCallerId,
           book: pipelineBook,
+          placementContext: permissionScopeId
+            ? () => pipelinePlacementLookup?.(permissionScopeId)
+            : undefined,
           onAcquired: (jobId) => pipelineAdvancer?.track(jobId),
         })
       );
@@ -875,6 +929,18 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
       })
     );
+    // A subagent uses its own run id for events but its parent's permission scope. It must not
+    // operate the person's App on the parent session's behalf.
+    if (permissionScopeId && scopeId === permissionScopeId) {
+      const sessionId = permissionScopeId;
+      tools.push(
+        ...createAppControlTools({
+          sessionId,
+          bridge: clientToolBridge,
+          emit: (event) => eventLog.appendEvent(sessionId, event),
+        })
+      );
+    }
     return tools;
   }
 
@@ -902,7 +968,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     const homeTools = isChatOnly
       ? []
       : (decoration?.customTools ??
-        baseTools(sessionPolicy, sessionCallerId, true, eventSessionId));
+        baseTools(
+          sessionPolicy,
+          sessionCallerId,
+          true,
+          eventSessionId,
+          permissionSessionId
+        ));
     // The tools that ask first say so themselves; the rest of the list is the host's own tools.
     const toolsRequiringApproval = [
       ...TOOLS_REQUIRING_APPROVAL,
@@ -1157,7 +1229,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
   }
 
   // The policy allows exactly the tools the host builds: no second list to keep in step with them.
-  policy.registerTools(baseTools().map((tool) => tool.name));
+  policy.registerTools([
+    ...baseTools().map((tool) => tool.name),
+    ...APP_CONTROL_TOOL_NAMES,
+  ]);
 
   return {
     options,
@@ -1219,6 +1294,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       registry.requestStop = value;
     },
     checkNotQuiesced,
+    clientToolBridge,
     resourcesNeedingReload,
     baseTools,
     setMandateLookup(
@@ -1236,6 +1312,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     },
     runPrompt,
     pipelineAdvancer,
+    pipelineBook,
+    setPipelinePlacementLookup(lookup: typeof pipelinePlacementLookup) {
+      pipelinePlacementLookup = lookup;
+    },
     lookupRemembered,
     takeMandateDenial: permissions.takeMandateDenial,
     registerSubagentParentCanceller,

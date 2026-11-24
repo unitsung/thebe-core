@@ -319,9 +319,12 @@ async function toTrigger(
   const named = policy.mentionNames.some((name) =>
     message.text.includes(`@${name}`)
   );
-  const mention = policy.botOpenId
-    ? message.mentionIds.includes(policy.botOpenId) || named
-    : message.mentionIds.length > 0 || named;
+  // Any mention id could be another member: it names the bot only when the operator configured
+  // which id is the bot's. Without that, a group `@someone` is not a request to Thebe.
+  const mention =
+    named ||
+    (policy.botOpenId !== undefined &&
+      message.mentionIds.includes(policy.botOpenId));
   const explicit = human && (policy.mode === "p2p" || mention);
   const admission: SourceAdmission = !human
     ? "ignore"

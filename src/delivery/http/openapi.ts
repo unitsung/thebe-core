@@ -30,9 +30,11 @@ type Operation = {
   tag: string;
   response?: number;
   responseContentType?: string;
+  streamResponse?: boolean;
   requestBody?: Record<string, unknown>;
   requestSchema?: string;
   responseSchema?: string;
+  alternateResponseSchema?: string;
   extraStatuses?: Array<{
     status: number;
     description: string;
@@ -177,6 +179,189 @@ const operations: Operation[] = [
       "Set the quiet-hours window ({quietHours: {start, end, timeZone?}}) or turn it off with null",
     tag: "compatibility",
     requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/settings",
+    summary: "Read notification targets with credentials masked",
+    tag: "system",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/settings",
+    summary: "Replace notification targets and global routing policy",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationSettingsInput",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/config",
+    summary:
+      "Read owner-only notification channel credentials with secret fields masked",
+    tag: "system",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/config",
+    summary:
+      "Replace notification channel credentials; a running Core reloads adapters",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationChannelConfigInput",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/status",
+    summary: "Read per-target pending, dropped, unknown, and last error state",
+    tag: "system",
+    responseSchema: "NotificationStatus",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/test",
+    summary: "Send one test notice to a configured target",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationTestRequest",
+    responseSchema: "NotificationTestResult",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/send",
+    summary:
+      "Queue a notification for every configured target (external entry point for devloop)",
+    tag: "system",
+    response: 202,
+    requestBody: { required: true },
+    requestSchema: "NotificationSendRequest",
+    responseSchema: "NotificationSendResult",
+  },
+  {
+    method: "get",
+    path: "/v1/im/channels",
+    summary: "List IM channels with health, capabilities and binding count",
+    tag: "system",
+    responseSchema: "ImChannels",
+  },
+  {
+    method: "get",
+    path: "/v1/im/platforms",
+    summary:
+      "List registered IM platforms with their credential fields and login support",
+    tag: "system",
+    responseSchema: "ImPlatformList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels",
+    summary:
+      "Add an IM channel; the credential is stored in an owner-only file and never returned",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImAddChannelRequest",
+    responseSchema: "ImChannelResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/channels/{channelId}",
+    summary:
+      "Remove an IM channel and its bindings (environment channels are refused)",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels/{channelId}/test",
+    summary: "Send a test message to the channel's bound owner chat",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "ImSendResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins",
+    summary: "Start a QR, link or code login for a platform",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImLoginStartRequest",
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "get",
+    path: "/v1/im/logins/{loginId}",
+    summary:
+      "Poll an IM login; the confirmed response never includes credentials",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins/{loginId}/code",
+    summary: "Submit a phone PIN for an IM login that needs one",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    requestBody: { required: true },
+    requestSchema: "ImLoginCodeRequest",
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/logins/{loginId}",
+    summary: "Cancel an in-progress IM login",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: "/v1/im/status",
+    summary: "Read IM channel health and the durable inbound queue depth",
+    tag: "system",
+    responseSchema: "ImStatus",
+  },
+  {
+    method: "get",
+    path: "/v1/im/conversations",
+    summary: "List chats seen by an IM adapter, with their binding if any",
+    tag: "system",
+    responseSchema: "ImConversationList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/bind",
+    summary:
+      "Bind an IM chat to the main Session; only direct chats may bind as owner",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImBindRequest",
+    responseSchema: "ImBindingResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/bind/{bindingId}",
+    summary: "Remove an IM chat binding",
+    tag: "system",
+    parameters: [idParameter("bindingId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/send",
+    summary: "Send text through a configured IM channel (local owner control)",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "ImSendRequest",
+    responseSchema: "ImSendResult",
   },
   {
     method: "post",
@@ -620,6 +805,31 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Read file storage backends (secrets redacted)",
+    tag: "settings",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "put",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Replace file storage backends",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "StorageSettingsWrite",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.storageSettings}/test`,
+    summary: "Test one or all file storage backends",
+    tag: "settings",
+    requestBody: { required: false },
+    requestSchema: "StorageTestRequest",
+    responseSchema: "StorageTestResult",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.memory,
     summary: "Read Thebe Memory",
     tag: "settings",
@@ -832,7 +1042,11 @@ const operations: Operation[] = [
     path: "/v1/tickets",
     summary: "List Tickets, newest first",
     tag: "ticket",
+    parameters: [
+      queryParameter("view", { type: "string", enum: ["execution"] }),
+    ],
     responseSchema: "TicketList",
+    alternateResponseSchema: "TicketExecutionList",
   },
   {
     method: "post",
@@ -859,6 +1073,27 @@ const operations: Operation[] = [
     tag: "ticket",
     parameters: [idParameter()],
     responseSchema: "Ticket",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}/execution",
+    summary: "Read Ticket progress, Assignment history, controls and Attention",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}/log",
+    summary: "Read Ticket execution events or follow an SSE log",
+    tag: "ticket",
+    parameters: [
+      idParameter(),
+      queryParameter("follow", { type: "boolean" }),
+      queryParameter("after", { type: "integer", minimum: 0 }),
+    ],
+    responseSchema: "TicketEventPage",
+    streamResponse: true,
   },
   {
     method: "post",
@@ -941,79 +1176,6 @@ const operations: Operation[] = [
       "Interrupt the current main Session turn without creating an uninitialized Session",
     tag: "main-session",
     responseSchema: "Ok",
-  },
-  {
-    method: "post",
-    path: "/v1/goals",
-    summary: "Create a session and start a Goal",
-    tag: "goal",
-    response: 201,
-    requestBody: { required: true },
-    requestSchema: "GoalCreateRequest",
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "get",
-    path: "/v1/goals",
-    summary: "List persisted Goals",
-    tag: "goal",
-    responseSchema: "ProductGoalList",
-  },
-  {
-    method: "get",
-    path: "/v1/goals/{id}",
-    summary: "Read one Goal (id is thebeSessionId)",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/pause",
-    summary: "Pause a running Goal after the current checkpoint",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/resume",
-    summary:
-      "Resume a paused Goal (409 attention_open while it waits on an answer or review: use /answer; 409 ticket_mandate_invalid when the current Policy no longer authorizes an Eval Ticket)",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/answer",
-    summary:
-      "Answer the question a paused Goal is waiting on, or accept / send back a result waiting for review (409 ticket_mandate_invalid when continuing an Eval Ticket no longer follows the current Policy)",
-    tag: "goal",
-    parameters: [idParameter()],
-    requestBody: { required: true },
-    requestSchema: "GoalAnswerRequest",
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/stop",
-    summary: "Cancel a Goal",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "get",
-    path: "/v1/goals/{id}/log",
-    summary: "Read Goal events or follow an SSE log",
-    tag: "goal",
-    parameters: [
-      idParameter(),
-      queryParameter("follow", { type: "boolean" }),
-      queryParameter("after", { type: "integer", minimum: 0 }),
-    ],
-    responseContentType: "text/event-stream",
   },
   {
     method: "get",
@@ -1189,6 +1351,28 @@ const operations: Operation[] = [
     summary: "Resolve a permission request",
     tag: "prompt",
     parameters: [idParameter(), idParameter("permissionId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/client-tools",
+    summary: "List App-control calls waiting for the paired Thebe App",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Read one pending App-control call and its exact arguments",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Return the paired App's result for one App-control call",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
     requestBody: { required: true },
   },
   {
@@ -1480,11 +1664,21 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             ? "Feature is not available"
             : "Successful response",
         content: {
+          ...(operation.streamResponse
+            ? { "text/event-stream": { schema: { type: "string" } } }
+            : {}),
           [operation.responseContentType ?? "application/json"]: {
             schema:
               operation.responseContentType === "text/event-stream"
                 ? { type: "string" }
-                : schemaRef(operation.responseSchema),
+                : operation.alternateResponseSchema
+                  ? {
+                      anyOf: [
+                        schemaRef(operation.responseSchema),
+                        schemaRef(operation.alternateResponseSchema),
+                      ],
+                    }
+                  : schemaRef(operation.responseSchema),
           },
         },
       },
@@ -1619,7 +1813,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "goal",
         description:
-          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
+          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Read and control it through the Ticket that carries it.",
       },
       {
         name: "compatibility",
@@ -1761,6 +1955,566 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                 at: { type: "string", format: "date-time" },
               },
             },
+          },
+        },
+        NotificationCategory: {
+          type: "string",
+          enum: [
+            "attention",
+            "completed",
+            "failed",
+            "budget",
+            "watchdog",
+            "source_health",
+            "pipeline",
+          ],
+        },
+        NotificationPriority: {
+          type: "string",
+          enum: ["critical", "normal", "low"],
+        },
+        NotificationTarget: {
+          type: "object",
+          required: ["id", "channel", "categories", "enabled"],
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            channel: {
+              type: "object",
+              required: ["source", "thread"],
+              properties: {
+                source: { type: "string" },
+                thread: { type: "string" },
+                address: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                },
+              },
+            },
+            categories: {
+              oneOf: [
+                { type: "string", enum: ["all"] },
+                {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              ],
+            },
+            minPriority: {
+              $ref: "#/components/schemas/NotificationPriority",
+            },
+            quietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string", example: "23:00" },
+                end: { type: "string", example: "07:00" },
+                timeZone: { type: "string" },
+              },
+            },
+            digest: {
+              type: "object",
+              required: ["windowMinutes", "categories"],
+              properties: {
+                windowMinutes: { type: "integer", minimum: 1, maximum: 1440 },
+                categories: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              },
+            },
+            enabled: { type: "boolean" },
+          },
+        },
+        NotificationChannelConfigView: {
+          type: "object",
+          required: ["config", "fields"],
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "label", "fields"],
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  fields: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["key", "label"],
+                      properties: {
+                        key: { type: "string" },
+                        label: { type: "string" },
+                        secret: { type: "boolean" },
+                        kind: { type: "string" },
+                        placeholder: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        NotificationChannelConfigInput: {
+          type: "object",
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+          },
+          additionalProperties: true,
+        },
+        NotificationSettings: {
+          type: "object",
+          required: [
+            "version",
+            "targets",
+            "criticalBypassesQuietHours",
+            "rateLimitPerHour",
+            "updatedAt",
+          ],
+          properties: {
+            version: { type: "integer", enum: [1] },
+            targets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/NotificationTarget" },
+            },
+            defaultQuietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string" },
+                end: { type: "string" },
+                timeZone: { type: "string" },
+              },
+            },
+            criticalBypassesQuietHours: { type: "boolean" },
+            rateLimitPerHour: { type: "integer", minimum: 0 },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSettingsInput: {
+          type: "object",
+          properties: {
+            settings: { $ref: "#/components/schemas/NotificationSettings" },
+          },
+          additionalProperties: true,
+        },
+        NotificationStatus: {
+          type: "object",
+          required: ["pending", "dropped", "unknown", "targets"],
+          properties: {
+            pending: { type: "integer", minimum: 0 },
+            dropped: { type: "integer", minimum: 0 },
+            unknown: { type: "integer", minimum: 0 },
+            lastError: { type: "string" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            targets: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        NotificationTestRequest: {
+          type: "object",
+          required: ["targetId"],
+          properties: { targetId: { type: "string" } },
+        },
+        NotificationTestResult: {
+          type: "object",
+          required: ["ok", "targetId", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            targetId: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            reason: { type: "string" },
+          },
+        },
+        NotificationSendRequest: {
+          type: "object",
+          required: ["category", "priority", "title", "body"],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Stable deduplication key; omitted ids are generated per request.",
+            },
+            category: { $ref: "#/components/schemas/NotificationCategory" },
+            priority: { $ref: "#/components/schemas/NotificationPriority" },
+            title: { type: "string" },
+            body: { type: "string" },
+            deepLink: { type: "string" },
+            ticketId: { type: "string" },
+            goalId: { type: "string" },
+            resource: {
+              type: "object",
+              required: ["kind", "id"],
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSendResult: {
+          type: "object",
+          required: ["ok", "id", "targets", "skipped"],
+          properties: {
+            ok: { type: "boolean" },
+            id: { type: "string" },
+            targets: { type: "array", items: { type: "string" } },
+            skipped: { type: "integer", minimum: 0 },
+          },
+        },
+        ImChat: {
+          type: "object",
+          required: ["kind", "id"],
+          properties: {
+            kind: { type: "string", enum: ["direct", "group"] },
+            id: { type: "string" },
+            threadId: {
+              type: "string",
+              description:
+                "Platform forum topic or thread id, when the platform addresses one.",
+            },
+            title: { type: "string" },
+          },
+        },
+        ImCapabilities: {
+          type: "object",
+          required: [
+            "proactive",
+            "replyOnly",
+            "recall",
+            "media",
+            "maxTextLength",
+          ],
+          properties: {
+            proactive: { type: "boolean" },
+            replyOnly: { type: "boolean" },
+            replyWindowMs: { type: "integer", minimum: 0 },
+            maxMessagesPerWindow: { type: "integer", minimum: 1 },
+            recall: { type: "boolean" },
+            media: {
+              type: "boolean",
+              description:
+                "True only when this adapter can actually send images or files.",
+            },
+            maxTextLength: { type: "integer", minimum: 1 },
+            markdown: { type: "boolean" },
+            threads: { type: "boolean" },
+            typing: { type: "boolean" },
+          },
+        },
+        ImPlatformInfo: {
+          type: "object",
+          required: ["platform", "credentials", "login"],
+          properties: {
+            platform: { type: "string" },
+            credentials: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["key"],
+                properties: {
+                  key: { type: "string" },
+                  label: { type: "string" },
+                  required: { type: "boolean" },
+                  secret: { type: "boolean" },
+                },
+              },
+            },
+            login: { type: "boolean" },
+          },
+        },
+        ImPlatformList: {
+          type: "object",
+          required: ["ok", "platforms"],
+          properties: {
+            ok: { type: "boolean" },
+            platforms: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImPlatformInfo" },
+            },
+          },
+        },
+        ImChannel: {
+          type: "object",
+          required: [
+            "id",
+            "platform",
+            "label",
+            "enabled",
+            "health",
+            "source",
+            "bindings",
+          ],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            label: { type: "string" },
+            enabled: { type: "boolean" },
+            createdAt: { type: "string", format: "date-time" },
+            source: { type: "string", enum: ["settings", "environment"] },
+            health: {
+              type: "object",
+              required: ["state"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "stopped",
+                    "starting",
+                    "connected",
+                    "needs_login",
+                    "error",
+                  ],
+                },
+                detail: { type: "string" },
+                code: { type: "string" },
+                since: { type: "string", format: "date-time" },
+                retryAt: { type: "string", format: "date-time" },
+              },
+            },
+            capabilities: { $ref: "#/components/schemas/ImCapabilities" },
+            bindings: { type: "integer", minimum: 0 },
+            lastInboundAt: { type: "string", format: "date-time" },
+            lastOutboundAt: { type: "string", format: "date-time" },
+            lastError: { type: "string" },
+          },
+        },
+        ImChannels: {
+          type: "object",
+          required: ["ok", "channels"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+          },
+        },
+        ImChannelResult: {
+          type: "object",
+          required: ["ok", "channel"],
+          properties: {
+            ok: { type: "boolean" },
+            channel: { $ref: "#/components/schemas/ImChannel" },
+          },
+        },
+        ImAddChannelRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: {
+              type: "string",
+              description:
+                "Registered platform id; the built-in adapter is telegram.",
+            },
+            label: { type: "string" },
+            credentials: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              writeOnly: true,
+              description:
+                "Platform-declared credential fields. Stored in an owner-only file and never returned.",
+            },
+            token: {
+              type: "string",
+              writeOnly: true,
+              deprecated: true,
+              description:
+                "Telegram shorthand for credentials.token; responses never include it.",
+            },
+          },
+        },
+        ImBinding: {
+          type: "object",
+          required: [
+            "id",
+            "accountId",
+            "chat",
+            "sessionId",
+            "role",
+            "createdAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            role: { type: "string", enum: ["owner", "guest"] },
+            senderId: {
+              type: "string",
+              description:
+                "Platform sender id pinned for an owner binding; only this sender may prompt.",
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        ImBindingResult: {
+          type: "object",
+          required: ["ok", "binding"],
+          properties: {
+            ok: { type: "boolean" },
+            binding: { $ref: "#/components/schemas/ImBinding" },
+          },
+        },
+        ImBindRequest: {
+          type: "object",
+          required: ["accountId", "chat"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            role: { type: "string", enum: ["owner", "guest"] },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            senderId: {
+              type: "string",
+              description:
+                "Optional owner sender id; it must match the last sender observed in the chat. When omitted, the observed sender is pinned.",
+            },
+          },
+        },
+        ImStatus: {
+          type: "object",
+          required: ["ok", "channels", "pending"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+            pending: { type: "integer", minimum: 0 },
+          },
+        },
+        ImConversationList: {
+          type: "object",
+          required: ["ok", "conversations"],
+          properties: {
+            ok: { type: "boolean" },
+            conversations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  accountId: { type: "string" },
+                  platform: { type: "string" },
+                  chat: { $ref: "#/components/schemas/ImChat" },
+                  lastSeenAt: { type: "string", format: "date-time" },
+                  binding: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      role: { type: "string", enum: ["owner", "guest"] },
+                      sessionId: { type: "string" },
+                      senderId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        ImSendRequest: {
+          type: "object",
+          required: ["accountId", "chat", "text"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            text: { type: "string" },
+            mode: { type: "string", enum: ["reply", "proactive"] },
+            replyTo: { type: "string" },
+            contextToken: { type: "string" },
+            idempotencyKey: { type: "string" },
+          },
+        },
+        ImSendResult: {
+          type: "object",
+          required: ["ok", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            platformMessageId: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+        ImLoginStartRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+        ImLoginCodeRequest: {
+          type: "object",
+          required: ["code"],
+          properties: {
+            code: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        },
+        ImLogin: {
+          type: "object",
+          required: ["id", "platform", "kind", "expiresAt", "state"],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            kind: { type: "string", enum: ["qr", "link", "code"] },
+            content: {
+              type: "string",
+              description:
+                "QR payload or login URL. Returned only when the login begins; never persisted or logged.",
+            },
+            expiresAt: { type: "string", format: "date-time" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "scanned",
+                "need_verifycode",
+                "confirmed",
+                "expired",
+                "failed",
+                "cancelled",
+              ],
+            },
+            detail: { type: "string" },
+            retryAfterMs: { type: "integer", minimum: 0 },
+            accountId: {
+              type: "string",
+              description: "Set when a confirmed login created an IM channel.",
+            },
+          },
+        },
+        ImLoginResult: {
+          type: "object",
+          required: ["ok", "login"],
+          properties: {
+            ok: { type: "boolean" },
+            login: { $ref: "#/components/schemas/ImLogin" },
           },
         },
         OAuthAuthorizeRequest: {
@@ -3111,6 +3865,109 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sandboxDeniedDomains: { type: "array", items: { type: "string" } },
           },
         },
+        StorageBackend: {
+          type: "object",
+          required: ["id", "type"],
+          properties: {
+            id: { type: "string" },
+            type: { type: "string", enum: ["openlist", "local", "webdav"] },
+            baseUrl: { type: "string" },
+            url: { type: "string" },
+            roots: { type: "array", items: { type: "string" } },
+            username: { type: "string" },
+            hasToken: { type: "boolean" },
+            hasPassword: { type: "boolean" },
+          },
+        },
+        StorageSettings: {
+          type: "object",
+          required: ["path", "source", "backends", "issues"],
+          properties: {
+            path: { type: "string" },
+            source: {
+              type: "string",
+              enum: ["config", "env", "none"],
+            },
+            default: { type: "string" },
+            backends: {
+              type: "array",
+              items: { $ref: "#/components/schemas/StorageBackend" },
+            },
+            issues: { type: "array", items: { type: "string" } },
+          },
+        },
+        StorageSettingsWrite: {
+          type: "object",
+          required: ["backends"],
+          additionalProperties: false,
+          properties: {
+            default: {
+              type: "string",
+              nullable: true,
+              description:
+                "Backend id; null picks the first. Omit to keep the current default.",
+            },
+            backends: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type"],
+                additionalProperties: true,
+                properties: {
+                  id: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: ["openlist", "local", "webdav"],
+                  },
+                  baseUrl: { type: "string" },
+                  url: { type: "string" },
+                  roots: { type: "array", items: { type: "string" } },
+                  username: { type: "string" },
+                  token: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored token for the same id and type.",
+                  },
+                  password: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored password for the same id and type.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        StorageTestRequest: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "Omit to test every backend." },
+          },
+        },
+        StorageTestResult: {
+          type: "object",
+          required: ["ok", "results"],
+          properties: {
+            ok: { type: "boolean" },
+            issues: { type: "array", items: { type: "string" } },
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type", "ok"],
+                properties: {
+                  id: { type: "string" },
+                  type: { type: "string" },
+                  ok: { type: "boolean" },
+                  total: { type: "integer" },
+                  entries: { type: "array", items: { type: "string" } },
+                  error: { type: "string" },
+                },
+              },
+            },
+          },
+        },
         ProductGoalRun: {
           type: "object",
           required: [
@@ -3131,54 +3988,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             currentStep: { type: "string" },
             createdAt: { type: "string" },
             updatedAt: { type: "string" },
-          },
-        },
-        GoalCreateRequest: {
-          type: "object",
-          required: ["goal"],
-          properties: {
-            goal: { type: "string", minLength: 1 },
-            criteria: {
-              type: "array",
-              items: { type: "string", minLength: 1 },
-            },
-            maxIterations: {
-              type: "integer",
-              minimum: 1,
-              description:
-                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
-            },
-            observe: {
-              type: "boolean",
-              description:
-                "Run read-only: the worker has no edit, write or shell tool and reports what it found and would do.",
-            },
-            allowAsk: {
-              type: "boolean",
-              description:
-                "Let the worker ask the person one question mid-run (the Goal pauses with an `attention`). Without it, a need becomes a blocker.",
-            },
-            reviewBeforeDone: {
-              type: "boolean",
-              description:
-                "After the independent review passes, pause with a review `attention` and wait for the person to accept or send it back.",
-            },
-            threads: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "Thread keys this task concerns, e.g. resource:container:emby. While the task is open, later triggers on these threads attach as inputs without a new assessment.",
-            },
-            model: {
-              type: "object",
-              required: ["providerId", "modelId"],
-              description:
-                "Model for a new Goal session; its workers and reviewer use it. Ignored when the Goal is started on an existing session.",
-              properties: {
-                providerId: { type: "string" },
-                modelId: { type: "string" },
-              },
-            },
           },
         },
         GoalScheduleInput: {
@@ -3562,6 +4371,35 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "Write destinations recorded from Source events attached to this Ticket.",
             },
+            assignments: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "state", "createdAt"],
+                properties: {
+                  id: { type: "string" },
+                  state: {
+                    type: "string",
+                    enum: ["pending", "running", "ended"],
+                  },
+                  createdAt: { type: "string", format: "date-time" },
+                  startedAt: { type: "string", format: "date-time" },
+                  endedAt: { type: "string", format: "date-time" },
+                  endedReason: { type: "string" },
+                  report: {
+                    type: "object",
+                    required: ["state", "summary", "at"],
+                    properties: {
+                      state: { type: "string" },
+                      summary: { type: "string" },
+                      at: { type: "string", format: "date-time" },
+                      evidence: { type: "string" },
+                      artifactId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
             links: {
               type: "object",
               required: ["sessionIds"],
@@ -3620,6 +4458,25 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description:
                 "After independent review passes, wait for the person to accept the result.",
             },
+            threads: {
+              type: "array",
+              description:
+                "Thread keys this Ticket concerns, e.g. resource:container:emby or {kind, id}. While it is open, later triggers on these threads attach as inputs without a new assessment.",
+              items: {
+                oneOf: [
+                  { type: "string", minLength: 1 },
+                  {
+                    type: "object",
+                    required: ["kind", "id"],
+                    additionalProperties: false,
+                    properties: {
+                      kind: { type: "string", minLength: 1 },
+                      id: { type: "string", minLength: 1 },
+                    },
+                  },
+                ],
+              },
+            },
           },
           additionalProperties: false,
         },
@@ -3651,8 +4508,50 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               enum: ["allow", "deny"],
               description: "The decision for permissionId.",
             },
+            placementId: {
+              type: "string",
+              description:
+                "The pending operation id from receipt.placementAttention.",
+            },
+            placementDecision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "The operator decision for placementId.",
+            },
           },
           additionalProperties: false,
+        },
+        TicketPlacement: {
+          type: "object",
+          required: ["id", "source", "destination", "state"],
+          properties: {
+            id: { type: "string" },
+            source: { type: "string" },
+            destination: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "denied",
+                "dispatching",
+                "verified",
+                "uncertain",
+              ],
+            },
+            decidedAt: { type: "string", format: "date-time" },
+            dispatchedAt: { type: "string", format: "date-time" },
+            verifiedAt: { type: "string", format: "date-time" },
+            stoppedAt: { type: "string", format: "date-time" },
+            verification: { type: "string", enum: ["sha256"] },
+            skill: {
+              type: "object",
+              required: ["name", "digest"],
+              properties: {
+                name: { type: "string" },
+                digest: { type: "string" },
+              },
+            },
+          },
         },
         TicketNoteRequest: {
           type: "object",
@@ -3667,6 +4566,37 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
           additionalProperties: false,
+        },
+        TicketExecutionList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketTask" },
+            },
+          },
+        },
+        TicketEventPage: {
+          type: "object",
+          required: ["events", "next"],
+          properties: {
+            events: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "ticketId", "type", "at"],
+                properties: {
+                  id: { type: "string" },
+                  ticketId: { type: "string" },
+                  type: { type: "string" },
+                  at: { type: "string", format: "date-time" },
+                },
+                additionalProperties: true,
+              },
+            },
+            next: { type: "integer", minimum: 0 },
+          },
         },
         TicketTask: {
           type: "object",
@@ -3691,6 +4621,38 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "array",
               items: { $ref: "#/components/schemas/PendingPermission" },
             },
+            execution: {
+              type: "object",
+              required: [
+                "status",
+                "phase",
+                "iteration",
+                "maxIterations",
+                "updatedAt",
+                "controls",
+              ],
+              properties: {
+                status: { type: "string" },
+                phase: { type: "string" },
+                progress: { type: "number" },
+                currentStep: { type: "string" },
+                iteration: { type: "integer" },
+                maxIterations: { type: "integer" },
+                updatedAt: { type: "string", format: "date-time" },
+                watchdog: { $ref: "#/components/schemas/GoalWatchdog" },
+                controls: {
+                  type: "object",
+                  required: ["pause", "resume", "stop", "retry", "reply"],
+                  properties: {
+                    pause: { type: "boolean" },
+                    resume: { type: "boolean" },
+                    stop: { type: "boolean" },
+                    retry: { type: "boolean" },
+                    reply: { type: "boolean" },
+                  },
+                },
+              },
+            },
             receipt: {
               type: "object",
               required: ["state", "complete"],
@@ -3709,7 +4671,27 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
                   ],
                 },
                 complete: { type: "boolean" },
+                placementAttention: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
+                placementReport: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
                 summary: { type: "string" },
+                report: {
+                  $ref: "#/components/schemas/ProductGoal/properties/report",
+                },
+                attention: {
+                  type: "object",
+                  required: ["id", "kind", "question", "askedAt"],
+                  properties: {
+                    id: { type: "string" },
+                    kind: { type: "string", enum: ["answer", "review"] },
+                    question: { type: "string" },
+                    options: { type: "array", items: { type: "string" } },
+                    askedAt: { type: "string", format: "date-time" },
+                  },
+                },
                 finalReport: { type: "string" },
                 artifactId: { type: "string" },
                 error: { type: "string" },
@@ -3883,7 +4865,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             attention: {
               type: "object",
               description:
-                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/goals/{id}/answer.",
+                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/tickets/{id}/reply.",
               required: ["id", "kind", "question", "askedAt"],
               properties: {
                 id: { type: "string" },
@@ -3954,29 +4936,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             since: { type: "string", format: "date-time" },
             at: { type: "string", format: "date-time" },
             summary: { type: "string" },
-          },
-        },
-        GoalAnswerRequest: {
-          type: "object",
-          required: ["attentionId"],
-          properties: {
-            attentionId: {
-              type: "string",
-              description:
-                "The `attention.id` being answered; a stale or already answered one is 409.",
-            },
-            answer: {
-              type: "string",
-              maxLength: 4000,
-              description:
-                "The answer to a question, or the note when sending a result back.",
-            },
-            decision: {
-              type: "string",
-              enum: ["accept", "reject"],
-              description:
-                "For a review request: accept finishes the Goal; reject needs an answer saying what to change.",
-            },
           },
         },
       },

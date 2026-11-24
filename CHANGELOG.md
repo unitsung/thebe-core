@@ -5,8 +5,38 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- File storage backends are managed in the `storage` section of
+  `~/.thebe/config.json`: OpenList, host-mounted local roots, and native WebDAV.
+  `thebe storage list|add|remove|default|test|import-env` edits the section
+  atomically (mode `0600`), and `GET/PUT /v1/settings/storage` plus
+  `POST /v1/settings/storage/test` expose it to clients. Every `files_*` tool call
+  re-reads the section, so adding, editing, or removing a backend applies without
+  restarting Core or reopening a session.
+- `files_rename`, `files_remove`, and `files_upload` extend the file tools, and
+  `local` and `webdav` backends join OpenList behind the same `FilesProvider`
+  seam. Uploads read only from the workspace or outputs directory; local paths
+  must stay inside a configured root; WebDAV refuses overwrites.
+- OpenList's built-in MCP server can be attached as a deferred `openlist` preset
+  with `THEBE_OPENLIST_MCP=on`. Its three `openlist.fs.*` tools are marked
+  read-only, and an explicit `openlist` entry in `.thebe/mcp.json` overrides the
+  preset.
+- `POST /v1/tickets` accepts `threads` (`["resource:container:emby"]` or
+  `[{kind: "container", id: "emby"}]`) and records them as the Ticket's
+  subscriptions, so a direct Ticket can follow the resources it names.
+
 ### Changed
 
+- OpenList credentials now come from the `storage` section when it exists and
+  also power STRM repair, cloud transfer, and background tasks, so the file
+  tools and acquisition providers share one address. The
+  `THEBE_OPENLIST_*`, `THEBE_FILES_LOCAL_ROOTS`, and `THEBE_WEBDAV_*` variables
+  remain a fallback only while the section is absent; `thebe storage import-env`
+  materializes them.
+- Removed the optional external agent-gateway notification bridge and its compose
+  sidecar. Every notification transport now runs in Core; unsupported services use
+  the generic webhook or Apprise target instead.
 - Goal checkpoints and subagent turns are no longer silently capped at 50.
   `maxIterations` and a profile's `maxTurns` accept any positive integer; the
   defaults remain 8 and 5/8. A worker that reaches its per-run turn budget now
@@ -23,8 +53,21 @@ All notable changes to Thebe Core are documented here. The format is based on
 - Removed what nothing produces any more: the `policy` approval source on an action receipt (and the client value that selected it) and a Ticket's `links.receiptIds`. A write an executor makes is a plain service call that leaves an audit record; there is no restart receipt for it.
 - **Breaking:** every capability and tool has one name, `<service>_<action>` in lower-case snake case, replacing the dotted ids. Over `/mcp`, `/v1/capabilities` and in the model's own tool list it is the same string, so descriptions and prompts that name a tool name the one the model can call. Examples: `container.list` is `container_list`, `navidrome.playlist.update` is `navidrome_playlist_update`, `download.delete` is `download_delete`, `strm.repair` is `strm_repair`. The generic service tools are now `service_discover`, `service_read` and `service_write` (they were `service_api_*`), the confirm step is `service_confirm`, and the per-operation tools for an allow-listed read operation are `service__<service>__<operation>` (`__` separates the parts, as MCP does for namespaces). Integrations that use the old ids must change them; ids already written to disk (remembered permission answers, old activity records) no longer match and are asked or shown as unknown. The App and `contracts/*.json` were renamed with it. A dotted tool name from an external MCP server is still translated at the Pi boundary.
 
+### Removed
+
+- **Breaking:** the public Goal API is retired. `GET/POST /v1/goals`,
+  `GET /v1/goals/{id}`, its pause/resume/stop/log routes and the session-scoped
+  `/v1/session/{id}/goal*` aliases return `404`; a Goal is internal execution
+  state behind a Ticket. Clients use `GET/POST /v1/tickets`,
+  `GET /v1/tickets/{id}/execution`, `GET /v1/tickets/{id}/log`, and
+  `POST /v1/tickets/{id}/reply|note|pause|resume|stop|retry`. OpenAPI and the
+  operator docs no longer list Goal routes.
+
 ### Fixed
 
+- An IM notification whose gateway cannot start during delivery now returns a retryable failure and stays in the outbox, instead of being reported as sent.
+- The iMessage adapter no longer drops the second of two messages that share the same millisecond timestamp in one poll; it delivers every row in that batch before advancing the cursor.
+- A critical notification now passes a normal notice already held for quiet hours in the same target queue. The held notice still waits until the window ends, and a retry still keeps its place.
 - Main Session recall now excludes every internal workflow Session carrying a
   `purpose` label, including container diagnosis, instead of exposing only the
   Eval assessment Session. A direct read of an internal Session is refused just
@@ -33,9 +76,139 @@ All notable changes to Thebe Core are documented here. The format is based on
 - An unattended Ticket worker's first Mandate refusal is now carried from permission control to the Goal instead of ending as an ordinary tool error. The Goal stops before the worker's completion claim reaches the reviewer, ends `failed` plus `blocked`, appears in Activity as `person` / `blocked`, and sends one push notice. This covers both a write on a service outside the inferred scope and an irreversible `DELETE` on a covered service.
 - A service connection with no readable OpenAPI description was reported to the model as a failed discovery ("No JSON OpenAPI found"), and a real model then gave up without trying `service_write`, which needs no description. Discovery now says the service has no description and how to call it anyway (a method and a path from its own documentation), and `service_read` works on such a service for the methods the operator listed in `readMethods`. A Ticket's task also says how the Mandate's service is named in a call.
 - Over `/mcp`, `strm.repair` and `sqmusic_download` ran even when the host had set `THEBE_MCP_WRITES=off`, because the write check matched a fixed list of tool names. Core's own tools are now judged by what they declare (the same `effect` that sets their `readOnlyHint`), so any write tool a Core capability adds is held by `THEBE_MCP_WRITES` and by a token's `mcp:write` scope.
+- A host's `bypassPermissions` no longer extends to unattended or background runs: permission
+  control consults the Ticket's Mandate before the session's bypass, so auto execution writes
+  only within what the Ticket asked for.
+- A Feishu group mention counts as an explicit request only when it names the configured bot
+  open ID or a configured mention name. With `THEBE_FEISHU_BOT_OPEN_ID` unset, any member's `@`
+  no longer bypasses Eval and the Policy and reaches the Main Session as a direct request.
+- The Push Relay's registration route is rate-limited per client (10 per minute by default) and
+  bounded in total registrations, so an anonymous caller cannot grow `registrations.json` until
+  the disk fills.
+- Blocked and completed Ticket notices redact their blocker, summary and final report before
+  posting to the Source's thread, the same way tool output is redacted, so a secret a worker or
+  reviewer quoted cannot leak into a public issue or a group chat.
+- A provider MCP server's own `readOnlyHint` no longer makes its tool a read: the operator names
+  read tools per server (`readTools`, or a server-level `permission: "read"`), and every other
+  tool asks for approval and counts as a write over `/mcp`, held by `THEBE_MCP_WRITES` and a
+  token's `mcp:write`.
+- A Ticket Mandate judges a covered call with the same inputs as the `/mcp` gate: HTTP method,
+  the server's `destructiveHint`, the operator's `irreversible` marks, and the body a confirm
+  token will send. Calls that stop or remove what a service runs (`container_stop`,
+  `POST /api/containers/{id}/stop`, `.../remove`) are irreversible, so a Ticket to restart emby
+  cannot use its `container:write` scope to stop, recreate or reconfigure anything.
+- A GitHub events read that stops at the page limit no longer advances that repository's cursor:
+  what it read is stored and dispatched, the cursor stays behind the unread older events, and
+  the Source reports `failing` with a warning in `GET /v1/health` until a full page-window read
+  succeeds. Feishu's ascending time cursor with its one-second overlap was checked and does not
+  lose events.
+- CI runs again on every push to `dev`, and the container job runs the restored
+  `scripts/check-pi-resolution.mjs` against the pruned production install, so a pi-ai layout
+  change fails the build instead of the release.
 
 ### Added
 
+- `.thebe/mcp.json` servers accept `readTools`, the operator's per-tool confirmation that a
+  provider MCP tool only reads; a tool not named there asks first unless the server is
+  `permission: "read"`.
+- `/mcp` now speaks MCP `2026-07-28` stateless requests without an `initialize` handshake,
+  including `server/discover`, required protocol/method/name headers, `resultType`, cache hints,
+  deterministic `tools/list` order, and the specification's unsupported-version error. The
+  `2025-11-25` handshake joins the existing `2025-06-18` and `2025-03-26` legacy paths.
+- Notification channel credentials can live in the owner-only
+  `{configDir}/notification-config.json` and are edited with TUI
+  `/notifications` or the App's Channel credentials page. The new
+  `GET/PUT /v1/notifications/config` route masks secrets, restores untouched
+  values, and rebuilds adapters immediately; a file watcher applies TUI saves
+  without restarting Core. Environment variables remain a deployment fallback.
+- Seven more native notification transports: Mattermost and Synology Chat incoming webhooks,
+  LINE push, Zalo Bot, Nextcloud Talk response bots, Twitch Helix chat messages, and one-shot
+  IRC. Their send paths, retry classification, and platform-level refusal checks are implemented
+  in TypeScript; they require no external agent gateway. LINE reuses a deterministic
+  retry key, Nextcloud Talk signs the exact message, and IRC treats a failure after `PRIVMSG` as
+  `unknown` rather than replaying it.
+- Native Weixin ClawBot/iLink two-way IM, integrated from Tencent's MIT-licensed
+  Weixin ClawBot protocol layer. It supports QR
+  login, the phone-PIN step through `POST /v1/im/logins/{loginId}/code`, long-polled direct
+  messages and reply-only sends carrying `context_token`; it never advertises proactive delivery.
+- Native QQ two-way IM over the official Bot OpenAPI v2 and its WebSocket gateway.
+  It receives `C2C_MESSAGE_CREATE` and `GROUP_AT_MESSAGE_CREATE`, identifies with
+  `QQBot <access_token>`, resumes with the gateway session after a disconnect, and
+  sends passive replies with the inbound `msg_id` and an increasing `msg_seq`.
+  Direct replies are limited to 60 minutes/4 messages and group @ replies to
+  5 minutes/5 messages; text is chunked at 2000 characters. It never advertises
+  proactive delivery.
+- Native iMessage two-way IM through a BlueBubbles server on an always-on Mac.
+  Core baselines the newest BlueBubbles message once, then polls `POST /api/v1/message/query` and sends
+  text with `POST /api/v1/message/text`; it skips own messages and tapbacks and
+  reports an offline Mac as a retryable send. `THEBE_IMESSAGE_BASE_URL` and
+  `THEBE_IMESSAGE_PASSWORD` (or the existing `THEBE_BLUEBUBBLES_*` values) seed a
+  channel from the environment.
+- Two-way IM as a notification transport. A target with `source: "im"` names
+  an `accountId`, `chatKind`, `chatId` and optional `threadId`; its notice is
+  sent through the same gateway as an owner reply. A proactive channel
+  (iMessage) sends directly; a reply-only QQ or Weixin target uses the latest
+  inbound anchor while its reply window is still open and is discarded as
+  `window_closed` otherwise, instead of being queued for days. Testing a
+  reply-only channel uses the same anchor and reports `no_reply_anchor` or
+  `reply_window_closed` instead of pretending a proactive test message worked.
+- The two-way IM seam is now platform-neutral. A factory registers a platform,
+  declares its credential schema and validation, may expose a QR/link/code
+  login adapter, and reports truthful capabilities (`proactive`, `replyOnly`,
+  reply window, `media`, `markdown`, `threads`, `typing`). Channels accept an
+  opaque `credentials` map, `GET /v1/im/platforms` exposes the registry's
+  credential fields, and `POST/GET/DELETE /v1/im/logins` drive an optional
+  login, and a confirmed login creates the channel without returning its
+  credentials. Owner bindings now pin the platform sender id (a different
+  sender in the same direct chat is recorded, never prompted); binding requires
+  an observed chat, rejects a direct `guest` and a group `owner`. A message
+  that arrives while the main Session is busy is queued, joins a streaming
+  turn as a `followUp`, or gets a busy notice/timeout instead of being dropped.
+  Inbound/outbound chats can carry a thread id, inbound media and mentions are
+  preserved as descriptors, and a persisted cursor is discarded when the bot
+  identity changes. `im-secrets.json` now holds arbitrary declared fields.
+  Telegram reports `media: false`, supports forum threads, and uses a hashed
+  token identity for its cursor. QQ, WeChat and iMessage remain platform ids
+  without adapters.
+- Two-way IM channels, Phase 1 with Telegram. `GET/POST /v1/im/channels`,
+  `DELETE /v1/im/channels/{id}`, `POST /v1/im/channels/{id}/test`,
+  `GET /v1/im/status`, `GET /v1/im/conversations`, `POST /v1/im/bind`,
+  `DELETE /v1/im/bind/{id}` and `POST /v1/im/send` configure a bot, inspect its
+  health and bind a direct chat to the main Session. An owner message becomes a
+  normal main-Session turn and its reply returns to the same chat; a group or
+  guest chat is recorded but never reaches the model, and an unknown chat only
+  gets a `/start` pairing hint. `THEBE_TELEGRAM_BOT_TOKEN` seeds a channel from
+  the environment; a channel added over HTTP keeps its token in an owner-only
+  `im-secrets.json` that no response returns. Accounts, bindings, the
+  `update_id` cursor, a 7-day dedupe table and the accepted inbound queue are
+  durable in `im.json`, so a restart resumes unhandled messages and never
+  replays a completed one. Each chat has one serial queue; a 429 pauses only
+  that bot token, a 409 polling conflict becomes `error` instead of a reconnect
+  loop, and one channel failing never stops Core or another channel. The
+  Telegram transport sends plain text without `parse_mode` and chunks at 4096
+  characters. `GET /v1/health` reports `im` only when a channel is configured.
+- Multi-channel notifications. `GET/PUT /v1/notifications/settings`,
+  `GET /v1/notifications/status`, `POST /v1/notifications/test` and
+  `POST /v1/notifications/send` expose durable owner targets for generic
+  webhooks, email, Telegram, WeCom (group robot or application message) and
+  DingTalk. Slack/Discord webhooks are included. An existing Feishu or GitHub
+  Ticket channel can serve as an owner target for any notice. A unified `Notification` carries category, priority, a stable id and
+  a `thebe://` deep link; the router filters by category/priority, honors
+  per-target quiet hours (critical bypasses by default), applies an hourly rate
+  limit, and queues one entry per `(notification, target)` in a durable outbox.
+  Delivery is serial per target, retries keep the same idempotency key, and a
+  send interrupted by a restart is recorded `unknown` and never replayed.
+  Credentials come from the notification config file and fall back to
+  environment variables; `GET settings` masks
+  credential-shaped address fields and URL query secrets. Goal attention and
+  completion, approval, budget, Eval outage and proactive-message events now
+  feed the same layer alongside the existing device Push path. A Goal notice
+  also carries the Ticket's recorded channels as event-specific targets, so the
+  Ticket's own reply address and the owner targets are merged and deduplicated
+  by channel. A target may configure a digest window: matching low/normal
+  notices are held in durable `digests.json` and sent as one summary when the
+  window ends, while critical notices bypass it; `GET
+  /v1/notifications/status` reports held notices as `digestPending`.
 - The Main Session is the single voice for communications to the owner (Issue #48).
   Workers report only to their ticket, with direct messages to the owner asserted and
   forbidden. Proactive messages from the resident Main Session and the `proactive_message`

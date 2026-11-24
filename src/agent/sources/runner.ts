@@ -24,6 +24,31 @@ export type SourceRunner = {
 
 export const DEFAULT_SOURCE_INTERVAL_MS = 30_000;
 
+const ABORTED = Symbol("source-read-aborted");
+
+/**
+ * Waits for a Source read, but stops waiting as soon as the runner aborts. The read itself may not
+ * honor the signal; detaching it keeps quiesce bounded while discarding its result.
+ */
+async function awaitUnlessAborted<T>(
+  work: Promise<T>,
+  signal: AbortSignal
+): Promise<T | typeof ABORTED> {
+  // The abandoned read may still reject later; settle it so it cannot surface as unhandled.
+  void work.catch(() => undefined);
+  if (signal.aborted) return ABORTED;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<typeof ABORTED>((resolve) => {
+    onAbort = () => resolve(ABORTED);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
 /**
  * Reads every Source concurrently on a timer, saves its new Triggers, then saves its cursor. The cursor
  * moves only after the Triggers are stored, so a crash between the two re-reads the change (and the store
@@ -64,10 +89,7 @@ export function createSourceRunner(options: {
   const intervalMs = options.intervalMs ?? DEFAULT_SOURCE_INTERVAL_MS;
   const maxPendingDispatch =
     options.maxPendingDispatch ?? DEFAULT_TRIGGER_RETENTION;
-  if (
-    !Number.isSafeInteger(maxPendingDispatch) ||
-    maxPendingDispatch <= 0
-  ) {
+  if (!Number.isSafeInteger(maxPendingDispatch) || maxPendingDispatch <= 0) {
     throw new Error("maxPendingDispatch must be a positive integer");
   }
   const now = options.now ?? (() => new Date());
@@ -108,28 +130,47 @@ export function createSourceRunner(options: {
     try {
       const before = await options.store.cursor(source.id);
       if (signal.aborted) return [];
-      const result = await source.read(before, signal);
+      // A Source that ignores the signal must not hold quiesce forever: stop() aborts, and the read
+      // is detached. Its result is discarded, so the old cursor stays and the batch is read again.
+      const result = await awaitUnlessAborted(
+        source.read(before, signal),
+        signal
+      );
       // If quiesce interrupted the read, keep the old cursor so the Source can report this batch again.
-      if (signal.aborted) return [];
+      if (result === ABORTED || signal.aborted) return [];
       const triggers = result.triggers.map((trigger) => {
         const admission = source.admit?.(trigger);
-        return admission === undefined
-          ? trigger
-          : { ...trigger, admission };
+        return admission === undefined ? trigger : { ...trigger, admission };
       });
       validateSourceResult(source, { ...result, triggers });
       // Once storage starts, finish the cursor write even if quiesce arrives mid-commit: the Trigger is
       // already durable, and leaving the cursor behind would replay it without dispatching it.
       const fresh = await options.store.add(triggers);
       await options.store.setCursor(source.id, result.cursor);
-      statuses.set(source.id, {
-        id: source.id,
-        scope: source.scope,
-        state: "healthy",
-        consecutiveFailures: 0,
-        lastAttemptAt: attemptedAt,
-        lastSuccessAt: now().toISOString(),
-      });
+      // A read that covered only part of the feed keeps what it read but never reports healthy:
+      // the operator has to see that a burst or an outage left events the Source could not reach.
+      const warning = result.warning?.trim();
+      if (warning) {
+        statuses.set(source.id, {
+          id: source.id,
+          scope: source.scope,
+          state: "failing",
+          consecutiveFailures: status.consecutiveFailures + 1,
+          lastAttemptAt: attemptedAt,
+          lastFailureAt: now().toISOString(),
+          lastError: warning,
+        });
+        options.onError?.(source.id, new Error(warning));
+      } else {
+        statuses.set(source.id, {
+          id: source.id,
+          scope: source.scope,
+          state: "healthy",
+          consecutiveFailures: 0,
+          lastAttemptAt: attemptedAt,
+          lastSuccessAt: now().toISOString(),
+        });
+      }
       return fresh;
     } catch (error) {
       if (signal.aborted) return [];
@@ -232,7 +273,9 @@ function validateSourceResult(
   if (
     !result ||
     typeof result.cursor !== "string" ||
-    !Array.isArray(result.triggers)
+    !Array.isArray(result.triggers) ||
+    (result.warning !== undefined &&
+      (typeof result.warning !== "string" || !result.warning.trim()))
   ) {
     throw new Error(`Source ${source.id} returned an invalid read result`);
   }

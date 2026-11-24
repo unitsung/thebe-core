@@ -7,6 +7,8 @@ import { json, readJson } from "../json.ts";
 import { agentError } from "../parsing/errors.ts";
 import { PRODUCT_HTTP_PATH } from "../product-paths.ts";
 import { PRODUCT_HTTP_SEGMENT } from "../product-paths.ts";
+import { parseLogCursor } from "../parsing/query.ts";
+import { ticketEventStream } from "../protocol/sse.ts";
 
 /**
  * Ticket HTTP controls. The Ticket is the durable assignment; the Goal behind it still owns progress,
@@ -24,6 +26,12 @@ export async function handleTicketRoutes(
   try {
     if (context.path === base) {
       if (request.method === "GET") {
+        if (context.url.searchParams.get("view") === "execution") {
+          const tasks = await agent.listTicketTasks();
+          return json({
+            tickets: tasks.map(({ goal: _goal, ...task }) => task),
+          });
+        }
         return json({ tickets: await agent.listTickets() });
       }
       if (request.method === "POST") {
@@ -45,12 +53,50 @@ export async function handleTicketRoutes(
     if (
       id &&
       context.parts.length === 4 &&
+      (context.parts[3] === PRODUCT_HTTP_SEGMENT.execution ||
+        context.parts[3] === PRODUCT_HTTP_SEGMENT.log)
+    ) {
+      if (request.method !== "GET") return methodNotAllowed();
+      if (context.parts[3] === PRODUCT_HTTP_SEGMENT.execution) {
+        const task = await agent.getTicketTask(id);
+        if (!task) return ticketNotFound();
+        const { goal: _goal, ...execution } = task;
+        return json(execution);
+      }
+
+      const cursor = parseLogCursor(request, context.url);
+      if (!cursor.ok) return json({ error: cursor.error }, 400);
+      const log = await agent.getTicketLog(id);
+      if (!log) return ticketNotFound();
+      const follow =
+        context.url.searchParams.get("follow") === "true" ||
+        (request.headers.get("accept") ?? "").includes("text/event-stream");
+      return follow
+        ? ticketEventStream(log, request, cursor.after)
+        : json(log.read(cursor.after));
+    }
+    if (
+      id &&
+      context.parts.length === 4 &&
       context.parts[3] === PRODUCT_HTTP_SEGMENT.reply
     ) {
       if (request.method !== "POST") return methodNotAllowed();
       const blocked = quiescedWrite(context);
       if (blocked) return blocked;
       const input = await readJson(request);
+      if (
+        (input.placementId !== undefined ||
+          input.placementDecision !== undefined) &&
+        !context.caller
+      ) {
+        return json(
+          {
+            error: "An operator token is required to decide placement",
+            code: "unauthorized",
+          },
+          401
+        );
+      }
       return json(
         await agent.replyTicket({
           ...input,

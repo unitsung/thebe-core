@@ -96,13 +96,33 @@ describe("Ticket Goal recovery across Core recreation", () => {
       // Reads wait for startup recovery, so this is the first post-recovery view.
       const tickets = await app2.agent.listTickets();
       expect(tickets.map((row) => row.id)).toEqual([ticketId]);
+      expect(tickets[0]?.assignments).toMatchObject([
+        {
+          state: "ended",
+          endedReason: "host_restarted",
+          report: { state: "failed" },
+        },
+        { state: expect.stringMatching(/running|ended/) },
+      ]);
+      expect(tickets[0]?.assignments[0]?.id).not.toBe(
+        tickets[0]?.assignments[1]?.id
+      );
       await vi.waitFor(() => {
         expect(app2.agent.getGoal(goalId)).toMatchObject({
           status: "completed",
           executor: "ticket",
         });
       });
-      expect(await app2.agent.listTickets()).toHaveLength(1);
+      expect((await app2.agent.getTicket(ticketId))?.assignments).toMatchObject(
+        [
+          {
+            state: "ended",
+            endedReason: "host_restarted",
+            report: { state: "failed" },
+          },
+          { state: "ended", report: { state: "ready" } },
+        ]
+      );
       // The interrupted worker is kept for the record; the recovered Goal ran a fresh isolated
       // worker and reviewer on top of the same Ticket.
       const runs = await app2.agent.listSubagents(goalId);

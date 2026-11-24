@@ -254,6 +254,24 @@ without activity pauses the Goal. Every intervention writes an audit method
 under `watchdog.*`, and the latest state survives on the Goal as `watchdog`.
 These actions never expand its Mandate or inject work into a running worker.
 
+### 3.3 Multi-channel notifications
+
+Core's notification outbox sends owner events to every configured target; device
+push stays a separate transport. Every notification transport runs in Core:
+webhook, Slack, Discord, Telegram, Teams, Google Chat, Mattermost, ntfy, Bark,
+Feishu, DingTalk, WeCom, SMTP, Pushover, Gotify, Matrix, Nextcloud Talk, Signal,
+WhatsApp, LINE, Zalo Bot, Twilio, BlueBubbles, Synology Chat, Twitch, IRC and
+Apprise. A local install stores adapter credentials in
+`{configDir}/notification-config.json`, edited with TUI `/notifications`;
+containers may use the environment variables as a fallback. Target addresses
+stay in the owner-only settings file. No external agent gateway or sidecar is
+required.
+
+Unsupported services use the generic webhook or Apprise target.
+
+See [Multi-channel notifications](configuration.en.md#multi-channel-notifications)
+for the address fields and environment variables.
+
 ## 4. Network exposure and client connections
 
 Pick one TLS path; all three keep Core on loopback and never expose the token in
@@ -637,11 +655,13 @@ check.
   including SIGTERM exit `0` and a settings write surviving a Core restart).
 - OAuth directional tests pass locally, including PKCE, scope narrowing, JWT
   issuer/audience checks, restart persistence, and immediate invalidation after
-  refresh-token revocation. No real claude.ai or ChatGPT connector/device
-  acceptance run has been completed on this checkout.
+  refresh-token revocation. The owner confirmed real claude.ai and ChatGPT
+  connector acceptance on 2026-11-23; this checkout does not store the external
+  evidence.
 - The container builds and runs. The optimized image (490 MB on disk, 104 MB
   compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
   `scripts/smoke.mjs` (8/8) inside the running container.
+- On 2026-11-23 the operator confirmed that Core has run on a real server.
 - The handwritten Seatbelt, bubblewrap, disposable-Docker and Gondolin checks
   are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime`.
   The container still does not nest that sandbox.

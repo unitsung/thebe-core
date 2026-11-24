@@ -7,6 +7,7 @@ import {
   SERVICE_API_OPERATION_SEPARATOR,
   SERVICE_API_TOOL_NAMES,
   SERVICE_API_WRITE_TOOL_NAME,
+  serviceCallContext,
   serviceOperationExposable,
   serviceOperationRequest,
   serviceOperationToolName,
@@ -383,21 +384,15 @@ export function createControlApi(
           }
         : {};
     }
-    if (name === SERVICE_API_WRITE_TOOL_NAME) {
-      return typeof params.method === "string"
-        ? { httpMethod: params.method }
-        : {};
-    }
-    if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
-      try {
-        const { operation } = await findServiceOperation(name);
-        return {
-          httpMethod: operation.method,
-          operatorMark: operation.irreversible,
-        };
-      } catch {
-        return {};
-      }
+    if (
+      name === SERVICE_API_WRITE_TOOL_NAME ||
+      name.startsWith(SERVICE_API_OPERATION_PREFIX)
+    ) {
+      return serviceCallContext(
+        options.serviceAPIProviders ?? [],
+        name,
+        params
+      );
     }
     if (name.startsWith("mcp:")) {
       const tool = (await mcp.listTools()).find((item) => item.name === name);

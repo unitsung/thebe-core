@@ -43,17 +43,19 @@ async function start(turns: Turn[], body: Record<string, unknown> = {}) {
       body: (await res.json()) as Record<string, any>,
     };
   };
-  const created = await call("/v1/goals", {
+  const created = await call("/v1/tickets", {
     method: "POST",
     body: JSON.stringify({
-      goal: "Move the library",
+      task: "Move the library",
+      idempotencyKey: "ticket-attention",
       maxIterations: 3,
       ...body,
     }),
   });
-  const id = created.body.id as string;
-  await app.agent.waitGoal(id);
-  return { app, call, id, fake };
+  const ticketId = created.body.ticket.id as string;
+  const goalId = created.body.goal.id as string;
+  await app.agent.waitGoal(goalId);
+  return { app, call, ticketId, goalId, fake };
 }
 
 const post = (body: unknown) => ({
@@ -61,9 +63,9 @@ const post = (body: unknown) => ({
   body: JSON.stringify(body),
 });
 
-describe("a goal waiting on the person", () => {
+describe("a Ticket waiting on the person", () => {
   it("shows its question, hides plain resume, and is in the needs-you list", async () => {
-    const { call, id } = await start(
+    const { call, ticketId, goalId } = await start(
       [
         report({
           state: "ask",
@@ -73,27 +75,31 @@ describe("a goal waiting on the person", () => {
       ],
       { allowAsk: true }
     );
-    const goal = await call(`/v1/goals/${id}`);
-    expect(goal.body).toMatchObject({
-      status: "paused",
-      controls: { resume: false },
-      attention: {
-        kind: "answer",
-        question: "Which library?",
-        options: ["Movies", "Shows"],
+    const task = await call(`/v1/tickets/${ticketId}/execution`);
+    expect(task.body).toMatchObject({
+      stage: "attention",
+      execution: { status: "paused", controls: { resume: false } },
+      receipt: {
+        attention: {
+          kind: "answer",
+          question: "Which library?",
+          options: ["Movies", "Shows"],
+        },
       },
     });
     const person = await call("/v1/activity?stage=person");
     expect(
       person.body.items.map((item: any) => [item.id, item.stage, item.reason])
-    ).toContainEqual([id, "person", "answer"]);
-    const resume = await call(`/v1/goals/${id}/resume`, { method: "POST" });
+    ).toContainEqual([goalId, "person", "answer"]);
+    const resume = await call(`/v1/tickets/${ticketId}/resume`, {
+      method: "POST",
+    });
     expect(resume.status).toBe(409);
     expect(resume.body.code).toBe("attention_open");
   });
 
   it("takes the answer once, uses it in the next checkpoint, and refuses a stale or empty one", async () => {
-    const { app, call, id } = await start(
+    const { app, call, ticketId, goalId } = await start(
       [
         report({ state: "ask", question: "Which library?" }),
         text("Asked."), // the worker's turn closes after its tool call
@@ -102,37 +108,39 @@ describe("a goal waiting on the person", () => {
       ],
       { allowAsk: true }
     );
-    const attentionId = (await call(`/v1/goals/${id}`)).body.attention
-      .id as string;
+    const attentionId = (await call(`/v1/tickets/${ticketId}/execution`)).body
+      .receipt.attention.id as string;
 
-    expect((await call(`/v1/goals/${id}/answer`, post({}))).status).toBe(400);
+    expect((await call(`/v1/tickets/${ticketId}/reply`, post({}))).status).toBe(
+      400
+    );
     expect(
       (
         await call(
-          `/v1/goals/${id}/answer`,
+          `/v1/tickets/${ticketId}/reply`,
           post({ attentionId, answer: "  " })
         )
       ).status
     ).toBe(400);
     const stale = await call(
-      `/v1/goals/${id}/answer`,
+      `/v1/tickets/${ticketId}/reply`,
       post({ attentionId: "old", answer: "Movies" })
     );
     expect(stale.status).toBe(409);
     expect(stale.body.code).toBe("attention_stale");
 
     const answered = await call(
-      `/v1/goals/${id}/answer`,
+      `/v1/tickets/${ticketId}/reply`,
       post({ attentionId, answer: "Movies" })
     );
     expect(answered.status).toBe(200);
-    expect(answered.body.attention).toBeUndefined();
-    const done = await app.agent.waitGoal(id);
+    expect(answered.body.receipt.attention).toBeUndefined();
+    const done = await app.agent.waitGoal(goalId);
     expect(done.status).toBe("completed");
     expect(done.guidance?.[0]).toContain("Movies");
 
     const again = await call(
-      `/v1/goals/${id}/answer`,
+      `/v1/tickets/${ticketId}/reply`,
       post({ attentionId, answer: "Shows" })
     );
     expect(again.status).toBe(409);
@@ -140,7 +148,7 @@ describe("a goal waiting on the person", () => {
   });
 
   it("gives an answer to the last checkpoint one more checkpoint to be used", async () => {
-    const { app, call, id } = await start(
+    const { app, call, ticketId, goalId } = await start(
       [
         report({ state: "ask", question: "Which?" }),
         text("Asked."), // the worker's turn closes after its tool call
@@ -149,68 +157,77 @@ describe("a goal waiting on the person", () => {
       ],
       { allowAsk: true, maxIterations: 1 }
     );
-    const goal = await call(`/v1/goals/${id}`);
-    expect(goal.body.iteration).toBe(1);
-    expect(goal.body.maxIterations).toBe(1);
+    const task = (await call(`/v1/tickets/${ticketId}/execution`)).body;
+    expect(task.execution.iteration).toBe(1);
+    expect(task.execution.maxIterations).toBe(1);
     const answered = await call(
-      `/v1/goals/${id}/answer`,
-      post({ attentionId: goal.body.attention.id, answer: "Movies" })
+      `/v1/tickets/${ticketId}/reply`,
+      post({ attentionId: task.receipt.attention.id, answer: "Movies" })
     );
-    expect(answered.body.maxIterations).toBe(2);
-    expect((await app.agent.waitGoal(id)).status).toBe("completed");
+    expect(answered.body.execution.maxIterations).toBe(2);
+    expect((await app.agent.waitGoal(goalId)).status).toBe("completed");
   });
 });
 
-describe("a goal that asked to be reviewed before it finishes", () => {
+describe("a Ticket that asked to be reviewed before it finishes", () => {
   const finished = [text("All moved."), pass];
 
   it("waits for review after the independent check passes, and accepting finishes it", async () => {
-    const { call, id } = await start(finished, { reviewBeforeDone: true });
-    const goal = await call(`/v1/goals/${id}`);
-    expect(goal.body).toMatchObject({
-      status: "paused",
-      attention: { kind: "review" },
+    const { call, ticketId, goalId } = await start(finished, {
+      reviewBeforeDone: true,
+    });
+    const task = (await call(`/v1/tickets/${ticketId}/execution`)).body;
+    expect(task).toMatchObject({
+      stage: "attention",
+      execution: { status: "paused" },
+      receipt: { attention: { kind: "review" } },
     });
     const person = await call("/v1/activity?stage=person");
     expect(
       person.body.items.map((item: any) => [item.id, item.reason])
-    ).toContainEqual([id, "review"]);
+    ).toContainEqual([goalId, "review"]);
 
     const noDecision = await call(
-      `/v1/goals/${id}/answer`,
-      post({ attentionId: goal.body.attention.id })
+      `/v1/tickets/${ticketId}/reply`,
+      post({ attentionId: task.receipt.attention.id })
     );
     expect(noDecision.status).toBe(400);
     const accepted = await call(
-      `/v1/goals/${id}/answer`,
-      post({ attentionId: goal.body.attention.id, decision: "accept" })
+      `/v1/tickets/${ticketId}/reply`,
+      post({
+        attentionId: task.receipt.attention.id,
+        decision: "accept",
+      })
     );
-    expect(accepted.body).toMatchObject({ status: "succeeded" });
-    expect(accepted.body.attention).toBeUndefined();
+    expect(accepted.body).toMatchObject({
+      execution: { status: "succeeded" },
+    });
+    expect(accepted.body.receipt.attention).toBeUndefined();
   });
 
   it("sends a result back with the person's note when they reject it, and asks again after", async () => {
-    const { app, call, id } = await start(
+    const { app, call, ticketId, goalId } = await start(
       [...finished, text("Fixed the names."), pass],
       {
         reviewBeforeDone: true,
       }
     );
-    const first = (await call(`/v1/goals/${id}`)).body.attention.id as string;
+    const first = (await call(`/v1/tickets/${ticketId}/execution`)).body.receipt
+      .attention.id as string;
     const noNote = await call(
-      `/v1/goals/${id}/answer`,
+      `/v1/tickets/${ticketId}/reply`,
       post({ attentionId: first, decision: "reject" })
     );
     expect(noNote.status).toBe(400);
     await call(
-      `/v1/goals/${id}/answer`,
+      `/v1/tickets/${ticketId}/reply`,
       post({
         attentionId: first,
         decision: "reject",
         answer: "Rename the folders",
       })
     );
-    const done = await app.agent.waitGoal(id);
+    const done = await app.agent.waitGoal(goalId);
     expect(done.guidance?.[0]).toContain("Rename the folders");
     // Finished again, so it waits for review again, with a new request.
     expect(done).toMatchObject({

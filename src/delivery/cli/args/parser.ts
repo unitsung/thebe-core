@@ -110,6 +110,13 @@ export function parseCliArgs(argv: string[]): CliCommand {
       collectRepeated(argv, REPEATED_CLI_KEYS)
     );
   }
+  if (head === "storage") {
+    return parseStorageSubcommand(
+      positionals.slice(1),
+      flags,
+      collectRepeated(argv, REPEATED_CLI_KEYS)
+    );
+  }
   if (head === "tui") {
     if (model === "invalid") {
       return {
@@ -324,11 +331,16 @@ function takesValue(key: string): boolean {
     key === "command" ||
     key === "header" ||
     key === "env" ||
-    key === "arg"
+    key === "arg" ||
+    key === "type" ||
+    key === "token" ||
+    key === "username" ||
+    key === "password" ||
+    key === "roots"
   );
 }
 
-const REPEATED_CLI_KEYS = ["header", "env", "arg"] as const;
+const REPEATED_CLI_KEYS = ["header", "env", "arg", "roots"] as const;
 const REPEATED_FLAG = new Set<string>(REPEATED_CLI_KEYS);
 
 /** A second pass that keeps every value of a repeatable flag, which the flags Map cannot. */
@@ -425,6 +437,94 @@ function parseMcpSubcommand(
     }
     default:
       return { kind: "error", message: `unknown mcp action: ${action}` };
+  }
+}
+
+function parseStorageSubcommand(
+  rest: string[],
+  flags: Map<string, string | true>,
+  repeated: Map<string, string[]>
+): CliCommand {
+  const action = rest[0] ?? "list";
+  switch (action) {
+    case "list":
+      return { kind: "storage-list" };
+    case "import-env":
+      return { kind: "storage-import-env" };
+    case "test":
+      return { kind: "storage-test", id: rest[1] };
+    case "remove":
+    case "default": {
+      const id = rest[1];
+      if (!id)
+        return {
+          kind: "error",
+          message: `storage ${action} requires <id>`,
+        };
+      return action === "remove"
+        ? { kind: "storage-remove", id }
+        : { kind: "storage-default", id };
+    }
+    case "add": {
+      const typeFlag = flagString(flags, "type");
+      const first = rest[1];
+      const knownType =
+        first === "openlist" || first === "local" || first === "webdav";
+      const type = knownType
+        ? first
+        : typeFlag === "openlist" ||
+            typeFlag === "local" ||
+            typeFlag === "webdav"
+          ? typeFlag
+          : undefined;
+      const id = knownType ? rest[2] : first;
+      if (!type)
+        return {
+          kind: "error",
+          message:
+            "storage add requires <type> <id>; type is openlist, local, or webdav",
+        };
+      if (!id) return { kind: "error", message: "storage add requires <id>" };
+      const makeDefault = flags.has("default");
+      const url = flagString(flags, "url") ?? "";
+      if (type === "openlist") {
+        return {
+          kind: "storage-add",
+          makeDefault,
+          backend: {
+            id,
+            type,
+            baseUrl: url,
+            token: flagString(flags, "token"),
+          },
+        };
+      }
+      if (type === "webdav") {
+        return {
+          kind: "storage-add",
+          makeDefault,
+          backend: {
+            id,
+            type,
+            url,
+            username: flagString(flags, "username"),
+            password: flagString(flags, "password"),
+            token: flagString(flags, "token"),
+          },
+        };
+      }
+      const roots = (repeated.get("roots") ?? [])
+        .flatMap((value) => value.split(","))
+        .map((value) => value.trim())
+        .filter(Boolean);
+      return {
+        kind: "storage-add",
+        makeDefault,
+        backend: { id, type, roots },
+      };
+    }
+    default:
+      return { kind: "error", message: `unknown storage action: ${action}` };
   }
 }
 

@@ -133,6 +133,10 @@ export type CreateThebeAgentOptions = {
   sourceAdapters?: readonly Source[];
   /** Host supplied, vendor-neutral reply channels for Ticket notices. */
   channelAdapters?: readonly ChannelAdapter[];
+  onSourceFollowUpNotice?: (
+    notice: import("./channels/types.ts").SourceFollowUpNotice,
+    channel: import("./sources/types.ts").ChannelRef
+  ) => Promise<void>;
   /**
    * How many times an hour Eval may ask the model before the rest are recorded as `unavailable`
    * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.
@@ -145,6 +149,10 @@ export type CreateThebeAgentOptions = {
   /** Called once when a Goal enters `person`: a question, review, blocker, or Watchdog escalation. */
   onGoalNeedsPerson?: (
     notice: import("./goals/service.ts").GoalNeedsPersonNotice
+  ) => Promise<void> | void;
+  /** Called once when a Goal reaches a terminal state with a person-facing completion notice. */
+  onGoalCompleted?: (
+    notice: import("./goals/service.ts").GoalCompletedNotice
   ) => Promise<void> | void;
   /** Called once when assessment fails and again only after a successful assessment. */
   onEvalUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
@@ -298,6 +306,22 @@ export interface ThebeAgent {
   recentEvents(
     limit?: number
   ): Array<NormalizedEvent & { thebeSessionId: string }>;
+  /** App-control calls waiting for the paired Thebe App. */
+  listClientToolRequests(
+    thebeSessionId: string
+  ): Promise<import("./app-control/client-tools.ts").ClientToolRequest[]>;
+  getClientToolRequest(
+    thebeSessionId: string,
+    requestId: string
+  ): Promise<
+    import("./app-control/client-tools.ts").ClientToolRequest | undefined
+  >;
+  /** The App's result for one pending App-control call; false when it is no longer pending. */
+  resolveClientToolRequest(
+    thebeSessionId: string,
+    requestId: string,
+    result: import("./app-control/client-tools.ts").ClientToolResult
+  ): Promise<boolean>;
 
   createSession(init?: CreateSessionInput): Promise<AgentSessionMeta>;
   listSessions(query?: {
@@ -381,6 +405,7 @@ export interface ThebeAgent {
     profileName: string;
     taskPrompt: string;
     parentSessionId: string;
+    background?: boolean;
   }): Promise<SubagentRun>;
   listSubagents(parentSessionId?: string): Promise<SubagentRun[]>;
   restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void;
@@ -544,6 +569,11 @@ export interface ThebeAgent {
   /** Tickets: the authorised units of work. The Goal behind one keeps its status, report and attention. */
   listTickets(): Promise<Ticket[]>;
   getTicket(id: string): Promise<Ticket | undefined>;
+  getTicketTask(id: string): Promise<TicketTaskView | undefined>;
+  listTicketTasks(): Promise<TicketTaskView[]>;
+  getTicketLog(
+    id: string
+  ): Promise<import("./tickets/log.ts").TicketExecutionLog | undefined>;
   getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
   /** Delegate one direct Ticket and Goal from the person-facing HTTP API. Idempotent by key. */
   delegateTicket(

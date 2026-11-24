@@ -114,6 +114,7 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       name: "notes",
       url: "http://127.0.0.1:2/mcp",
       headers: { Authorization: "Bearer fixture-secret" },
+      readTools: ["notes.read", "notes.list"],
     });
     expect(response.status).toBe(201);
     const result = await json(response);
@@ -127,7 +128,10 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
       JSON.parse(await readFile(join(dir, ".thebe", "mcp.json"), "utf8"))
     ).toMatchObject({
       note: "preserved",
-      mcpServers: { existing: { disabled: true }, notes: { disabled: true } },
+      mcpServers: {
+        existing: { disabled: true },
+        notes: { disabled: true, readTools: ["notes.read", "notes.list"] },
+      },
     });
     expect((await post({ name: "notes", command: "unused" })).status).toBe(400);
     expect((await post({ name: "../escape", command: "unused" })).status).toBe(
@@ -139,6 +143,14 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     expect(
       (await post({ name: "invalid", command: "unused", args: [42] })).status
     ).toBe(400);
+    expect(
+      (await post({ name: "invalid", command: "unused", readTools: [42] }))
+        .status
+    ).toBe(400);
+    expect(
+      (await post({ name: "invalid", command: "unused", readTools: [""] }))
+        .status
+    ).toBe(400);
     const recreated = createThebeApp({
       runtime: createFakeRuntime().runtime,
       provider: provider(),
@@ -146,7 +158,11 @@ describe("skills / MCP / resources / permission-mode product HTTP", () => {
     });
     expect(await recreated.agent.listMcpServers()).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ name: "notes", disabled: true }),
+        expect.objectContaining({
+          name: "notes",
+          disabled: true,
+          readTools: ["notes.read", "notes.list"],
+        }),
       ])
     );
     app.agent.closeMcp();

@@ -53,7 +53,13 @@ before(async () => {
     now: () => clock,
   });
   apnsClient = apns;
-  relay = createRelay({ dataDir: dir, apns, now: () => clock });
+  // The suite registers many devices under one fake clock: keep its own limit out of the way.
+  relay = createRelay({
+    dataDir: dir,
+    apns,
+    now: () => clock,
+    registrationsPerMinute: 1000,
+  });
   await new Promise((resolve) => relay.server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${relay.server.address().port}`;
 });
@@ -323,4 +329,51 @@ test("a delivered event id is remembered for a day, not for ever", async () => {
   const next = signedEvent(id, { id: "day-old" });
   assert.equal((await post("/v1/events", next)).status, 200);
   assert.equal(received.length, 2);
+});
+
+test("registration is rate limited per client and capped in total", async () => {
+  const limitedDir = mkdtempSync(join(tmpdir(), "thebe-relay-limits-"));
+  const limited = createRelay({
+    dataDir: limitedDir,
+    apns: apnsClient,
+    now: () => clock,
+    registrationsPerMinute: 2,
+    maxRegistrations: 3,
+  });
+  await new Promise((resolve) =>
+    limited.server.listen(0, "127.0.0.1", resolve)
+  );
+  const limitedBase = `http://127.0.0.1:${limited.server.address().port}`;
+  const registerToken = (n) =>
+    fetch(`${limitedBase}/v1/registrations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        apnsToken: n.toString(16).padStart(64, "0"),
+        corePublicKey,
+        environment: "development",
+      }),
+    });
+  const tokenA = 1;
+  const tokenB = 2;
+  const tokenC = 3;
+  const tokenD = 4;
+  try {
+    assert.equal((await registerToken(tokenA)).status, 200);
+    assert.equal((await registerToken(tokenA)).status, 200);
+    // Third registration from one client in a minute is refused before any work is done.
+    assert.equal((await registerToken(tokenB)).status, 429);
+
+    clock += 61_000;
+    assert.equal((await registerToken(tokenB)).status, 200);
+    assert.equal((await registerToken(tokenC)).status, 200);
+    // The registry is full: another device would grow it without bound.
+    assert.equal((await registerToken(tokenD)).status, 429);
+
+    // An existing device may still refresh itself at the cap.
+    clock += 61_000;
+    assert.equal((await registerToken(tokenA)).status, 200);
+  } finally {
+    limited.server.close();
+  }
 });

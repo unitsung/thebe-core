@@ -158,6 +158,24 @@ export function createGoalWatchdog(options: {
     if (tracker.retry) {
       if (at.getTime() < tracker.retry.dueAt) return [];
       const activityAt = active ? latestActivity(active) : undefined;
+      // The retry produced a different, demonstrably active worker: give the replacement its own
+      // inactivity window instead of pausing it before it can make progress.
+      if (
+        active &&
+        active.runId !== tracker.retry.originalRunId &&
+        activityAt !== undefined &&
+        activityAt >= tracker.retry.actionAt
+      ) {
+        tracker.retry = {
+          originalRunId: active.runId,
+          actionAt: activityAt,
+          dueAt: activityAt + thresholds.workerSecondMs,
+          reason: reviewerRole(active)
+            ? "reviewer_inactivity"
+            : "worker_inactivity",
+        };
+        return [];
+      }
       return [
         {
           type: "pause",

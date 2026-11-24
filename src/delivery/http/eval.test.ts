@@ -152,6 +152,7 @@ describe("decisions over HTTP", () => {
       "main-session",
       "policy",
       "decisions",
+      "notifications",
     ]);
     expect((await call("/openapi.json")).body.paths).toMatchObject({
       "/v1/decisions/{id}/accept": { post: expect.any(Object) },
@@ -418,6 +419,10 @@ describe("a container going down, end to end", () => {
       stage: "running",
       ticket: {
         id: ticketId,
+        assignments: [
+          { state: "ended", report: { state: "ready" } },
+          { state: "running" },
+        ],
         subscriptions: expect.arrayContaining(["resource:container:emby"]),
         inputs: [
           {

@@ -41,6 +41,18 @@ export function createPipelineAdvancer(input: {
     try {
       for (const job of input.book.status()) {
         if (!tracked.has(job.id)) continue;
+        if (job.placement?.stoppedAt && job.placement.state !== "dispatching") {
+          tracked.delete(job.id);
+          continue;
+        }
+        if (job.placement?.state === "pending") continue;
+        if (
+          job.placement?.state === "denied" ||
+          job.placement?.state === "uncertain"
+        ) {
+          tracked.delete(job.id);
+          continue;
+        }
         if (job.stage === "done" || job.stage === "failed") {
           tracked.delete(job.id);
           continue;

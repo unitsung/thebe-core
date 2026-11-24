@@ -1,3 +1,6 @@
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { ProviderError } from "../../agent/capabilities/containers.ts";
 import type {
   FileEntry,
@@ -8,7 +11,7 @@ type Json = Record<string, unknown>;
 
 /** OpenList (AList) file manager as a FilesProvider. */
 export class OpenListFilesProvider implements FilesProvider {
-  readonly service = "openlist";
+  readonly service: string;
   private readonly base: string;
   private readonly token: string;
   private readonly fetchImpl: typeof fetch;
@@ -17,23 +20,33 @@ export class OpenListFilesProvider implements FilesProvider {
     baseUrl: string;
     token: string;
     fetch?: typeof fetch;
+    service?: string;
   }) {
     this.base = options.baseUrl.trim().replace(/\/+$/, "");
     this.token = options.token.trim();
     this.fetchImpl = options.fetch ?? fetch;
+    this.service = options.service ?? "openlist";
   }
 
-  private async call(path: string, body: Json): Promise<unknown> {
-    const response = await this.fetchImpl(`${this.base}${path}`, {
-      method: "POST",
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-      headers: {
-        Authorization: this.token,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
+  private async send(
+    path: string,
+    init: RequestInit,
+    timeoutMs = 30_000
+  ): Promise<Json> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.base}${path}`, {
+        redirect: "error",
+        signal: AbortSignal.timeout(timeoutMs),
+        ...init,
+        headers: {
+          Authorization: this.token,
+          ...(init.headers as Record<string, string> | undefined),
+        },
+      });
+    } catch (cause) {
+      throw new ProviderError("UNREACHABLE", "OpenList is unreachable", cause);
+    }
     if (response.status === 401 || response.status === 403)
       throw new ProviderError("UNAUTHORIZED", "OpenList rejected the token");
     if (!response.ok)
@@ -50,16 +63,31 @@ export class OpenListFilesProvider implements FilesProvider {
         `OpenList: ${typeof payload.message === "string" ? payload.message.slice(0, 200) : `code ${String(payload.code)}`}`
       );
     }
-    return payload.data;
+    return payload;
   }
 
-  async list(input: { path: string; page?: number; perPage?: number }) {
+  private async call(path: string, body: Json): Promise<unknown> {
+    return (
+      await this.send(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    ).data;
+  }
+
+  async list(input: {
+    path: string;
+    page?: number;
+    perPage?: number;
+    refresh?: boolean;
+  }) {
     const path = cleanPath(input.path);
     const data = (await this.call("/api/fs/list", {
       path,
       page: input.page ?? 1,
       per_page: Math.min(input.perPage ?? 100, 200),
-      refresh: false,
+      refresh: input.refresh ?? false,
     })) as Json | null;
     const content = Array.isArray(data?.content)
       ? (data!.content as unknown[])
@@ -68,11 +96,23 @@ export class OpenListFilesProvider implements FilesProvider {
       if (!raw || typeof raw !== "object") return [];
       const row = raw as Json;
       if (typeof row.name !== "string") return [];
+      const hashes = row.hash_info;
+      const digest =
+        hashes && typeof hashes === "object" && !Array.isArray(hashes)
+          ? Object.entries(hashes).find(([algorithm]) =>
+              /^sha-?256$/i.test(algorithm)
+            )?.[1]
+          : undefined;
       return [
         {
           name: row.name,
           path: `${path === "/" ? "" : path}/${row.name}`,
           isDirectory: row.is_dir === true,
+          ...(row.is_dir !== true &&
+          typeof digest === "string" &&
+          /^[a-f0-9]{64}$/i.test(digest)
+            ? { sha256: digest.toLowerCase() }
+            : {}),
           sizeBytes: typeof row.size === "number" ? row.size : undefined,
           modifiedAt:
             typeof row.modified === "string" ? row.modified : undefined,
@@ -93,16 +133,12 @@ export class OpenListFilesProvider implements FilesProvider {
     kind: "copy" | "move",
     input: { sourceDir: string; destinationDir: string; names: string[] }
   ) {
-    if (input.names.length === 0)
-      throw new ProviderError("UNKNOWN", "names is required");
-    for (const name of input.names)
-      if (name.includes("/") || name === ".." || name === ".")
-        throw new ProviderError("UNKNOWN", `Invalid name: ${name}`);
-    await this.refuseExisting(input.destinationDir, input.names);
+    const names = cleanNames(input.names);
+    await this.refuseExisting(input.destinationDir, names);
     const data = (await this.call(`/api/fs/${kind}`, {
       src_dir: cleanPath(input.sourceDir),
       dst_dir: cleanPath(input.destinationDir),
-      names: input.names,
+      names,
     })) as Json | null;
     return { taskIds: taskIds(data) };
   }
@@ -145,6 +181,80 @@ export class OpenListFilesProvider implements FilesProvider {
     return this.transfer("move", input);
   }
 
+  async rename(input: {
+    dir: string;
+    name: string;
+    newName: string;
+  }): Promise<void> {
+    const name = cleanName(input.name);
+    await this.call("/api/fs/rename", {
+      path: joinPath(input.dir, name),
+      name: cleanName(input.newName),
+      overwrite: false,
+    });
+  }
+
+  async remove(input: {
+    dir: string;
+    names: string[];
+    recursive?: boolean;
+  }): Promise<void> {
+    const names = cleanNames(input.names);
+    if (input.recursive !== true) {
+      for (const name of names) {
+        const entry = (await this.call("/api/fs/get", {
+          path: joinPath(input.dir, name),
+        })) as Json | null;
+        if (entry?.is_dir !== true) continue;
+        const listing = (await this.call("/api/fs/list", {
+          path: joinPath(input.dir, name),
+          page: 1,
+          per_page: 1,
+          refresh: false,
+        })) as Json | null;
+        if (typeof listing?.total === "number" && listing.total > 0)
+          throw new ProviderError(
+            "UNKNOWN",
+            `${name} is not empty; pass recursive: true to remove it`
+          );
+      }
+    }
+    await this.call("/api/fs/remove", {
+      dir: cleanPath(input.dir),
+      names,
+    });
+  }
+
+  async upload(input: {
+    dir: string;
+    name: string;
+    sourcePath: string;
+  }): Promise<void> {
+    const info = await stat(input.sourcePath);
+    if (!info.isFile())
+      throw new ProviderError(
+        "UNKNOWN",
+        "Upload source must be a regular file"
+      );
+    const target = joinPath(input.dir, cleanName(input.name));
+    await this.send(
+      "/api/fs/put",
+      {
+        method: "PUT",
+        headers: {
+          "Content-Length": String(info.size),
+          "File-Path": encodePath(target),
+          Overwrite: "false",
+        },
+        body: Readable.toWeb(
+          createReadStream(input.sourcePath)
+        ) as unknown as NonNullable<RequestInit["body"]>,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" },
+      10 * 60_000
+    );
+  }
+
   async offlineDownload(input: {
     urls: string[];
     destinationDir: string;
@@ -170,6 +280,28 @@ function cleanPath(value: string): string {
   if (path.split("/").includes(".."))
     throw new ProviderError("UNKNOWN", "Path must not contain ..");
   return path;
+}
+
+function cleanName(value: string): string {
+  const name = value.trim();
+  if (!name || name === "." || name === ".." || /[/\\]/.test(name))
+    throw new ProviderError("UNKNOWN", `Invalid name: ${value}`);
+  return name;
+}
+
+function cleanNames(values: string[]): string[] {
+  if (values.length === 0)
+    throw new ProviderError("UNKNOWN", "names is required");
+  return values.map(cleanName);
+}
+
+function joinPath(dir: string, name: string): string {
+  const parent = cleanPath(dir);
+  return parent === "/" ? `/${name}` : `${parent}/${name}`;
+}
+
+function encodePath(path: string): string {
+  return cleanPath(path).split("/").map(encodeURIComponent).join("/");
 }
 
 function taskIds(data: Json | null): string[] {

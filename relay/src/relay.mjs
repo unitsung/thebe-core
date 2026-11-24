@@ -31,12 +31,21 @@ export function eventMessage(event) {
  * the relay then forwards only events that Core signed, to only that device. It never sees a
  * conversation, a filename or a credential, because Core sends none.
  */
-export function createRelay({ dataDir, apns, now = () => Date.now() }) {
+export function createRelay({
+  dataDir,
+  apns,
+  now = () => Date.now(),
+  /** Registrations one client may attempt in a minute. */
+  registrationsPerMinute = 10,
+  /** How many devices the relay holds; a full registry refuses new ones. */
+  maxRegistrations = 1000,
+}) {
   const file = join(dataDir, "registrations.json");
   const seenFile = join(dataDir, "seen.json");
   let registrations = load();
   const seen = loadSeen();
   const recent = new Map();
+  const recentRegistrations = new Map();
 
   function load() {
     try {
@@ -110,10 +119,25 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     return true;
   }
 
+  /** An unauthenticated registration is cheap to send, so refuse it before any work or write. */
+  function underRegistrationRateLimit(client) {
+    const cutoff = now() - 60_000;
+    const stamps = (recentRegistrations.get(client) ?? []).filter(
+      (stamp) => stamp > cutoff
+    );
+    if (stamps.length >= registrationsPerMinute) return false;
+    stamps.push(now());
+    recentRegistrations.set(client, stamps);
+    return true;
+  }
+
   const isText = (value, max) =>
     typeof value === "string" && value.length > 0 && value.length <= max;
 
-  async function register(body) {
+  async function register(body, client) {
+    if (!underRegistrationRateLimit(client)) {
+      return [429, { error: "too many registrations, try again later" }];
+    }
     const { apnsToken, corePublicKey, environment } = body;
     if (!isText(apnsToken, 200) || !/^[0-9a-fA-F]+$/.test(apnsToken))
       return [400, { error: "apnsToken must be hex" }];
@@ -130,6 +154,9 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
       return [400, { error: "environment must be development or production" }];
     }
     const id = idFor(apnsToken, corePublicKey);
+    if (!registrations.has(id) && registrations.size >= maxRegistrations) {
+      return [429, { error: "registration limit reached" }];
+    }
     registrations.set(id, {
       apnsToken,
       corePublicKey,
@@ -230,7 +257,8 @@ export function createRelay({ dataDir, apns, now = () => Date.now() }) {
     if (request.method === "GET" && url.pathname === "/healthz")
       return [200, { ok: true }];
     if (request.method === "POST" && url.pathname === "/v1/registrations")
-      return register(body);
+      // The socket address is the client. A forwarding header is caller-controlled and not trusted.
+      return register(body, request.socket.remoteAddress ?? "unknown");
     if (request.method === "POST" && url.pathname === "/v1/events")
       return deliver(body);
     const match = /^\/v1\/registrations\/([\w-]+)$/.exec(url.pathname);

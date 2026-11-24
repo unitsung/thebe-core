@@ -4,9 +4,14 @@ import { join } from "node:path";
 import { createActionApi } from "./action/service.ts";
 import { createTicketStore } from "./tickets/store.ts";
 import { createTicketControlApi } from "./tickets/control.ts";
+import { createTicketExecutionLog } from "./tickets/log.ts";
+import { isTerminalGoalStatus } from "./goals/product.ts";
 import { recoverInterruptedTicketGoals } from "./tickets/recovery.ts";
 import type { Ticket } from "./tickets/types.ts";
-import { createTicketChannelNotifier } from "./channels/delivery.ts";
+import {
+  createTicketChannelNotifier,
+  sameChannelRef,
+} from "./channels/delivery.ts";
 import { createContainerHealthSource } from "./sources/container-health.ts";
 import {
   createDownloadCompletedSource,
@@ -25,7 +30,12 @@ import { createEvalRoutingApi } from "./eval/routing.ts";
 import { executorTask } from "./eval/executor-task.ts";
 import { prepareForEval } from "./eval/preparation.ts";
 import { ticketIdFor } from "./tickets/ids.ts";
-import { inferScope, revalidateMandate } from "./tickets/mandate.ts";
+import {
+  inferScope,
+  mandateAllows,
+  revalidateMandate,
+} from "./tickets/mandate.ts";
+import { httpError } from "./types.ts";
 import { createActivityStore } from "./activity/store.ts";
 import { createDiagnosisApi } from "./diagnosis/service.ts";
 import { createGoalApi } from "./goals/service.ts";
@@ -86,6 +96,15 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     now: ctx.now,
   });
   channelNotifier.start();
+  const ticketChannels = async (
+    ticketId: string | undefined,
+    goalId: string
+  ) => {
+    const ticket = ticketId
+      ? await ticketStore.get(ticketId).catch(() => undefined)
+      : await ticketStore.getByGoal(goalId).catch(() => undefined);
+    return ticket?.channels ?? [];
+  };
   const enabledSources = [
     ...(options.sources?.containerHealth ? ["container-health"] : []),
     ...(options.sources?.downloadCompleted ? ["download-completed"] : []),
@@ -103,7 +122,11 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       .map((service) => service.id);
     if (kind === "download" && options.pipeline) {
       services.push("download");
-      if (options.pipeline.files) services.push("files");
+      if (
+        options.pipeline.files ||
+        (options.pipeline.storage?.snapshot().providers.length ?? 0) > 0
+      )
+        services.push("files");
       if (options.pipeline.libraries?.length) services.push("library");
       if (canRunPipelineJobs(options.pipeline)) services.push("pipeline");
     }
@@ -127,35 +150,74 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       enabledSources,
     });
   }
-  const { watchdog: goalWatchdog, ...goals } = createGoalApi(
-    ctx,
-    subagents,
-    artifactStore,
-    reportInbox,
-    {
-      watchdog: options.watchdog,
-      getTicketIdForGoal: async (goalId) =>
-        (await ticketStore.getByGoal(goalId))?.id,
-      getTicketForGoal: (goalId) => ticketStore.getByGoal(goalId),
-      revalidateMandate: revalidateTicketGoal,
-      ticketInputs: async (goalId) =>
-        (await ticketStore.getByGoal(goalId))?.inputs ?? [],
-      onNeedsPerson: async (notice) => {
-        // The outbox entry is written before the Goal reports its terminal state, so a shutdown
-        // cannot lose it; sending stays in the background.
-        try {
-          await channelNotifier.enqueueNeedsPerson(notice);
-          void channelNotifier.flush().catch(() => {});
-        } finally {
-          await options.onGoalNeedsPerson?.(notice);
-        }
-      },
-      onCompleted: async (notice) => {
+  const goalsApi = createGoalApi(ctx, subagents, artifactStore, reportInbox, {
+    watchdog: options.watchdog,
+    getTicketIdForGoal: async (goalId) =>
+      (await ticketStore.getByGoal(goalId))?.id,
+    getTicketForGoal: (goalId) => ticketStore.getByGoal(goalId),
+    revalidateMandate: revalidateTicketGoal,
+    ticketInputs: async (goalId) =>
+      (await ticketStore.getByGoal(goalId))?.inputs ?? [],
+    onSourceFollowUp: async (goalId, input, type, message) => {
+      const ticket = await ticketStore.getByGoal(goalId);
+      if (
+        !ticket?.channels?.some((channel) =>
+          sameChannelRef(channel, input.channel)
+        )
+      )
+        return;
+      const notice = {
+        id: `${ticket.id}:${type}:${input.seq}`,
+        ticketId: ticket.id,
+        goalId,
+        type,
+        message,
+      };
+      if (options.onSourceFollowUpNotice) {
+        await options.onSourceFollowUpNotice(notice, input.channel);
+      } else {
+        await channelNotifier.enqueueFollowUp(notice, input.channel);
+        void channelNotifier.flush().catch(() => {});
+      }
+    },
+    onNeedsPerson: async (notice) => {
+      if (options.onGoalNeedsPerson) {
+        // The app-level notification layer owns both the owner targets and the Ticket's channels.
+        await options.onGoalNeedsPerson({
+          ...notice,
+          channels: await ticketChannels(notice.ticketId, notice.goalId),
+        });
+        return;
+      }
+      // A host that only installed channel adapters keeps the older writeback path.
+      try {
+        await channelNotifier.enqueueNeedsPerson(notice);
+        void channelNotifier.flush().catch(() => {});
+      } catch {
+        // Delivery is supplementary and never changes Goal state.
+      }
+    },
+    onCompleted: async (notice) => {
+      if (options.onGoalCompleted) {
+        await options.onGoalCompleted({
+          ...notice,
+          channels: await ticketChannels(notice.ticketId, notice.goalId),
+        });
+        return;
+      }
+      try {
         await channelNotifier.enqueueCompleted(notice);
         void channelNotifier.flush().catch(() => {});
-      },
-    }
-  );
+      } catch {
+        // Delivery is supplementary and never changes Goal state.
+      }
+    },
+  });
+  const {
+    watchdog: goalWatchdog,
+    flushPersistence: flushGoalPersistence,
+    ...goals
+  } = goalsApi;
   const restoreSessionState = async (thebeSessionId: string): Promise<void> => {
     const meta = await ctx.lookup(thebeSessionId);
     subagents.restoreSubagents(thebeSessionId, meta.subagentRuns ?? []);
@@ -222,6 +284,16 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     async (thebeSessionId) =>
       (await ticketStore.getByGoal(thebeSessionId))?.mandate
   );
+  ctx.setPipelinePlacementLookup(async (sessionId) => {
+    const ticket = await ticketStore.getByGoal(sessionId);
+    if (!ticket) return undefined;
+    const skill = await extensions.getSkill("media-acquire");
+    if (!skill?.contentHash) return undefined;
+    return {
+      ticketId: ticket.id,
+      skill: { name: skill.name, digest: skill.contentHash },
+    };
+  });
   const evalService = createEvalService({
     policy: policyStore,
     decisions: decisionStore,
@@ -526,6 +598,12 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   let ticketReady: Promise<unknown> = Promise.resolve();
   const ticketControl = createTicketControlApi({
     store: ticketStore,
+    placements: (id) =>
+      ctx.pipelineBook
+        ?.status()
+        .flatMap((job) =>
+          job.ticketId === id && job.placement ? [job.placement] : []
+        ) ?? [],
     triggers: triggerStore,
     goals,
     sessions,
@@ -534,16 +612,60 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   });
   // A Ticket whose executor was mid-checkpoint when the previous process ended continues without
   // waiting for the person; a paused, stopped, or attention-waiting Ticket is deliberately left alone.
-  const ticketRecovery = recoverInterruptedTicketGoals({
-    tickets: ticketStore,
-    lookup: (goalId) => ctx.lookup(goalId),
-    restore: (goal, events) => goals.restoreGoal(goal, events),
-    revalidate: revalidateTicketGoal,
-    resume: (goalId) => goals.resumeGoal(goalId),
-    onError: () => {
-      // The Ticket stays paused and its view carries the error; startup must not fail.
-    },
-  }).catch(() => []);
+  const placementRecovery =
+    ctx.pipelineBook?.recoverPlacements() ?? Promise.resolve();
+  const ticketRecovery = placementRecovery
+    .catch(() => {
+      // A placement whose outcome cannot be persisted still cannot dispatch twice.
+    })
+    .then(() =>
+      recoverInterruptedTicketGoals({
+        tickets: ticketStore,
+        lookup: (goalId) => ctx.lookup(goalId),
+        restore: (goal, events) => goals.restoreGoal(goal, events),
+        revalidate: async (goalId) => {
+          const ticket = await ticketStore.getByGoal(goalId);
+          const waitingForPlacement = ctx.pipelineBook
+            ?.status()
+            .some(
+              (job) =>
+                job.ticketId === ticket?.id &&
+                job.placement &&
+                (job.placement.stoppedAt ||
+                  ["pending", "dispatching", "uncertain", "denied"].includes(
+                    job.placement.state
+                  ))
+            );
+          if (waitingForPlacement)
+            return {
+              allowed: false,
+              reason: "Placement is awaiting an operator",
+            };
+          return revalidateTicketGoal(goalId);
+        },
+        resume: async (goalId, goal, ticketId) => {
+          const assignment = await ticketStore.recoverAssignment(ticketId, {
+            executorId: goalId,
+            executorCreatedAt: goal.createdAt,
+            acceptedAssignmentId: goal.recoveryAssignmentId,
+            at: ctx.now().toISOString(),
+          });
+          if (!assignment)
+            throw new Error("Ticket disappeared during recovery");
+          const resumed = await goals.resumeGoal(goalId, assignment.id);
+          if (resumed.recoveryAssignmentId === assignment.id) {
+            await ticketStore.updateAssignment(ticketId, assignment.id, {
+              state: "running",
+              startedAt: assignment.createdAt,
+            });
+          }
+        },
+        onError: () => {
+          // The Ticket stays paused and its view carries the error; startup must not fail.
+        },
+      })
+    )
+    .catch(() => []);
   ticketReady = ticketRecovery;
   const candidates = createCandidateApi({
     decisions: decisionStore,
@@ -554,7 +676,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     policy: policyStore,
     goals: {
       startGoal: goals.startGoal,
-      reopenGoal: goals.reopenGoalForInput,
+      reopenGoal: (id) =>
+        ticketControl.reopenForInput(id, goals.reopenGoalForInput),
     },
     sessions,
     servicesForResource,
@@ -639,6 +762,22 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     getMainSession: mainSession.getMainSession,
     askMainSession: mainSession.askMainSession,
     onProactiveMessage: options.onProactiveMessage,
+    async listClientToolRequests(thebeSessionId: string) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.list(thebeSessionId);
+    },
+    async getClientToolRequest(thebeSessionId: string, requestId: string) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.get(thebeSessionId, requestId);
+    },
+    async resolveClientToolRequest(
+      thebeSessionId: string,
+      requestId: string,
+      result: import("./app-control/client-tools.ts").ClientToolResult
+    ) {
+      await sessions.getSession(thebeSessionId);
+      return ctx.clientToolBridge.resolve(thebeSessionId, requestId, result);
+    },
     ...prompts,
     ...sessions,
     ...goals,
@@ -694,14 +833,26 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return triggerStore.list(query);
     },
     sourceHealth: sourceRunner.health,
-    async listTickets() {
-      await ticketRecovery;
-      await ticketControl.backfillGoals();
-      return ticketStore.list();
-    },
+    listTickets: ticketControl.listRecords,
+    listTicketTasks: ticketControl.listTasks,
     async getTicket(id) {
-      await ticketRecovery;
-      return ticketStore.get(id);
+      return (await ticketControl.get(id))?.ticket;
+    },
+    getTicketTask: ticketControl.get,
+    async getTicketLog(id) {
+      const task = await ticketControl.get(id);
+      if (!task) return undefined;
+      const executorId = task.ticket.links.legacyGoalId;
+      return createTicketExecutionLog(
+        id,
+        () => (executorId ? goals.executionEvents(executorId) : []),
+        (listener) =>
+          executorId ? goals.subscribeGoal(executorId, listener) : () => {},
+        () => {
+          const run = executorId ? goals.getGoal(executorId) : undefined;
+          return !run || isTerminalGoalStatus(run.status);
+        }
+      );
     },
     async getTicketForGoal(goalId) {
       await ticketRecovery;
@@ -714,6 +865,69 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async replyTicket(input) {
       await ticketRecovery;
+      if (
+        input.placementId !== undefined ||
+        input.placementDecision !== undefined
+      ) {
+        if (
+          typeof input.ticketId !== "string" ||
+          typeof input.placementId !== "string" ||
+          (input.placementDecision !== "allow" &&
+            input.placementDecision !== "deny")
+        ) {
+          throw httpError(
+            400,
+            "placementId and an allow or deny placementDecision are required",
+            "invalid_body"
+          );
+        }
+        const ticketId = input.ticketId;
+        const task = await ticketControl.get(ticketId);
+        if (!task) throw httpError(404, "ticket not found", "not_found");
+        const book = ctx.pipelineBook;
+        if (!book)
+          throw httpError(
+            409,
+            "Acquisition pipeline is unavailable",
+            "placement_unavailable"
+          );
+        const jobId = await book.decidePlacement({
+          ticketId,
+          placementId: input.placementId,
+          decision: input.placementDecision,
+          authorize: async () => {
+            const current = await ticketControl.get(ticketId);
+            const goalId = current?.ticket.links.legacyGoalId;
+            if (
+              !current ||
+              !goalId ||
+              current.execution?.phase === "cancelled"
+            ) {
+              throw httpError(
+                409,
+                "Ticket cannot dispatch placement",
+                "ticket_stopped"
+              );
+            }
+            const mandate = current.ticket.mandate;
+            if (
+              !(await revalidateTicketGoal(goalId)).allowed ||
+              (mandate.decidedBy === "eval" &&
+                !mandateAllows(mandate, "files_copy"))
+            ) {
+              throw httpError(
+                409,
+                "The current Mandate does not permit placement",
+                "ticket_mandate_invalid"
+              );
+            }
+            ctx.checkNotQuiesced();
+          },
+        });
+        if (input.placementDecision === "allow")
+          ctx.pipelineAdvancer?.track(jobId);
+        return (await ticketControl.get(ticketId))!;
+      }
       return ticketControl.reply(input);
     },
     async noteTicket(input) {
@@ -722,6 +936,17 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     },
     async controlTicket(input) {
       await ticketRecovery;
+      if (
+        input.action === "stop" &&
+        ctx.pipelineBook?.stopPlacements(input.ticketId)
+      ) {
+        const task = await ticketControl.get(input.ticketId);
+        const phase = task?.execution?.phase;
+        if (phase === "running" || phase === "pausing" || phase === "paused") {
+          return ticketControl.control(input);
+        }
+        if (task) return task;
+      }
       return ticketControl.control(input);
     },
     async recordGoalTicket(run, goalOptions) {
@@ -755,6 +980,9 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       await channelNotifier.stop();
       ctx.pipelineAdvancer?.stop();
       await schedules.stop();
+      // A Goal snapshot queued just before the restart must reach disk, or recovery resumes
+      // from a stale cursor and re-delivers Ticket inputs the worker already consumed.
+      await flushGoalPersistence();
       await options.runtime.quiesce();
     },
     async unquiesce() {

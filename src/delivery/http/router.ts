@@ -10,7 +10,6 @@ import { handleArtifactRoutes } from "./routes/artifacts.ts";
 import { handleAuditRoutes } from "./routes/audit.ts";
 import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
-import { handleGoalRoutes } from "./routes/goal.ts";
 import { handleTicketRoutes } from "./routes/tickets.ts";
 import { handleMainSessionRoutes } from "./routes/main-session.ts";
 import { handleEvalRoutes } from "./routes/eval.ts";
@@ -19,7 +18,10 @@ import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
 import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
 import { handleMemoryRoutes } from "./routes/memory.ts";
+import { handleNotificationRoutes } from "./routes/notifications.ts";
+import { handleImRoutes } from "./routes/im.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
+import { handleStorageRoutes } from "./routes/storage.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
@@ -44,6 +46,9 @@ export type ThebeHttpRouterOptions = {
   pushIdentity?: ThebeHttpContext["pushIdentity"];
   pushOutbox?: ThebeHttpContext["pushOutbox"];
   quietHours?: ThebeHttpContext["quietHours"];
+  notifications?: ThebeHttpContext["notifications"];
+  notificationConfig?: ThebeHttpContext["notificationConfig"];
+  im?: ThebeHttpContext["im"];
   workspacePath?: string;
   /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
   mcpRateLimit?: number;
@@ -155,6 +160,14 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (resourceResponse) {
         return resourceResponse;
       }
+      const notificationResponse = await handleNotificationRoutes(context);
+      if (notificationResponse) {
+        return notificationResponse;
+      }
+      const imResponse = await handleImRoutes(context);
+      if (imResponse) return imResponse;
+      const storageResponse = await handleStorageRoutes(context);
+      if (storageResponse) return storageResponse;
       const settingsResponse = await handleSettingsRoutes(context);
       if (settingsResponse) {
         return settingsResponse;
@@ -169,10 +182,6 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (ticketResponse) return ticketResponse;
       const mainSessionResponse = await handleMainSessionRoutes(context);
       if (mainSessionResponse) return mainSessionResponse;
-      const goalResponse = await handleGoalRoutes(context);
-      if (goalResponse) {
-        return goalResponse;
-      }
       const scheduleResponse = await handleScheduleRoutes(context);
       if (scheduleResponse) return scheduleResponse;
       if (isAgentRoute(context.path)) {
@@ -228,7 +237,6 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
     path.startsWith("/v1/auth") ||
-    path === PRODUCT_HTTP_PATH.capabilities ||
-    path.startsWith("/v1/goals")
+    path === PRODUCT_HTTP_PATH.capabilities
   );
 }

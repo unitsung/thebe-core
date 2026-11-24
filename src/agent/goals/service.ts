@@ -1,6 +1,7 @@
 import { normalizeGoalMaxIterations, type GoalEvent } from "../goals/runner.ts";
 import {
   executeGoal,
+  type BufferedGoalEvent,
   type GoalCheckpointInput,
   type GoalSubagentApi,
   type ManagedGoal,
@@ -19,8 +20,10 @@ import type { StoredGoalEvent } from "../store.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
 import { stripToolLogs, shortenToWords } from "../main-session/proactive.ts";
+import { redactToolOutput } from "../security/redaction.ts";
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { MandateRevalidation } from "../tickets/mandate.ts";
+import type { ChannelRef } from "../sources/types.ts";
 import {
   buildGoalStatusCheckPrompt,
   createGoalWatchdog,
@@ -41,6 +44,8 @@ export type GoalNeedsPersonNotice = {
   ticketId?: string;
   reason: "answer" | "review" | "blocked" | "stalled";
   message: string;
+  /** The Ticket's recorded reply channels, filled by the composition root for notification routing. */
+  channels?: ChannelRef[];
 };
 
 export type GoalCompletedNotice = {
@@ -48,6 +53,8 @@ export type GoalCompletedNotice = {
   goalId: string;
   ticketId?: string;
   message: string;
+  /** The Ticket's recorded reply channels, filled by the composition root for notification routing. */
+  channels?: ChannelRef[];
 };
 
 export type GoalApiOptions = {
@@ -65,6 +72,7 @@ export type GoalApiOptions = {
   ) => Promise<TicketWatchdogContext | undefined>;
   revalidateMandate?: (goalId: string) => Promise<MandateRevalidation>;
   ticketInputs?: (goalId: string) => Promise<GoalCheckpointInput[]>;
+  onSourceFollowUp?: Parameters<typeof executeGoal>[1]["onSourceFollowUp"];
   onNeedsPerson?: (notice: GoalNeedsPersonNotice) => Promise<void> | void;
   onCompleted?: (notice: GoalCompletedNotice) => Promise<void> | void;
 };
@@ -106,6 +114,9 @@ export function createGoalApi(
     ...(run.blocked ? { blocked: true } : {}),
     ...(run.observe ? { observe: true } : {}),
     ...(run.executor ? { executor: run.executor } : {}),
+    ...(run.recoveryAssignmentId
+      ? { recoveryAssignmentId: run.recoveryAssignmentId }
+      : {}),
     ...(run.report ? { report: { ...run.report } } : {}),
     ...(run.attention ? { attention: { ...run.attention } } : {}),
     ...(run.allowAsk ? { allowAsk: true } : {}),
@@ -113,6 +124,7 @@ export function createGoalApi(
     ...(run.guidance?.length ? { guidance: run.guidance.slice() } : {}),
     ...(run.ticketInputSeq ? { ticketInputSeq: run.ticketInputSeq } : {}),
     ...(run.watchdog ? { watchdog: { ...run.watchdog } } : {}),
+    ...(run.stopRequested ? { stopRequested: true } : {}),
   });
 
   const RECOVERY_MESSAGE =
@@ -126,7 +138,11 @@ export function createGoalApi(
     const at = ctx.now().toISOString();
     if (progress) run.progressAt = at;
     run.updatedAt = at;
-    run.events.push({ event, at });
+    run.events.push({
+      event,
+      at,
+      sequence: (run.events.at(-1)?.sequence ?? 0) + 1,
+    });
     if (run.events.length > MAX_GOAL_EVENTS) {
       run.events.splice(0, run.events.length - MAX_GOAL_EVENTS);
     }
@@ -305,6 +321,11 @@ export function createGoalApi(
     }
   }
 
+  /** Resolves once every queued Goal snapshot has reached the store. */
+  async function flushPersistence(): Promise<void> {
+    await Promise.all(persistChains.values());
+  }
+
   function queueGoalPersistence(
     run: GoalRun | undefined,
     thebeSessionId: string,
@@ -351,6 +372,7 @@ export function createGoalApi(
     // These would otherwise be lost on restart: what the run was allowed to do, why it stopped, and what
     // it is waiting on the person for.
     if (persisted.blocked) run.blocked = true;
+    run.recoveryAssignmentId = persisted.recoveryAssignmentId;
     if (persisted.report) run.report = { ...persisted.report };
     if (persisted.attention) run.attention = { ...persisted.attention };
     if (persisted.guidance?.length) run.guidance = persisted.guidance.slice();
@@ -358,7 +380,18 @@ export function createGoalApi(
       run.ticketInputSeq = persisted.ticketInputSeq;
     }
     run.iteration = persisted.iteration;
-    run.status = interrupted ? "paused" : persisted.status;
+    if (persisted.stopRequested && interrupted) {
+      // The person ended this run before the previous process could finish the stop. Finishing it
+      // now is the only faithful recovery; resuming would undo their decision. A stop that raced
+      // with the run's own finish leaves a terminal status behind: the work really ended that way,
+      // and reporting it as cancelled would misstate what happened.
+      run.stopRequested = true;
+      run.status = "cancelled";
+      run.finishedAt = persisted.finishedAt ?? persisted.updatedAt;
+      run.summary = persisted.summary ?? "Goal stopped before Core restarted.";
+    } else {
+      run.status = interrupted ? "paused" : persisted.status;
+    }
     run.createdAt = persisted.createdAt;
     run.updatedAt =
       persisted.updatedAt ?? persisted.finishedAt ?? persisted.createdAt;
@@ -397,6 +430,7 @@ export function createGoalApi(
       const recoveredAt = ctx.now().toISOString();
       run.updatedAt = recoveredAt;
       run.events.push({
+        sequence: (run.events.at(-1)?.sequence ?? 0) + 1,
         event: {
           type: "goal_status",
           status: "paused",
@@ -462,6 +496,13 @@ export function createGoalApi(
         setTerminal,
         reportInbox,
         ticketInputs: options.ticketInputs,
+        persistInputCursor: (current) =>
+          queueGoalPersistence(
+            snapshot(current),
+            current.thebeSessionId,
+            storedGoalEvents(current.events)
+          ),
+        onSourceFollowUp: options.onSourceFollowUp,
         now: ctx.now,
       },
       initialIteration,
@@ -970,6 +1011,10 @@ export function createGoalApi(
 
     restoreGoal,
 
+    executionEvents(thebeSessionId: string): readonly BufferedGoalEvent[] {
+      return runs.get(thebeSessionId)?.events.slice() ?? [];
+    },
+
     subscribeGoal(
       thebeSessionId: string,
       listener: (event: GoalEvent) => void
@@ -997,7 +1042,10 @@ export function createGoalApi(
       );
     },
 
-    async resumeGoal(thebeSessionId: string): Promise<GoalRun> {
+    async resumeGoal(
+      thebeSessionId: string,
+      recoveryAssignmentId?: string
+    ): Promise<GoalRun> {
       const run = runs.get(thebeSessionId);
       if (!run) throw new Error("no goal found for this session");
       if (run.status !== "paused") return snapshot(run);
@@ -1006,12 +1054,20 @@ export function createGoalApi(
         throw httpError(
           409,
           run.attention.kind === "review"
-            ? "this task is waiting for your review; accept it or say what to change with POST /v1/goals/{id}/answer"
-            : "this task is waiting for your answer; give it with POST /v1/goals/{id}/answer",
+            ? "this task is waiting for your review; accept it or say what to change from its Ticket"
+            : "this task is waiting for your answer; give it from its Ticket",
           "attention_open"
         );
       }
-      return continueGoal(run);
+      if (!recoveryAssignmentId) return continueGoal(run);
+      await revalidateBeforeContinue(run);
+      if (run.status !== "paused") return snapshot(run);
+      run.recoveryAssignmentId = recoveryAssignmentId;
+      const recoveryNote =
+        "Core restarted during the previous Assignment. Check current resource state and any existing receipts before repeating external actions. If you cannot determine whether a previous write took effect, do not repeat it. Report the unknown result as a blocker.";
+      if (!run.guidance?.includes(recoveryNote))
+        (run.guidance ??= []).push(recoveryNote);
+      return continueGoal(run, true);
     },
 
     /**
@@ -1229,6 +1285,13 @@ export function createGoalApi(
         return snapshot(run);
       }
       run.stopRequested = true;
+      // Make the stop durable before the loop observes it: a restart between here and the terminal
+      // transition must not resume the work the person just stopped.
+      await queueGoalPersistence(
+        snapshot(run),
+        run.thebeSessionId,
+        storedGoalEvents(run.events)
+      );
       const active = run.activeSubagent;
       if (
         active &&
@@ -1252,14 +1315,16 @@ export function createGoalApi(
       run.listeners.clear();
       void queueGoalPersistence(undefined, thebeSessionId);
     },
+    flushPersistence,
     watchdog,
   };
 }
 
-function storedGoalEvents(
-  events: Array<{ event: GoalEvent; at: string }>
-): StoredGoalEvent[] {
-  return events.slice(-MAX_GOAL_EVENTS).map(toStoredGoalEvent);
+function storedGoalEvents(events: BufferedGoalEvent[]): StoredGoalEvent[] {
+  return events.slice(-MAX_GOAL_EVENTS).map((row) => ({
+    ...toStoredGoalEvent(row),
+    sequence: row.sequence,
+  }));
 }
 
 function toStoredGoalEvent(row: {
@@ -1348,7 +1413,7 @@ function toStoredGoalEvent(row: {
 function restoreEvents(
   events: StoredGoalEvent[],
   parentSessionId: string
-): Array<{ event: GoalEvent; at: string }> {
+): BufferedGoalEvent[] {
   return events
     .filter(
       (row) =>
@@ -1358,7 +1423,8 @@ function restoreEvents(
         typeof row.event.type === "string"
     )
     .slice(-MAX_GOAL_EVENTS)
-    .map((row) => ({
+    .map((row, index) => ({
+      sequence: row.sequence ?? index + 1,
       at: row.at,
       event: restoreEvent(row.event, parentSessionId, row.at),
     }));
@@ -1419,7 +1485,7 @@ function personNotice(
   }
   if (run.status === "failed" && run.blocked) {
     const cleanError = run.error
-      ? shortenToWords(stripToolLogs(run.error), 50)
+      ? shortenToWords(redactToolOutput(stripToolLogs(run.error)), 50)
       : "";
     return {
       id: `${run.thebeSessionId}:blocked:${run.finishedAt ?? run.createdAt}`,
@@ -1438,7 +1504,9 @@ function completionNotice(
 ): Omit<GoalCompletedNotice, "ticketId"> | undefined {
   if (run.status !== "completed") return undefined;
   const report = run.finalReport?.trim() || run.summary?.trim();
-  const clean = report ? shortenToWords(stripToolLogs(report), 50) : "";
+  const clean = report
+    ? shortenToWords(redactToolOutput(stripToolLogs(report)), 50)
+    : "";
   return {
     id: `${run.thebeSessionId}:completed:${run.finishedAt ?? run.createdAt}`,
     goalId: run.thebeSessionId,

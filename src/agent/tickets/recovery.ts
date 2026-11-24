@@ -19,6 +19,7 @@ export type RecoverableTicketGoal = {
  * Resumes Ticket Goals that were mid-checkpoint when the previous Core process ended. It never
  * resumes work that a person paused, stopped, or that is waiting for an answer or review; those are
  * deliberate states, not an interruption. A Goal whose Mandate no longer revalidates stays paused.
+ * A `pausing` Goal is restored into its paused state but is never resumed.
  */
 export async function recoverInterruptedTicketGoals(options: {
   tickets: Pick<TicketStore, "list">;
@@ -28,7 +29,7 @@ export async function recoverInterruptedTicketGoals(options: {
   }>;
   restore: (goal: GoalRun, events?: StoredGoalEvent[]) => void;
   revalidate: (goalId: string) => Promise<MandateRevalidation>;
-  resume: (goalId: string) => Promise<unknown>;
+  resume: (goalId: string, goal: GoalRun, ticketId: string) => Promise<unknown>;
   onError?: (goalId: string, error: unknown) => void;
 }): Promise<RecoverableTicketGoal[]> {
   const recovered: RecoverableTicketGoal[] = [];
@@ -45,11 +46,16 @@ export async function recoverInterruptedTicketGoals(options: {
     const goal = meta.goalRun;
     if (!goal || goal.executor !== "ticket") continue;
     if (goal.status !== "running" && goal.status !== "pausing") continue;
+    // `pausing` is a person's (or Watchdog's) deliberate pause in flight, not an interruption.
+    // Restoring it keeps the Goal paused where the view can show it; resuming would undo the pause.
+    const interrupted =
+      goal.status === "running" && !goal.stopRequested && !goal.attention;
     try {
       options.restore(goal, meta.goalEvents);
+      if (!interrupted) continue;
       const revalidation = await options.revalidate(goalId);
       if (!revalidation.allowed) continue;
-      await options.resume(goalId);
+      await options.resume(goalId, goal, ticket.id);
       recovered.push({ ticketId: ticket.id, goalId });
     } catch (error) {
       // A resumed run that cannot start stays paused; the Ticket view shows why instead of

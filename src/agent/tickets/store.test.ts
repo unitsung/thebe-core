@@ -67,6 +67,88 @@ describe("ticket store", () => {
     expect(await reopened.list()).toHaveLength(1);
   });
 
+  it("persists one Assignment per dispatch and keeps the history across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-"));
+    const store = createTicketStore({ dir });
+    const ticket = await store.recordDirect(request(5));
+    expect(ticket.assignments).toEqual([]);
+
+    const first = await store.ensureAssignment(ticket.id, {
+      executorId: "s5",
+      at: "2026-11-06T10:00:05.000Z",
+      state: "running",
+      startedAt: "2026-11-06T10:00:05.000Z",
+    });
+    const same = await store.ensureAssignment(ticket.id, {
+      executorId: "s5",
+      at: "2026-11-06T10:00:06.000Z",
+    });
+    expect(same?.assignment.id).toBe(first?.assignment.id);
+
+    const second = await store.createAssignment(ticket.id, {
+      executorId: "s5",
+      at: "2026-11-06T10:01:00.000Z",
+    });
+    expect(second?.ticket.assignments).toHaveLength(2);
+    await store.updateAssignment(ticket.id, first!.assignment.id, {
+      state: "ended",
+      endedAt: "2026-11-06T10:01:00.000Z",
+      endedReason: "retried",
+    });
+
+    const loaded = await createTicketStore({ dir }).get(ticket.id);
+    expect(loaded?.assignments).toMatchObject([
+      {
+        id: first!.assignment.id,
+        state: "ended",
+        executorId: "s5",
+        endedReason: "retried",
+      },
+      {
+        id: second!.assignment.id,
+        state: "pending",
+        executorId: "s5",
+      },
+    ]);
+  });
+
+  it("reuses a reserved recovery Assignment until the executor accepts it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-ticket-recovery-"));
+    const store = createTicketStore({ dir });
+    const ticket = await store.recordDirect(request(5));
+    const original = await store.ensureAssignment(ticket.id, {
+      executorId: "s5",
+      at: ticket.createdAt,
+      state: "running",
+    });
+    const input = {
+      executorId: "s5",
+      executorCreatedAt: ticket.createdAt,
+      at: "2026-11-06T10:01:00.000Z",
+    };
+    const reserved = await store.recoverAssignment(ticket.id, input);
+    expect(reserved?.state).toBe("pending");
+
+    const reopened = createTicketStore({ dir });
+    expect(await reopened.recoverAssignment(ticket.id, input)).toEqual(
+      reserved
+    );
+    const next = await reopened.recoverAssignment(ticket.id, {
+      ...input,
+      at: "2026-11-06T10:02:00.000Z",
+      acceptedAssignmentId: reserved?.id,
+    });
+    expect((await reopened.get(ticket.id))?.assignments).toMatchObject([
+      {
+        id: original?.assignment.id,
+        state: "ended",
+        endedReason: "host_restarted",
+      },
+      { id: reserved?.id, state: "ended", endedReason: "host_restarted" },
+      { id: next?.id, state: "pending" },
+    ]);
+  });
+
   it("gives concurrent startup reads the fully loaded store", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-"));
     const first = await createTicketStore({ dir }).recordDirect(request(4));
@@ -149,6 +231,7 @@ describe("a Ticket for work Eval took on", () => {
       {
         triggerId: origin.id,
         source: "container-health",
+        kind: "container.went_down",
         actor: { source: "container-health", id: "person-7" },
         human: false,
         channel: origin.channel,

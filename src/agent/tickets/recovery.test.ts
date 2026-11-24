@@ -20,6 +20,7 @@ function ticket(id: string, goalId?: string): Ticket {
     inputs: [],
     origins: [],
     channels: [],
+    assignments: [],
     links: {
       ...(goalId ? { legacyGoalId: goalId } : {}),
       sessionIds: goalId ? [goalId] : [],
@@ -99,6 +100,23 @@ describe("Ticket assignment recovery", () => {
     expect(recovered).toEqual([
       { ticketId: "a".repeat(32), goalId: "goal-running" },
     ]);
+  });
+
+  it("restores a pause in flight without resuming it", async () => {
+    const resume = vi.fn();
+    const restored: string[] = [];
+    const recovered = await recoverInterruptedTicketGoals({
+      tickets: store([ticket("9".repeat(32), "goal-pausing")]),
+      lookup: async () => ({
+        goalRun: goal("goal-pausing", "pausing", "ticket"),
+      }),
+      restore: (run) => restored.push(run.thebeSessionId),
+      revalidate: async () => ({ allowed: true }),
+      resume,
+    });
+    expect(restored).toEqual(["goal-pausing"]);
+    expect(resume).not.toHaveBeenCalled();
+    expect(recovered).toEqual([]);
   });
 
   it("leaves a Ticket alone when the policy no longer authorizes its Mandate", async () => {

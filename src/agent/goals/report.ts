@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { CustomToolDefinition } from "../runtime/interface.ts";
 import type { GoalReport, GoalReportState } from "../types.ts";
+import { stripToolLogs } from "../main-session/proactive.ts";
+import { redactToolOutput } from "../security/redaction.ts";
+
+type SourceReply = { inputSeq: number; message: string };
+type CheckpointReport = GoalReport & { sourceReply?: SourceReply };
 
 /**
  * The structured way for a Goal's worker to say where it stands, instead of Core reading a marker
- * out of free text. See docs/research/goal-report-attention-design-2026-11-06.md. The text footer
- * (`GOAL_STATUS:` ...) stays as the fallback when a model does not call the tool.
+ * out of free text. The text footer (`GOAL_STATUS:` ...) stays as the fallback when a model does
+ * not call the tool.
  */
 export const GOAL_REPORT_TOOL_NAME = "goal_report";
 
@@ -138,9 +143,15 @@ export function parseGoalReport(
 
 /** Per parent Goal session: whether its worker may ask, and the latest report the worker made. */
 export type GoalReportInbox = {
-  open(parentSessionId: string, settings: { allowAsk: boolean }): void;
+  open(
+    parentSessionId: string,
+    settings: {
+      allowAsk: boolean;
+      replyableInputs?: readonly number[];
+    }
+  ): void;
   /** Returns and clears the latest report made since `open`. */
-  take(parentSessionId: string): GoalReport | undefined;
+  take(parentSessionId: string): CheckpointReport | undefined;
   close(parentSessionId: string): void;
   /** The tool for one worker spawn, bound to its Goal; reports from it land in this inbox. */
   toolFor(parentSessionId: string): CustomToolDefinition;
@@ -149,10 +160,17 @@ export type GoalReportInbox = {
 export function createGoalReportInbox(
   now: () => Date = () => new Date()
 ): GoalReportInbox {
-  const open = new Map<string, { allowAsk: boolean; report?: GoalReport }>();
+  const open = new Map<
+    string,
+    {
+      allowAsk: boolean;
+      replyableInputs?: readonly number[];
+      report?: CheckpointReport;
+    }
+  >();
   return {
     open(parentSessionId, settings) {
-      open.set(parentSessionId, { allowAsk: settings.allowAsk });
+      open.set(parentSessionId, { ...settings });
     },
     take(parentSessionId) {
       const entry = open.get(parentSessionId);
@@ -200,6 +218,16 @@ export function createGoalReportInbox(
               type: "string",
               description: "dropped: why nothing needs doing.",
             },
+            sourceReply: {
+              type: "object",
+              description:
+                "Optional plain-text answer to a human follow-up in this checkpoint. Use its input sequence. Share only information suitable for the original conversation.",
+              properties: {
+                inputSeq: { type: "integer" },
+                message: { type: "string" },
+              },
+              required: ["inputSeq", "message"],
+            },
           },
           required: ["state"],
         },
@@ -228,7 +256,35 @@ export function createGoalReportInbox(
               isError: true,
             };
           }
+          const reply = (
+            params as { sourceReply?: Partial<SourceReply> } | undefined
+          )?.sourceReply;
+          if (
+            reply !== undefined &&
+            (!reply ||
+              typeof reply.inputSeq !== "number" ||
+              !entry.replyableInputs?.includes(reply.inputSeq) ||
+              typeof reply.message !== "string" ||
+              !reply.message.trim())
+          ) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `Invalid Source reply. This checkpoint accepts Input sequences: ${entry.replyableInputs?.join(", ") || "none"}.`,
+                },
+              ],
+              isError: true,
+            };
+          }
           entry.report = parsed.report;
+          if (reply?.inputSeq && reply.message) {
+            const message = redactToolOutput(stripToolLogs(reply.message))
+              .trim()
+              .slice(0, MAX_TEXT);
+            if (message)
+              entry.report.sourceReply = { inputSeq: reply.inputSeq, message };
+          }
           return {
             content: [
               {

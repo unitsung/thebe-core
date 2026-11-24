@@ -4,7 +4,14 @@ import { insertOverlay, type DismissibleOverlay } from "./base.ts";
 
 export function attachPromptInput(
   tui: TUI,
-  options: { prompt: string; placeholder?: string; focusBack?: unknown; abortSignal?: AbortSignal },
+  options: {
+    prompt: string;
+    placeholder?: string;
+    focusBack?: unknown;
+    abortSignal?: AbortSignal;
+    /** Hide typed characters while still returning the real value. */
+    secret?: boolean;
+  }
 ): Promise<string | null> {
   return new Promise((resolvePromise) => {
     const input = new Input({
@@ -12,6 +19,17 @@ export function attachPromptInput(
       placeholder: options.placeholder ?? "",
       placeholderStyle: (text) => chalk.dim(text),
     });
+    if (options.secret) {
+      const render = input.render.bind(input);
+      input.render = (width: number) => {
+        const value = input.getValue();
+        if (!value) return render(width);
+        input.setValue("•".repeat(value.length));
+        const lines = render(width);
+        input.setValue(value);
+        return lines;
+      };
+    }
     let resolved = false;
     const finish = (value: string | null) => {
       if (resolved) return;
@@ -26,7 +44,9 @@ export function attachPromptInput(
         finish(null);
         return;
       }
-      options.abortSignal.addEventListener("abort", () => finish(null), { once: true });
+      options.abortSignal.addEventListener("abort", () => finish(null), {
+        once: true,
+      });
     }
     (input as unknown as DismissibleOverlay).dismiss = () => finish(null);
     input.onSubmit = (value) => finish(value);

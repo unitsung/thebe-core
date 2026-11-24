@@ -327,15 +327,30 @@ describe("Ticket retry", () => {
     const failedView = await api.get(ticket.id);
     expect(failedView?.canRetry).toBe(true);
     expect(failedView?.receipt.canRetry).toBe(true);
+    expect(failedView?.ticket.assignments).toMatchObject([
+      {
+        state: "ended",
+        executorId: "goal-retry",
+        endedReason: "failed",
+      },
+    ]);
 
-    await expect(
-      api.control({ ticketId: ticket.id, action: "retry" })
-    ).resolves.toMatchObject({
+    const request = { ticketId: ticket.id, action: "retry" } as const;
+    const [retried, duplicate] = await Promise.all([
+      api.control(request),
+      api.control(request),
+    ]);
+    expect(duplicate).toEqual(retried);
+    expect(retried).toMatchObject({
       ticket: { id: ticket.id },
       stage: "running",
       canRetry: false,
     });
-    expect(retryGoal).toHaveBeenCalledWith("goal-retry");
+    expect(retried.ticket.assignments).toMatchObject([
+      { state: "ended", executorId: "goal-retry" },
+      { state: "running", executorId: "goal-retry" },
+    ]);
+    expect(retryGoal).toHaveBeenCalledExactlyOnceWith("goal-retry");
 
     current = goal("goal-retry", "max_iterations", "2026-11-10T00:02:30.000Z");
     await expect(
@@ -483,6 +498,9 @@ describe("Ticket retry", () => {
       ],
       channels: [channel],
     });
+    expect(first.ticket.assignments).toMatchObject([
+      { state: "running", executorId: "goal-source" },
+    ]);
     expect(startedGoal).toContain("Please inspect this request.");
     expect(startedGoal).toContain("untrusted");
     expect(createdSessions).toBe(1);
@@ -499,6 +517,7 @@ describe("Ticket retry", () => {
       reused: true,
       assignment: { state: "running", goalId: "goal-source" },
     });
+    expect(healed.ticket.assignments).toHaveLength(1);
     expect(createdSessions).toBe(1);
 
     await expect(

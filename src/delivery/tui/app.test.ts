@@ -176,7 +176,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       sessionId: parent.thebeSessionId,
     });
     const footer = tui.children.at(-1) as {
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     expect(footer.render(100).join("\n")).toContain("Tasks");
     expect(footer.render(100).join("\n")).toContain("click/Ctrl+G open");
@@ -524,7 +524,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
             typeof (child as { render?: unknown }).render === "function"
         )
         .map((child) =>
-          (child as { render: (width: number) => string[] })
+          (child as { render: (width: number) => readonly string[] })
             .render(80)
             .join("\n")
         )
@@ -889,7 +889,7 @@ describe("Thebe TUI agent slash commands", () => {
     expect(allText).toContain("switched to branch");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
     const footer = tui.children.at(-1) as {
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     const footerText = footer.render(80).join("\n");
     expect(footerText).toContain("fake-2 • thinking off");
@@ -921,7 +921,7 @@ describe("Thebe TUI agent slash commands", () => {
         (child) => child.constructor.name === "SelectList"
       ) as {
         handleInput: (data: string) => void;
-        render: (width: number) => string[];
+        render: (width: number) => readonly string[];
       };
       expect(list.render(80).join("\n")).toContain("Turn on bypassPermissions");
       list.handleInput("\x1b");
@@ -1128,7 +1128,9 @@ describe("Thebe TUI agent slash commands", () => {
             typeof (child as { render?: unknown }).render === "function"
         )
         .map((child) =>
-          (child as { render: (w: number) => string[] }).render(80).join("\n")
+          (child as { render: (w: number) => readonly string[] })
+            .render(80)
+            .join("\n")
         )
         .join("\n");
 
@@ -1294,7 +1296,7 @@ describe("Thebe TUI agent slash commands", () => {
         .map((child) => child.render(80).join("\n"))
         .join("\n");
     const footer = () =>
-      (tui.children.at(-1) as { render: (w: number) => string[] })
+      (tui.children.at(-1) as { render: (w: number) => readonly string[] })
         .render(80)
         .join("\n");
 
@@ -1332,7 +1334,7 @@ describe("Thebe TUI agent slash commands", () => {
     ) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     expect(list).toBeDefined();
@@ -1464,12 +1466,12 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     name: string
   ): {
     handleInput: (data: string) => void;
-    render: (width: number) => string[];
+    render: (width: number) => readonly string[];
   } {
     const child = tui.children.find((c) => c.constructor.name === name) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     expect(child).toBeDefined();
@@ -1481,12 +1483,12 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     name: string
   ): {
     handleInput: (data: string) => void;
-    render: (width: number) => string[];
+    render: (width: number) => readonly string[];
   } | null {
     const child = tui.children.find((c) => c.constructor.name === name) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     return child ?? null;
@@ -2098,7 +2100,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       (child) => child.constructor.name === "SelectList"
     ) as {
       handleInput: (data: string) => void;
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     expect(list.render(80).join("\n")).not.toContain("Test MCP tool");
     list.handleInput("\x1b");

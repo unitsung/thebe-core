@@ -179,6 +179,8 @@ export type McpServerRegistration = {
   description?: string;
   /** How the model reaches the tools; the runtime's default is `codemode`. */
   exposure?: "codemode" | "deferred" | "direct" | "hidden";
+  /** Tools the operator confirms only read, so Core never treats them as writes. */
+  readTools?: string[];
 };
 
 export type McpRegistry = {

@@ -144,12 +144,71 @@ describe("what a Mandate covers, call by call", () => {
     expect(
       mandateAllows(container, "container_restart", { name: "emby" })
     ).toBe(true);
-    expect(mandateAllows(container, "container_stop", { name: "emby" })).toBe(
+    expect(mandateAllows(container, "container_reload", { name: "emby" })).toBe(
       true
     );
     expect(mandateAllows(container, "container_some_future_write", {})).toBe(
       true
     );
+  });
+
+  it("leaves out the calls that stop or remove what the service runs", () => {
+    // "Restart emby" authorizes restarting it, not taking it down or rebuilding it.
+    expect(mandateAllows(container, "container_stop", { name: "emby" })).toBe(
+      false
+    );
+    expect(mandateAllows(container, "container_remove", { name: "emby" })).toBe(
+      false
+    );
+    expect(
+      mandateAllows({ scope: ["arcane:write"] }, "service_write", {
+        service: "arcane",
+        method: "POST",
+        path: "/api/containers/emby/stop",
+      })
+    ).toBe(false);
+    expect(
+      mandateAllows({ scope: ["arcane:write"] }, "service_write", {
+        service: "arcane",
+        method: "POST",
+        path: "/api/containers/emby/restart",
+      })
+    ).toBe(true);
+  });
+
+  it("judges a covered call with the same context the /mcp gate uses", () => {
+    const radarr = { scope: ["radarr:write"] };
+    // The operator marked the operation irreversible: the Mandate does not authorize it.
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "POST", path: "/api/v3/movie/1" },
+        { operatorMark: true }
+      )
+    ).toBe(false);
+    // The operator confirmed an operation the default rules would refuse.
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "DELETE", path: "/api/v3/movie/1" },
+        { operatorMark: false }
+      )
+    ).toBe(true);
+    // A provider tool its server marks destructive is not covered on a named service.
+    expect(
+      mandateAllows(radarr, "radarr_cleanup", {}, { destructiveHint: true })
+    ).toBe(false);
+    // What the call will really send is judged too.
+    expect(
+      mandateAllows(
+        radarr,
+        "service_write",
+        { service: "radarr", method: "POST" },
+        { sends: { body: { deleteFiles: true } } }
+      )
+    ).toBe(false);
   });
 
   it("does not cover another service, a tool with no service, or an empty scope", () => {

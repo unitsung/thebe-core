@@ -180,7 +180,13 @@ export async function handleAgentCommand(
           host.notice("no goal to pause");
           break;
         }
-        const paused = await agent.pauseGoal(currentId);
+        const ticket = await agent.getTicketForGoal(currentId);
+        if (!ticket) {
+          host.notice("no task to pause");
+          break;
+        }
+        await agent.controlTicket({ ticketId: ticket.id, action: "pause" });
+        const paused = agent.getGoal(currentId)!;
         host.updateGoalStatus(paused);
         host.watchGoal(currentId);
         host.notice(`goal ${paused.status}`);
@@ -191,7 +197,13 @@ export async function handleAgentCommand(
           host.notice("no goal to resume");
           break;
         }
-        const resumed = await agent.resumeGoal(currentId);
+        const ticket = await agent.getTicketForGoal(currentId);
+        if (!ticket) {
+          host.notice("no task to resume");
+          break;
+        }
+        await agent.controlTicket({ ticketId: ticket.id, action: "resume" });
+        const resumed = agent.getGoal(currentId)!;
         host.updateGoalStatus(resumed);
         host.watchGoal(currentId);
         host.notice(
@@ -204,7 +216,13 @@ export async function handleAgentCommand(
           host.notice("no goal to stop");
           break;
         }
-        const stopped = await agent.stopGoal(currentId);
+        const ticket = await agent.getTicketForGoal(currentId);
+        if (!ticket) {
+          host.notice("no task to stop");
+          break;
+        }
+        await agent.controlTicket({ ticketId: ticket.id, action: "stop" });
+        const stopped = agent.getGoal(currentId)!;
         host.updateGoalStatus(stopped);
         host.watchGoal(currentId);
         host.notice(`goal ${stopped.status}; stopping active worker`);
@@ -225,6 +243,7 @@ export async function handleAgentCommand(
         thebeSessionId: id,
         goal: trimmed,
       });
+      await agent.recordGoalTicket(started);
       host.updateGoalStatus(started);
       host.watchGoal(id);
       host.notice(

@@ -1,10 +1,12 @@
-import { mkdtemp } from "node:fs/promises";
+import { appendFile, cp, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
+import type { PipelineProviders } from "../../agent/tools/pipeline-tools.ts";
+import { downloadItem } from "../../testing/download-item.ts";
 
 const provider: ContainerInfoProvider = {
   listContainers: async () => [],
@@ -38,21 +40,29 @@ const defaultTurns: FakeTurnBatch = [
 function open(
   agentStoreDir?: string,
   turns: FakeTurnBatch = defaultTurns,
-  now?: () => Date
+  now?: () => Date,
+  fake = createFakeRuntime(),
+  pipeline?: PipelineProviders
 ) {
-  const fake = createFakeRuntime();
   fake.queueTurns(turns);
   const app = createThebeApp({
     runtime: fake.runtime,
     provider,
     agentStoreDir,
     now,
+    pipeline,
+    workspacePath: pipeline ? process.cwd() : undefined,
+    token: pipeline ? "placement-owner" : undefined,
   });
   const call = async (path: string, init?: RequestInit) => {
     const res = await app.handler.handle(
       new Request(`http://127.0.0.1:8787${path}`, {
         ...init,
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          ...(pipeline ? { "x-thebe-token": "placement-owner" } : {}),
+          ...init?.headers,
+        },
       })
     );
     return {
@@ -63,12 +73,588 @@ function open(
   return { app, call, fake };
 }
 
-const newGoal = {
-  method: "POST",
-  body: JSON.stringify({ goal: "Move the library", maxIterations: 2 }),
-};
+function signal() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const placementBenchmark = process.env.THEBE_PLACEMENT_BENCHMARK;
+const placementFixtures = [
+  "verified",
+  "denied",
+  "changed",
+  "mismatch",
+  "crash-after-copy",
+  "crash-before-copy",
+  "stop-pending",
+  "stop-copy",
+  "restart-verified",
+] as const;
+const placementCases = placementFixtures
+  .filter(
+    (fixture) =>
+      !placementBenchmark ||
+      ["verified", "mismatch", "crash-after-copy", "stop-copy"].includes(
+        fixture
+      )
+  )
+  .flatMap((fixture) =>
+    (placementBenchmark ? [1, 2] : [1]).map(
+      (executors) => [fixture, executors] as const
+    )
+  );
 
 describe("tickets", () => {
+  it.each(placementCases)(
+    "keeps placement intent across restart and records %s with %i Executors",
+    async (outcome, executors) => {
+      const startedAt = performance.now();
+      const dir = await mkdtemp(join(tmpdir(), "thebe-placement-http-"));
+      const hash = "a".repeat(40);
+      const digest = "b".repeat(64);
+      let placed = false;
+      let sourceDigest = digest;
+      const crashed =
+        outcome === "crash-after-copy" ||
+        outcome === "crash-before-copy" ||
+        outcome === "stop-copy";
+      const dispatchReached = signal();
+      const finishCopy = signal();
+      const copy = vi.fn(async () => {
+        placed = outcome !== "crash-before-copy";
+        dispatchReached.resolve();
+        if (crashed) await finishCopy.promise;
+        return { taskIds: ["copy-1"] };
+      });
+      const pipeline: PipelineProviders = {
+        downloads: {
+          service: "fixture",
+          add: async () => ({ submitted: 1 }),
+          list: async () => [],
+          get: async () =>
+            downloadItem({
+              hash,
+              name: "Film.mkv",
+              state: "completed",
+              progress: 1,
+            }),
+        },
+        files: {
+          service: "fixture",
+          list: async ({ path }) => {
+            const entries =
+              path === "/incoming" || placed
+                ? [
+                    {
+                      path: `${path}/Film.mkv`,
+                      name: "Film.mkv",
+                      isDirectory: false,
+                      sha256:
+                        path === "/incoming"
+                          ? sourceDigest
+                          : outcome === "mismatch"
+                            ? "c".repeat(64)
+                            : digest,
+                    },
+                  ]
+                : [];
+            return { entries, total: entries.length };
+          },
+          mkdir: async () => {},
+          copy,
+          move: async () => ({ taskIds: [] }),
+          offlineDownload: async () => ({ taskIds: [] }),
+        },
+      };
+      const first = open(
+        dir,
+        [
+          {
+            kind: "tools",
+            calls: [
+              {
+                name: "pipeline_acquire",
+                args: {
+                  title: "Film",
+                  placementApproval: true,
+                  magnet: `magnet:?xt=urn:btih:${hash}`,
+                  filesSourceDir: "/incoming",
+                  libraryDir: "/library",
+                },
+              },
+              {
+                name: "goal_report",
+                args: {
+                  state: "dropped",
+                  reason: "The pipeline owns placement.",
+                },
+              },
+            ],
+          },
+        ],
+        undefined,
+        undefined,
+        pipeline
+      );
+      let ticketPath = "";
+      let attention: Record<string, unknown> = {};
+      const skill = await first.call("/v1/skills/media-acquire/content");
+      expect(skill.status).toBe(200);
+      expect(skill.body.contentHash).toMatch(/^[a-f0-9]{64}$/);
+      try {
+        const created = await first.call("/v1/tickets", {
+          method: "POST",
+          body: JSON.stringify({
+            task: `Acquire Film using the placement pilot.\n\n${skill.body.content}`,
+            idempotencyKey: "placement",
+          }),
+        });
+        expect(created.status).toBe(201);
+        ticketPath = `/v1/tickets/${created.body.ticket.id}`;
+        await vi.waitFor(() =>
+          expect(first.app.agent.listPendingPermissions()).toHaveLength(1)
+        );
+        const [permission] = first.app.agent.listPendingPermissions();
+        const reply = await first.call(`${ticketPath}/reply`, {
+          method: "POST",
+          body: JSON.stringify({
+            permissionId: permission!.id,
+            permissionDecision: "allow",
+          }),
+        });
+        expect(reply.status).toBe(200);
+        await vi.waitFor(async () => {
+          const { body } = await first.call(`${ticketPath}/execution`);
+          attention = body.receipt.placementAttention;
+          expect(attention).toMatchObject({
+            id: expect.any(String),
+            source: "/incoming/Film.mkv",
+            destination: "/library/Film.mkv",
+            state: "pending",
+            skill: { name: "media-acquire", digest: skill.body.contentHash },
+          });
+        });
+        expect(copy).toHaveBeenCalledTimes(0);
+      } finally {
+        await first.app.agent.quiesce();
+        await first.fake.runtime.unquiesce();
+      }
+      const restarted = open(dir, [], undefined, first.fake, pipeline);
+      let placementState: string | undefined;
+      let secondaryClaim = false;
+      try {
+        const { body } = await restarted.call(`${ticketPath}/execution`);
+        expect(body.receipt.placementAttention).toEqual(attention);
+        expect(copy).toHaveBeenCalledTimes(0);
+        if (executors === 2) {
+          restarted.fake.queueTurns([
+            { kind: "text", text: "Placement needs provider evidence." },
+          ]);
+          const reviewer = await restarted.app.agent.spawnSubagent({
+            profileName: "ticket-reviewer",
+            background: true,
+            parentSessionId: body.ticket.links.legacyGoalId,
+            taskPrompt:
+              "Check the planned placement independently. Only report success with destination evidence.",
+          });
+          const checked = await restarted.app.agent.waitSubagent(
+            reviewer.runId
+          );
+          expect(checked.status).toBe("completed");
+          secondaryClaim = /placement verified/i.test(checked.result ?? "");
+        }
+        const decision = (
+          placementId: unknown,
+          token = "placement-owner",
+          placementDecision = "allow"
+        ) =>
+          restarted.call(`${ticketPath}/reply`, {
+            method: "POST",
+            headers: { "x-thebe-token": token },
+            body: JSON.stringify({ placementId, placementDecision }),
+          });
+        expect((await decision(attention.id, "wrong-token")).status).toBe(401);
+        expect((await decision("stale-id")).status).toBe(409);
+        if (outcome === "stop-pending") {
+          const stopped = await restarted.call(`${ticketPath}/stop`, {
+            method: "POST",
+          });
+          expect(stopped).toMatchObject({
+            status: 200,
+            body: { stage: "cancelled" },
+          });
+          const snapshot = await mkdtemp(
+            join(tmpdir(), "thebe-placement-stop-")
+          );
+          await cp(dir, snapshot, {
+            recursive: true,
+            filter: (path) => !path.endsWith(".tmp"),
+          });
+          const recovered = open(snapshot, [], undefined, undefined, pipeline);
+          try {
+            const reopened = (await recovered.call(`${ticketPath}/execution`))
+              .body;
+            expect(reopened).toMatchObject({
+              stage: "cancelled",
+              receipt: {
+                placementReport: {
+                  id: attention.id,
+                  stoppedAt: expect.any(String),
+                },
+              },
+            });
+            expect(reopened.ticket.assignments).toHaveLength(1);
+            const rejected = await recovered.call(`${ticketPath}/reply`, {
+              method: "POST",
+              body: JSON.stringify({
+                placementId: attention.id,
+                placementDecision: "allow",
+              }),
+            });
+            expect(rejected.status).toBe(409);
+            expect(copy).not.toHaveBeenCalled();
+          } finally {
+            await recovered.app.agent.quiesce();
+          }
+          return;
+        }
+        if (outcome === "denied") {
+          expect(
+            (await decision(attention.id, "placement-owner", "deny")).status
+          ).toBe(200);
+          expect((await decision(attention.id)).status).toBe(409);
+          expect(copy).not.toHaveBeenCalled();
+          expect(
+            (await restarted.call(`${ticketPath}/execution`)).body.receipt
+              .placementReport
+          ).toMatchObject({
+            id: attention.id,
+            state: "denied",
+            decidedAt: expect.any(String),
+            skill: attention.skill,
+          });
+          return;
+        }
+        if (outcome === "changed") {
+          sourceDigest = "d".repeat(64);
+          expect(await decision(attention.id)).toMatchObject({
+            status: 409,
+            body: { code: "placement_changed" },
+          });
+          expect(copy).not.toHaveBeenCalled();
+          return;
+        }
+        if (crashed) {
+          const inFlight = decision(attention.id);
+          try {
+            await dispatchReached.promise;
+            if (outcome === "stop-copy") {
+              const stopped = await restarted.call(`${ticketPath}/stop`, {
+                method: "POST",
+              });
+              expect(stopped).toMatchObject({
+                status: 200,
+                body: { stage: "cancelled" },
+              });
+            }
+            const snapshot = await mkdtemp(
+              join(tmpdir(), "thebe-placement-crash-")
+            );
+            await cp(dir, snapshot, {
+              recursive: true,
+              filter: (path) => !path.endsWith(".tmp"),
+            });
+            const recovered = open(
+              snapshot,
+              [],
+              undefined,
+              undefined,
+              pipeline
+            );
+            try {
+              const result = (await recovered.call(`${ticketPath}/execution`))
+                .body;
+              placementState = result.receipt.placementReport?.state;
+              expect(result.receipt.placementReport).toMatchObject({
+                id: attention.id,
+                state: placed ? "verified" : "uncertain",
+                dispatchedAt: expect.any(String),
+              });
+              if (!placed) expect(result.stage).toBe("attention");
+              if (outcome === "stop-copy") {
+                expect(result).toMatchObject({
+                  stage: "cancelled",
+                  receipt: {
+                    placementReport: { stoppedAt: expect.any(String) },
+                  },
+                });
+              }
+              expect(result.ticket.assignments[0]?.id).toBe(
+                body.ticket.assignments[0]?.id
+              );
+              expect(copy).toHaveBeenCalledTimes(1);
+              const repeated = await recovered.call(`${ticketPath}/reply`, {
+                method: "POST",
+                body: JSON.stringify({
+                  placementId: attention.id,
+                  placementDecision: "allow",
+                }),
+              });
+              expect(repeated.status).toBe(409);
+            } finally {
+              await recovered.app.agent.quiesce();
+            }
+          } finally {
+            finishCopy.resolve();
+            await inFlight;
+          }
+          return;
+        }
+        const replies = await Promise.all([
+          decision(attention.id),
+          decision(attention.id),
+        ]);
+        expect(replies.map(({ status }) => status).sort()).toEqual([200, 409]);
+        expect(copy).toHaveBeenCalledExactlyOnceWith({
+          sourceDir: "/incoming",
+          destinationDir: "/library",
+          names: ["Film.mkv"],
+        });
+        const result = (await restarted.call(`${ticketPath}/execution`)).body;
+        placementState = result.receipt.placementReport?.state;
+        expect(result.receipt.placementAttention).toBeUndefined();
+        if (outcome === "mismatch") {
+          expect(result).toMatchObject({
+            stage: "attention",
+            receipt: {
+              placementReport: {
+                id: attention.id,
+                state: "uncertain",
+                skill: attention.skill,
+              },
+            },
+          });
+          expect(result.receipt.placementReport.verifiedAt).toBeUndefined();
+          return;
+        }
+        const verifiedReport = result.receipt.placementReport;
+        expect(verifiedReport).toMatchObject({
+          id: attention.id,
+          state: "verified",
+          skill: attention.skill,
+          verification: "sha256",
+          decidedAt: expect.any(String),
+          dispatchedAt: expect.any(String),
+          verifiedAt: expect.any(String),
+        });
+        if (outcome === "restart-verified") {
+          const snapshot = await mkdtemp(
+            join(tmpdir(), "thebe-placement-verified-")
+          );
+          await cp(dir, snapshot, {
+            recursive: true,
+            filter: (path) => !path.endsWith(".tmp"),
+          });
+          const recovered = open(snapshot, [], undefined, undefined, pipeline);
+          try {
+            const reopened = (await recovered.call(`${ticketPath}/execution`))
+              .body;
+            expect(reopened).toMatchObject({
+              receipt: { placementReport: verifiedReport },
+            });
+            expect(reopened.receipt.placementAttention).toBeUndefined();
+            expect(reopened.stage).not.toBe("attention");
+            expect(reopened.ticket.assignments).toEqual(
+              result.ticket.assignments
+            );
+            expect(copy).toHaveBeenCalledTimes(1);
+            const retry = await recovered.call(`${ticketPath}/retry`, {
+              method: "POST",
+            });
+            expect(retry.status).toBe(409);
+            expect(copy).toHaveBeenCalledTimes(1);
+          } finally {
+            await recovered.app.agent.quiesce();
+          }
+        }
+      } finally {
+        if (placementBenchmark && placementState) {
+          const verified = placementState === "verified";
+          const evidence = placed && outcome !== "mismatch";
+          const usage = await restarted.app.agent.getBackgroundBudgetSummary();
+          const measurement = {
+            benchmark: "nas-placement",
+            fixture: outcome,
+            executors,
+            model: "fake/fake-1",
+            skillDigest: skill.body.contentHash,
+            verifiedSuccess: verified && evidence,
+            unsupportedSuccessClaim: (verified || secondaryClaim) && !evidence,
+            duplicateMutations: Math.max(0, copy.mock.calls.length - 1),
+            elapsedMs: Math.round(performance.now() - startedAt),
+            estimatedTokens: usage.usage.counted,
+          };
+          await appendFile(
+            placementBenchmark,
+            `${JSON.stringify(measurement)}\n`
+          );
+        }
+        await restarted.app.agent.quiesce();
+      }
+    }
+  );
+
+  it("keeps log cursors usable after older Ticket events rotate out", async () => {
+    const { app, call } = open(undefined, [{ kind: "hang" }]);
+    try {
+      const created = await call("/v1/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          task: "Check the library",
+          idempotencyKey: "log-rotation",
+        }),
+      });
+      const path = `/v1/tickets/${created.body.ticket.id}`;
+      for (let index = 0; index < 52; index += 1) {
+        const response = await call(`${path}/note`, {
+          method: "POST",
+          body: JSON.stringify({ note: `Check library ${index}` }),
+        });
+        expect(response.status).toBe(200);
+      }
+      const first = (await call(`${path}/log`)).body;
+      expect(first.events).toHaveLength(50);
+      expect(first.next).toBeGreaterThan(50);
+      await call(`${path}/note`, {
+        method: "POST",
+        body: JSON.stringify({ note: "Check one more library" }),
+      });
+      const next = (await call(`${path}/log?after=${first.next}`)).body;
+      expect(next.events.at(-1)).toMatchObject({ type: "ticket_status" });
+      expect(next.next).toBeGreaterThan(first.next);
+    } finally {
+      await app.agent.quiesce();
+    }
+  });
+
+  it("reads progress and answers Attention by Ticket ID after restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-ticket-execution-"));
+    const first = open(dir, [
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: {
+              state: "ask",
+              question: "Which library should I move?",
+            },
+          },
+        ],
+      },
+    ]);
+    const created = await first.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "execution-restart",
+      }),
+    });
+    const id = created.body.ticket.id;
+    const path = `/v1/tickets/${id}`;
+    try {
+      await vi.waitFor(async () => {
+        const execution = await first.call(`${path}/execution`);
+        expect(execution.status).toBe(200);
+        expect(execution.body).toMatchObject({
+          stage: "attention",
+          execution: { iteration: 1, controls: { resume: false, reply: true } },
+          receipt: { attention: { question: "Which library should I move?" } },
+        });
+      });
+    } finally {
+      await first.app.agent.quiesce();
+      await first.fake.runtime.unquiesce();
+    }
+    const second = open(dir, defaultTurns, undefined, first.fake);
+    try {
+      const waiting = await second.call(`${path}/execution`);
+      const catalogue = await second.call("/v1/tickets?view=execution");
+      expect(catalogue.body.tickets).toEqual([waiting.body]);
+      const { attention } = waiting.body.receipt;
+      expect(attention).toMatchObject({ kind: "answer" });
+      const log = await second.call(`${path}/log`);
+      expect(log.body.events).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "ticket_iteration", ticketId: id }),
+        ])
+      );
+      expect(
+        log.body.events.every(
+          (event: Record<string, unknown>) => !("goalId" in event)
+        )
+      ).toBe(true);
+      const reply = await second.call(`${path}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ attentionId: attention.id, answer: "Movies" }),
+      });
+      expect(reply.status).toBe(200);
+      await vi.waitFor(async () => {
+        const finished = await second.call(`${path}/execution`);
+        expect(finished.body).toMatchObject({
+          ticket: {
+            id,
+            assignments: [{ state: "ended", report: { state: "ready" } }],
+          },
+          stage: "completed",
+        });
+      });
+      const stream = await second.app.handler.handle(
+        new Request(`http://127.0.0.1:8787${path}/log?follow=true`)
+      );
+      expect(stream.headers.get("content-type")).toBe("text/event-stream");
+      expect(await stream.text()).toContain("event: ticket_completed");
+    } finally {
+      await second.app.agent.quiesce();
+    }
+  });
+
+  it("subscribes a direct Ticket to the threads it names", async () => {
+    const { call } = open();
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Watch the media servers",
+        idempotencyKey: "ticket-threads",
+        threads: ["container:emby", { kind: "container", id: "sonarr" }],
+      }),
+    });
+    expect(created.status).toBe(201);
+    const ticket = (await call(`/v1/tickets/${created.body.ticket.id}`)).body;
+    expect(ticket.subscriptions).toEqual(
+      expect.arrayContaining([
+        "resource:container:emby",
+        "resource:container:sonarr",
+      ])
+    );
+  });
+
+  it("does not serve the retired public Goal API", async () => {
+    const { call } = open();
+    expect((await call("/v1/goals")).status).toBe(404);
+    expect((await call("/v1/goals/abc")).status).toBe(404);
+    expect((await call("/v1/session/abc/goal")).status).toBe(404);
+    const spec = await call("/openapi.json");
+    expect(
+      Object.keys(spec.body.paths).filter(
+        (path) => path.startsWith("/v1/goals") || path.endsWith("/goal")
+      )
+    ).toEqual([]);
+  });
+
   it("starts empty, and a Core that has them says so on /v1/health", async () => {
     const { call } = open();
     expect((await call("/v1/tickets")).body).toEqual({ tickets: [] });
@@ -84,6 +670,8 @@ describe("tickets", () => {
         post: expect.any(Object),
       },
       "/v1/tickets/{id}": { get: expect.any(Object) },
+      "/v1/tickets/{id}/execution": { get: expect.any(Object) },
+      "/v1/tickets/{id}/log": { get: expect.any(Object) },
       "/v1/tickets/{id}/reply": { post: expect.any(Object) },
       "/v1/tickets/{id}/note": { post: expect.any(Object) },
       "/v1/tickets/{id}/pause": { post: expect.any(Object) },
@@ -101,34 +689,32 @@ describe("tickets", () => {
     });
   });
 
-  it("makes an explicit, direct Ticket for a task the person asks for, and links it from the task", async () => {
+  it("makes an explicit, direct Ticket for a task the person asks for", async () => {
     const { app, call } = open();
-    const created = await call("/v1/goals", newGoal);
+    const created = await call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "direct-library",
+        maxIterations: 2,
+      }),
+    });
     expect(created.status).toBe(201);
-    await app.agent.waitGoal(created.body.id);
+    const goalId = created.body.goal.id as string;
+    await app.agent.waitGoal(goalId);
 
-    const ticketId = created.body.ticketId as string;
+    const ticketId = created.body.ticket.id as string;
     expect(ticketId).toMatch(/^[a-f0-9]{32}$/);
-    expect((await call(`/v1/goals/${created.body.id}`)).body.ticketId).toBe(
-      ticketId
-    );
-    const listed = (await call("/v1/goals")).body.goals as Array<
-      Record<string, any>
-    >;
-    expect(listed.find((g) => g.id === created.body.id)?.ticketId).toBe(
-      ticketId
-    );
-
     const tickets = (await call("/v1/tickets")).body.tickets as Array<
       Record<string, any>
     >;
-    expect(tickets).toHaveLength(1);
+    expect(tickets.map((ticket) => ticket.id)).toEqual([ticketId]);
     const ticket = (await call(`/v1/tickets/${ticketId}`)).body;
     expect(ticket).toMatchObject({
       id: ticketId,
       title: "Move the library",
-      mandate: { strength: "explicit", decidedBy: "direct", requester: "chat" },
-      links: { legacyGoalId: created.body.id, sessionIds: [created.body.id] },
+      mandate: { strength: "explicit", decidedBy: "direct", requester: "http" },
+      links: { legacyGoalId: goalId, sessionIds: [goalId] },
     });
     // The Ticket does not copy what the Goal owns.
     expect(ticket).not.toHaveProperty("status");
@@ -158,14 +744,20 @@ describe("tickets", () => {
   it("keeps its Tickets across a restart", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-tickets-http-"));
     const first = open(dir);
-    const created = await first.call("/v1/goals", newGoal);
-    await first.app.agent.waitGoal(created.body.id);
+    const created = await first.call("/v1/tickets", {
+      method: "POST",
+      body: JSON.stringify({
+        task: "Move the library",
+        idempotencyKey: "restart-ticket",
+      }),
+    });
+    await first.app.agent.waitGoal(created.body.goal.id);
 
     const second = open(dir);
     const tickets = (await second.call("/v1/tickets")).body.tickets as Array<
       Record<string, any>
     >;
-    expect(tickets.map((t) => t.id)).toEqual([created.body.ticketId]);
+    expect(tickets.map((t) => t.id)).toEqual([created.body.ticket.id]);
   });
 
   it("backfills existing Goals once without changing their Goal identity", async () => {
@@ -210,11 +802,9 @@ describe("tickets", () => {
       },
       createdAt: run.createdAt,
     });
-    const goal = (await second.call(`/v1/goals/${run.thebeSessionId}`)).body;
-    expect(goal).toMatchObject({
-      id: run.thebeSessionId,
-      ticketId: firstRead[0]?.id,
-    });
+    expect(
+      (await second.app.agent.getTicketForGoal(run.thebeSessionId))?.id
+    ).toBe(firstRead[0]?.id);
   });
 
   it("delegates idempotently and replies to the Ticket's attention", async () => {
@@ -290,7 +880,7 @@ describe("tickets", () => {
     });
     expect(
       (
-        await call(`/v1/goals/${goalId}/stop`, {
+        await call(`/v1/tickets/${ticketId}/stop`, {
           method: "POST",
           body: "{}",
         })
@@ -442,7 +1032,8 @@ describe("tickets", () => {
   });
 
   it("retries blocked work under the same Ticket and Goal", async () => {
-    const { app, call, fake } = open(undefined, [
+    const dir = await mkdtemp(join(tmpdir(), "thebe-http-ticket-history-"));
+    const { app, call, fake } = open(dir, [
       {
         kind: "tools",
         calls: [
@@ -492,6 +1083,18 @@ describe("tickets", () => {
     });
     expect(completed.blocked).toBeUndefined();
     expect(app.agent.getGoal(goalId)?.status).toBe("completed");
+    const history = await call(`/v1/tickets/${ticketId}`);
+    expect(history.status).toBe(200);
+    expect(history.body.assignments).toMatchObject([
+      {
+        state: "ended",
+        report: { state: "blocked", summary: "The library is read-only" },
+      },
+      { state: "ended", report: { state: "ready" } },
+    ]);
+    const reopened = await open(dir, []).call(`/v1/tickets/${ticketId}`);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body.assignments).toEqual(history.body.assignments);
   });
 
   it("refuses retry after completion or a person stop", async () => {
@@ -641,7 +1244,10 @@ describe("tickets", () => {
     expect(retried.status).toBe(200);
     expect(retried.body).toMatchObject({
       reused: true,
-      ticket: { id: created.body.ticket.id },
+      ticket: {
+        id: created.body.ticket.id,
+        assignments: [{ state: "ended", report: { state: "ready" } }],
+      },
       goal: { id: created.body.goal.id },
     });
   });

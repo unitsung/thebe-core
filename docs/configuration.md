@@ -10,6 +10,12 @@ Thebe 的用户配置文件默认位于：
 ~/.thebe/config.json
 ```
 
+通知通道凭据默认位于：
+
+```text
+~/.thebe/notification-config.json
+```
+
 Pi Adapter 使用的 agent 文件默认位于：
 
 ```text
@@ -25,6 +31,7 @@ Pi Adapter 使用的 agent 文件默认位于：
 - `/config`：使用外部编辑器打开 `config.json`。文件不存在时会安全创建。编辑器退出后，Thebe 恢复 TUI 并重新绘制界面。
 - `/config path`：显示 Thebe 配置文件、Pi agent 目录、工作区和文档输出目录的实际路径。
 - `/settings`：在 TUI 内修改常用设置。
+- `/notifications`：在 TUI 内配置通知通道凭据；输入密钥时字符会隐藏，`/notifications list` 只显示是否配置，`/notifications path` 显示文件路径。
 
 手动修改后，需要重新启动 Thebe 才能确保所有设置生效。
 
@@ -157,20 +164,22 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
   - 准入结果随 Trigger 持久化；工单范围（Mandate）和 Core 的审批检查仍是授权边界，来源身份不能扩大范围。
   - 两个适配器目前只有模拟 API 的自动化测试；接入生产账号前，先在测试 Core 上验证凭据和网络。
 
-- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；权限取自工具的 `readOnlyHint`，或 `.thebe/mcp.json` 里服务器级的 `permission: "read"`。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
+- `THEBE_MCP_WRITES` 决定经 `/mcp` 连接的 agent 能否调用写工具：`container_restart`、Navidrome 歌单写操作、服务商 MCP 的写工具，以及已配置服务 API 的预览加确认调用。**默认开启。** 设为 `off`（或 `deny`/`false`/`0`/`no`）可让 `/mcp` 变成只读，客户端无法自己改这一项。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。服务商 MCP 的工具只要权限不是 `read` 就算写操作；`read` 只来自你在 `.thebe/mcp.json` 里为该服务器列出的 `readTools`，或服务器级的 `permission: "read"`，服务器自己声明的 `readOnlyHint` 不算。重启会留下普通回执，其审批来源为 `mcp_client`，每次写操作都记入审计日志。
 - `THEBE_AUDIT_PATH` 设置只追加的审计日志（JSON 行：方法、参数哈希、结果、耗时；不含参数和输出内容）。默认是 agent store 目录下的 `audit.jsonl`，可由 `GET /v1/audit` 读取。
 
 ## OpenList STRM 修复 provider
 
-Core 可以在启动时注册一个 provider-owned `strm_repair` 实现。配置完整的
-OpenList 地址和 token 后，能力会自动出现在 Core capability catalog；缺少任一
-变量时不会暴露该写能力：
+Core 可以在启动时注册一个 provider-owned `strm_repair` 实现。OpenList 凭据的推荐
+位置是下文的 `storage` 段（`thebe storage add openlist ...`）；下面的环境变量仍是
+兼容回退。配置完整的 OpenList 地址和 token 后，能力会自动出现在 Core capability
+catalog；缺少任一凭据时不会暴露该写能力：
 
 ```bash
 export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 # With qBittorrent (THEBE_QBITTORRENT_URL/USERNAME/PASSWORD), OpenList and an Emby/Jellyfin API key configured,
-# Core exposes the acquisition pipeline tools: download_add/list/status/pause/resume, files_list/mkdir/copy/move/offline_download,
+# Core exposes the acquisition pipeline tools: download_add/list/status/pause/resume,
+# files_list/mkdir/copy/move/rename/remove/upload/offline_download,
 # library_scan and library_refresh_item. With THEBE_PROWLARR_URL/THEBE_PROWLARR_API_KEY it also exposes resource_search,
 # and pipeline_acquire/advance/status: a deterministic job (download → copy → scan → verify, bounded retries,
 # persisted in <agent store>/pipeline-jobs.json). Writes need approval; the system prompt carries the find → download → place → scrape playbook.
@@ -192,10 +201,126 @@ Core 自动识别版本。未知 hash 会被拒绝，不会静默成功（qBitto
 自己推进本进程内新建的任务（每分钟一次），所以手机休眠时
 也能跑完。Core 重启后恢复出来的任务不会被自动续跑，需要显式调用 `pipeline_advance`；失败的任务不会自动重试。
 
+### 文件存储后端
+
+文件存储配置放在 `~/.thebe/config.json`（或 `$THEBE_CONFIG_DIR/config.json`），
+不再依赖一组环境变量。`storage` 段是唯一事实来源：
+
+```json
+{
+  "storage": {
+    "default": "media",
+    "backends": [
+      {
+        "id": "openlist",
+        "type": "openlist",
+        "baseUrl": "https://openlist.example.com",
+        "token": "your-openlist-token"
+      },
+      { "id": "media", "type": "local", "roots": ["/mnt/media"] },
+      {
+        "id": "nas",
+        "type": "webdav",
+        "url": "https://dav.example.com/dav",
+        "username": "user",
+        "password": "secret"
+      }
+    ]
+  }
+}
+```
+
+用 CLI 管理；每条命令都原子写入该文件（权限 `0600`），并保留其他配置键：
+
+```bash
+thebe storage list
+thebe storage add openlist openlist --url https://openlist.example.com --token <token> --default
+thebe storage add local media --roots /mnt/media,/mnt/backup
+thebe storage add webdav nas --url https://dav.example.com/dav --username user --password secret
+thebe storage test media
+thebe storage default media
+thebe storage remove openlist
+```
+
+`thebe storage test` 会列出指定后端（或全部后端）的 `/` 并报告条目数。用已存在的
+id 执行 `storage add` 会替换该后端；省略某个密钥则保留已存的值，所以改地址不需要
+重新输入 token。WebDAV 可以 `--username` + `--password` 使用 Basic
+认证，也可以只用 `--token` 使用 Bearer。
+
+同一套配置通过产品 HTTP API 提供给 Web UI：
+
+- `GET /v1/settings/storage` 返回后端列表、配置路径、来源、默认后端和问题列表；
+  密钥会脱敏为 `hasToken`/`hasPassword`。
+- `PUT /v1/settings/storage` 替换整个列表；省略密钥时沿用同 id、同类型后端已存的
+  密钥。`default: null` 选择第一个后端，省略 `default` 则保留当前默认值。
+- `POST /v1/settings/storage/test` 可带 `{ "id": "media" }`，测试单个或全部后端。
+
+配置修改无需重启 Core。每次 `files_*` 工具调用都会重新读取配置，所以运行中的会话
+能立即看到新增、修改或删除的后端。采集任务在会话打开时确定默认后端：修改默认值后
+请开新会话，已有任务才会使用新的默认后端。
+
+配置多个后端时，每次文件工具调用都要带 `provider` 参数（即后端 `id`），
+`files_list` 会返回当前配置的 id；只配置一个时自动使用它。某个后端不支持的操作
+不会出现对应工具。
+
+`local` 后端把宿主机目录接入同一套文件工具，适合宿主机已经挂载好的 NFS/SMB 共享
+或任意本地路径。根目录必须是绝对路径。传给工具的路径必须解析到这些根目录之内；
+`..` 和逃出根目录的符号链接会被拒绝或隐藏。在该后端列出 `/` 时返回的是配置的根
+目录本身。Core 容器只能看到宿主机挂载进来的目录，所以要先挂载共享（Docker bind
+mount / compose `volumes`），再传容器内路径。
+
+`webdav` 后端使用 PROPFIND、MKCOL、COPY、MOVE、DELETE 和 PUT，发送
+`Overwrite: F`，目标已存在时拒绝覆盖。`token` 发送 bearer token；否则
+`username` + `password` 发送 Basic 认证。
+
+Core 不内置 SMB/NFS 客户端：在宿主机挂载共享后使用 `local` 后端（如果存储本身由
+OpenList 管理，OpenList 自带的 SMB/WebDAV 驱动仍是功能更全的路径）。
+
+`files_remove` 必须明确给出 `recursive` 布尔值，非空目录只有传 `true` 才会删除。
+`files_upload` 只读取工作区或输出目录（上限 1 GiB），并拒绝覆盖已存在的目标名。
+
+一个 OpenList 后端（无论来自配置还是环境变量）除了文件工具，还会注册
+`strm_repair`、网盘转存和 OpenList 后台任务。这些长生命周期 provider 在 Core
+启动时读取 OpenList 地址与 token；`files_*` 工具则始终读取当前配置。修改 OpenList
+后端的地址或 token 后，要让采集/转存相关功能生效需重启 Core。
+
+##### 兼容的环境变量
+
+`THEBE_OPENLIST_BASE_URL`/`THEBE_OPENLIST_TOKEN`、`THEBE_FILES_LOCAL_ROOTS`，以及
+`THEBE_WEBDAV_URL`/`_USERNAME`/`_PASSWORD`/`_TOKEN` 仍然可用，但只在
+`config.json` 没有 `storage` 段时生效。一旦存在该段，环境变量会被忽略——这样删除
+后端才是可靠的。想保留现有的环境变量配置，执行一次导入：
+
+```bash
+thebe storage import-env
+```
+
+环境变量对应的 id 是 `openlist`、`local` 和 `webdav`。`THEBE_OPENLIST_MCP=on`
+开启的 OpenList MCP preset 仍读取环境变量；也可以手动执行
+`thebe mcp add openlist --url ... --header "Authorization: <token>"`。
+
 `OPENLIST_BASE_URL` 和 `OPENLIST_TOKEN` 也可作为兼容别名。provider 会通过
 OpenList 的 `/api/fs/get`、`/api/fs/search` 和 `/api/fs/put` 完成候选查找、STRM
 写回与复读验证，候选包括常规媒体文件以及 HLS `.m3u8` / DASH `.mpd` 播放列表；
 token 只由 Core adapter 使用，不进入 Agent capability 参数。
+
+OpenList 还自带官方 MCP server。先在 OpenList 自己的配置里开启
+`"mcp": { "enable": true }` 并重启，再让 Core 挂载：
+
+```bash
+export THEBE_OPENLIST_MCP=on
+```
+
+Core 会在 `<THEBE_OPENLIST_BASE_URL>/mcp` 添加一个 deferred 的 `openlist` MCP
+server，并把用户 token 原样放进 `Authorization`（OpenList 不接受 `Bearer`
+前缀）。预设把 `openlist.fs.list`、`openlist.fs.get` 和 `openlist.fs.link` 声明为
+只读工具，因此 `/mcp` 客户端不会把它们当成写操作。该预设默认关闭，因为上面的
+原生 adapter 已覆盖同样的读取；`.thebe/mcp.json` 里显式定义的 `openlist`
+条目优先于环境变量预设。也可以手动添加：
+
+```bash
+thebe mcp add openlist --url https://openlist.example.com/mcp --header "Authorization: <token>"
+```
 
 ## MCP OAuth 网关
 
@@ -307,7 +432,8 @@ refresh token，吊销 refresh token 后，相关 access token 在下一次 `/mc
 
 - `exposure`：`codemode`（默认，工具只能在 `codemode` 脚本里调用，不占模型的工具声明）、`deferred`（`tool_search` 加载后才声明）、`direct`、`hidden`。
 - URL 服务器可带 `headers`（字符串键值），每个请求都会发送，用来接入需要令牌的服务商自带 MCP，例如 `"headers": { "X-Api-Key": "..." }` 或服务专用头 `{"sqmusic":"<JWT>"}`，Core 不用为它新增厂商适配器。有自带 MCP 的服务优先这样接：把 Core 指向它的 MCP，工具就有了。`headers` 保存在 `.thebe/mcp.json`（权限 `600`），不写日志，也只发给配置的 URL。
-- `permission`：`read` 以外的服务器每次调用都要审批；不写则按工具自己的 `readOnlyHint` 判断，没有声明就审批。
+- `permission`：`read` 以外的服务器每次调用都要审批；不写时，只有 `readTools` 列出的工具按读处理，其余一律审批。服务器自己的 `readOnlyHint` 不作为依据：失陷的服务器可以对写工具谎称只读。
+- `readTools`（可选，工具名数组，用服务器自己的原名）：你确认这些工具只读。列出的工具在会话里不再逐个审批，经 `/mcp` 调用时也不被 `THEBE_MCP_WRITES` 或 token 的 `mcp:write` 当作写操作。服务器级 `permission: "read"` 相当于把全部工具都列进来。
 - `irreversible`（可选，工具名 → 布尔）：经 `/mcp` 调用时，哪些工具的调用无法撤销。默认只看服务器自己的 `destructiveHint`；你的标注优先：`true` 要求 token 带 `mcp:irreversible`，`false` 把服务器标了 destructive 的工具当普通写。例：`"irreversible": { "delete_movie": true, "clear_cache": false }`。
 - 脚本在 Pi 的 QuickJS 沙箱里运行，只能通过工具访问外部；脚本里的每次 MCP 调用同样经过策略、审批、审计和脱敏。`codemode` 的 `models` 全局已关闭。
 - stdio 服务器只继承 `HOME`、`PATH` 等基本变量加自己的 `env`，不继承 Core 的环境变量。
@@ -503,6 +629,112 @@ export THEBE_DOCKER_PROXY_URL=http://127.0.0.1:2375   # 代理根地址，必须
 - 工作区越界：写工作区外路径、或 `rm/mv/cp/chmod/chown` 等改动工作区外路径，都会升级为 `dangerous`。
 - 直接打 Docker Engine API 的调用（`curl --unix-socket /var/run/docker.sock ... /containers/create`、podman remote）走 `docker-api-guard.ts`：`HostConfig.Privileged=true`、`Binds` 里的宿主根 / `docker.sock`、`CapAdd: SYS_ADMIN|ALL`、`/volumes/prune` 与 `/system/prune` 一律 `critical`（策略拒绝）；`/containers/create` 的 body 解析不出来时降级为 `dangerous`（转人工）而不是放行。
 - 这层守卫始终开启；只有 `bypassPermissions`（见下）能为单个会话关掉它。
+
+## 多通道通知
+
+`/v1/notifications/*` 把需要人知道的事件送到 owner 配置的目标；设备 Push（`/v1/devices` 与 Push Relay）仍是并行的另一条通道。
+
+- 设置保存在 `{agentStoreDir}/notifications/notifications.json`（0600），待发送队列保存在同目录的 `outbox.json`。适配器级凭据（bot token、SMTP 密码、企微 corp secret 等）优先来自 `{configDir}/notification-config.json`（0600，TUI `/notifications` 编辑）；未配置时回退到环境变量。地址自身携带的 token（钉钉 access token、webhook URL）保存在 0600 设置文件，读取时会被遮住。
+- TUI 的 `/notifications` 逐个通道编辑这些凭据，密钥输入会遮挡；保存后运行中的 Core 会自动重载；未运行的 Core 在下次启动时读取。`/notifications list` 只显示字段是否已配置，不打印密钥；`/notifications path` 显示文件路径。环境变量仍保留给容器和自动化部署作为回退。
+- App 的“通知通道 → 通道凭据”通过 `GET/PUT /v1/notifications/config` 编辑同一份文件；读取时密钥字段返回遮罩值，保存时 Core 恢复未修改的密钥。保存后适配器立即重建，不需要重启。
+- `NotificationTarget.channel.source` 选择适配器。原生适配器：`webhook`、`slack`、`discord`、`telegram`、`teams`、`googlechat`、`mattermost`、`ntfy`、`bark`、`feishu-webhook`、`dingtalk`、`wecom`、`smtp`、`pushover`、`gotify`、`matrix`、`nextcloud-talk`、`signal`、`whatsapp`、`line`、`zalo`、`twilio`、`bluebubbles`、`synology-chat`、`twitch`、`irc`、`apprise`。已绑定的 Telegram、微信、QQ 或 iMessage 会话也可以作为 `im` transport 的通知目标。声明主动发送能力的通道（目前是 iMessage）直接发送；QQ/微信这类仅回复通道会在窗口内使用最近一条入站消息作为回复锚点，窗口关闭后记为 `window_closed`。现有飞书/GitHub Ticket channel 也可作为 owner target（非 Ticket 通知会作为普通消息/评论发送）。
+- `channel.address` 按通道填写：webhook `{url, secret?}`；Slack/Discord/Teams/Google Chat/Mattermost/Synology Chat `{url}`（Mattermost 还接受 `channel?` 覆盖频道）；Telegram `{chatId, threadId?}`；ntfy `{url?, topic?, token?}`；Bark `{deviceKey, server?}`；飞书 `{url?, secret?}`；钉钉 `{url?, accessToken?, secret?}`（URL 可放在目标里）；企业微信群机器人 `{url}`（目标自带或 Core 环境变量）或应用消息 `{toUser}`；邮件 `{to}`；Pushover `{user}`；Gotify `{token, url?}`；Matrix `{roomId}`；Nextcloud Talk `{roomToken}`；Signal `{recipients}`（逗号分隔的电话号码或 `group.*` id）；WhatsApp/Twilio `{to}`；BlueBubbles `{chatGuid}`；LINE `{to}`；Zalo Bot `{chatId}`；Twitch `{broadcasterId}`；IRC `{channel}`；Apprise `{token?}`。
+- `GET /v1/notifications/channels` 返回 App 渲染用的通道目录：id、名称、说明、地址字段、capabilities、主机是否已注册该适配器，以及未注册时的 `setup` 提示。App 的“设置 → 通知通道”通过该接口和 settings 接口编辑目标，并可发送测试通知；适配器凭据不落到 App 本地。设备 Push（APNs，经 Push Relay）仍在独立页面。
+- 类别：`attention`、`completed`、`failed`、`budget`、`watchdog`、`source_health`、`pipeline`。优先级：`critical`、`normal`、`low`。目标用 `categories` 和 `minPriority` 收窄自己。
+- `critical` 默认穿透静默时段；把 `criticalBypassesQuietHours` 设为 `false` 可关闭。普通和低优先级通知在静默窗口结束后才进入队列。`rateLimitPerHour` 是每目标每小时上限（0 表示不限），`critical` 不受限；滚动窗口只在内存中，重启会清零。
+- 投递是持久、至少一次、按目标串行的：同一 `id` 重试不会产生第二条；请求已发出但超时（TimeoutError/AbortError）记为 `unknown`，Core 重启后不会重放。连接失败/断连（refused、reset 等）属于可恢复错误，会按退避重试而非记为 `unknown`。
+- `GET/PUT /v1/notifications/settings`、`GET /v1/notifications/channels`、`GET /v1/notifications/status`、`POST /v1/notifications/test`、`POST /v1/notifications/send` 都受 Core token 保护；写操作在 quiesce 时返回 503。`GET settings` 会遮住 `secret`、`token`、`password`、`apiKey`、Bark `deviceKey`、Pushover `user` 类字段和 URL 查询串里的凭据。
+- `POST /v1/notifications/send` 是 devloop 等外部发送方的入口，接受 `{id?, category, priority, title, body, deepLink?, ticketId?, goalId?}`；省略 `id` 时每次请求生成新 id，需要幂等时请自带稳定 id。它只入队并返回 202，实际投递由 outbox 完成。
+- 带 `digest`（`{windowMinutes, categories}`）的目标会把匹配的 `low`/`normal` 通知累积到窗口结束，只发一条摘要；`critical` 永远立即发送。摘要状态持久化在 `digests.json`，重启会保留窗口，并补发 Core 停机期间已结束的窗口。`GET /v1/notifications/status` 用 `digestPending` 报告尚未发出的条数。Goal 通知还会携带 Ticket 记录的 `ChannelRef` 作为事件级 target；它们与 owner targets 合并并按 channel 去重，最终仍由现有 ChannelAdapter 写回。
+
+环境变量：
+
+```bash
+# 通用 webhook 不需要环境变量；每个目标在 address 里给 url（可选 secret 做 HMAC-SHA256）
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+export THEBE_WECOM_WEBHOOK_URL='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
+# 或企业微信应用消息（target 使用 {toUser}）
+export THEBE_WECOM_CORP_ID=ww...
+export THEBE_WECOM_CORP_SECRET=...
+export THEBE_WECOM_AGENT_ID=1000002
+export THEBE_DINGTALK_WEBHOOK_URL='https://oapi.dingtalk.com/robot/send?access_token=...'
+export THEBE_DINGTALK_SECRET=SEC...
+export THEBE_SMTP_URL='smtps://smtp.example.com:465'
+export THEBE_SMTP_FROM='thebe@example.com'
+# 其他原生适配器（均可选）：
+export THEBE_FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/...'
+export THEBE_FEISHU_WEBHOOK_SECRET=...
+export THEBE_GOTIFY_URL='https://gotify.example.com'
+export THEBE_PUSHOVER_TOKEN=...
+export THEBE_MATRIX_HOMESERVER_URL='https://matrix.example.com'
+export THEBE_MATRIX_ACCESS_TOKEN=...
+export THEBE_SIGNAL_URL='http://127.0.0.1:8080'
+export THEBE_SIGNAL_NUMBER='15550104'
+export THEBE_WHATSAPP_ACCESS_TOKEN=...
+export THEBE_WHATSAPP_PHONE_NUMBER_ID=...
+# 可选，默认 v20.0。
+export THEBE_WHATSAPP_API_VERSION=v20.0
+export THEBE_TWILIO_ACCOUNT_SID=AC...
+export THEBE_TWILIO_AUTH_TOKEN=...
+export THEBE_TWILIO_FROM='15550104'
+export THEBE_BLUEBUBBLES_URL='http://127.0.0.1:1234'
+export THEBE_BLUEBUBBLES_PASSWORD=...
+export THEBE_APPRISE_URL='http://127.0.0.1:8000'
+export THEBE_APPRISE_KEY=apprise-config-key
+export THEBE_LINE_CHANNEL_ACCESS_TOKEN=...
+export THEBE_ZALO_BOT_TOKEN=...
+# 可选，测试或自建代理；默认 https://bot-api.zaloplatforms.com。
+export THEBE_ZALO_API_URL='https://bot-api.zaloplatforms.com'
+export THEBE_NEXTCLOUD_TALK_URL='https://cloud.example.com'
+export THEBE_NEXTCLOUD_TALK_BOT_SECRET=...
+export THEBE_TWITCH_CLIENT_ID=...
+export THEBE_TWITCH_USER_ACCESS_TOKEN=...
+export THEBE_TWITCH_SENDER_ID=...
+export THEBE_IRC_HOST='irc.example.com'
+export THEBE_IRC_PORT=6697
+export THEBE_IRC_TLS=true
+export THEBE_IRC_NICK=thebe
+export THEBE_IRC_PASSWORD=...
+```
+
+没有配置对应凭据的适配器不会注册；指向它的目标会记录 `adapter_missing`，不影响其他目标。测试发送只验证地址和凭据，不进入 outbox。
+
+## IM 双向通道（多平台接缝；内置 Telegram、微信 ClawBot、QQ 和 iMessage）
+
+`/v1/im/*` 是双向聊天接入，和上面的通知出口是两条并列的路径：通知只写出站，IM 适配器还能接收平台消息。入站消息只允许进入 owner 私聊绑定的主 Session（`thebe-main`）；绑定同时固定 owner 的平台 sender id，同一私聊里的其他 sender 会被记录但不会进入模型。群聊和 guest 绑定只记录、不进入模型，也不会获得 shell/文件工具或跳过审批。
+
+- 状态保存在 `{agentStoreDir}/im/im.json`（0600）：账号、绑定、带 bot 身份标记的游标、7 天去重表和未处理入站队列。凭据是一组平台自定义字段，单独保存在同目录的 `im-secrets.json`（0600），任何 HTTP 响应都不返回；日志和错误信息也不包含凭据。
+- `POST /v1/im/channels` 接受 `{platform, label?, credentials: {字段: 值}}`。每个平台的 factory 声明必填字段、可选字段和校验规则；`platform` 是注册 id，内置适配器是 `telegram`（Bot Token）、`wechat`（微信 ClawBot / iLink）、`qq`（官方 Bot AppID/AppSecret）和 `imessage`（BlueBubbles 服务器）。Telegram 仍接受旧的 `token` 简写。
+- 平台工厂可选提供扫码/链接/验证码登录。`POST /v1/im/logins` 开始一次登录，`GET /v1/im/logins/{id}` 轮询，`POST /v1/im/logins/{id}/code` 在 `need_verifycode` 状态提交手机 PIN，`DELETE /v1/im/logins/{id}` 取消。二维码/链接只在开始响应里返回一次，不写入状态文件或日志；确认后只返回新建的 `accountId`，凭据直接写入 `im-secrets.json`。内置 Telegram 使用 token，不支持登录流程，会返回 `login_not_supported`；微信使用扫码登录。
+- 路由：`GET /v1/im/platforms`（已注册平台、凭据字段和是否支持登录）、`GET/POST /v1/im/channels`、`DELETE /v1/im/channels/{id}`、`POST /v1/im/channels/{id}/test`、`POST /v1/im/logins`、`GET/DELETE /v1/im/logins/{id}`、`GET /v1/im/status`、`GET /v1/im/conversations`、`POST /v1/im/bind`、`DELETE /v1/im/bind/{id}`、`POST /v1/im/send`。写操作在 quiesce 时返回 503。
+- 绑定：先让 owner 给 bot 发一条消息，从 `/v1/im/conversations` 拿到 `chat.id`，再 `POST /v1/im/bind`，`chat.kind` 为 `direct`、`role` 为 `owner`。未观察过的 chat 返回 `chat_not_seen`；`senderId` 可省略（固定最后观察到的 sender），显式给出时必须与观察值一致，否则返回 `sender_mismatch`。`sessionId` 目前只能是 `thebe-main`；群聊只能绑为 `guest`，私聊不能绑为 `guest`，群聊也不能绑为 `owner`。
+- 入站先持久化再处理；同一 `(platform, account, chat, threadId, messageId)` 或 `updateId` 只处理一次。每个 chat（含 thread）一条串行队列，不同 chat 并行；Core 重启后未处理的入站会继续，已完成的消息不会重放。
+- 主 Session 正在处理另一轮时，owner 消息留在队列里而不是丢弃：默认 5 秒后回一条“排队中”，10 分钟后回一条超时提示并结束该条消息；如果主 Session 正在流式输出，消息会以 `followUp` 加入当前轮。`GET /v1/im/status` 的 `pending` 是队列深度。
+- 每个适配器会如实报告 capabilities：`proactive`、`replyOnly`、`replyWindowMs`、`maxMessagesPerWindow`、`recall`、`media`、`maxTextLength`、`markdown`、`threads`、`typing`。主动发送前 gateway 会检查 `proactive` 和适配器的 `canSendProactively(chat)`；不支持时返回 `proactive_not_supported`，窗口关闭时返回 `window_closed`。回复锚点（`replyTo`、`contextToken`）只属于当轮，持久目标只有 account + chat + 可选 thread。
+- 仅回复通道会在内存中保留最近一条入站回复锚点（消息 id；微信还包括短期 `context_token`）。通知和通道测试只在 capability 窗口内可以使用它；锚点不写入 `im.json`，Core 重启或 quiesce 后丢弃。没有任何入站消息时测试仅回复通道返回 `no_reply_anchor`，窗口关闭后返回 `reply_window_closed`。
+- 入站结构已包含 `threadId`、`mentions`、`media` 和 `replyAuthor`；媒体只记录描述，不下载、不执行。带文本的媒体消息会保留描述；纯媒体消息只记录会话，owner 会收到“暂不支持媒体”的提示，不进入模型。出站媒体在 `media: true` 的适配器真正实现前不会被声明为支持。
+- 游标与 bot/账号身份绑定：token 或账号身份变化时旧游标作废，避免把新 bot 从旧 `update_id` 开始轮询。
+- Telegram 适配器用 `getUpdates` 长轮询（`allowed_updates: ["message"]`），游标是 `update_id + 1`；支持论坛/话题的 `message_thread_id`。发送为纯文本，不设置 `parse_mode`，按 4096 字符分块并带 `(n/m)` 标记。429 只暂停该 bot token，409（另一个进程在轮询同一个 bot）进入 `error` 并停止轮询，不会无限重连。
+- `GET /v1/health` 只在至少配置了一个通道时报告 `im`。`health.state` 为 `stopped` / `starting` / `connected` / `needs_login` / `error`，可带安全的 `code`、`since`、`retryAt`。一个通道失败不会影响 Core 启动或其他通道；`GET /v1/im/status` 显示每个通道的最新错误（不含凭据）。
+- `THEBE_TELEGRAM_BOT_TOKEN` 会自动创建一个 environment 类型的 Telegram 通道（不能通过 API 删除）。`THEBE_TELEGRAM_API_BASE` 可用于自建代理或测试，`THEBE_TELEGRAM_POLL_TIMEOUT` 设置长轮询秒数（1–50，默认 50）。
+- 微信适配器使用腾讯官方 ClawBot / iLink 协议：通过 `POST /v1/im/logins` 扫码登录，登录凭据只写入 Core。它是回复型通道，每条发送都带当轮入站的 `context_token`，不会被通知路由器选为主动推送。`THEBE_WECHAT_API_BASE` 可指向自建代理或测试服务，默认 `https://ilinkai.weixin.qq.com`。协议层移植自腾讯 MIT 许可的 Weixin ClawBot 协议层；Core 不运行外部 Agent 运行时。
+- QQ 适配器使用官方 QQ Bot OpenAPI v2 的 WebSocket 网关。填写 `AppID`、`AppSecret` 后接收 `C2C_MESSAGE_CREATE` 和 `GROUP_AT_MESSAGE_CREATE`，并用入站的 `msg_id` 加递增的 `msg_seq` 发送被动回复。它刻意只做回复：QQ 的主动推送有限频，且用户可关闭。单聊回复窗口为 60 分钟/4 条，群内 @ 为 5 分钟/5 条；文本按 2000 字符分块。`THEBE_QQ_APP_ID`/`THEBE_QQ_APP_SECRET` 可从环境变量预置通道；`THEBE_QQ_API_BASE`、`THEBE_QQ_TOKEN_URL`、`THEBE_QQ_GATEWAY_URL` 可指向代理或测试服务。
+- iMessage 适配器通过一台常开的 Mac 上的 BlueBubbles 服务器工作。填写服务器地址和 password；Core 轮询 `POST /api/v1/message/query`，用 `POST /api/v1/message/text` 发文本。目前只支持文本；Mac 离线时发送会交给通知 outbox 重试，而不是静默丢弃。`THEBE_IMESSAGE_BASE_URL`/`THEBE_IMESSAGE_PASSWORD`（或已有的 `THEBE_BLUEBUBBLES_URL`/`THEBE_BLUEBUBBLES_PASSWORD`）可从环境变量预置通道。
+
+```bash
+# 只用环境变量接一个 Telegram 双向通道；同一个 bot token 也可以继续作为通知 target
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+# 可选：自建 Bot API 代理，或测试用假服务
+export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
+# 可选：自建微信 iLink 代理或测试服务
+export THEBE_WECHAT_API_BASE='https://ilinkai.weixin.qq.com'
+# 从环境变量接一个 QQ 双向通道
+export THEBE_QQ_APP_ID=102030
+export THEBE_QQ_APP_SECRET=...
+# 从环境变量接一个 iMessage（BlueBubbles）通道；同一个服务器也可作为通知 target
+export THEBE_IMESSAGE_BASE_URL='https://bluebubbles.example'
+export THEBE_IMESSAGE_PASSWORD=...
+```
 
 ## 权限模式
 

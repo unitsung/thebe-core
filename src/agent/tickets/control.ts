@@ -6,6 +6,8 @@ import type { Trigger } from "../sources/types.ts";
 import { toProductGoal, type ProductGoal } from "../goals/product.ts";
 import { httpError } from "../types.ts";
 import type { GoalRun } from "../types.ts";
+import type { Placement } from "../pipeline/job-runner.ts";
+import { redactToolOutput } from "../security/redaction.ts";
 import { directTicketId, key } from "./ids.ts";
 import type { TicketStore } from "./store.ts";
 import {
@@ -20,14 +22,29 @@ import {
   type TicketStage,
   type TicketToolName,
 } from "./tools.ts";
-import type { Ticket } from "./types.ts";
+import type {
+  Assignment,
+  AssignmentReport,
+  AssignmentState,
+  Ticket,
+} from "./types.ts";
 
 const DEFAULT_TICKET_LIST_LIMIT = 20;
 const MAX_TICKET_LIST_LIMIT = 50;
 const MAX_TASK_CHARS = 16_000;
 const MAX_IDEMPOTENCY_KEY_CHARS = 256;
 
+function publicPlacement({ digest: _digest, ...placement }: Placement) {
+  return {
+    ...placement,
+    source: redactToolOutput(placement.source),
+    destination: redactToolOutput(placement.destination),
+  };
+}
+
 export type TicketReceipt = {
+  placementAttention?: Omit<Placement, "digest">;
+  placementReport?: Omit<Placement, "digest">;
   state: TicketStage;
   complete: boolean;
   canRetry?: boolean;
@@ -43,6 +60,11 @@ export type TicketAssignmentView = {
   executor: "goal";
   state: "pending" | "running" | "waiting" | "ended";
   goalId?: string;
+  id?: string;
+  createdAt?: string;
+  startedAt?: string;
+  endedAt?: string;
+  endedReason?: string;
   /** How many isolated agent runs this assignment started; 0 while it is still queued. */
   agentRuns: number;
 };
@@ -53,6 +75,26 @@ export type TicketTaskView = {
   canRetry?: boolean;
   assignment: TicketAssignmentView;
   goal?: ProductGoal & { finalReport?: string };
+  execution?: Pick<
+    ProductGoal,
+    | "status"
+    | "phase"
+    | "progress"
+    | "currentStep"
+    | "iteration"
+    | "maxIterations"
+    | "updatedAt"
+    | "watchdog"
+    | "criteria"
+    | "finishedAt"
+  > & {
+    controls: ProductGoal["controls"] & { retry: boolean; reply: boolean };
+    currentRun?: Omit<
+      NonNullable<ProductGoal["currentRun"]>,
+      "goalId" | "sessionId"
+    >;
+    errorCode?: string;
+  };
   pendingPermissions: ProductPendingPermission[];
   receipt: TicketReceipt;
 };
@@ -133,6 +175,7 @@ export type TicketInvocationSource = "mcp" | "main-session";
 
 export function createTicketControlApi(options: {
   store: TicketStore;
+  placements?: (ticketId: string) => Placement[];
   triggers?: Pick<TriggerStore, "get">;
   goals: GoalPort;
   sessions: SessionPort;
@@ -145,6 +188,7 @@ export function createTicketControlApi(options: {
   ready?: () => Promise<unknown>;
 }) {
   const delegateFlights = new Map<string, Promise<TicketTaskView>>();
+  const restartFlights = new Map<string, Promise<TicketTaskView>>();
   const backfillCutoff = options.now().getTime();
   let backfillFlight: Promise<void> | undefined;
 
@@ -168,18 +212,205 @@ export function createTicketControlApi(options: {
       .filter((permission) => permission.sessionId === goalId);
   }
 
-  function assignmentOf(goal: GoalRun | undefined): TicketAssignmentView {
-    if (!goal) return { executor: "goal", state: "pending", agentRuns: 0 };
+  function latestAssignment(ticket: Ticket): Assignment | undefined {
+    return ticket.assignments[ticket.assignments.length - 1];
+  }
+
+  function assignmentStateFromGoal(goal: GoalRun | undefined): AssignmentState {
+    if (!goal) return "pending";
+    return goal.status === "completed" ||
+      goal.status === "cancelled" ||
+      goal.status === "failed" ||
+      goal.status === "max_iterations"
+      ? "ended"
+      : "running";
+  }
+
+  function terminalReport(goal: GoalRun, at: string): AssignmentReport {
+    const report = goal.report;
+    const state =
+      goal.status === "completed"
+        ? "ready"
+        : goal.status === "cancelled" || report?.state === "dropped"
+          ? "dropped"
+          : goal.blocked
+            ? "blocked"
+            : "failed";
+    return {
+      state,
+      summary: (
+        goal.error ??
+        report?.blocker ??
+        report?.reason ??
+        goal.summary ??
+        report?.summary ??
+        "Execution ended."
+      ).slice(0, 2_000),
+      at,
+      ...(report?.evidence ? { evidence: report.evidence } : {}),
+      ...(goal.artifactId ? { artifactId: goal.artifactId } : {}),
+    };
+  }
+
+  async function reconcileAssignment(
+    ticket: Ticket,
+    assignment: Assignment,
+    goal: GoalRun | undefined,
+    retryStarted = false
+  ): Promise<Ticket> {
+    if (!goal) return ticket;
+    const state = assignmentStateFromGoal(goal);
+    const endedReason = goal.status === "cancelled" ? "stopped" : goal.status;
+    if (assignment.state === "ended") {
+      // The latest legacy record can be enriched only while its terminal snapshot still exists.
+      if (
+        state !== "ended" ||
+        assignment.report ||
+        (assignment.endedReason !== endedReason &&
+          assignment.endedReason !== goal.status) ||
+        !assignment.endedAt ||
+        assignment.endedAt !== (goal.finishedAt ?? goal.updatedAt)
+      )
+        return ticket;
+      const updated = await options.store.updateAssignment(
+        ticket.id,
+        assignment.id,
+        {
+          report: terminalReport(goal, assignment.endedAt),
+        }
+      );
+      return updated?.ticket ?? ticket;
+    }
+    if (
+      assignment.state === "pending" &&
+      ticket.assignments.length > 1 &&
+      !retryStarted
+    ) {
+      const previous = ticket.assignments.findLast((item) => item.report);
+      if (
+        state === "ended" &&
+        previous?.report?.at === (goal.finishedAt ?? goal.updatedAt)
+      ) {
+        if (restartFlights.has(ticket.id)) return ticket;
+        const updated = await options.store.updateAssignment(
+          ticket.id,
+          assignment.id,
+          {
+            state: "ended",
+            endedReason: "retry_interrupted",
+            endedAt: options.now().toISOString(),
+          }
+        );
+        return updated?.ticket ?? ticket;
+      }
+    }
+    const startedAt = assignment.startedAt ?? assignment.createdAt;
+    const endedAt =
+      state === "ended"
+        ? (goal.finishedAt ?? goal.updatedAt ?? options.now().toISOString())
+        : undefined;
+    if (
+      assignment.state === state &&
+      assignment.executorId === goal.thebeSessionId &&
+      assignment.startedAt === startedAt &&
+      assignment.endedAt === endedAt
+    ) {
+      return ticket;
+    }
+    const updated = await options.store.updateAssignment(
+      ticket.id,
+      assignment.id,
+      {
+        state,
+        executorId: goal.thebeSessionId,
+        ...(startedAt ? { startedAt } : {}),
+        ...(endedAt
+          ? { endedAt, endedReason, report: terminalReport(goal, endedAt) }
+          : {}),
+      }
+    );
+    return updated?.ticket ?? ticket;
+  }
+
+  /**
+   * A Ticket persisted before Assignments existed gets one from its legacy Goal. The backfill is
+   * idempotent and happens before any read or control, so callers never see an unassigned Ticket
+   * that actually has work.
+   */
+  async function ensureAssignmentFor(
+    ticket: Ticket,
+    goal: GoalRun | undefined
+  ): Promise<Ticket> {
+    const current = latestAssignment(ticket);
+    if (current) return reconcileAssignment(ticket, current, goal);
+    if (!ticket.links.legacyGoalId) return ticket;
+    const state = assignmentStateFromGoal(goal);
+    const at = goal?.createdAt ?? ticket.createdAt;
+    const ensured = await options.store.ensureAssignment(ticket.id, {
+      executorId: ticket.links.legacyGoalId,
+      at,
+      state,
+      ...(state === "pending" ? {} : { startedAt: at }),
+      ...(state === "ended"
+        ? {
+            endedAt: goal?.finishedAt ?? goal?.updatedAt ?? at,
+            endedReason:
+              goal?.status === "cancelled"
+                ? "stopped"
+                : (goal?.status ?? "ended"),
+            ...(goal
+              ? {
+                  report: terminalReport(
+                    goal,
+                    goal.finishedAt ?? goal.updatedAt ?? at
+                  ),
+                }
+              : {}),
+          }
+        : {}),
+    });
+    if (!ensured) return ticket;
+    return reconcileAssignment(ensured.ticket, ensured.assignment, goal);
+  }
+
+  function assignmentView(
+    ticket: Ticket,
+    goal: GoalRun | undefined
+  ): TicketAssignmentView {
+    const assignment = latestAssignment(ticket);
+    if (!assignment) {
+      if (!goal) return { executor: "goal", state: "pending", agentRuns: 0 };
+      return {
+        executor: "goal",
+        state:
+          goal.status === "running" || goal.status === "pausing"
+            ? "running"
+            : goal.status === "paused"
+              ? "waiting"
+              : "ended",
+        goalId: goal.thebeSessionId,
+        agentRuns: goal.subagentRunIds.length,
+      };
+    }
     return {
       executor: "goal",
       state:
-        goal.status === "running" || goal.status === "pausing"
-          ? "running"
-          : goal.status === "paused"
-            ? "waiting"
-            : "ended",
-      goalId: goal.thebeSessionId,
-      agentRuns: goal.subagentRunIds.length,
+        assignment.state === "running" && goal?.status === "paused"
+          ? "waiting"
+          : assignment.state,
+      ...(assignment.executorId
+        ? { goalId: assignment.executorId }
+        : ticket.links.legacyGoalId
+          ? { goalId: ticket.links.legacyGoalId }
+          : {}),
+      id: assignment.id,
+      createdAt: assignment.createdAt,
+      ...(assignment.startedAt ? { startedAt: assignment.startedAt } : {}),
+      ...(assignment.endedAt ? { endedAt: assignment.endedAt } : {}),
+      ...(assignment.endedReason
+        ? { endedReason: assignment.endedReason }
+        : {}),
+      agentRuns: goal?.subagentRunIds.length ?? 0,
     };
   }
 
@@ -217,16 +448,67 @@ export function createTicketControlApi(options: {
     goal: GoalRun | undefined,
     pending: ProductPendingPermission[]
   ): TicketTaskView {
-    const stage = stageOf(goal, pending);
-    const retryable = canRetry(stage, goal);
+    const placements = options.placements?.(ticket.id) ?? [];
+    const placementStopped = placements.some((item) => item.stoppedAt);
+    const placement =
+      placementStopped || goal?.status === "cancelled"
+        ? undefined
+        : placements.find((item) => item.state === "pending");
+    const report = placements.findLast(
+      (item) => item.state !== "pending" || item.stoppedAt
+    );
+    const outcome = placements.at(-1)?.state;
+    const stage =
+      placementStopped || goal?.status === "cancelled"
+        ? "cancelled"
+        : placement
+          ? "attention"
+          : outcome === "dispatching"
+            ? "running"
+            : outcome === "uncertain"
+              ? "attention"
+              : outcome === "denied"
+                ? "blocked"
+                : stageOf(goal, pending);
+    const retryable = !placements.length && canRetry(stage, goal);
     const product = goal ? toProductGoal(goal) : undefined;
+    let currentRun: NonNullable<TicketTaskView["execution"]>["currentRun"];
+    if (product?.currentRun) {
+      const {
+        goalId: _goalId,
+        sessionId: _sessionId,
+        ...worker
+      } = product.currentRun;
+      currentRun = worker;
+    }
     return {
       ticket,
       stage,
       canRetry: retryable,
-      assignment: assignmentOf(goal),
+      assignment: assignmentView(ticket, goal),
       ...(product
         ? {
+            execution: {
+              status: product.status,
+              phase: product.phase,
+              progress: product.progress,
+              currentStep: product.currentStep,
+              iteration: product.iteration,
+              maxIterations: product.maxIterations,
+              updatedAt: product.updatedAt,
+              watchdog: product.watchdog,
+              criteria: product.criteria,
+              finishedAt: product.finishedAt,
+              currentRun,
+              errorCode: product.error?.code,
+              controls: {
+                ...product.controls,
+                retry: retryable,
+                reply: Boolean(
+                  product.attention || pending.length || placement
+                ),
+              },
+            },
             goal: {
               ...product,
               ...(goal?.finalReport ? { finalReport: goal.finalReport } : {}),
@@ -235,6 +517,10 @@ export function createTicketControlApi(options: {
         : {}),
       pendingPermissions: pending,
       receipt: {
+        ...(placement
+          ? { placementAttention: publicPlacement(placement) }
+          : {}),
+        ...(report ? { placementReport: publicPlacement(report) } : {}),
         state: stage,
         complete:
           stage === "completed" ||
@@ -258,7 +544,7 @@ export function createTicketControlApi(options: {
   ): Promise<Ticket> {
     const existing = await options.store.getByGoal(run.thebeSessionId);
     if (existing) return existing;
-    return options.store.recordDirect({
+    const ticket = await options.store.recordDirect({
       thread: `chat:${run.thebeSessionId}`,
       triggerId: key("trigger", "chat", "goal-start", run.thebeSessionId),
       kind: "goal-start",
@@ -269,6 +555,7 @@ export function createTicketControlApi(options: {
       sessionIds: [run.thebeSessionId],
       subscriptions: input.subscriptions,
     });
+    return ensureAssignmentFor(ticket, run);
   }
 
   /**
@@ -304,7 +591,7 @@ export function createTicketControlApi(options: {
       : ticket.links.legacyGoalId
         ? pendingFor(ticket.links.legacyGoalId)
         : [];
-    return view(ticket, goal, pending);
+    return view(await ensureAssignmentFor(ticket, goal), goal, pending);
   }
 
   async function list(
@@ -322,6 +609,15 @@ export function createTicketControlApi(options: {
       .filter((ticket) => !stage || ticket.stage === stage)
       .sort(compareByActivity)
       .slice(0, limit);
+  }
+
+  async function listTasks(): Promise<TicketTaskView[]> {
+    await backfillGoals();
+    return viewsFor(await options.store.list());
+  }
+
+  async function listRecords(): Promise<Ticket[]> {
+    return (await listTasks()).map(({ ticket }) => ticket);
   }
 
   async function related(
@@ -354,7 +650,8 @@ export function createTicketControlApi(options: {
       options.sessions.listPendingPermissions(),
     ]);
     const goalsById = new Map(goals.map((goal) => [goal.thebeSessionId, goal]));
-    return tickets.map((ticket) => {
+    const views: TicketTaskView[] = [];
+    for (const ticket of tickets) {
       const goal = ticket.links.legacyGoalId
         ? goalsById.get(ticket.links.legacyGoalId)
         : undefined;
@@ -363,8 +660,9 @@ export function createTicketControlApi(options: {
             (permission) => permission.sessionId === goal.thebeSessionId
           )
         : [];
-      return view(ticket, goal, pending);
-    });
+      views.push(view(await ensureAssignmentFor(ticket, goal), goal, pending));
+    }
+    return views;
   }
 
   async function delegateFrom(
@@ -418,6 +716,14 @@ export function createTicketControlApi(options: {
       }
     }
     const criteria = parseCriteria(input.criteria);
+    const threads = parseThreads(input.threads);
+    if (input.threads !== undefined && threads === undefined) {
+      throw httpError(
+        400,
+        "threads must be an array of strings or {kind, id} objects",
+        "invalid_body"
+      );
+    }
     const requester = origin.requester;
     const requestId = sourceTrigger
       ? key(origin.requestIdNamespace, "trigger", sourceTrigger.id)
@@ -433,7 +739,8 @@ export function createTicketControlApi(options: {
     });
     const existing = await get(ticketId);
     if (existing) {
-      const goalId = existing.ticket.links.legacyGoalId;
+      const existingTicket = existing.ticket;
+      const goalId = existingTicket.links.legacyGoalId;
       if (goalId) {
         const goal =
           options.goals.getGoal(goalId) ??
@@ -443,6 +750,10 @@ export function createTicketControlApi(options: {
         // A crash between recording the Ticket and starting its executor leaves the request
         // without a Goal; start it now instead of returning a Ticket that can never run.
         if (!goal) {
+          const withAssignment = await ensureAssignmentFor(
+            existingTicket,
+            undefined
+          );
           const run = await options.goals.startGoal({
             thebeSessionId: goalId,
             goal: sourceTrigger
@@ -460,8 +771,24 @@ export function createTicketControlApi(options: {
               ? { reviewBeforeDone: true }
               : {}),
           });
+          const assignment = latestAssignment(withAssignment);
+          if (assignment) {
+            await options.store.updateAssignment(
+              withAssignment.id,
+              assignment.id,
+              {
+                state: "running",
+                executorId: goalId,
+                startedAt: options.now().toISOString(),
+              }
+            );
+          }
           return {
-            ...view(existing.ticket, run, pendingFor(goalId)),
+            ...view(
+              (await options.store.get(withAssignment.id)) ?? withAssignment,
+              run,
+              pendingFor(goalId)
+            ),
             reused: true,
           };
         }
@@ -496,31 +823,58 @@ export function createTicketControlApi(options: {
         requester,
         goalId: session.thebeSessionId,
         sessionIds: [session.thebeSessionId],
+        ...(threads ? { subscriptions: threads } : {}),
         ...(sourceTrigger ? { triggers: [sourceTrigger] } : {}),
       });
+      const withAssignment = await ensureAssignmentFor(ticket, undefined);
       const scheduledGoalId = session.thebeSessionId;
-      const run =
-        ticket.links.legacyGoalId === scheduledGoalId
-          ? await options.goals.startGoal({
-              thebeSessionId: scheduledGoalId,
-              goal: sourceTrigger
-                ? `${task}\n\n${explicitTriggerContext(sourceTrigger)}`
-                : task,
-              criteria,
-              executor: "ticket",
-              maxIterations:
-                typeof input.maxIterations === "number"
-                  ? input.maxIterations
-                  : undefined,
-              ...(input.observe === true ? { observe: true } : {}),
-              ...(input.allowAsk !== false ? { allowAsk: true } : {}),
-              ...(input.reviewBeforeDone === true
-                ? { reviewBeforeDone: true }
-                : {}),
-            })
-          : options.goals.getGoal(ticket.links.legacyGoalId ?? "");
+      let run: GoalRun | undefined;
+      try {
+        run =
+          withAssignment.links.legacyGoalId === scheduledGoalId
+            ? await options.goals.startGoal({
+                thebeSessionId: scheduledGoalId,
+                goal: sourceTrigger
+                  ? `${task}\n\n${explicitTriggerContext(sourceTrigger)}`
+                  : task,
+                criteria,
+                executor: "ticket",
+                maxIterations:
+                  typeof input.maxIterations === "number"
+                    ? input.maxIterations
+                    : undefined,
+                ...(input.observe === true ? { observe: true } : {}),
+                ...(input.allowAsk !== false ? { allowAsk: true } : {}),
+                ...(input.reviewBeforeDone === true
+                  ? { reviewBeforeDone: true }
+                  : {}),
+              })
+            : options.goals.getGoal(withAssignment.links.legacyGoalId ?? "");
+      } catch (error) {
+        const assignment = latestAssignment(withAssignment);
+        if (assignment) {
+          await options.store.updateAssignment(
+            withAssignment.id,
+            assignment.id,
+            {
+              state: "ended",
+              endedAt: options.now().toISOString(),
+              endedReason: "start_failed",
+            }
+          );
+        }
+        throw error;
+      }
+      const assignment = latestAssignment(withAssignment);
+      if (assignment) {
+        await options.store.updateAssignment(withAssignment.id, assignment.id, {
+          state: "running",
+          executorId: scheduledGoalId,
+          startedAt: options.now().toISOString(),
+        });
+      }
       return view(
-        ticket,
+        (await options.store.get(withAssignment.id)) ?? withAssignment,
         run,
         pendingFor(run?.thebeSessionId ?? scheduledGoalId)
       );
@@ -691,6 +1045,29 @@ export function createTicketControlApi(options: {
         "invalid_body"
       );
     }
+    if (input.action !== "retry") return applyControl(ticketId, input.action);
+    return restartOnce(ticketId, () => applyControl(ticketId, "retry"));
+  }
+
+  async function restartOnce(
+    ticketId: string,
+    restart: () => Promise<TicketTaskView>
+  ): Promise<TicketTaskView> {
+    const existing = restartFlights.get(ticketId);
+    if (existing) return existing;
+    const flight = restart();
+    restartFlights.set(ticketId, flight);
+    try {
+      return await flight;
+    } finally {
+      restartFlights.delete(ticketId);
+    }
+  }
+
+  async function applyControl(
+    ticketId: string,
+    action: TicketControlAction
+  ): Promise<TicketTaskView> {
     const ticket = await options.store.get(ticketId);
     if (!ticket) throw httpError(404, "ticket not found", "not_found");
     const goal = await goalFor(ticket);
@@ -701,14 +1078,14 @@ export function createTicketControlApi(options: {
         "ticket_unassigned"
       );
     }
-    if (input.action === "pause" && goal.status !== "running") {
+    if (action === "pause" && goal.status !== "running") {
       throw httpError(
         409,
         "ticket can only be paused while running",
         "invalid_transition"
       );
     }
-    if (input.action === "resume" && goal.status !== "paused") {
+    if (action === "resume" && goal.status !== "paused") {
       throw httpError(
         409,
         "ticket can only be resumed while paused",
@@ -716,7 +1093,7 @@ export function createTicketControlApi(options: {
       );
     }
     if (
-      input.action === "stop" &&
+      action === "stop" &&
       goal.status !== "running" &&
       goal.status !== "pausing" &&
       goal.status !== "paused"
@@ -724,7 +1101,7 @@ export function createTicketControlApi(options: {
       throw httpError(409, "ticket is already finished", "invalid_transition");
     }
     if (
-      input.action === "retry" &&
+      action === "retry" &&
       goal.status !== "failed" &&
       goal.status !== "max_iterations"
     ) {
@@ -736,15 +1113,72 @@ export function createTicketControlApi(options: {
         goal.status === "cancelled" ? "ticket_stopped" : "invalid_transition"
       );
     }
-    if (input.action === "pause")
-      await options.goals.pauseGoal(goal.thebeSessionId);
-    if (input.action === "resume")
+    if (action === "pause") await options.goals.pauseGoal(goal.thebeSessionId);
+    if (action === "resume")
       await options.goals.resumeGoal(goal.thebeSessionId);
-    if (input.action === "stop")
+    if (action === "stop") {
       await options.goals.stopGoal(goal.thebeSessionId);
-    if (input.action === "retry")
-      await options.goals.retryGoal(goal.thebeSessionId);
+    }
+    if (action === "retry") {
+      return restartAssignment(ticket, goal, options.goals.retryGoal);
+    }
     return (await get(ticketId))!;
+  }
+
+  async function restartAssignment(
+    ticket: Ticket,
+    goal: GoalRun,
+    start: (executorId: string) => Promise<GoalRun>
+  ): Promise<TicketTaskView> {
+    const previous = await ensureAssignmentFor(ticket, goal);
+    const current = latestAssignment(previous);
+    if (current?.state === "pending") {
+      // A pending restart can survive a crash before the executor accepted it.
+      await options.store.updateAssignment(ticket.id, current.id, {
+        state: "ended",
+        endedAt: options.now().toISOString(),
+        endedReason: "retry_interrupted",
+      });
+    }
+    const next = await options.store.createAssignment(ticket.id, {
+      executorId: goal.thebeSessionId,
+      at: options.now().toISOString(),
+    });
+    if (!next) throw httpError(404, "ticket not found", "not_found");
+    let restarted: GoalRun;
+    try {
+      restarted = await start(goal.thebeSessionId);
+    } catch (error) {
+      await options.store.updateAssignment(ticket.id, next.assignment.id, {
+        state: "ended",
+        endedAt: options.now().toISOString(),
+        endedReason: "retry_failed",
+      });
+      throw error;
+    }
+    await reconcileAssignment(next.ticket, next.assignment, restarted, true);
+    return (await get(ticket.id))!;
+  }
+
+  async function reopenForInput(
+    executorId: string,
+    start: (id: string) => Promise<GoalRun>
+  ): Promise<void> {
+    await readyToRead();
+    const ticket = await options.store.getByGoal(executorId);
+    if (!ticket) throw httpError(404, "ticket not found", "not_found");
+    await restartOnce(ticket.id, async () => {
+      const goal = await goalFor(ticket);
+      if (
+        !goal ||
+        goal.status === "cancelled" ||
+        assignmentStateFromGoal(goal) !== "ended"
+      ) {
+        await start(executorId);
+        return (await get(ticket.id))!;
+      }
+      return restartAssignment(ticket, goal, start);
+    });
   }
 
   async function invoke(
@@ -789,15 +1223,18 @@ export function createTicketControlApi(options: {
   }
 
   return {
+    listTasks,
     invoke,
     get,
     list,
+    listRecords,
     related,
     delegate,
     delegateHttp,
     reply,
     note,
     control,
+    reopenForInput,
     recordGoal,
     backfillGoals,
   };
@@ -830,6 +1267,34 @@ function parseCriteria(value: unknown): string[] | undefined {
     criteria.push(item.trim());
   }
   return criteria.length > 0 ? criteria : undefined;
+}
+
+function parseThreads(value: unknown): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const threads: string[] = [];
+  for (const item of value) {
+    if (typeof item === "string" && item.trim()) {
+      const trimmed = item.trim();
+      if (trimmed.startsWith("resource:")) {
+        threads.push(trimmed);
+      } else if (trimmed.includes(":")) {
+        threads.push(`resource:${trimmed}`);
+      } else {
+        threads.push(`resource:container:${trimmed}`);
+      }
+    } else if (item && typeof item === "object") {
+      const { kind, id } = item as Record<string, unknown>;
+      if (typeof kind === "string" && typeof id === "string" && kind && id) {
+        threads.push(`resource:${kind}:${id}`);
+      } else {
+        return undefined;
+      }
+    } else {
+      return undefined;
+    }
+  }
+  return [...new Set(threads)];
 }
 
 function explicitTriggerContext(trigger: Trigger): string {

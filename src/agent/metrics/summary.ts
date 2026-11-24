@@ -5,7 +5,7 @@ import type { GoalRun } from "../types.ts";
 /**
  * A read-only summary of how the assistant has been working, computed on request from what Core
  * already keeps (Goal runs, Activity records, the audit log). Nothing is collected or sent anywhere;
- * it is for the person who owns this Core. See docs/research/baseline-metrics-2026-11-03.md.
+ * it is for the person who owns this Core.
  */
 export type Spread = { count: number; p50?: number; p95?: number };
 

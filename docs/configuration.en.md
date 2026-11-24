@@ -13,6 +13,12 @@ User configuration lives in:
 ~/.thebe/config.json
 ```
 
+Notification channel credentials live in:
+
+```text
+~/.thebe/notification-config.json
+```
+
 Files managed by the Pi runtime adapter (`models.json`, `auth.json`, and so on) live in:
 
 ```text
@@ -39,7 +45,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
 - `THEBE_SESSION_DIR`: where the Pi runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
-- `THEBE_MCP_WRITES`: whether an agent connected over `/mcp` may call write tools: `container_restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. **On by default.** Set `off` (or `deny`/`false`/`0`/`no`) to make `/mcp` read-only; a client cannot change this for itself. Core does not ask anyone first on this path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. A provider MCP server's tool counts as a write unless its permission is `read`, which Core takes from the tool's `readOnlyHint` or from a server-level `permission: "read"` in `.thebe/mcp.json`. A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
+- `THEBE_MCP_WRITES`: whether an agent connected over `/mcp` may call write tools: `container_restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. **On by default.** Set `off` (or `deny`/`false`/`0`/`no`) to make `/mcp` read-only; a client cannot change this for itself. Core does not ask anyone first on this path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. A provider MCP server's tool counts as a write unless its permission is `read`, which Core takes from the `readTools` you list for that server in `.thebe/mcp.json` or from a server-level `permission: "read"` — not from the server's own `readOnlyHint`. A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
 - `THEBE_AUDIT_PATH`: the append-only audit log (JSON lines: method, parameter hash, result, duration; no arguments or output). Defaults to `audit.jsonl` in the agent store directory. `GET /v1/audit` reads it back.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
 
@@ -50,6 +56,7 @@ In the TUI:
 - `/config` opens `config.json` in your external editor (created safely if missing).
 - `/config path` prints the real paths of the config file, Pi agent directory, workspace, and output directory.
 - `/settings` edits common settings.
+- `/notifications` edits notification channel credentials. Secret input is masked; `/notifications list` shows only whether fields are set, and `/notifications path` prints the file path.
 
 Restart after editing by hand so every setting takes effect.
 
@@ -142,6 +149,112 @@ export THEBE_FEISHU_CHATS=oc_...
 - The adapters have automated mock-API coverage only. Verify credentials and network access on a test Core before pointing them at a production account.
 - Eval asks the configured assessment model about eligible Triggers under the Policy. `THEBE_EVAL_MAX_PER_HOUR` caps questions at 60 per hour by default; `0` removes the cap. A provider error, an unusable reply, or the hourly limit records a Decision with `outcome: "unavailable"`, never a "no". Core pushes one notice for an assessment outage and waits for a successful assessment before it announces another.
   Autonomous model work also has a daily budget. Input, output and cache-write tokens count; cache-read is reported separately and does not consume the budget. The owner's own chat is never included. The default is 1,000,000 tokens per UTC day and can be changed with `THEBE_BACKGROUND_TOKEN_BUDGET` or `PUT /v1/usage/budget`; `0` pauses autonomous model work. Warning thresholds default to 50%, 80%, 90% and 100% (configurable via `THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS` or `PUT /v1/usage/budget`); notices trigger once per UTC day when crossing 50%, 80%, 90% and 100%. At the limit Eval still runs the deterministic Gate, but skips the model, records `unavailable` / `daily_budget`, accepts no new Ticket, and sends one notice that day. It resumes at the next UTC midnight. `GET /v1/usage/summary` returns today's usage, estimated USD cost, thresholds, pause state and the last 30 days; after 15 days Core offers a one-time budget of twice the daily p95, and nothing changes unless the owner accepts it.
+
+## Multi-channel notifications
+
+`/v1/notifications/*` sends person-facing events to the owner's configured targets. Device push (`/v1/devices` and the Push Relay) remains a separate, parallel channel.
+
+- Settings live in `{agentStoreDir}/notifications/notifications.json` (0600) and the pending queue in `outbox.json` in the same directory. Adapter-level credentials (bot token, SMTP password, WeCom corp secret and so on) come from `{configDir}/notification-config.json` (0600, edited by TUI `/notifications`) and fall back to the environment when unset. An address that embeds its own token (a DingTalk access token or a webhook URL) stays in the owner-only settings file and is masked on read.
+- TUI `/notifications` edits those credentials channel by channel and masks secret input; a running Core reloads the channel automatically; a stopped Core reads the file at next start. `/notifications list` reports only whether fields are set, never their values, and `/notifications path` prints the file path. Environment variables remain a fallback for container and automated deployments.
+- The App's Settings → Notification channels → Channel credentials edits the same file through `GET/PUT /v1/notifications/config`. Reads mask secret fields; a save restores untouched secrets server-side and rebuilds adapters immediately.
+- `NotificationTarget.channel.source` selects the adapter. Native adapters: `webhook`, `slack`, `discord`, `telegram`, `teams`, `googlechat`, `mattermost`, `ntfy`, `bark`, `feishu-webhook`, `dingtalk`, `wecom`, `smtp`, `pushover`, `gotify`, `matrix`, `nextcloud-talk`, `signal`, `whatsapp`, `line`, `zalo`, `twilio`, `bluebubbles`, `synology-chat`, `twitch`, `irc`, `apprise`. A bound Telegram, Weixin, QQ or iMessage chat can also be a target through the `im` transport. A proactive channel (currently iMessage) sends directly; a reply-only QQ/Weixin target uses the latest inbound reply anchor while its window is open and is discarded as `window_closed` once it has closed. Existing Feishu and GitHub ticket channels also work as owner targets (a non-Ticket notice becomes a plain message/comment).
+- `channel.address` is per channel: webhook `{url, secret?}`; Slack, Discord, Teams, Google Chat, Mattermost and Synology Chat `{url}` (Mattermost also accepts `channel?`); Telegram `{chatId, threadId?}`; ntfy `{url?, topic?, token?}`; Bark `{deviceKey, server?}`; Feishu `{url?, secret?}`; DingTalk `{url?, accessToken?, secret?}` (a target may carry the URL); WeCom group robot `{url}` (target or host environment) or application message `{toUser}`; email `{to}`; Pushover `{user}`; Gotify `{token, url?}`; Matrix `{roomId}`; Nextcloud Talk `{roomToken}`; Signal `{recipients}` (comma-separated phone numbers or `group.*` ids); WhatsApp and Twilio `{to}`; BlueBubbles `{chatGuid}`; LINE `{to}`; Zalo Bot `{chatId}`; Twitch `{broadcasterId}`; IRC `{channel}`; Apprise `{token?}`.
+- `GET /v1/notifications/channels` returns the catalog the App renders: id, label, description, address fields, capabilities, whether the host registered the adapter, and a `setup` hint when it did not. The App's Settings → Notification channels edits targets through this route and the settings route, can send a test notice, and never stores adapter credentials locally. Device push (APNs through the Push Relay) has its own page.
+- Categories: `attention`, `completed`, `failed`, `budget`, `watchdog`, `source_health`, `pipeline`. Priorities: `critical`, `normal`, `low`. A target narrows itself with `categories` and `minPriority`.
+- `critical` bypasses quiet hours by default; set `criticalBypassesQuietHours` to `false` to disable that. Normal and low notices enter the queue only when the window ends. `rateLimitPerHour` is a per-target hourly limit (0 means no limit); `critical` is never rate limited, and the rolling window is in memory, so a restart resets it.
+- Delivery is durable, at-least-once, and serial per target. Retrying the same `id` never produces a second notice. A request that was sent but timed out (TimeoutError/AbortError) is recorded as `unknown` and is never replayed, including after a Core restart. A connection failure / disconnect (refused, reset, etc.) is a recoverable error and retries with backoff instead of being recorded as `unknown`.
+- `GET/PUT /v1/notifications/settings`, `GET /v1/notifications/channels`, `GET /v1/notifications/status`, `POST /v1/notifications/test`, and `POST /v1/notifications/send` require the Core token. Writes return 503 while quiesced. `GET settings` masks `secret`, `token`, `password`, `apiKey`, Bark `deviceKey` and Pushover `user` fields, plus credentials in URL query strings.
+- `POST /v1/notifications/send` is the external entry point for devloop and similar hosts. It accepts `{id?, category, priority, title, body, deepLink?, ticketId?, goalId?}`. Without a caller-supplied `id` a fresh id is generated, so pass a stable id when retries must be idempotent. It only enqueues and returns 202; the outbox performs delivery.
+- A target with `digest` (`{windowMinutes, categories}`) holds matching `low`/`normal` notices and sends one summary when the window ends; `critical` notices always bypass the window. Digest state is durable (`digests.json`), so a restart keeps an open window and emits one that ended while Core was down. `GET /v1/notifications/status` reports held notices as `digestPending`. A Goal notice also carries the Ticket's recorded `ChannelRef`s as event-specific targets; they are merged with owner targets and deduplicated by channel, and the existing write-back adapter performs the send.
+
+Environment:
+
+```bash
+# The generic webhook needs no environment variable; each target supplies url (and optional secret) in address.
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+export THEBE_WECOM_WEBHOOK_URL='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...'
+# Or WeCom application messages (a target uses {toUser}):
+export THEBE_WECOM_CORP_ID=ww...
+export THEBE_WECOM_CORP_SECRET=...
+export THEBE_WECOM_AGENT_ID=1000002
+export THEBE_DINGTALK_WEBHOOK_URL='https://oapi.dingtalk.com/robot/send?access_token=...'
+export THEBE_DINGTALK_SECRET=SEC...
+export THEBE_SMTP_URL="smtps://smtp.example.com:465"
+export THEBE_SMTP_FROM='thebe@example.com'
+# Additional native adapters (each optional):
+export THEBE_FEISHU_WEBHOOK_URL='https://open.feishu.cn/open-apis/bot/v2/hook/...'
+export THEBE_FEISHU_WEBHOOK_SECRET=...
+export THEBE_GOTIFY_URL='https://gotify.example.com'
+export THEBE_PUSHOVER_TOKEN=...
+export THEBE_MATRIX_HOMESERVER_URL='https://matrix.example.com'
+export THEBE_MATRIX_ACCESS_TOKEN=...
+export THEBE_SIGNAL_URL='http://127.0.0.1:8080'
+export THEBE_SIGNAL_NUMBER='15550104'
+export THEBE_WHATSAPP_ACCESS_TOKEN=...
+export THEBE_WHATSAPP_PHONE_NUMBER_ID=...
+# Optional; defaults to v20.0.
+export THEBE_WHATSAPP_API_VERSION=v20.0
+export THEBE_TWILIO_ACCOUNT_SID=AC...
+export THEBE_TWILIO_AUTH_TOKEN=...
+export THEBE_TWILIO_FROM='15550104'
+export THEBE_BLUEBUBBLES_URL='http://127.0.0.1:1234'
+export THEBE_BLUEBUBBLES_PASSWORD=...
+export THEBE_APPRISE_URL='http://127.0.0.1:8000'
+export THEBE_APPRISE_KEY=apprise-config-key
+export THEBE_LINE_CHANNEL_ACCESS_TOKEN=...
+export THEBE_ZALO_BOT_TOKEN=...
+# Optional, for a proxy or test double; defaults to https://bot-api.zaloplatforms.com.
+export THEBE_ZALO_API_URL='https://bot-api.zaloplatforms.com'
+export THEBE_NEXTCLOUD_TALK_URL='https://cloud.example.com'
+export THEBE_NEXTCLOUD_TALK_BOT_SECRET=...
+export THEBE_TWITCH_CLIENT_ID=...
+export THEBE_TWITCH_USER_ACCESS_TOKEN=...
+export THEBE_TWITCH_SENDER_ID=...
+export THEBE_IRC_HOST='irc.example.com'
+export THEBE_IRC_PORT=6697
+export THEBE_IRC_TLS=true
+export THEBE_IRC_NICK=thebe
+export THEBE_IRC_PASSWORD=...
+```
+
+An adapter without its credential is not registered; a target pointing at it records `adapter_missing` and does not affect other targets. A test send validates the address and credential and never enters the outbox.
+
+## Two-way IM channels (multi-platform seam; Telegram, Weixin, QQ and iMessage built in)
+
+`/v1/im/*` is a two-way chat integration, parallel to the notification transports above: a notification adapter only writes out, while an IM adapter also receives platform messages. Inbound messages may enter the main Session (`thebe-main`) only from an owner-bound direct chat. The binding also pins the owner's platform sender id, so another sender in the same direct chat is recorded but never reaches the model. Groups and guest bindings are recorded but never reach the model, and an inbound message never gets shell/file tools or bypasses an approval.
+
+- State lives in `{agentStoreDir}/im/im.json` (0600): accounts, bindings, cursors tagged with the bot identity, a 7-day dedupe table, and the accepted inbound queue. Credentials are an opaque per-platform field map in `im-secrets.json` (0600); no HTTP response, log, or error message contains them.
+- `POST /v1/im/channels` accepts `{platform, label?, credentials: {field: value}}`. A platform factory declares required and optional fields plus its own validation. `platform` is a registered id; the built-in adapters are `telegram` (bot token), `wechat` (Weixin ClawBot through the iLink protocol), `qq` (official Bot AppID/AppSecret) and `imessage` (a BlueBubbles server). Telegram still accepts the older `token` shorthand.
+- A platform factory may also provide a QR, link or code login. `POST /v1/im/logins` starts one, `GET /v1/im/logins/{id}` polls it, `POST /v1/im/logins/{id}/code` submits a phone PIN when the state is `need_verifycode`, and `DELETE /v1/im/logins/{id}` cancels it. The QR payload or link appears only in the start response and is never persisted or logged; confirmation returns only the new `accountId`, and the resulting credentials go straight into `im-secrets.json`. The built-in Telegram adapter uses a static token, so it reports `login_not_supported`; Weixin uses QR login.
+- Routes: `GET /v1/im/platforms` (registered platforms, credential fields and login support), `GET/POST /v1/im/channels`, `DELETE /v1/im/channels/{id}`, `POST /v1/im/channels/{id}/test`, `POST /v1/im/logins`, `GET/DELETE /v1/im/logins/{id}`, `GET /v1/im/status`, `GET /v1/im/conversations`, `POST /v1/im/bind`, `DELETE /v1/im/bind/{id}`, and `POST /v1/im/send`. Writes return 503 while quiesced.
+- Pairing: have the owner message the bot, read `chat.id` from `GET /v1/im/conversations`, then `POST /v1/im/bind` with `chat.kind: "direct"` and `role: "owner"`. A chat that has not been observed returns `chat_not_seen`. `senderId` may be omitted (the last observed sender is pinned); when supplied it must match the observed sender or the request returns `sender_mismatch`. `sessionId` is currently always `thebe-main`; a group can only be bound as a `guest`, a direct chat cannot bind as `guest`, and a group cannot bind as `owner`.
+- Inbound messages are persisted before processing. The same `(platform, account, chat, threadId, messageId)` or `updateId` is handled once. Each chat (including its thread) has one serial queue and different chats run in parallel; accepted messages survive a Core restart and completed ones are never replayed.
+- While the main Session is busy with another turn, an owner message stays in the queue instead of being dropped. By default a notice is sent after 5 seconds and a timeout reply after 10 minutes; while the main Session is streaming, the message joins the current turn as a `followUp`. `pending` in `GET /v1/im/status` is the queue depth.
+- Each adapter reports truthful capabilities: `proactive`, `replyOnly`, `replyWindowMs`, `maxMessagesPerWindow`, `recall`, `media`, `maxTextLength`, `markdown`, `threads` and `typing`. Before a proactive send the gateway checks `proactive` and the adapter's `canSendProactively(chat)`: unsupported returns `proactive_not_supported`, a closed window returns `window_closed`. Reply anchors (`replyTo`, `contextToken`) belong to the current turn only; the durable destination is account + chat + optional thread.
+- A reply-only channel keeps its latest inbound reply anchor in memory (the message id and, for Weixin, its short-lived `context_token`). A notification or a channel test may use it only while the capability window is open; the anchor is not written to `im.json` and is dropped on restart or quiesce. Testing a reply-only channel before any inbound message returns `no_reply_anchor`, and after the window closes `reply_window_closed`.
+- Inbound already carries `threadId`, `mentions`, `media` and `replyAuthor`; media are descriptors and are never downloaded or executed. A message with text keeps its media descriptors; a media-only message records the conversation and sends the owner a "media not supported yet" notice without entering the model. Outbound media is not advertised until an adapter actually implements `media: true`.
+- A cursor is tied to the bot/account identity: when the token or account identity changes, the old cursor is discarded so a new bot is not resumed from another bot's update position.
+- The Telegram adapter long-polls `getUpdates` (`allowed_updates: ["message"]`) with `update_id + 1` as its cursor and supports forum/topic `message_thread_id` on inbound and outbound messages. It sends plain text without `parse_mode`, chunked at 4096 characters with an `(n/m)` marker. A 429 pauses only that bot token; a 409 (another process polls the same bot) becomes `error` and stops polling instead of reconnecting forever.
+- `GET /v1/health` reports `im` only when at least one channel is configured. `health.state` is `stopped`, `starting`, `connected`, `needs_login`, or `error`, optionally with a safe `code`, `since` and `retryAt`. One channel failing never stops Core or another channel; `GET /v1/im/status` shows the latest safe error without credentials.
+- `THEBE_TELEGRAM_BOT_TOKEN` automatically creates an environment-owned Telegram channel (it cannot be removed through the API). `THEBE_TELEGRAM_API_BASE` points the adapter at a proxy or a test server, and `THEBE_TELEGRAM_POLL_TIMEOUT` sets the long-poll seconds (1–50, default 50).
+- The Weixin adapter uses the official Tencent ClawBot / iLink protocol. Add it with `POST /v1/im/logins` and scan the QR in Weixin. It is reply-only: every send carries the inbound turn's `context_token`, so it can never be selected for a proactive notification. `THEBE_WECHAT_API_BASE` points the adapter at a self-hosted proxy or test double; it defaults to `https://ilinkai.weixin.qq.com`. The protocol layer is derived from Tencent's MIT-licensed Weixin ClawBot protocol layer; Core does not run an external agent runtime.
+- The QQ adapter uses the official QQ Bot OpenAPI v2 over its WebSocket gateway. Add it with `AppID` and `AppSecret`; it receives `C2C_MESSAGE_CREATE` and `GROUP_AT_MESSAGE_CREATE`, and sends passive replies carrying the inbound `msg_id` and an increasing `msg_seq`. It is deliberately reply-only: proactive QQ push is rate-limited and can be disabled by the recipient. A direct reply window is 60 minutes/4 messages; a group @ window is 5 minutes/5 messages. Text is chunked at 2000 characters. `THEBE_QQ_APP_ID` and `THEBE_QQ_APP_SECRET` seed a channel from the environment; `THEBE_QQ_API_BASE`, `THEBE_QQ_TOKEN_URL` and `THEBE_QQ_GATEWAY_URL` point at a proxy or test double.
+- The iMessage adapter uses a BlueBubbles server on a Mac that stays online. Add its base URL and server password; Core polls `POST /api/v1/message/query` and sends text with `POST /api/v1/message/text`. Text is the only implemented content, and a Mac that is offline makes notification sends retry through the outbox instead of silently dropping them. `THEBE_IMESSAGE_BASE_URL`/`THEBE_IMESSAGE_PASSWORD` (or the existing `THEBE_BLUEBUBBLES_URL`/`THEBE_BLUEBUBBLES_PASSWORD`) seed a channel from the environment.
+
+```bash
+# One Telegram two-way channel from the environment; the same bot token can still serve a notification target.
+export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
+# Optional: a self-hosted Bot API proxy or a test double.
+export THEBE_TELEGRAM_API_BASE='https://api.telegram.org'
+# Optional: a self-hosted Weixin iLink proxy or a test double.
+export THEBE_WECHAT_API_BASE='https://ilinkai.weixin.qq.com'
+# One QQ two-way channel from the environment.
+export THEBE_QQ_APP_ID=102030
+export THEBE_QQ_APP_SECRET=...
+# One iMessage channel through BlueBubbles; the same server can serve the notification target.
+export THEBE_IMESSAGE_BASE_URL='https://bluebubbles.example'
+export THEBE_IMESSAGE_PASSWORD=...
+```
 
 ## Model providers and sign-in
 
@@ -304,20 +417,158 @@ export THEBE_OPENLIST_BASE_URL=https://openlist.example.com
 export THEBE_OPENLIST_TOKEN=your-openlist-token
 ```
 
-(`OPENLIST_BASE_URL` and `OPENLIST_TOKEN` also work.) This registers the
-`strm_repair` capability and the file tools. It uses OpenList's `/api/fs/get`,
+The preferred place for these credentials is the `storage` section below
+(`thebe storage add openlist ...`); the environment variables remain as a
+fallback. Either source registers the `strm_repair` capability and the file
+tools. It uses OpenList's `/api/fs/get`,
 `/api/fs/search`, and `/api/fs/put` to find candidates (regular media plus HLS
 `.m3u8` and DASH `.mpd` playlists), write the STRM back, and read it again to
 verify. The token is used only by the adapter.
 
+OpenList also ships an official MCP server. Enable it in OpenList's own
+configuration (`"mcp": { "enable": true }`), restart OpenList, and let Core attach
+it:
+
+```bash
+export THEBE_OPENLIST_MCP=on
+```
+
+Core then adds a deferred `openlist` MCP server at `<THEBE_OPENLIST_BASE_URL>/mcp`
+with the user token in `Authorization` verbatim (OpenList rejects a `Bearer`
+prefix). The preset lists `openlist.fs.list`, `openlist.fs.get` and
+`openlist.fs.link` as read tools, so `/mcp` clients do not treat them as writes.
+It is off by default because the native adapters above cover the same reads; an
+explicit `openlist` entry in `.thebe/mcp.json` wins over the environment preset.
+To attach it by hand instead:
+
+```bash
+thebe mcp add openlist --url https://openlist.example.com/mcp --header "Authorization: <token>"
+```
+
 With qBittorrent (`THEBE_QBITTORRENT_URL`, `_USERNAME`, `_PASSWORD`), OpenList,
 and an Emby or Jellyfin API key configured, Core exposes the acquisition tools:
 `download_add/list/status/pause/resume/delete`,
-`files_list/mkdir/copy/move/offline_download`, `library_scan`, and
-`library_refresh_item`. With `THEBE_PROWLARR_URL` and `THEBE_PROWLARR_API_KEY` it
-also exposes `resource_search` and `pipeline_acquire/advance/status`: a
-deterministic job (download, copy, scan, verify) with bounded retries, persisted
-in `<agent store>/pipeline-jobs.json`. Writes need approval.
+`files_list/mkdir/copy/move/rename/remove/upload/offline_download`,
+`library_scan`, and `library_refresh_item`. With `THEBE_PROWLARR_URL` and
+`THEBE_PROWLARR_API_KEY` it also exposes `resource_search` and
+`pipeline_acquire/advance/status`: a deterministic job (download, copy, scan,
+verify) with bounded retries, persisted in `<agent store>/pipeline-jobs.json`.
+Writes need approval.
+
+#### File storage backends
+
+File storage lives in `~/.thebe/config.json` (or `$THEBE_CONFIG_DIR/config.json`),
+not in a pile of environment variables. The `storage` section is authoritative:
+
+```json
+{
+  "storage": {
+    "default": "media",
+    "backends": [
+      {
+        "id": "openlist",
+        "type": "openlist",
+        "baseUrl": "https://openlist.example.com",
+        "token": "your-openlist-token"
+      },
+      { "id": "media", "type": "local", "roots": ["/mnt/media"] },
+      {
+        "id": "nas",
+        "type": "webdav",
+        "url": "https://dav.example.com/dav",
+        "username": "user",
+        "password": "secret"
+      }
+    ]
+  }
+}
+```
+
+Manage it with the CLI; every command writes the file atomically with mode
+`0600` and leaves unrelated config keys alone:
+
+```bash
+thebe storage list
+thebe storage add openlist openlist --url https://openlist.example.com --token <token> --default
+thebe storage add local media --roots /mnt/media,/mnt/backup
+thebe storage add webdav nas --url https://dav.example.com/dav --username user --password secret
+thebe storage test media
+thebe storage default media
+thebe storage remove openlist
+```
+
+`thebe storage test` lists `/` on one backend (or all of them) and reports the
+entry count. `storage add` with an existing id replaces that backend; a secret
+you omit keeps the stored one, so editing a URL does not require re-entering a
+token. `--password` can be used with `--username`; use `--token` for
+a WebDAV bearer token instead.
+
+The same settings are available over the product HTTP API for the web UI:
+
+- `GET /v1/settings/storage` returns the backends with secrets redacted
+  (`hasToken`/`hasPassword`), plus the config path, source, default and any
+  issues.
+- `PUT /v1/settings/storage` replaces the list; an omitted secret keeps the
+  stored secret for the same id and type. `default: null` picks the first
+  backend and omitting `default` keeps the current one.
+- `POST /v1/settings/storage/test` with an optional `{ "id": "media" }` tests
+  one or all backends.
+
+Changes apply without restarting Core. Every `files_*` tool call re-reads the
+configuration, so an open session sees a backend that was added, edited, or
+removed while it was running. Acquisition jobs capture the default backend when
+the session opens: open a new session after changing the default if you want
+existing jobs to use the new one.
+
+When more than one backend is configured, each file tool call takes a
+`provider` argument (the backend `id`), and `files_list` reports the configured
+ids. When only one exists it is used automatically. A backend that does not
+support an operation does not expose that tool.
+
+A `local` backend exposes host directories through the same tools — an NFS or
+SMB share the host has already mounted, or any local path. Roots must be
+absolute paths. Every path must resolve inside one of these roots; `..` and
+symlinks that leave a root are refused or hidden. Listing `/` on this backend
+shows the configured roots themselves. The Core container sees only what the
+host mounts into it, so mount the share (Docker bind mount / compose `volumes`)
+and pass the container path.
+
+A `webdav` backend speaks PROPFIND, MKCOL, COPY, MOVE, DELETE and PUT, sends
+`Overwrite: F`, and refuses a destination that already exists. `token` sends a
+bearer token; otherwise `username` and `password` send Basic auth.
+
+Native SMB and NFS clients are not built in: mount the share on the host and use
+a `local` backend (OpenList's own SMB/WebDAV drivers remain the richer path when
+OpenList manages the storage).
+
+`files_remove` requires an explicit `recursive` boolean and refuses a non-empty
+folder unless it is `true`. `files_upload` reads only from the workspace or
+outputs directory (1 GiB limit) and refuses an existing destination name.
+
+An OpenList backend, whether it comes from the config section or the
+environment, also registers `strm_repair`, cloud transfer, and OpenList
+background tasks. Those long-lived providers read the OpenList address and
+token when Core starts; the `files_*` tools always read the current config.
+Restart Core after changing the OpenList address or token to apply it to
+acquisition and transfer.
+
+##### Legacy environment variables
+
+`THEBE_OPENLIST_BASE_URL`/`THEBE_OPENLIST_TOKEN`,
+`THEBE_FILES_LOCAL_ROOTS`, and
+`THEBE_WEBDAV_URL`/`_USERNAME`/`_PASSWORD`/`_TOKEN` still work, but only while
+`config.json` has no `storage` section. Once a section exists, the environment
+is ignored — that is what makes removing a backend reliable. To keep the
+environment setup, materialize it once:
+
+```bash
+thebe storage import-env
+```
+
+The environment supplies the ids `openlist`, `local`, and `webdav`. The optional
+OpenList MCP server enabled with `THEBE_OPENLIST_MCP=on` still reads
+`THEBE_OPENLIST_BASE_URL/TOKEN`; you can also add it by hand with
+`thebe mcp add openlist --url ... --header "Authorization: <token>"`.
 
 `THEBE_ARIA2_URL` (and `THEBE_ARIA2_SECRET`, aria2's `rpc-secret`, when it has one) adds aria2 as a second
 download engine behind the same `download_*` tools. `download_add` sends magnets and `.torrent` links to
@@ -486,7 +737,8 @@ its own. Tool names are `mcp__<server>__<tool>`.
 
 - `exposure`: `codemode` (default; tools can only be called from `codemode` scripts and take no space in the model's tool list), `deferred` (declared after `tool_search` loads them), `direct`, or `hidden`.
 - URL servers accept a `headers` map (string values) sent on every request, so a provider's own MCP that needs a token — for example `"headers": { "X-Api-Key": "..." }` or a service-specific header such as `{"sqmusic":"<JWT>"}` — is attached without Core growing a vendor adapter. Prefer this over hard-coding the service: point Core at the provider's MCP and it gets those tools instead. `headers` are stored in `.thebe/mcp.json` (mode `600`), never logged, and never sent anywhere but the configured URL.
-- `permission`: servers other than `read` need approval on every call. If omitted, the tool's own `readOnlyHint` decides; with no hint, approval is required.
+- `permission`: servers other than `read` need approval on every call. If omitted, only the tools named in `readTools` run as reads and every other tool asks first. The server's own `readOnlyHint` is not the operator's confirmation: a compromised server could claim it on a write.
+- `readTools` (optional list of tool names as the server declares them): tools you confirm only read. A listed tool no longer asks per call, and over `/mcp` it is not held as a write by `THEBE_MCP_WRITES` or a token's `mcp:write`. A server-level `permission: "read"` covers all of its tools.
 - Scripts run in Pi's QuickJS sandbox and reach the outside only through tools. Every MCP call from a script still goes through policy, approval, audit, and redaction. The `models` global in `codemode` is disabled.
 - stdio servers inherit only basic variables such as `HOME` and `PATH`, plus their own `env`, never Core's environment.
 - Newly added servers are disabled. Enable, disable, or delete them with `/v1/extensions/mcp/servers`; sessions pick up the change on the next reload.

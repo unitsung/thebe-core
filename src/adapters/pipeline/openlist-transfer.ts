@@ -3,6 +3,10 @@ import type {
   CloudTransferProvider,
   CloudTransferState,
 } from "../../agent/capabilities/pipeline.ts";
+import {
+  openListCredentialsFromEnv,
+  type OpenListCredentials,
+} from "../openlist/credentials.ts";
 
 type Json = Record<string, unknown>;
 
@@ -161,14 +165,15 @@ function stringField(object: Json, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function createOpenListTransferProvider(
+  credentials: OpenListCredentials
+): OpenListTransferProvider {
+  return new OpenListTransferProvider(credentials);
+}
+
 export function createOpenListTransferProviderFromEnv(
   env: Record<string, string | undefined> = process.env
 ): OpenListTransferProvider | undefined {
-  const pick = (...values: Array<string | undefined>) =>
-    values.map((value) => value?.trim() ?? "").find(Boolean) ?? "";
-  const baseUrl = pick(env.THEBE_OPENLIST_BASE_URL, env.OPENLIST_BASE_URL);
-  const token = pick(env.THEBE_OPENLIST_TOKEN, env.OPENLIST_TOKEN);
-  return baseUrl && token
-    ? new OpenListTransferProvider({ baseUrl, token })
-    : undefined;
+  const credentials = openListCredentialsFromEnv(env);
+  return credentials ? createOpenListTransferProvider(credentials) : undefined;
 }

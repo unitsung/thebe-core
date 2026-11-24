@@ -7,8 +7,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { directEvalId, ticketIdFor } from "./ids.ts";
-import type { Ticket, TicketInput, TicketOrigin } from "./types.ts";
+import { directEvalId, key, ticketIdFor } from "./ids.ts";
+import type {
+  Assignment,
+  AssignmentState,
+  Ticket,
+  TicketInput,
+  TicketOrigin,
+} from "./types.ts";
 import type { ChannelRef, Trigger } from "../sources/types.ts";
 
 export const DEFAULT_TICKET_RETENTION = 500;
@@ -21,6 +27,52 @@ export type TicketStore = {
   getByGoal(goalId: string): Promise<Ticket | undefined>;
   getByDecision(decisionId: string): Promise<Ticket | undefined>;
   list(): Promise<Ticket[]>;
+  /**
+   * Adds the first Assignment to a Ticket, or returns its latest Assignment. Legacy Tickets are
+   * backfilled lazily from `links.legacyGoalId`; a Ticket with no Goal stays pending.
+   */
+  ensureAssignment(
+    id: string,
+    input: {
+      executorId?: string;
+      at: string;
+      state?: AssignmentState;
+      startedAt?: string;
+      endedAt?: string;
+      endedReason?: string;
+      report?: Assignment["report"];
+    }
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
+  /** Appends a new Assignment for a retry. */
+  createAssignment(
+    id: string,
+    input: { executorId?: string; at: string }
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
+  recoverAssignment(
+    id: string,
+    input: {
+      executorId: string;
+      executorCreatedAt: string;
+      acceptedAssignmentId?: string;
+      at: string;
+    }
+  ): Promise<Assignment | undefined>;
+  /** Updates lifecycle fields on one Assignment and persists the Ticket. */
+  updateAssignment(
+    id: string,
+    assignmentId: string,
+    patch: Partial<
+      Pick<
+        Assignment,
+        | "state"
+        | "executorId"
+        | "startedAt"
+        | "endedAt"
+        | "endedReason"
+        | "report"
+      >
+    >
+  ): Promise<{ ticket: Ticket; assignment: Assignment } | undefined>;
   /**
    * Records the Ticket for work a person asked for. Idempotent: the same request gives the same Ticket,
    * so a retry does not create a second one.
@@ -163,6 +215,9 @@ export function createTicketStore(options: {
           parsed.channels = Array.isArray(parsed.channels)
             ? parsed.channels
             : [];
+          parsed.assignments = Array.isArray(parsed.assignments)
+            ? parsed.assignments
+            : [];
           memory.set(parsed.id, parsed);
         }
       } catch {
@@ -213,6 +268,131 @@ export function createTicketStore(options: {
       await ensureLoaded();
       return newestFirst([...memory.values()]);
     },
+    async ensureAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const latest = ticket.assignments.at(-1);
+        if (latest) return { ticket, assignment: latest };
+        const assignment: Assignment = {
+          id: key("assignment", ticket.id, "0"),
+          state: input.state ?? "pending",
+          ...(input.executorId ? { executorId: input.executorId } : {}),
+          createdAt: input.at,
+          ...(input.startedAt ? { startedAt: input.startedAt } : {}),
+          ...(input.endedAt ? { endedAt: input.endedAt } : {}),
+          ...(input.endedReason ? { endedReason: input.endedReason } : {}),
+          ...(input.report ? { report: { ...input.report } } : {}),
+        };
+        const next = {
+          ...ticket,
+          assignments: [...ticket.assignments, assignment],
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment };
+      });
+    },
+    async createAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const assignment: Assignment = {
+          id: key("assignment", ticket.id, String(ticket.assignments.length)),
+          state: "pending",
+          ...(input.executorId ? { executorId: input.executorId } : {}),
+          createdAt: input.at,
+        };
+        const next = {
+          ...ticket,
+          assignments: [...ticket.assignments, assignment],
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment };
+      });
+    },
+    async recoverAssignment(id, input) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        if (!ticket) return undefined;
+        const assignments = ticket.assignments.slice();
+        const last = assignments.at(-1);
+        if (
+          last?.state === "pending" &&
+          assignments.at(-2)?.endedReason === "host_restarted" &&
+          last.id !== input.acceptedAssignmentId
+        ) {
+          // Core stopped after reserving the replacement and before the executor accepted it.
+          return last;
+        }
+        if (!last || last.state !== "ended") {
+          const createdAt = last?.createdAt ?? input.executorCreatedAt;
+          const interrupted: Assignment = {
+            id: last?.id ?? key("assignment", id, "0"),
+            state: "ended",
+            executorId: input.executorId,
+            createdAt,
+            startedAt: last?.startedAt ?? createdAt,
+            endedAt: input.at,
+            endedReason: "host_restarted",
+            report: {
+              state: "failed",
+              summary:
+                "Core restarted before the executor finished its checkpoint.",
+              at: input.at,
+            },
+          };
+          if (last) assignments[assignments.length - 1] = interrupted;
+          else assignments.push(interrupted);
+        }
+        const replacement: Assignment = {
+          id: key("assignment", id, String(assignments.length)),
+          state: "pending",
+          executorId: input.executorId,
+          createdAt: input.at,
+        };
+        assignments.push(replacement);
+        const next = { ...ticket, assignments };
+        await persist(next);
+        memory.set(id, next);
+        return replacement;
+      });
+    },
+    async updateAssignment(id, assignmentId, patch) {
+      return serial(async () => {
+        await ensureLoaded();
+        const ticket = memory.get(id);
+        const assignment = ticket?.assignments.find(
+          (item) => item.id === assignmentId
+        );
+        if (!ticket || !assignment) return undefined;
+        // An earlier executor snapshot cannot reopen an ended assignment.
+        if (
+          assignment.state === "ended" &&
+          (assignment.report || !patch.report)
+        ) {
+          return { ticket, assignment };
+        }
+        const updated = {
+          ...assignment,
+          ...(assignment.state === "ended" ? {} : patch),
+          ...(patch.report ? { report: { ...patch.report } } : {}),
+        };
+        const next = {
+          ...ticket,
+          assignments: ticket.assignments.map((item) =>
+            item.id === assignmentId ? updated : item
+          ),
+        };
+        await persist(next);
+        memory.set(id, next);
+        return { ticket: next, assignment: updated };
+      });
+    },
     async recordDirect(input) {
       return serial(async () => {
         await ensureLoaded();
@@ -247,6 +427,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
             ...(input.idempotencyKey
@@ -285,6 +466,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             decisionId: input.decisionId,
             ...(input.goalId ? { legacyGoalId: input.goalId } : {}),
@@ -317,6 +499,7 @@ export function createTicketStore(options: {
           inputs: [],
           origins: originsFor(input.triggers ?? []),
           channels: channelsFor(input.triggers ?? []),
+          assignments: [],
           links: {
             decisionId: input.decisionId,
             legacyGoalId: input.goalId,
@@ -510,6 +693,7 @@ function originsFor(triggers: readonly Trigger[]): TicketOrigin[] {
   return triggers.map((trigger) => ({
     triggerId: trigger.id,
     source: trigger.source,
+    kind: trigger.kind,
     ...(trigger.actor ? { actor: cloneActorRef(trigger.actor) } : {}),
     ...(trigger.human !== undefined ? { human: trigger.human } : {}),
     ...(trigger.admission ? { admission: trigger.admission } : {}),

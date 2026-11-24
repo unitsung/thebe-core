@@ -5,7 +5,11 @@ import type {
 import { key } from "../tickets/ids.ts";
 import type { TicketStore } from "../tickets/store.ts";
 import type { ChannelRef } from "../sources/types.ts";
-import type { ChannelAdapter, TicketChannelNotice } from "./types.ts";
+import type {
+  ChannelAdapter,
+  SourceFollowUpNotice,
+  TicketChannelNotice,
+} from "./types.ts";
 import {
   createChannelOutbox,
   type ChannelDeliveryAttempt,
@@ -116,6 +120,7 @@ export function createTicketChannelNotifier(options: {
     ticketId: string;
     goalId: string;
     notice: NoticeWithoutTicket;
+    channel?: ChannelRef;
   }): Promise<void> {
     const ticket = await options.tickets
       .get(input.ticketId)
@@ -123,6 +128,9 @@ export function createTicketChannelNotifier(options: {
     if (!ticket || ticket.links.legacyGoalId !== input.goalId) return;
     const queued: QueuedChannelNotice[] = (ticket.channels ?? [])
       .filter(isChannelRef)
+      .filter(
+        (channel) => !input.channel || sameChannelRef(channel, input.channel)
+      )
       .map((channel) => ({
         id: ticketChannelNoticeKey(
           ticket.id,
@@ -153,9 +161,7 @@ export function createTicketChannelNotifier(options: {
     });
   }
 
-  async function enqueueCompleted(
-    notice: GoalCompletedNotice
-  ): Promise<void> {
+  async function enqueueCompleted(notice: GoalCompletedNotice): Promise<void> {
     if (!notice.ticketId) return;
     await enqueueForTicket({
       ticketId: notice.ticketId,
@@ -180,6 +186,13 @@ export function createTicketChannelNotifier(options: {
     deliver,
     enqueueNeedsPerson,
     enqueueCompleted,
+    enqueueFollowUp: (notice: SourceFollowUpNotice, channel: ChannelRef) =>
+      enqueueForTicket({
+        ticketId: notice.ticketId,
+        goalId: notice.goalId,
+        notice,
+        channel,
+      }),
     notifyNeedsPerson,
     start: outbox.start,
     stop: outbox.stop,
@@ -213,7 +226,7 @@ function deliveryAttempt(
   return { status: "retry", error: result.status };
 }
 
-function sameChannelRef(left: ChannelRef, right: ChannelRef): boolean {
+export function sameChannelRef(left: ChannelRef, right: ChannelRef): boolean {
   return (
     JSON.stringify(channelKeyParts(left)) ===
     JSON.stringify(channelKeyParts(right))
