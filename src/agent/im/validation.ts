@@ -217,7 +217,9 @@ export function parseSendInput(value: unknown): {
   const text =
     row.text === undefined || row.text === null
       ? ""
-      : requiredText(row.text, "text", MAX_IM_TEXT);
+      : typeof row.text === "string" && !row.text.trim()
+        ? ""
+        : requiredText(row.text, "text", MAX_IM_TEXT);
   const media = parseOutboundMedia(row.media);
   if (!text && media.length === 0) {
     throw new ImInputError("send requires text or media");

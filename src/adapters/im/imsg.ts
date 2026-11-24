@@ -22,6 +22,7 @@ import type {
   ImMediaFetchResult,
   ImSendResult,
 } from "../../agent/im/types.ts";
+import { sanitizeBashEnv } from "../../agent/security/process-env.ts";
 
 export const IMESSAGE_MAX_TEXT = 10_000;
 const DEFAULT_RETRY_MS = 3_000;
@@ -462,6 +463,7 @@ export function createNodeImsgRunner(): ImsgCliRunner {
       return new Promise<void>((resolve, reject) => {
         const child = spawn(cliPath, args, {
           stdio: ["ignore", "pipe", "pipe"],
+          env: sanitizeBashEnv(process.env),
         });
         const lines = createInterface({
           input: child.stdout,
@@ -513,6 +515,7 @@ export function createNodeImsgRunner(): ImsgCliRunner {
         }
         const child = spawn(cliPath, args, {
           stdio: ["ignore", "pipe", "pipe"],
+          env: sanitizeBashEnv(process.env),
         });
         const stdout: Buffer[] = [];
         const stderr: Buffer[] = [];

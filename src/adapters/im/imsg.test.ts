@@ -303,4 +303,38 @@ setInterval(() => {}, 1000);
     await finished;
     expect(lines).toHaveLength(2);
   });
+
+  it("does not pass Core secrets to the local imsg process", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-imsg-env-"));
+    const cli = join(dir, "imsg");
+    await writeFile(
+      cli,
+      `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({
+  hasSecret: Boolean(process.env.THEBE_IMSG_TEST_SECRET),
+  hasHome: Boolean(process.env.HOME),
+}) + "\\n");
+setInterval(() => {}, 1000);
+`,
+      { mode: 0o700 }
+    );
+    process.env.THEBE_IMSG_TEST_SECRET = "must-not-reach-child";
+    try {
+      const controller = new AbortController();
+      let observed: Record<string, unknown> | undefined;
+      await createNodeImsgRunner().watch({
+        cliPath: cli,
+        args: ["watch", "--json"],
+        signal: controller.signal,
+        onLine: (line) => {
+          observed = JSON.parse(line) as Record<string, unknown>;
+          controller.abort();
+        },
+        onDiagnostic: () => {},
+      });
+      expect(observed).toEqual({ hasSecret: false, hasHome: true });
+    } finally {
+      delete process.env.THEBE_IMSG_TEST_SECRET;
+    }
+  });
 });

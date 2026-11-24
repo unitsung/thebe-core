@@ -231,6 +231,7 @@ describe("IM HTTP routes", () => {
       body: JSON.stringify({
         accountId: channel.id,
         chat: { kind: "direct", id: "42" },
+        text: "",
         media: [
           {
             kind: "image",
