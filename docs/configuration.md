@@ -725,6 +725,8 @@ export THEBE_IRC_PASSWORD=...
 - QQ 适配器使用官方 QQ Bot OpenAPI v2 的 WebSocket 网关。填写 `AppID`、`AppSecret` 后接收 `C2C_MESSAGE_CREATE` 和 `GROUP_AT_MESSAGE_CREATE`，并用入站的 `msg_id` 加递增的 `msg_seq` 发送被动回复。它刻意只做回复：QQ 的主动推送有限频，且用户可关闭。单聊回复窗口为 60 分钟/4 条，群内 @ 为 5 分钟/5 条；文本按 2000 字符分块。富媒体先上传到官方 `/files`，再用 `msg_type: 7` 发送；单条消息只允许一个媒体。`POST /v1/im/recall` 调用官方 `DELETE /v2/users|groups/.../messages/{message_id}`，平台仍执行 2 分钟、角色和归属限制。`THEBE_QQ_APP_ID`/`THEBE_QQ_APP_SECRET` 可从环境变量预置通道；`THEBE_QQ_API_BASE`、`THEBE_QQ_TOKEN_URL`、`THEBE_QQ_GATEWAY_URL` 可指向代理或测试服务。
 - 本地 iMessage 后端在登录 Messages 的 Mac 上执行 `imsg watch --json --since-rowid <rowid>` 和 `imsg send --chat-id <id> ... --json`。游标属于 `cliPath` 和可选 `dbPath`，不同数据库不会互相续传。入站附件只允许来自 `~/Library/Messages/Attachments`；出站媒体写入 0600 临时文件，`imsg` 退出后立即删除。它需要 Messages 自动化和 Full Disk Access。BlueBubbles 后端仍轮询 REST API；Mac 离线时发送交给 outbox 重试。`THEBE_IMESSAGE_BASE_URL`/`THEBE_IMESSAGE_PASSWORD`（或已有的 `THEBE_BLUEBUBBLES_URL`/`THEBE_BLUEBUBBLES_PASSWORD`）预置 BlueBubbles；`THEBE_IMSG_PATH` 提供本机 `imsg` 默认路径，`THEBE_IMSG_DB_PATH` 可指定非默认 `chat.db`，`THEBE_IMESSAGE_BACKEND=imsg|bluebubbles` 选择默认后端。
 
+本地 watcher 同时传 `--attachments`。媒体下载按有界流读取，不信任远端 `Content-Length`；gateway 的总量上限保持在 HTTP 10 MB body 限制之内。
+
 ```bash
 # 只用环境变量接一个 Telegram 双向通道；同一个 bot token 也可以继续作为通知 target
 export THEBE_TELEGRAM_BOT_TOKEN=123456:ABC...
