@@ -54,6 +54,12 @@ staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `com
 5. Sign off every commit (see below).
 6. Confirm `bash scripts/check-release.sh` passes, then open a pull request
    describing the changed behavior and the checks you ran.
+7. Wait for the Codex review summary on the current head. Treat an unresolved
+   finding as a merge blocker: fix it and resolve the thread, or explain with
+   evidence why it does not apply, then request another review with
+   `@codex review`.
+8. Merge only after the review covers the current head, all review threads are
+   resolved, and the required CI and DCO checks pass.
 
 Preserve unrelated work in the tree. Avoid destructive Git operations and broad
 refactors that are not part of the change.

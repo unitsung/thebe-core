@@ -52,3 +52,4 @@ Use `apply_patch` for edits. Preserve existing uncommitted changes. Avoid destru
 - Conventional commits (`@commitlint/config-conventional`): a scoped imperative subject (`core: …`, `fix: …`, `chore: …`) and body lines of at most 100 characters.
 - One focused change per commit. Do not bundle unrelated features, and never commit another process's uncommitted work.
 - The pre-commit hook runs lint-staged (oxfmt on staged files, oxlint on staged JS/TS), then typecheck, a full lint, and the tests affected by the change. lint-staged re-stages formatted files, which flattens a partial `git add -p`. Split those commits with `git commit --no-verify` and run `npm run typecheck`, `npx vitest run` and `npm run lint` yourself.
+- For pull requests, wait for the Codex review summary on the current head. Fix or explicitly reject each unresolved finding with evidence, resolve its thread, and request another review after changes. Do not merge on CI alone.
