@@ -12,6 +12,7 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
+  statuses: write
 
 concurrency:
   group: codex-review-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -19,7 +20,7 @@ concurrency:
 
 jobs:
   review:
-    name: Codex review
+    name: Codex review publisher
     if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -59,7 +60,8 @@ jobs:
             -F number="${PR_NUMBER}" \
             > /tmp/codex-threads.json
 
-          node <<'NODE'
+          set +e
+          node <<'NODE' > /tmp/codex-review.log 2>&1
           const fs = require("node:fs");
 
           const head = JSON.parse(fs.readFileSync("/tmp/codex-pr.json", "utf8")).head.sha;
@@ -131,3 +133,23 @@ jobs:
 
           console.log(`Codex review passed for ${head}.`);
           NODE
+          result=$?
+          set -e
+          cat /tmp/codex-review.log
+
+          head="$(jq -r .head.sha /tmp/codex-pr.json)"
+          if [ "$result" = "0" ]; then
+            state=success
+            description="Current-head Codex review passed"
+          else
+            state=failure
+            description="Current-head Codex review has not passed"
+          fi
+          gh api --method POST \
+            "repos/${REPOSITORY}/statuses/${head}" \
+            -f state="$state" \
+            -f context="Codex review" \
+            -f description="$description" \
+            -f target_url="https://github.com/${REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            > /tmp/codex-status.json
+          exit "$result"
