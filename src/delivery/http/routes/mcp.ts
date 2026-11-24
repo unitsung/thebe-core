@@ -6,12 +6,17 @@ import {
   capabilityChangesThings,
   listCoreMcpTools,
   toMcpWireTool,
+  type McpToolInfo,
   type McpWireTool,
 } from "../../../agent/extensions/mcp.ts";
 import { parseCapabilityResult } from "../../../agent/capabilities/invoke.ts";
 import type { McpCaller } from "../../../agent/index.ts";
 import { asObject, json, readJson } from "../json.ts";
-import { tokenMayDeleteIrreversibly, tokenMayWrite } from "../token-store.ts";
+import {
+  tokenMayCallTool,
+  type TokenAccessLevel,
+  type TokenCaller,
+} from "../token-store.ts";
 
 const MCP_EVENT_TOOLS = [
   LIST_CORE_EVENTS_TOOL,
@@ -268,14 +273,91 @@ async function callTool(
  * A token that may not write is not shown the write tools, so its agent does not plan around calls
  * that would be refused. The deletes that cannot be undone stay listed: they are judged per call.
  */
+function toolService(tool: McpToolInfo): string | undefined {
+  if (tool.service) return tool.service;
+  if (tool.serverName) return tool.serverName;
+  if (tool.id.startsWith("mcp:")) {
+    return tool.id.slice("mcp:".length).split("/", 1)[0];
+  }
+  if (
+    tool.id === LIST_CORE_EVENTS_TOOL ||
+    tool.id === DIAGNOSE_FROM_EVENTS_TOOL
+  ) {
+    return "core";
+  }
+  if (tool.id.startsWith("ticket_")) return "ticket";
+  if (tool.id.startsWith("service_")) return "service";
+  return tool.id.split("_", 1)[0];
+}
+
+function requiredAccess(tool: McpToolInfo): TokenAccessLevel {
+  return capabilityChangesThings(tool) ? "write" : "read";
+}
+
+function scopedCaller(
+  caller: TokenCaller | undefined,
+  tool: McpToolInfo | undefined,
+  requestedName: string
+): McpCaller {
+  if (!caller?.scopes) {
+    return {
+      name: caller?.name,
+      writes: true,
+      irreversible: true,
+    };
+  }
+  if (!tool) {
+    return {
+      name: caller.name,
+      writes: false,
+      irreversible: false,
+      scopeError: `The token may not call unknown MCP tool ${requestedName}.`,
+    };
+  }
+  const service = toolService(tool);
+  const required = requiredAccess(tool);
+  const mayRead = tokenMayCallTool(caller, tool.name, "read", service);
+  const mayWrite = tokenMayCallTool(caller, tool.name, "write", service);
+  const mayIrreversible = tokenMayCallTool(
+    caller,
+    tool.name,
+    "irreversible",
+    service
+  );
+  const allowed =
+    required === "read"
+      ? mayRead
+      : required === "write"
+        ? mayWrite
+        : mayIrreversible;
+  return {
+    name: caller.name,
+    writes: mayWrite,
+    irreversible: mayIrreversible,
+    ...(!allowed && {
+      scopeError: `This token may not call ${tool.name}. Grant --scope mcp:write, or narrow it with --scope mcp:tool:${tool.name}:${required}${
+        service ? ` or --scope mcp:service:${service}:${required}` : ""
+      }.`,
+    }),
+  };
+}
+
+function listedForCaller(
+  capabilities: readonly McpToolInfo[],
+  caller: TokenCaller | undefined
+): McpToolInfo[] {
+  if (!caller?.scopes) return [...capabilities];
+  return capabilities.filter((tool) =>
+    tokenMayCallTool(caller, tool.name, requiredAccess(tool), toolService(tool))
+  );
+}
+
 async function listedTools(
   agent: NonNullable<ThebeHttpContext["agent"]> | undefined,
-  mayWrite: boolean
+  caller: TokenCaller | undefined
 ): Promise<McpWireTool[]> {
   const capabilities = agent ? await agent.listMcpTools() : listCoreMcpTools();
-  return capabilities
-    .map(toMcpWireTool)
-    .filter((tool) => mayWrite || tool.annotations.readOnlyHint);
+  return listedForCaller(capabilities, caller).map(toMcpWireTool);
 }
 
 async function isReadOnlyTool(
@@ -380,7 +462,7 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
     });
   }
   if (method === "tools/list") {
-    const tools = await listedTools(agent, tokenMayWrite(context.caller));
+    const tools = await listedTools(agent, context.caller);
     return json({
       jsonrpc: "2.0",
       id,
@@ -414,11 +496,19 @@ export async function handleMcp(context: ThebeHttpContext): Promise<Response> {
       );
     }
     try {
-      const { text, isError } = await callTool(agent, name, params.arguments, {
-        name: context.caller?.name,
-        writes: tokenMayWrite(context.caller),
-        irreversible: tokenMayDeleteIrreversibly(context.caller),
-      });
+      const mapped = ALIASES[name] ?? name;
+      const capabilities = agent
+        ? await agent.listMcpTools()
+        : listCoreMcpTools();
+      const tool = capabilities.find(
+        (item) => item.name === mapped || item.id === mapped
+      );
+      const { text, isError } = await callTool(
+        agent,
+        name,
+        params.arguments,
+        scopedCaller(context.caller, tool, name)
+      );
       const result = toolResult(text, isError);
       return json({
         jsonrpc: "2.0",

@@ -266,6 +266,8 @@ export type McpCaller = {
   name?: string;
   writes: boolean;
   irreversible: boolean;
+  /** A target-scope refusal prepared by the authenticated HTTP caller, audited by invokeMcpTool. */
+  scopeError?: string;
 };
 
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */

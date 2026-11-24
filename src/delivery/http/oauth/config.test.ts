@@ -122,4 +122,16 @@ describe("OAuth configuration", () => {
       /unknown scope/
     );
   });
+
+  it("accepts a pre-registered target-specific MCP scope", () => {
+    const [client] = parseOAuthClients([
+      {
+        clientId: "container-monitor",
+        redirectUris: ["https://client.example/callback"],
+        scopes: ["mcp:tool:container_list", "offline_access"],
+      },
+    ]);
+
+    expect(client?.scope).toBe("mcp:tool:container_list:read offline_access");
+  });
 });

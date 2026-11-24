@@ -84,19 +84,67 @@ export function tokenStatus(options: {
 // ---- Per-device tokens ----------------------------------------------------------------------
 
 /**
- * What a token may do, beyond the full access every token has by default. A token with scopes works
- * only on `/mcp`: `mcp:read` for read tools, `mcp:write` (which includes `mcp:read`) for write tools
- * too, and `mcp:irreversible` (which includes both) for the deletes that cannot be undone.
+ * Broad permissions. A token with scopes works only on `/mcp`: `mcp:read` for read tools,
+ * `mcp:write` (which includes read) for write tools, and `mcp:irreversible` for destructive work.
  */
 export const TOKEN_SCOPES = [
   "mcp:read",
   "mcp:write",
   "mcp:irreversible",
 ] as const;
-export type TokenScope = (typeof TOKEN_SCOPES)[number];
+export type BroadTokenScope = (typeof TOKEN_SCOPES)[number];
+export const TOKEN_ACCESS_LEVELS = ["read", "write", "irreversible"] as const;
+export type TokenAccessLevel = (typeof TOKEN_ACCESS_LEVELS)[number];
+export type TargetTokenScope =
+  | `mcp:tool:${string}:${TokenAccessLevel}`
+  | `mcp:service:${string}:${TokenAccessLevel}`;
+export type TokenScope = BroadTokenScope | TargetTokenScope;
 
 /** Whose token it is, and what it may do. No `scopes` means full access, as every token had before scopes. */
 export type TokenCaller = { name: string; scopes?: readonly TokenScope[] };
+
+const TARGET_SCOPE_PREFIXES = ["mcp:tool:", "mcp:service:"] as const;
+const TARGET_RE = /^[A-Za-z0-9_.:@+/-]{1,160}$/;
+
+/** Parses a stored or CLI scope into one canonical form, or rejects it for fail-closed handling. */
+export function parseTokenScope(value: unknown): TokenScope | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if ((TOKEN_SCOPES as readonly string[]).includes(trimmed)) {
+    return trimmed as BroadTokenScope;
+  }
+  const prefix = TARGET_SCOPE_PREFIXES.find((entry) =>
+    trimmed.startsWith(entry)
+  );
+  if (!prefix) return undefined;
+  let target = trimmed.slice(prefix.length);
+  let level: TokenAccessLevel = "read";
+  for (const candidate of TOKEN_ACCESS_LEVELS) {
+    const suffix = `:${candidate}`;
+    if (!target.endsWith(suffix)) continue;
+    target = target.slice(0, -suffix.length);
+    level = candidate;
+    break;
+  }
+  if (!TARGET_RE.test(target)) return undefined;
+  const normalizedTarget =
+    prefix === "mcp:service:" ? target.toLowerCase() : target;
+  return `${prefix}${normalizedTarget}:${level}` as TokenScope;
+}
+
+export function isTokenScope(value: unknown): value is TokenScope {
+  return parseTokenScope(value) !== undefined;
+}
+
+function accessAtLeast(
+  granted: TokenAccessLevel,
+  required: TokenAccessLevel
+): boolean {
+  return (
+    TOKEN_ACCESS_LEVELS.indexOf(granted) >=
+    TOKEN_ACCESS_LEVELS.indexOf(required)
+  );
+}
 
 /** Whether this caller may run write tools: a token with no scope list has full access. */
 export function tokenMayWrite(caller: TokenCaller | undefined): boolean {
@@ -112,6 +160,43 @@ export function tokenMayDeleteIrreversibly(
   caller: TokenCaller | undefined
 ): boolean {
   return !caller?.scopes || caller.scopes.includes("mcp:irreversible");
+}
+
+/**
+ * Authorizes one named tool. Targeted scopes grant only their exact tool or service and never affect
+ * another target. Broad scopes continue to work across Core.
+ */
+export function tokenMayCallTool(
+  caller: TokenCaller | undefined,
+  tool: string,
+  required: TokenAccessLevel,
+  service?: string
+): boolean {
+  if (!caller?.scopes) return true;
+  for (const raw of caller.scopes) {
+    const scope = parseTokenScope(raw);
+    if (!scope) continue;
+    if ((TOKEN_SCOPES as readonly string[]).includes(scope)) {
+      const granted = scope.slice("mcp:".length) as TokenAccessLevel;
+      if (accessAtLeast(granted, required)) return true;
+      continue;
+    }
+    const separator = scope.lastIndexOf(":");
+    const granted = scope.slice(separator + 1) as TokenAccessLevel;
+    if (!accessAtLeast(granted, required)) continue;
+    const body = scope.slice("mcp:".length, separator);
+    if (body.startsWith("tool:") && body.slice("tool:".length) === tool) {
+      return true;
+    }
+    if (
+      body.startsWith("service:") &&
+      service &&
+      body.slice("service:".length) === service.toLowerCase()
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** What the HTTP handler asks: whose token is this, if it is one of ours. */
@@ -221,6 +306,8 @@ export function createDeviceToken(options: {
   name: string;
   /** Limit the token to `/mcp`; leave out for full access. */
   scope?: TokenScope;
+  /** Permit several broad or target-specific scopes. */
+  scopes?: readonly TokenScope[];
   now?: () => Date;
   generate?: () => string;
 }): DeviceTokenResult {
@@ -241,15 +328,43 @@ export function createDeviceToken(options: {
     name,
     hash: hex(token),
     createdAt: (options.now?.() ?? new Date()).toISOString(),
-    ...(options.scope && { scopes: scopesGranting(options.scope) }),
+    ...((options.scopes?.length || options.scope) && {
+      scopes: scopesGranting([
+        ...(options.scopes ?? []),
+        ...(options.scope ? [options.scope] : []),
+      ]),
+    }),
   });
   writeDeviceTokens(options.configDir, existing);
   return { ok: true, name, token };
 }
 
 /** Each scope includes the ones below it, so the stored list is every scope the token may use. */
-function scopesGranting(scope: TokenScope): TokenScope[] {
-  return TOKEN_SCOPES.slice(0, TOKEN_SCOPES.indexOf(scope) + 1);
+function scopesGranting(scopes: readonly TokenScope[]): TokenScope[] {
+  const granted = new Set<TokenScope>();
+  for (const raw of scopes) {
+    const scope = parseTokenScope(raw);
+    if (!scope) continue;
+    if ((TOKEN_SCOPES as readonly string[]).includes(scope)) {
+      for (const broad of TOKEN_SCOPES.slice(
+        0,
+        TOKEN_SCOPES.indexOf(scope as BroadTokenScope) + 1
+      )) {
+        granted.add(broad);
+      }
+      continue;
+    }
+    const separator = scope.lastIndexOf(":");
+    const level = scope.slice(separator + 1) as TokenAccessLevel;
+    const base = scope.slice(0, separator);
+    for (const candidate of TOKEN_ACCESS_LEVELS.slice(
+      0,
+      TOKEN_ACCESS_LEVELS.indexOf(level) + 1
+    )) {
+      granted.add(`${base}:${candidate}` as TokenScope);
+    }
+  }
+  return [...granted];
 }
 
 /** Removes one device's token; the others keep working. */
@@ -277,8 +392,27 @@ export function describeTokenScopes(stored: unknown): string {
   const scopes = knownScopes(stored);
   if (scopes === undefined) return "full access";
   if (scopes === "unknown") return "unknown scope (refused)";
-  if (scopes.includes("mcp:irreversible")) return "mcp:irreversible";
-  return scopes.includes("mcp:write") ? "mcp:write" : "mcp:read";
+  const broad = [...TOKEN_SCOPES]
+    .reverse()
+    .find((scope) => scopes.includes(scope));
+  const targets = new Map<string, TokenAccessLevel>();
+  for (const scope of scopes) {
+    if ((TOKEN_SCOPES as readonly string[]).includes(scope)) continue;
+    const separator = scope.lastIndexOf(":");
+    const level = scope.slice(separator + 1) as TokenAccessLevel;
+    const base = scope.slice(0, separator);
+    const previous = targets.get(base);
+    if (
+      !previous ||
+      TOKEN_ACCESS_LEVELS.indexOf(level) > TOKEN_ACCESS_LEVELS.indexOf(previous)
+    ) {
+      targets.set(base, level);
+    }
+  }
+  return [
+    ...(broad ? [broad] : []),
+    ...[...targets].map(([base, level]) => `${base}:${level}`),
+  ].join(", ");
 }
 
 /** The stored scopes as a list, `undefined` for full access, or `"unknown"` when any entry is not one Core defines. */
@@ -286,12 +420,15 @@ function knownScopes(
   stored: unknown
 ): readonly TokenScope[] | undefined | "unknown" {
   if (stored === undefined) return undefined;
-  const known = (value: unknown): value is TokenScope =>
-    (TOKEN_SCOPES as readonly unknown[]).includes(value);
   // An empty list is as unusable as an unknown name: refuse it, do not guess what was meant.
-  return Array.isArray(stored) && stored.length > 0 && stored.every(known)
-    ? stored
-    : "unknown";
+  if (!Array.isArray(stored) || stored.length === 0) return "unknown";
+  const scopes: TokenScope[] = [];
+  for (const value of stored) {
+    const scope = parseTokenScope(value);
+    if (!scope) return "unknown";
+    scopes.push(scope);
+  }
+  return scopes;
 }
 
 /**

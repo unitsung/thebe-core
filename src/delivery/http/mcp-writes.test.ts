@@ -501,6 +501,54 @@ describe("/mcp tools/list by token scope", () => {
       expect(writerSees, shown).toContain(shown);
     }
   });
+
+  it("shows and invokes only the tool or service target a narrow token names", async () => {
+    const targeted = "x".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-target-"));
+    createDeviceToken({
+      configDir,
+      name: "PR medic",
+      scopes: ["mcp:service:radarr:read", "mcp:tool:container_restart:write"],
+      generate: () => targeted,
+    });
+    const box = setup(
+      true,
+      [],
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+    const list = await box.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${targeted}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      })
+    );
+    const listed = (
+      (await list.json()) as { result: { tools: Array<{ name: string }> } }
+    ).result.tools.map((tool) => tool.name);
+    expect(listed).toEqual(
+      expect.arrayContaining(["mcp:radarr/list_movies", "container_restart"])
+    );
+    expect(listed).not.toContain("container_list");
+    expect(listed).not.toContain("navidrome_playlist_create");
+    expect(listed).not.toContain("mcp:radarr/delete_movie");
+
+    const inside = await box.call("mcp:radarr/list_movies", {}, targeted);
+    expect(text(inside)).toBe("done");
+    const outside = await box.call("container_list", {}, targeted);
+    expect(outside.result?.isError).toBe(true);
+    expect(text(outside)).toContain("scope");
+    const write = await box.call(
+      "container_restart",
+      { id: "ctr-1" },
+      targeted
+    );
+    expect(write.result?.isError).toBeUndefined();
+  });
 });
 
 describe("/mcp service_confirm", () => {

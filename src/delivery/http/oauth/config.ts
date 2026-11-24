@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ClientMetadata } from "oidc-provider";
-import { OAUTH_SUPPORTED_SCOPES } from "./metadata.ts";
+import { canonicalOAuthScope } from "./metadata.ts";
 
 export const DEFAULT_OAUTH_CLIENTS_FILE = "oauth-clients.json";
 export const DEFAULT_OAUTH_PAIRING_TTL_SECONDS = 300;
@@ -138,11 +138,13 @@ export function parseOAuthClients(value: unknown): ClientMetadata[] {
         : typeof scopeValue === "string"
           ? scopeValue.split(/\s+/).filter(Boolean)
           : stringList(scopeValue, `OAuth client ${clientId} scopes`);
-    const uniqueScopes = [...new Set(scopes)];
-    for (const scope of uniqueScopes) {
-      if (!(OAUTH_SUPPORTED_SCOPES as readonly string[]).includes(scope)) {
+    const uniqueScopes: string[] = [];
+    for (const scope of scopes) {
+      const canonical = canonicalOAuthScope(scope);
+      if (!canonical) {
         throw new Error(`OAuth client ${clientId} has unknown scope ${scope}`);
       }
+      if (!uniqueScopes.includes(canonical)) uniqueScopes.push(canonical);
     }
     if (!uniqueScopes.some((scope) => scope.startsWith("mcp:"))) {
       throw new Error(`OAuth client ${clientId} needs at least one mcp scope`);

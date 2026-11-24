@@ -443,6 +443,9 @@ export function createControlApi(
       }
     };
     try {
+      if (caller.scopeError) {
+        throw httpError(403, caller.scopeError, "mcp_scope_required");
+      }
       const done = await runMcpTool(name, args, caller);
       await record(done.isError ? "error" : "ok", Buffer.byteLength(done.text));
       return done;

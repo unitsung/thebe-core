@@ -287,15 +287,23 @@ describe("per-device tokens", () => {
     );
     expect(
       runTokenCommand(
-        ["create", "Twice", "--scope", "mcp:read", "--scope", "mcp:write"],
+        [
+          "create",
+          "Focused",
+          "--scope",
+          "mcp:read",
+          "--scope",
+          "mcp:tool:container_restart:write",
+        ],
         configDir,
         io
       )
-    ).toBe(2);
+    ).toBe(0);
     expect(readDeviceTokens(configDir).map((t) => t.name)).toEqual([
       "Claude Code",
       "Hub",
       "iPad",
+      "Focused",
     ]);
 
     expect(

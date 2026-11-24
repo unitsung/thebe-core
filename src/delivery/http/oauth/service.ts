@@ -11,6 +11,8 @@ import type { OAuthConfig } from "./config.ts";
 import { createOAuthAdapter, listOAuthAdapterPayloads } from "./adapter.ts";
 import { loadOrCreateOAuthKeys, type OAuthKeyMaterial } from "./keys.ts";
 import {
+  canonicalOAuthScope,
+  isMcpOAuthScope,
   MCP_OAUTH_SCOPES,
   OAUTH_SUPPORTED_SCOPES,
   protectedResourceMetadata,
@@ -293,6 +295,19 @@ function providerConfiguration(options: {
 }): Configuration {
   const { config, keys } = options;
   const secureCookie = new URL(config.issuer).protocol === "https:";
+  const resourceScopes = [
+    ...new Set([
+      ...MCP_OAUTH_SCOPES,
+      ...config.clients.flatMap((client) =>
+        String(client.scope ?? "")
+          .split(/\s+/)
+          .filter(isMcpOAuthScope)
+      ),
+    ]),
+  ];
+  const providerScopes = [
+    ...new Set([...OAUTH_SUPPORTED_SCOPES, ...resourceScopes]),
+  ];
   return {
     adapter: createOAuthAdapter(options.configDir),
     clients: config.clients,
@@ -318,7 +333,7 @@ function providerConfiguration(options: {
         secure: secureCookie,
       },
     },
-    scopes: OAUTH_SUPPORTED_SCOPES,
+    scopes: providerScopes,
     claims: { sub: null },
     responseTypes: ["code"],
     subjectTypes: ["public"],
@@ -364,7 +379,7 @@ function providerConfiguration(options: {
             throw new errors.InvalidTarget();
           }
           return {
-            scope: MCP_OAUTH_SCOPES.join(" "),
+            scope: resourceScopes.join(" "),
             audience: config.resource,
             accessTokenFormat: "jwt",
             accessTokenTTL: 15 * 60,
@@ -430,7 +445,7 @@ function providerConfiguration(options: {
     },
     discovery: {
       resource_indicators_supported: true,
-      scopes_supported: [...OAUTH_SUPPORTED_SCOPES],
+      scopes_supported: providerScopes,
     },
     renderError(ctx, _out, error) {
       const status =
@@ -618,13 +633,9 @@ async function handleInteractionRequest(
     accountId: OWNER_ACCOUNT_ID,
     clientId,
   });
-  const mcpScopes = selected.filter((scope) =>
-    (MCP_OAUTH_SCOPES as readonly string[]).includes(scope)
-  );
+  const mcpScopes = selected.filter((scope) => isMcpOAuthScope(scope));
   const rejected = requestedScopes.filter((scope) => !selected.includes(scope));
-  const rejectedMcp = rejected.filter((scope) =>
-    (MCP_OAUTH_SCOPES as readonly string[]).includes(scope)
-  );
+  const rejectedMcp = rejected.filter((scope) => isMcpOAuthScope(scope));
   grant.addOIDCScope(requestedScopes);
   grant.addResourceScope(options.config.resource, mcpScopes);
   if (rejected.length > 0) grant.rejectOIDCScope(rejected);
@@ -678,17 +689,12 @@ async function verifyAccessToken(
       return undefined;
     }
     const scopeList = [...new Set(scope.split(/\s+/).filter(Boolean))];
-    if (
-      scopeList.some(
-        (entry) =>
-          !(OAUTH_SUPPORTED_SCOPES as readonly string[]).includes(entry)
-      )
-    ) {
-      return undefined;
-    }
-    const scopes = MCP_OAUTH_SCOPES.filter((entry) =>
-      scopeList.includes(entry)
-    ) as TokenScope[];
+    const canonical = scopeList.map(canonicalOAuthScope);
+    if (canonical.some((entry) => !entry)) return undefined;
+    const scopes = canonical.filter(
+      (entry): entry is TokenScope =>
+        !!entry && (entry as string).startsWith("mcp:")
+    );
     if (scopes.length === 0) return undefined;
     const claimedName = stringValue(payload.client_name);
     return {
@@ -749,9 +755,10 @@ function interactionNeedsLogin(details: Interaction): boolean {
 function interactionScopes(details: Interaction): string[] {
   const raw = stringValue(details.params.scope) ?? "mcp:read";
   const requested = [...new Set(raw.split(/\s+/).filter(Boolean))];
-  const allowed = requested.filter((scope) =>
-    (OAUTH_SUPPORTED_SCOPES as readonly string[]).includes(scope)
-  );
+  const allowed = requested.flatMap((scope) => {
+    const canonical = canonicalOAuthScope(scope);
+    return canonical ? [canonical] : [];
+  });
   return allowed.length > 0 ? allowed : ["mcp:read"];
 }
 

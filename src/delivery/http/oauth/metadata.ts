@@ -1,4 +1,4 @@
-import { TOKEN_SCOPES } from "../token-store.ts";
+import { parseTokenScope, TOKEN_SCOPES } from "../token-store.ts";
 
 export const MCP_OAUTH_SCOPES = TOKEN_SCOPES;
 export const OAUTH_GLOBAL_SCOPES = ["offline_access"] as const;
@@ -6,6 +6,16 @@ export const OAUTH_SUPPORTED_SCOPES = [
   ...TOKEN_SCOPES,
   ...OAUTH_GLOBAL_SCOPES,
 ] as const;
+
+/** OAuth accepts the same target syntax as device tokens, plus offline_access. */
+export function canonicalOAuthScope(value: string): string | undefined {
+  if (value === "offline_access") return value;
+  return parseTokenScope(value);
+}
+
+export function isMcpOAuthScope(value: string): boolean {
+  return canonicalOAuthScope(value)?.startsWith("mcp:") === true;
+}
 
 const PROTECTED_RESOURCE_PATHS = new Set([
   "/.well-known/oauth-protected-resource",
