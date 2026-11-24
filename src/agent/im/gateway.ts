@@ -748,7 +748,7 @@ export function createImGateway(options: ImGatewayOptions) {
       onError(error);
       result = { status: "unknown", reason: "adapter_error" };
     }
-    if (result.status === "sent" || result.status === "discard") {
+    if (result.status !== "retry") {
       rememberOutbound(memoryKey, result);
       if (result.status === "sent") {
         runtime.lastOutboundAt = now().toISOString();

@@ -587,6 +587,33 @@ describe("IM gateway", () => {
     await gateway.stop();
   });
 
+  it("remembers an unknown send so the same idempotency key is not replayed", async () => {
+    const { gateway, channel, adapter } = await setupGateway();
+    let calls = 0;
+    adapter.send = async () => {
+      calls += 1;
+      return { status: "unknown", reason: "response lost" };
+    };
+    const input = {
+      accountId: channel.id,
+      chat: { kind: "direct" as const, id: "42" },
+      text: "once",
+      mode: "proactive" as const,
+      idempotencyKey: "unknown-once",
+    };
+
+    await expect(gateway.send(input)).resolves.toEqual({
+      status: "unknown",
+      reason: "response lost",
+    });
+    await expect(gateway.send(input)).resolves.toEqual({
+      status: "unknown",
+      reason: "response lost",
+    });
+    expect(calls).toBe(1);
+    await gateway.stop();
+  });
+
   it("keeps a thread id on the reply", async () => {
     const { gateway, channel, adapter, prompts } = await setupGateway();
     const chat: ImChat = {

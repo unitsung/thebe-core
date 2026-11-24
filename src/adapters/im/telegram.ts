@@ -391,6 +391,7 @@ export function createTelegramImAdapter(input: {
     let lastMessageId: string | undefined;
     let replyClaimed = false;
     let captionUsed = false;
+    let delivered = 0;
     for (const item of media) {
       let bytes: Buffer;
       try {
@@ -438,8 +439,9 @@ export function createTelegramImAdapter(input: {
         const messageId = numeric(result.message_id);
         if (messageId !== undefined) lastMessageId = String(messageId);
       } catch (error) {
-        return classificationFor(error);
+        return partialMediaFailure(classificationFor(error), delivered);
       }
+      delivered += 1;
     }
     if (input.text.trim().length > 1_024) {
       const rest = await sendChunks({
@@ -452,7 +454,7 @@ export function createTelegramImAdapter(input: {
       if (rest.status === "sent" && rest.platformMessageId) {
         lastMessageId = rest.platformMessageId;
       }
-      if (rest.status !== "sent") return rest;
+      if (rest.status !== "sent") return partialMediaFailure(rest, delivered);
     }
     return {
       status: "sent",
@@ -600,6 +602,17 @@ export function createTelegramImAdapter(input: {
       inbound = handler;
     },
     fetchMedia,
+  };
+}
+
+function partialMediaFailure(
+  result: ImSendResult,
+  delivered: number
+): ImSendResult {
+  if (delivered === 0 || result.status === "sent") return result;
+  return {
+    status: "unknown",
+    reason: `telegram delivered ${delivered} attachment${delivered === 1 ? "" : "s"}; ${result.reason}`,
   };
 }
 

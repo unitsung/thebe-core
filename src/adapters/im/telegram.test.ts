@@ -256,6 +256,40 @@ describe("Telegram IM adapter", () => {
     expect((call!.formData!.get("photo") as File).name).toBe("chart.png");
   });
 
+  it("does not retry a partial multi-attachment send", async () => {
+    let uploads = 0;
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]).toString("base64");
+    const { adapter, calls } = adapterWith(() => {
+      uploads += 1;
+      return uploads === 1
+        ? jsonBody({ ok: true, result: { message_id: 1 } })
+        : jsonBody({ ok: false, description: "Too Many Requests" }, 429);
+    });
+
+    const result = await adapter.send({
+      platform: "telegram",
+      accountId: "im-telegram-test",
+      chat: { kind: "direct", id: "42" },
+      text: "",
+      media: [
+        { kind: "image", mediaType: "image/png", data: png },
+        { kind: "image", mediaType: "image/png", data: png },
+      ],
+      mode: "proactive",
+      idempotencyKey: "partial-media",
+    });
+
+    expect(result).toMatchObject({
+      status: "unknown",
+      reason: expect.stringContaining("delivered 1 attachment"),
+    });
+    expect(
+      calls.filter((call) => call.url.endsWith("/sendPhoto"))
+    ).toHaveLength(2);
+  });
+
   it("keeps a forum thread on inbound and outbound messages", async () => {
     const updates: ImInbound[] = [];
     let first = true;
