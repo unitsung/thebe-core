@@ -655,6 +655,47 @@ describe("/mcp service_confirm", () => {
     expect(confirmed.result?.isError).toBeUndefined();
     expect(requests).toEqual(["DELETE /pet/7"]);
   });
+
+  it("does not lend an irreversible grant from another service to a confirm token", async () => {
+    const full = "f".repeat(64);
+    const crossScoped = "c".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-cross-confirm-"));
+    createDeviceToken({
+      configDir,
+      name: "Full previewer",
+      generate: () => full,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Cross scoped",
+      scopes: ["mcp:service:petstore:write", "mcp:service:other:irreversible"],
+      generate: () => crossScoped,
+    });
+    const requests: string[] = [];
+    const { call } = setup(
+      true,
+      requests,
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+
+    const preview = await call(
+      "service__petstore__deletePet",
+      { petId: 7 },
+      full
+    );
+    const confirmToken =
+      JSON.parse(text(preview)).confirmToken ?? JSON.parse(text(preview)).token;
+    const refused = await call(
+      "service_confirm",
+      { token: confirmToken },
+      crossScoped
+    );
+
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("mcp:irreversible");
+    expect(requests).toEqual([]);
+  });
 });
 
 describe("/mcp operator marks on provider tools", () => {

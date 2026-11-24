@@ -332,9 +332,7 @@ function scopedCaller(
         caller.scopes.some(
           (scope) => scope.endsWith(":write") || scope.endsWith(":irreversible")
         ),
-      irreversible:
-        tokenMayDeleteIrreversibly(caller) ||
-        caller.scopes.some((scope) => scope.endsWith(":irreversible")),
+      irreversible: tokenMayDeleteIrreversibly(caller),
       scopeAllows: (name, required, service) =>
         tokenMayCallTool(caller, name, required, service),
     };

@@ -492,24 +492,29 @@ export function createControlApi(
       );
     }
     const params = (args ?? {}) as Record<string, unknown>;
+    let targetIrreversible = caller.irreversible;
     if (name === SERVICE_API_CONFIRM_TOOL_NAME && caller.scopeAllows) {
       const { service, operationId } = await irreversibleContext(name, params);
-      if (
-        service &&
-        !caller.scopeAllows(
-          serviceOperationToolName(service, operationId ?? ""),
-          "write",
+      if (service) {
+        const operationTool = serviceOperationToolName(
+          service,
+          operationId ?? ""
+        );
+        if (!caller.scopeAllows(operationTool, "write", service)) {
+          throw httpError(
+            403,
+            `This token may not confirm ${service} writes. Add --scope mcp:service:${service}:write or the matching operation tool scope.`,
+            "mcp_scope_required"
+          );
+        }
+        targetIrreversible = caller.scopeAllows(
+          operationTool,
+          "irreversible",
           service
-        )
-      ) {
-        throw httpError(
-          403,
-          `This token may not confirm ${service} writes. Add --scope mcp:service:${service}:write or the matching operation tool scope.`,
-          "mcp_scope_required"
         );
       }
     }
-    if (!caller.irreversible) {
+    if (!targetIrreversible) {
       const { sends, ...context } = await irreversibleContext(name, params);
       const reason = irreversibleReason({
         name,
