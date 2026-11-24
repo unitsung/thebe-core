@@ -1,0 +1,92 @@
+name: Codex review gate
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: codex-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    name: Codex review
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a current-head Codex review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/codex-pr.json
+          gh api --paginate --slurp \
+            "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
+            > /tmp/codex-reviews.json
+          gh api graphql \
+            -f query='query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      isResolved
+                      path
+                      line
+                    }
+                  }
+                }
+              }
+            }' \
+            -F owner="${REPOSITORY%/*}" \
+            -F repo="${REPOSITORY#*/}" \
+            -F number="${PR_NUMBER}" \
+            > /tmp/codex-threads.json
+
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const head = JSON.parse(fs.readFileSync("/tmp/codex-pr.json", "utf8")).head.sha;
+          const pages = JSON.parse(fs.readFileSync("/tmp/codex-reviews.json", "utf8"));
+          const reviews = pages.flat();
+          const threads = JSON.parse(
+            fs.readFileSync("/tmp/codex-threads.json", "utf8"),
+          ).data.repository.pullRequest.reviewThreads.nodes;
+
+          const current = reviews
+            .filter(
+              (review) =>
+                review.user?.login === "chatgpt-codex-connector[bot]" &&
+                review.commit_id === head &&
+                review.state !== "DISMISSED",
+            )
+            .sort((left, right) =>
+              (left.submitted_at ?? "").localeCompare(right.submitted_at ?? ""),
+            )
+            .at(-1);
+
+          if (!current) {
+            console.error(`Codex review has not completed for current head ${head}.`);
+            process.exit(1);
+          }
+
+          const unresolved = threads.filter((thread) => !thread.isResolved);
+          if (unresolved.length > 0) {
+            for (const thread of unresolved) {
+              console.error(
+                `Unresolved Codex finding: ${thread.path}:${thread.line ?? "?"}`,
+              );
+            }
+            process.exit(1);
+          }
+
+          console.log(`Codex review passed for ${head}.`);
+          NODE
