@@ -50,6 +50,7 @@ describe("quiet hours window", () => {
     expect(msUntilQuietEnds(night, new Date("2026-11-06T06:59:30Z"))).toBe(
       30_000
     );
+    expect(msUntilQuietEnds(night, at("07:00"))).toBe(1_000);
   });
 
   it("uses the real elapsed time across daylight-saving transitions", () => {

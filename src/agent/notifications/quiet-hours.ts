@@ -157,6 +157,7 @@ export function isQuiet(window: QuietHours, at: Date): boolean {
 
 /** Milliseconds from `at` until the window ends. At least one second, so a timer never fires early. */
 export function msUntilQuietEnds(window: QuietHours, at: Date): number {
+  if (!isQuiet(window, at)) return 1000;
   const current = localDateTime(at, window.timeZone);
   const now = current.hour * 60 + current.minute;
   const end = toMinutes(window.end);
