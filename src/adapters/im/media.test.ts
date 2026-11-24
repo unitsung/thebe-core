@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { MediaDownloadLimitError, readBoundedResponseBody } from "./media.ts";
+import {
+  MediaDownloadLimitError,
+  mediaTypeFromResponse,
+  readBoundedResponseBody,
+} from "./media.ts";
 
 describe("IM media download bounds", () => {
   it("stops reading when a stream crosses the byte limit", async () => {
@@ -31,6 +35,16 @@ describe("IM media download bounds", () => {
 
     await expect(readBoundedResponseBody(response, 3)).resolves.toEqual(
       Uint8Array.from([1, 2, 3])
+    );
+  });
+
+  it("keeps a specific source MIME over a generic download response", () => {
+    const response = new Response(null, {
+      headers: { "content-type": "application/octet-stream" },
+    });
+    expect(mediaTypeFromResponse(response, "text/plain")).toBe("text/plain");
+    expect(mediaTypeFromResponse(response, "application/json")).toBe(
+      "application/json"
     );
   });
 });

@@ -129,6 +129,7 @@ export function createImsgLocalAdapter(input: {
     return [
       "watch",
       "--json",
+      "--attachments",
       ...baseArgs(),
       ...(cursor !== undefined ? ["--since-rowid", String(cursor)] : []),
     ];
@@ -174,7 +175,7 @@ export function createImsgLocalAdapter(input: {
       diagnostic = "";
       try {
         setHealth({ state: "starting", since: now().toISOString() });
-        await runner.watch({
+        const watching = runner.watch({
           cliPath,
           args: watchArgs(),
           signal: active.signal,
@@ -183,6 +184,8 @@ export function createImsgLocalAdapter(input: {
             diagnostic = line.trim().slice(0, 300);
           },
         });
+        setHealth({ state: "connected", since: now().toISOString() });
+        await watching;
         if (active.signal.aborted) return;
         throw new Error(diagnostic || "imsg watch exited");
       } catch (error) {

@@ -16,7 +16,11 @@ import type {
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
-import { MediaDownloadLimitError, readBoundedResponseBody } from "./media.ts";
+import {
+  MediaDownloadLimitError,
+  mediaTypeFromResponse,
+  readBoundedResponseBody,
+} from "./media.ts";
 
 export const QQ_MAX_TEXT = 2_000;
 export const QQ_C2C_REPLY_WINDOW_MS = 60 * 60_000;
@@ -735,10 +739,7 @@ export function createQqImAdapter(input: {
     const filename = mediaInput.media.filename ?? urlFilename;
     return {
       data,
-      mediaType:
-        response.headers.get("content-type")?.split(";")[0]?.trim() ??
-        mediaInput.media.mimeType ??
-        "application/octet-stream",
+      mediaType: mediaTypeFromResponse(response, mediaInput.media.mimeType),
       ...(filename ? { filename: filename.slice(0, 120) } : {}),
     };
   }

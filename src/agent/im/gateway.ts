@@ -703,6 +703,10 @@ export function createImGateway(options: ImGatewayOptions) {
     if (!runtime.adapter) {
       return { status: "discard", reason: "adapter_unavailable" };
     }
+    if (input.media?.length && !runtime.adapter.capabilities.media) {
+      runtime.lastError = "media_not_supported";
+      return { status: "discard", reason: "media_not_supported" };
+    }
     const payload: ImSendInput =
       input.mode === "proactive"
         ? {

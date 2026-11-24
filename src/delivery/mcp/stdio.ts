@@ -86,13 +86,12 @@ export async function serveMcpStdio(options: {
     for await (const line of input) {
       if (options.signal?.aborted) break;
       if (!line.trim()) continue;
-      const response = await options.server.handleLine(
-        line.length > maxBytes
+      const response =
+        Buffer.byteLength(line) > maxBytes
           ? JSON.stringify(
               rpcError(null, -32600, "Request exceeds the stdio limit")
             )
-          : line
-      );
+          : await options.server.handleLine(line);
       if (!response) continue;
       await writeLine(options.output, response);
       if (options.signal?.aborted) break;

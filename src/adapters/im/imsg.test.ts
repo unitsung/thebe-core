@@ -90,7 +90,7 @@ describe("local imsg IM adapter", () => {
       messageId: "message-guid",
       text: "hello from Messages",
     });
-    expect(fake.watchArgs[0]).toEqual(["watch", "--json"]);
+    expect(fake.watchArgs[0]).toEqual(["watch", "--json", "--attachments"]);
     expect(cursors).toEqual(["42"]);
 
     const sent = await adapter.send({

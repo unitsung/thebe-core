@@ -13,7 +13,11 @@ import type {
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
-import { MediaDownloadLimitError, readBoundedResponseBody } from "./media.ts";
+import {
+  MediaDownloadLimitError,
+  mediaTypeFromResponse,
+  readBoundedResponseBody,
+} from "./media.ts";
 
 export const TELEGRAM_MAX_TEXT = 4_096;
 const DEFAULT_POLL_TIMEOUT_SECONDS = 50;
@@ -552,10 +556,7 @@ export function createTelegramImAdapter(input: {
     }
     return {
       data: bytes,
-      mediaType:
-        response.headers.get("content-type")?.split(";")[0]?.trim() ??
-        mediaInput.media.mimeType ??
-        "application/octet-stream",
+      mediaType: mediaTypeFromResponse(response, mediaInput.media.mimeType),
       ...(filePath.split("/").pop()
         ? { filename: filePath.split("/").pop()! }
         : {}),

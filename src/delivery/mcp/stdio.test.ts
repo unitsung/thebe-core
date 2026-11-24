@@ -150,4 +150,29 @@ describe("MCP stdio transport", () => {
       { jsonrpc: "2.0", id: 2, result: {} },
     ]);
   });
+
+  it("returns a JSON-RPC error instead of dropping an oversized line", async () => {
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const chunks: Buffer[] = [];
+    output.on("data", (chunk: Buffer) => chunks.push(chunk));
+    const served = serveMcpStdio({
+      server: {
+        async handleLine() {
+          throw new Error("oversized input must not reach the dispatcher");
+        },
+      },
+      input,
+      output,
+      maxLineBytes: 8,
+    });
+    input.end('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
+
+    await served;
+    expect(JSON.parse(chunks.join("").trim())).toMatchObject({
+      jsonrpc: "2.0",
+      id: null,
+      error: { code: -32600 },
+    });
+  });
 });

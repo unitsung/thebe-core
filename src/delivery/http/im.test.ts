@@ -225,6 +225,7 @@ describe("IM HTTP routes", () => {
     });
     const channel = created.body.channel as { id: string };
     const adapter = adapters.get(channel.id)!;
+    adapter.capabilities.media = true;
     const sent = await call("/v1/im/send", {
       method: "POST",
       body: JSON.stringify({

@@ -5,6 +5,25 @@ export class MediaDownloadLimitError extends Error {
   }
 }
 
+export function mediaTypeFromResponse(
+  response: Response,
+  fallback: string | undefined
+): string {
+  const responseType = response.headers
+    .get("content-type")
+    ?.split(";")[0]
+    ?.trim()
+    .toLowerCase();
+  const fallbackType = fallback?.trim().toLowerCase();
+  if (
+    (!responseType || responseType === "application/octet-stream") &&
+    fallbackType
+  ) {
+    return fallbackType;
+  }
+  return responseType || fallbackType || "application/octet-stream";
+}
+
 /** Reads a remote media response without trusting Content-Length or buffering past the bound. */
 export async function readBoundedResponseBody(
   response: Response,

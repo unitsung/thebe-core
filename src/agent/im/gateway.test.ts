@@ -561,6 +561,32 @@ describe("IM gateway", () => {
     await gateway.stop();
   });
 
+  it("rejects outbound media on a text-only adapter without caching success", async () => {
+    const { gateway, channel, adapter } = await setupGateway();
+
+    await expect(
+      gateway.send({
+        accountId: channel.id,
+        chat: { kind: "direct", id: "42" },
+        text: "caption",
+        media: [
+          {
+            kind: "image",
+            mediaType: "image/png",
+            data: "iVBORw0KGgo=",
+          },
+        ],
+        mode: "proactive",
+        idempotencyKey: "media-unsupported",
+      })
+    ).resolves.toEqual({
+      status: "discard",
+      reason: "media_not_supported",
+    });
+    expect(adapter.sent).toEqual([]);
+    await gateway.stop();
+  });
+
   it("keeps a thread id on the reply", async () => {
     const { gateway, channel, adapter, prompts } = await setupGateway();
     const chat: ImChat = {
