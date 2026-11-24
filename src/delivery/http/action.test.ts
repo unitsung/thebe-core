@@ -32,25 +32,27 @@ async function json(res: Response): Promise<Record<string, unknown>> {
   return (await res.json()) as Record<string, unknown>;
 }
 
-describe("POST /v1/action container.restart", () => {
+describe("POST /v1/action container_restart", () => {
   it("exposes restart capability metadata on GET /v1/capabilities", async () => {
     const app = createThebeApp({
       runtime: createFakeRuntime().runtime,
       provider: provider(),
     });
-    const res = await app.handler.handle(new Request("http://127.0.0.1:8787/v1/capabilities"));
+    const res = await app.handler.handle(
+      new Request("http://127.0.0.1:8787/v1/capabilities")
+    );
     const body = await json(res);
     const capabilities = body.capabilities as Array<Record<string, unknown>>;
     expect(capabilities).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "container.restart",
+          id: "container_restart",
           effect: "write",
           risk: "disruptive",
           approval: "required",
           permission: "confirm",
         }),
-      ]),
+      ])
     );
   });
 
@@ -64,16 +66,27 @@ describe("POST /v1/action container.restart", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
-          resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
+          actionId: "container_restart",
+          resource: {
+            kind: "container",
+            id: "ctr-emby",
+            name: "emby",
+            provider: "arcane",
+          },
         }),
-      }),
+      })
     );
     expect(res.status).toBe(403);
     const body = await json(res);
-    expect(body.action).toEqual(expect.objectContaining({ status: "rejected" }));
+    expect(body.action).toEqual(
+      expect.objectContaining({ status: "rejected" })
+    );
     expect((body.approval as Record<string, unknown>).capability).toEqual(
-      expect.objectContaining({ effect: "write", risk: "disruptive", approval: "required" }),
+      expect.objectContaining({
+        effect: "write",
+        risk: "disruptive",
+        approval: "required",
+      })
     );
   });
 
@@ -87,24 +100,35 @@ describe("POST /v1/action container.restart", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
-          resource: { kind: "container", id: "ctr-emby", name: "emby", provider: "arcane" },
-          approval: { approved: true, approvedAt: "2026-09-17T00:00:00Z", client: "ios" },
+          actionId: "container_restart",
+          resource: {
+            kind: "container",
+            id: "ctr-emby",
+            name: "emby",
+            provider: "arcane",
+          },
+          approval: {
+            approved: true,
+            approvedAt: "2026-09-17T00:00:00Z",
+            client: "ios",
+          },
           idempotencyKey: "http-ok",
         }),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body.actionId).toBe("container.restart");
-    expect(body.action).toEqual(expect.objectContaining({ status: "succeeded" }));
+    expect(body.actionId).toBe("container_restart");
+    expect(body.action).toEqual(
+      expect.objectContaining({ status: "succeeded" })
+    );
     expect(body.verification).toEqual(
       expect.objectContaining({
         status: "passed",
-      }),
+      })
     );
     const fetched = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/action/${body.receiptId}`),
+      new Request(`http://127.0.0.1:8787/v1/action/${body.receiptId}`)
     );
     expect(fetched.status).toBe(200);
     expect((await json(fetched)).receiptId).toBe(body.receiptId);
@@ -116,7 +140,7 @@ describe("POST /v1/action container.restart", () => {
       provider: provider(),
     });
     const payload = {
-      actionId: "container.restart",
+      actionId: "container_restart",
       resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
       approval: { approved: true },
       idempotencyKey: "dup",
@@ -127,8 +151,8 @@ describe("POST /v1/action container.restart", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
-        }),
-      ),
+        })
+      )
     );
     const second = await json(
       await app.handler.handle(
@@ -136,8 +160,8 @@ describe("POST /v1/action container.restart", () => {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
-        }),
-      ),
+        })
+      )
     );
     expect(second.receiptId).toBe(first.receiptId);
   });
@@ -150,58 +174,100 @@ describe("POST /v1/action container.restart", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          actionId: "container.restart",
+          actionId: "container_restart",
           resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
           approval: { approved: true },
         }),
-      }),
+      })
     );
     expect(res.status).toBe(503);
   });
 
   it("documents named Action request and receipt schemas in OpenAPI", async () => {
-    const app = createThebeApp({ runtime: createFakeRuntime().runtime, provider: provider() });
+    const app = createThebeApp({
+      runtime: createFakeRuntime().runtime,
+      provider: provider(),
+    });
     const document = await json(
       await app.handler.handle(
-        new Request("http://127.0.0.1:8787/openapi.json"),
-      ),
+        new Request("http://127.0.0.1:8787/openapi.json")
+      )
     );
-    const paths = document.paths as Record<string, Record<string, Record<string, unknown>>>;
-    const schemas = (document.components as Record<string, unknown>).schemas as Record<string, unknown>;
+    const paths = document.paths as Record<
+      string,
+      Record<string, Record<string, unknown>>
+    >;
+    const schemas = (document.components as Record<string, unknown>)
+      .schemas as Record<string, unknown>;
     const actionPost = paths["/v1/action"]?.post;
     const actionGet = paths["/v1/action/{receiptId}"]?.get;
 
     expect(actionPost?.requestBody).toEqual(
       expect.objectContaining({
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionRequest" } } },
-      }),
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ActionRequest" },
+          },
+        },
+      })
     );
-    expect((actionPost?.responses as Record<string, Record<string, unknown>>)?.["200"]).toEqual(
+    expect(
+      (actionPost?.responses as Record<string, Record<string, unknown>>)?.[
+        "200"
+      ]
+    ).toEqual(
       expect.objectContaining({
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
-      }),
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ActionReceipt" },
+          },
+        },
+      })
     );
-    expect((actionPost?.responses as Record<string, Record<string, unknown>>)?.["403"]).toEqual(
+    expect(
+      (actionPost?.responses as Record<string, Record<string, unknown>>)?.[
+        "403"
+      ]
+    ).toEqual(
       expect.objectContaining({
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
-      }),
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ActionReceipt" },
+          },
+        },
+      })
     );
-    expect((actionGet?.responses as Record<string, Record<string, unknown>>)?.["200"]).toEqual(
+    expect(
+      (actionGet?.responses as Record<string, Record<string, unknown>>)?.["200"]
+    ).toEqual(
       expect.objectContaining({
-        content: { "application/json": { schema: { $ref: "#/components/schemas/ActionReceipt" } } },
-      }),
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/ActionReceipt" },
+          },
+        },
+      })
     );
     expect(schemas.ActionRequest).toEqual(
       expect.objectContaining({
         type: "object",
         required: ["actionId", "resource"],
-      }),
+      })
     );
     expect(schemas.ActionReceipt).toEqual(
       expect.objectContaining({
         type: "object",
-        required: ["receiptId", "actionId", "resource", "approval", "action", "verification", "idempotencyKey", "tokenUsed"],
-      }),
+        required: [
+          "receiptId",
+          "actionId",
+          "resource",
+          "approval",
+          "action",
+          "verification",
+          "idempotencyKey",
+          "tokenUsed",
+        ],
+      })
     );
   });
 });

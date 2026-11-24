@@ -1,54 +1,76 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { findPiAiDist, piAiRoots } from "./check-pi-resolution.mjs";
 
-function writePiAiInstall(base) {
-  const dist = join(base, "node_modules", "@earendil-works", "pi-ai", "dist");
+const dirs = [];
+
+function fixture() {
+  const dir = mkdtempSync(join(tmpdir(), "thebe-pi-resolution-"));
+  dirs.push(dir);
+  return dir;
+}
+
+function installPiAi(root) {
+  const dist = join(root, "node_modules", "@earendil-works", "pi-ai", "dist");
   mkdirSync(dist, { recursive: true });
-  writeFileSync(join(dist, "index.js"), "");
+  writeFileSync(join(dist, "index.js"), "export {};\n");
   return join(dist, "index.js");
 }
 
+afterEach(() => {
+  for (const dir of dirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 describe("pi-ai resolution check", () => {
-  it("finds pi-ai nested inside the agent package", () => {
-    const root = join(tmpdir(), `thebe-pi-check-${Date.now()}-nested`);
-    try {
-      const agentRoot = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
-      mkdirSync(agentRoot, { recursive: true });
-      const expected = writePiAiInstall(agentRoot);
-      expect(findPiAiDist([agentRoot])).toBe(expected);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it("finds pi-ai nested inside the Pi agent package, as a production install leaves it", () => {
+    const app = fixture();
+    const agent = join(
+      realpathSync(app),
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent"
+    );
+    mkdirSync(agent, { recursive: true });
+    // pi-ai is not at the top level; it ships inside the agent's dependency tree.
+    const entry = installPiAi(agent);
+
+    expect(findPiAiDist(piAiRoots(app))).toBe(entry);
   });
 
-  it("walks up from a nested agent location", () => {
-    const root = join(tmpdir(), `thebe-pi-check-${Date.now()}-deep`);
-    try {
-      const expected = writePiAiInstall(root);
-      const agentRoot = join(root, "store", "deep", "agent");
-      mkdirSync(agentRoot, { recursive: true });
-      expect(findPiAiDist([agentRoot])).toBe(expected);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+  it("reports a missing pi-ai instead of a path that does not load", () => {
+    const app = fixture();
+    mkdirSync(join(app, "node_modules"), { recursive: true });
+
+    expect(findPiAiDist(piAiRoots(app))).toBeUndefined();
   });
 
-  it("reports a missing install", () => {
-    const root = join(tmpdir(), `thebe-pi-check-${Date.now()}-missing`);
-    try {
-      const agentRoot = join(root, "node_modules", "@earendil-works", "pi-coding-agent");
-      mkdirSync(agentRoot, { recursive: true });
-      expect(findPiAiDist([agentRoot])).toBeUndefined();
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
+  it("checks Core's own tree first, then the real path of the agent package", () => {
+    const app = fixture();
+    const agentLink = join(
+      app,
+      "node_modules",
+      "@earendil-works",
+      "pi-coding-agent"
+    );
+    mkdirSync(agentLink, { recursive: true });
+    installPiAi(app);
 
-  it("always includes the Core root in the search roots", () => {
-    const roots = piAiRoots("/nonexistent-core-root");
-    expect(roots[0]).toBe("/nonexistent-core-root");
+    const roots = piAiRoots(app);
+    expect(roots[0]).toBe(app);
+    expect(roots).toContain(realpathSync(agentLink));
+    // The walk starts at Core, so its own tree wins when both can resolve pi-ai.
+    const found = findPiAiDist(roots);
+    expect(found.endsWith(join("pi-ai", "dist", "index.js"))).toBe(true);
+    expect(found.startsWith(app)).toBe(true);
   });
 });

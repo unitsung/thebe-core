@@ -9,7 +9,7 @@ import {
 } from "../security/remembered-permissions.ts";
 import type { AgentSessionMeta } from "../store.ts";
 import type { OpenedSession } from "./session-state.ts";
-import { httpError } from "../types.ts";
+import { httpError, type MandateDenial } from "../types.ts";
 import {
   NETWORK_PERMISSION_TOOL,
   rememberNetworkHost,
@@ -40,6 +40,29 @@ export function createPermissionControl(input: {
    * request does (a file write inside the workspace, a command the sandbox contains).
    */
   autoApprove?(request: PermissionRequest): Promise<boolean>;
+  /**
+   * Whether the Ticket this session carries out authorises the request without asking: the write is
+   * inside its Mandate. A session with no Ticket, or a write outside the scope, is not allowed here and
+   * falls through to the normal asking (and, for an unattended run, to an immediate refusal).
+   */
+  mandateAllows?(
+    thebeSessionId: string,
+    request: PermissionRequest
+  ): Promise<boolean>;
+  /**
+   * Whether nobody is there to answer this session's questions: a Ticket Eval accepted on its own is
+   * carried out with no person watching. Such a session is refused at once what it may not do, so the
+   * work fails fast instead of waiting for an answer that will not come.
+   */
+  unattended?(thebeSessionId: string): Promise<boolean>;
+  /**
+   * Why the Ticket's Mandate refuses this call. Consulted only for an unattended session, so the
+   * refusal can end the executor as blocked instead of disappearing as a tool error.
+   */
+  mandateRefusal?(
+    thebeSessionId: string,
+    request: PermissionRequest
+  ): Promise<string | undefined>;
   lookupRemembered(
     thebeSessionId: string
   ): Promise<Record<string, "allow" | "deny"> | undefined>;
@@ -52,6 +75,32 @@ export function createPermissionControl(input: {
   let mode: PermissionMode = input.initialMode ?? "manual";
   const nonInteractiveRuns = new Set<string>();
   const pendingPermissions = new Map<string, PendingPermission>();
+  const mandateDenials = new Map<string, MandateDenial>();
+
+  async function noOneIsThere(
+    thebeSessionId: string | undefined
+  ): Promise<boolean> {
+    if (!thebeSessionId) return false;
+    if (nonInteractiveRuns.has(thebeSessionId)) return true;
+    return (await input.unattended?.(thebeSessionId)) === true;
+  }
+
+  /**
+   * A bypass the person granted their own session does not follow the work into a turn nobody is
+   * watching: an unattended Ticket executor, or a background run, may still do only what its Mandate
+   * covers. Without that, a host-level bypass would hand automatic work authority over every service.
+   */
+  async function bypassLeavesTheMandate(
+    thebeSessionId: string | undefined,
+    request: PermissionRequest
+  ): Promise<boolean> {
+    if (!thebeSessionId) return false;
+    if (!(await noOneIsThere(thebeSessionId))) return false;
+    const allowed = await input
+      .mandateAllows?.(thebeSessionId, request)
+      .catch(() => false);
+    return allowed !== true;
+  }
 
   function permissionMode(): PermissionMode {
     return mode;
@@ -84,6 +133,36 @@ export function createPermissionControl(input: {
     }
   }
 
+  async function deny(
+    thebeSessionId: string | undefined,
+    request: PermissionRequest
+  ): Promise<"deny"> {
+    if (
+      thebeSessionId &&
+      (await input.unattended?.(thebeSessionId)) === true &&
+      !mandateDenials.has(thebeSessionId)
+    ) {
+      const detail = await input
+        .mandateRefusal?.(thebeSessionId, request)
+        .catch(() => undefined);
+      mandateDenials.set(thebeSessionId, {
+        toolName: request.toolName,
+        ...(request.toolCallId ? { toolCallId: request.toolCallId } : {}),
+        detail:
+          detail ?? `${request.toolName} is outside this Ticket's Mandate.`,
+      });
+    }
+    return "deny";
+  }
+
+  function takeMandateDenial(
+    thebeSessionId: string
+  ): MandateDenial | undefined {
+    const denial = mandateDenials.get(thebeSessionId);
+    mandateDenials.delete(thebeSessionId);
+    return denial;
+  }
+
   /**
    * The mode a session runs in: its own when it has one, else the host's. A background, scheduled
    * or subagent turn on the same session does not take the session's own mode, only the host's.
@@ -112,30 +191,40 @@ export function createPermissionControl(input: {
         const effective = modeOf();
         const bypass = effective === "bypassPermissions";
         const policy = await input.preflight(request, bypass);
-        if (policy === "deny") return "deny";
+        if (policy === "deny") return deny(thebeSessionId, request);
         const remembered = rememberedDecision(
           thebeSessionId
             ? await input.lookupRemembered(thebeSessionId)
             : input.active()?.meta.rememberedPermissions,
           request
         );
-        if (remembered === "deny") return "deny";
+        if (remembered === "deny") return deny(thebeSessionId, request);
         // Bypass lifts the command guard and the sandbox; an explicit remembered
-        // denial and the workspace boundary still win.
-        if (bypass) return "allow";
+        // denial and the workspace boundary still win, and a turn nobody is watching
+        // is still held to its Ticket's Mandate.
+        if (bypass) {
+          if (await bypassLeavesTheMandate(thebeSessionId, request))
+            return deny(thebeSessionId, request);
+          return "allow";
+        }
         if (
           effective === "plan" &&
           !input.workspaceReadTools.includes(request.toolName)
         )
-          return "deny";
+          return deny(thebeSessionId, request);
         if (policy === "allow" || remembered === "allow") return "allow";
+        if (
+          thebeSessionId &&
+          (await input.mandateAllows?.(thebeSessionId, request)) === true
+        )
+          return "allow";
         if (
           effective === "acceptEdits" &&
           (await input.autoApprove?.(request)) === true
         )
           return "allow";
-        if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
-          return "deny";
+        if (await noOneIsThere(thebeSessionId))
+          return deny(thebeSessionId, request);
         return "ask";
       },
       async request(request: PermissionRequest): Promise<"allow" | "deny"> {
@@ -147,16 +236,20 @@ export function createPermissionControl(input: {
             : input.active()?.meta.rememberedPermissions,
           request
         );
-        if (remembered === "deny") return "deny";
-        if (effective === "bypassPermissions") return "allow";
+        if (remembered === "deny") return deny(thebeSessionId, request);
+        if (effective === "bypassPermissions") {
+          if (await bypassLeavesTheMandate(thebeSessionId, request))
+            return deny(thebeSessionId, request);
+          return "allow";
+        }
         if (effective === "plan") {
           return input.workspaceReadTools.includes(request.toolName)
             ? "allow"
-            : "deny";
+            : deny(thebeSessionId, request);
         }
         if (remembered === "allow") return remembered;
-        if (thebeSessionId && nonInteractiveRuns.has(thebeSessionId))
-          return "deny";
+        if (await noOneIsThere(thebeSessionId))
+          return deny(thebeSessionId, request);
         return new Promise<"allow" | "deny">((resolve) => {
           const timer = setTimeout(() => {
             const pending = pendingPermissions.get(request.permissionId);
@@ -235,6 +328,7 @@ export function createPermissionControl(input: {
     rejectPendingFor,
     rejectPendingPermission,
     resolvePermission,
+    takeMandateDenial,
   };
 }
 

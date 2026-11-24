@@ -8,10 +8,10 @@ const toolsDir = dirname(fileURLToPath(import.meta.url));
 describe("Tool Layer isolation", () => {
   it("does not import Arcane SDK, fetch, or docker.sock", async () => {
     const names = (await readdir(toolsDir)).filter(
-      (name) => name.endsWith(".ts") && !name.endsWith(".test.ts"),
+      (name) => name.endsWith(".ts") && !name.endsWith(".test.ts")
     );
     const sources = await Promise.all(
-      names.map((name) => readFile(join(toolsDir, name), "utf8")),
+      names.map((name) => readFile(join(toolsDir, name), "utf8"))
     );
     const joined = sources.join("\n");
     expect(joined).not.toMatch(/arcane-adapter/i);

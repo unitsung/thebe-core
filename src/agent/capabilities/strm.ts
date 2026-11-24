@@ -1,4 +1,4 @@
-export const STRM_REPAIR_CAPABILITY_ID = "strm.repair" as const;
+export const STRM_REPAIR_CAPABILITY_ID = "strm_repair" as const;
 
 export type StrmRepairRequest = {
   arguments: unknown;

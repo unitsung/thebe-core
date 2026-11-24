@@ -13,14 +13,15 @@ import { createServiceAPIProvidersFromEnv } from "../adapters/service-api/client
 import { createQBittorrentDownloadProviderFromEnv } from "../adapters/pipeline/qbittorrent-downloads.ts";
 import { createAria2DownloadProviderFromEnv } from "../adapters/pipeline/aria2-downloads.ts";
 import { createDownloadHub } from "../adapters/pipeline/download-hub.ts";
-import { createOpenListFilesProviderFromEnv } from "../adapters/pipeline/openlist-files.ts";
-import { createOpenListTransferProviderFromEnv } from "../adapters/pipeline/openlist-transfer.ts";
+import { loadStorageConfig, StorageRegistry } from "./storage-config.ts";
+import { createOpenListTransferProvider } from "../adapters/pipeline/openlist-transfer.ts";
 import { createFileJobStore } from "../agent/pipeline/job-store.ts";
 import { createProwlarrSearchProviderFromEnv } from "../adapters/pipeline/prowlarr-search.ts";
 import { createLibraryRefreshProvidersFromEnv } from "../adapters/pipeline/library-refresh.ts";
-import { createEmbyProviderFromEnv } from "../adapters/emby/env.ts";
-import { createJellyfinProviderFromEnv } from "../adapters/jellyfin/env.ts";
+import { createMediaBrowserProviderFromEnv } from "../adapters/media-browser/env.ts";
 import { createImmichProviderFromEnv } from "../adapters/immich/env.ts";
+import { createGithubFromEnv } from "../adapters/sources/github.ts";
+import { createFeishuFromEnv } from "../adapters/sources/feishu.ts";
 import {
   arcaneEnvironmentIdFromEnv,
   createArcaneBackgroundTaskProviderFromEnv,
@@ -30,19 +31,30 @@ import { envLocalCandidates, loadEnvLocal } from "./config/env.ts";
 import { resolveThebeToken } from "../delivery/http/bind.ts";
 import { createTokenVerifier } from "../delivery/http/token-store.ts";
 import { createThebeApp } from "./create.ts";
+import { createNotificationAdapters } from "./notifications.ts";
+import { loadNotificationChannelConfig } from "../agent/notifications/channel-config.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
 import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
 import {
-  createOpenListBackgroundTaskProviderFromEnv,
-  createOpenListStrmRepairProviderFromEnv,
+  createOpenListBackgroundTaskProvider,
+  createOpenListStrmRepairProvider,
+  openListCredentialsFromEnv,
 } from "../adapters/openlist/index.ts";
 import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbittorrent/tasks.ts";
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
 import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
+import {
+  oauthPublicHosts,
+  resolveOAuthConfig,
+} from "../delivery/http/oauth/config.ts";
+import {
+  createThebeOAuth,
+  type ThebeOAuthService,
+} from "../delivery/http/oauth/service.ts";
 
 export type ThebeBootstrap = {
   runtime: AgentRuntime;
@@ -64,6 +76,7 @@ export type ThebeBootstrap = {
    * library (see `architecture.test.ts`).
    */
   disposeSandboxVms: () => Promise<void>;
+  oauth?: ThebeOAuthService;
 };
 
 export type BootstrapOptions = {
@@ -108,6 +121,18 @@ export async function bootstrapThebe(
   const outputDirectory = outputDirectoryValue
     ? resolveConfiguredPath(outputDirectoryValue)
     : join(workspacePath, ".thebe", "outputs");
+  const oauthConfig = resolveOAuthConfig({ configDir });
+  const allowedHosts = mergeAllowedHosts(
+    options?.allowedHosts,
+    oauthConfig ? oauthPublicHosts(oauthConfig) : []
+  );
+  const oauth = oauthConfig
+    ? await createThebeOAuth({
+        configDir,
+        config: oauthConfig,
+        allowedHosts,
+      })
+    : undefined;
 
   const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
@@ -176,21 +201,47 @@ export async function bootstrapThebe(
             : {}),
         })
       : (dockerEngineProvider ?? stubProvider());
-  const strmRepairProvider = createOpenListStrmRepairProviderFromEnv();
+  // Storage is re-read on every file tool call; environment variables remain a
+  // fallback only until config.json gains a storage section.
+  const storage = new StorageRegistry();
+  for (const issue of storage.snapshot().issues ?? [])
+    console.warn(`storage: ${issue}`);
+  // One OpenList backend powers STRM repair, transfer, and background tasks,
+  // not just the file tools, so derive its credentials from the same section.
+  const loadedStorage = loadStorageConfig();
+  const configuredOpenList =
+    loadedStorage.backends.find(
+      (backend) =>
+        backend.type === "openlist" && backend.id === loadedStorage.defaultId
+    ) ?? loadedStorage.backends.find((backend) => backend.type === "openlist");
+  const openList = loadedStorage.configured
+    ? configuredOpenList?.type === "openlist"
+      ? { baseUrl: configuredOpenList.baseUrl, token: configuredOpenList.token }
+      : undefined
+    : openListCredentialsFromEnv(process.env);
+  const strmRepairProvider = openList
+    ? createOpenListStrmRepairProvider(openList)
+    : undefined;
   const navidrome = createNavidromeProviderFromEnv();
   const releaseSearch = createProwlarrSearchProviderFromEnv();
-  const emby = createEmbyProviderFromEnv();
-  const jellyfin = createJellyfinProviderFromEnv();
+  const emby = createMediaBrowserProviderFromEnv("emby");
+  const jellyfin = createMediaBrowserProviderFromEnv("jellyfin");
   const immich = createImmichProviderFromEnv();
-  const openListBackgroundTaskProvider =
-    createOpenListBackgroundTaskProviderFromEnv();
+  const openListBackgroundTaskProvider = openList
+    ? createOpenListBackgroundTaskProvider(openList)
+    : undefined;
   const arcaneBackgroundTaskProvider =
     createArcaneBackgroundTaskProviderFromEnv();
 
   const version = readPackageVersion(fromDir);
+  const notificationConfig = await loadNotificationChannelConfig(configDir);
   const agentStoreDir =
     process.env.THEBE_AGENT_STORE_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
+  const eventIntegrations = [
+    createGithubFromEnv(process.env),
+    createFeishuFromEnv(process.env),
+  ].flatMap((integration) => (integration ? [integration] : []));
 
   const app = createThebeApp({
     runtime,
@@ -200,6 +251,27 @@ export async function bootstrapThebe(
     // `thebe token` commands apply without a restart.
     token: createTokenVerifier({ configDir, fallback: tokenResolution.token }),
     agentStoreDir,
+    sources: parseSources(process.env),
+    sourceAdapters: eventIntegrations.map((integration) => integration.source),
+    channelAdapters: eventIntegrations.map(
+      (integration) => integration.channel
+    ),
+    evalMaxPerHour: parseEvalMaxPerHour(process.env),
+    dailyBackgroundTokenBudget: parseDailyBackgroundTokenBudget(process.env),
+    maxProactiveWords: parseMaxProactiveWords(process.env),
+    dailyBackgroundTokenBudgetThresholds:
+      parseDailyBackgroundTokenBudgetThresholds(process.env),
+    watchdog: userConfig.watchdog,
+    pushRelayUrl: process.env.THEBE_PUSH_RELAY_URL?.trim() || undefined,
+    notificationAdapters: createNotificationAdapters(
+      process.env,
+      notificationConfig
+    ),
+    notificationConfig: {
+      dir: configDir,
+      build: (config) => createNotificationAdapters(process.env, config),
+    },
+    im: { env: process.env },
     auditPath:
       process.env.THEBE_AUDIT_PATH ?? join(agentStoreDir, "audit.jsonl"),
     model: defaultModel,
@@ -211,7 +283,7 @@ export async function bootstrapThebe(
     maxSubagentsPerParent: userConfig.maxSubagentsPerParent,
     workspacePath,
     outputDirectory,
-    allowedHosts: options?.allowedHosts,
+    allowedHosts,
     settingsStore: createJsonAgentSettingsStore(join(configDir, "config.json")),
     memoryStore: createJsonMemoryStore(join(configDir, "memory.json")),
     strmRepairProvider,
@@ -226,8 +298,9 @@ export async function bootstrapThebe(
           isIndexerAddress: (url) => releaseSearch?.ownsAddress(url) === true,
         }
       ),
-      transfer: createOpenListTransferProviderFromEnv(),
-      files: createOpenListFilesProviderFromEnv(),
+      transfer: openList ? createOpenListTransferProvider(openList) : undefined,
+      storage,
+      uploadRoots: [workspacePath, outputDirectory],
       libraries: createLibraryRefreshProvidersFromEnv(),
       search: releaseSearch,
       media: { ...(emby ? { emby } : {}), ...(jellyfin ? { jellyfin } : {}) },
@@ -252,6 +325,7 @@ export async function bootstrapThebe(
         ? [openListBackgroundTaskProvider]
         : []),
     ],
+    oauth,
   });
 
   return {
@@ -268,7 +342,15 @@ export async function bootstrapThebe(
     tokenGenerated: tokenResolution.generated,
     tokenPath: tokenResolution.path,
     disposeSandboxVms: disposeOsSandbox,
+    ...(oauth ? { oauth } : {}),
   };
+}
+
+function mergeAllowedHosts(
+  configured: string[] | undefined,
+  publicHosts: string[]
+): string[] {
+  return [...new Set([...(configured ?? []), ...publicHosts])];
 }
 
 function failEnv(message: string, fromDir: string): never {
@@ -325,4 +407,90 @@ function readPackageVersion(fromDir: string): string {
     dir = parent;
   }
   return "0.1.0";
+}
+
+/**
+ * `THEBE_SOURCES` is a comma list of the Sources Core watches: `container-health`,
+ * `download-completed`. Unset or empty means none, so nothing is read in the background.
+ * `THEBE_SOURCE_INTERVAL_MS` sets the poll interval.
+ */
+export function parseSources(env: NodeJS.ProcessEnv):
+  | {
+      containerHealth: boolean;
+      downloadCompleted: boolean;
+      intervalMs?: number;
+    }
+  | undefined {
+  const names = (env.THEBE_SOURCES ?? "")
+    .split(",")
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean);
+  if (names.length === 0) return undefined;
+  const interval = Number(env.THEBE_SOURCE_INTERVAL_MS);
+  return {
+    containerHealth: names.includes("container-health"),
+    downloadCompleted: names.includes("download-completed"),
+    ...(Number.isFinite(interval) && interval >= 1000
+      ? { intervalMs: interval }
+      : {}),
+  };
+}
+
+/**
+ * `THEBE_EVAL_MAX_PER_HOUR`: how many times an hour Eval may ask the model. Unset or not a whole number
+ * of at least 0 keeps Core's default (60); `0` turns the limit off.
+ */
+export function parseEvalMaxPerHour(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_EVAL_MAX_PER_HOUR?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `THEBE_BACKGROUND_TOKEN_BUDGET`: autonomous input + output + cache-write tokens per UTC day.
+ * Unset or invalid keeps one million; `0` pauses autonomous model work.
+ */
+export function parseDailyBackgroundTokenBudget(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_BACKGROUND_TOKEN_BUDGET?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS`: comma-separated ratios (e.g. "0.5,0.8,0.9,1.0" or "50,80,90,100")
+ * at which autonomous work sends push warnings.
+ */
+export function parseDailyBackgroundTokenBudgetThresholds(
+  env: NodeJS.ProcessEnv
+): number[] | undefined {
+  const raw = env.THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS?.trim();
+  if (!raw) return undefined;
+  const parts = raw
+    .split(",")
+    .map((s) => Number(s.trim()))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (parts.length === 0) return undefined;
+  const normalized = parts
+    .map((n) => (n > 1 && n <= 100 ? n / 100 : n))
+    .filter((n) => n > 0 && n <= 1);
+  if (normalized.length === 0) return undefined;
+  return [...new Set(normalized)].sort((a, b) => a - b);
+}
+
+/**
+ * `THEBE_PROACTIVE_MESSAGE_MAX_WORDS`: Maximum word/character limit for proactive messages (default: 100).
+ */
+export function parseMaxProactiveWords(
+  env: NodeJS.ProcessEnv
+): number | undefined {
+  const raw = env.THEBE_PROACTIVE_MESSAGE_MAX_WORDS?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }

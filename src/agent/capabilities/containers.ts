@@ -32,11 +32,15 @@ export type ContainerState =
   | "created"
   | "restarting";
 
+export type ContainerHealth = "starting" | "healthy" | "unhealthy";
+
 export type ContainerSummary = {
   id: string;
   name: string;
   image: string;
   state: ContainerState;
+  /** Docker healthcheck state when the provider reports one. */
+  health?: ContainerHealth;
   status: string;
   created: number;
 };
@@ -46,6 +50,8 @@ export type ContainerDetail = {
   name: string;
   image: string;
   state: string;
+  /** Docker healthcheck state when the provider reports one. */
+  health?: ContainerHealth;
   config: {
     env?: string[];
     cmd?: string[];
@@ -65,13 +71,13 @@ export type HostStatusSummary = {
 };
 
 export const CONTAINER_TOOL_NAMES = [
-  "container.list",
-  "container.inspect",
-  "container.logs",
-  "container.status_summary",
+  "container_list",
+  "container_inspect",
+  "container_logs",
+  "container_status_summary",
 ] as const;
 
-export const CONTAINER_RESTART_ACTION_ID = "container.restart" as const;
+export const CONTAINER_RESTART_ACTION_ID = "container_restart" as const;
 
 export type CapabilityEffect = "read" | "write";
 export type CapabilityRisk = "low" | "disruptive";
@@ -89,11 +95,31 @@ export const CONTAINER_CAPABILITY_METADATA: Record<
   (typeof CONTAINER_TOOL_NAMES)[number] | typeof CONTAINER_RESTART_ACTION_ID,
   ContainerCapabilityMetadata
 > = {
-  "container.list": { effect: "read", risk: "low", approval: "none", permission: "read" },
-  "container.inspect": { effect: "read", risk: "low", approval: "none", permission: "read" },
-  "container.logs": { effect: "read", risk: "low", approval: "none", permission: "read" },
-  "container.status_summary": { effect: "read", risk: "low", approval: "none", permission: "read" },
-  "container.restart": {
+  container_list: {
+    effect: "read",
+    risk: "low",
+    approval: "none",
+    permission: "read",
+  },
+  container_inspect: {
+    effect: "read",
+    risk: "low",
+    approval: "none",
+    permission: "read",
+  },
+  container_logs: {
+    effect: "read",
+    risk: "low",
+    approval: "none",
+    permission: "read",
+  },
+  container_status_summary: {
+    effect: "read",
+    risk: "low",
+    approval: "none",
+    permission: "read",
+  },
+  container_restart: {
     effect: "write",
     risk: "disruptive",
     approval: "required",
@@ -109,13 +135,13 @@ export const CONTAINER_TOOL_SCHEMAS: Record<
   (typeof CONTAINER_TOOL_NAMES)[number],
   Record<string, unknown>
 > = {
-  "container.list": { type: "object", properties: {} },
-  "container.inspect": {
+  container_list: { type: "object", properties: {} },
+  container_inspect: {
     type: "object",
     properties: { id: { type: "string", description: "Container id" } },
     required: ["id"],
   },
-  "container.logs": {
+  container_logs: {
     type: "object",
     properties: {
       id: { type: "string", description: "Container id" },
@@ -123,7 +149,7 @@ export const CONTAINER_TOOL_SCHEMAS: Record<
     },
     required: ["id"],
   },
-  "container.status_summary": { type: "object", properties: {} },
+  container_status_summary: { type: "object", properties: {} },
 };
 
 export const CONTAINER_RESTART_SCHEMA: Record<string, unknown> = {
@@ -136,10 +162,10 @@ export const CONTAINER_TOOL_DESCRIPTIONS: Record<
   (typeof CONTAINER_TOOL_NAMES)[number] | typeof CONTAINER_RESTART_ACTION_ID,
   string
 > = {
-  "container.list": "List container summaries in the configured environment",
-  "container.inspect": "Inspect one container (env already redacted)",
-  "container.logs": "Read recent container logs (redacted and truncated)",
-  "container.status_summary": "Host-level container counts",
-  "container.restart":
+  container_list: "List container summaries in the configured environment",
+  container_inspect: "Inspect one container (env already redacted)",
+  container_logs: "Read recent container logs (redacted and truncated)",
+  container_status_summary: "Host-level container counts",
+  container_restart:
     "Restart one container. Write, disruptive, requires on-device approval. Not callable by the model.",
 };

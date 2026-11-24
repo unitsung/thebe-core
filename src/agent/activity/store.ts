@@ -45,6 +45,8 @@ export function createActivityStore(options: {
   dir?: string;
   now: () => Date;
   maxItems?: number;
+  /** Called once for each approval that starts waiting for a person. Never awaited; errors are ignored. */
+  onPendingApproval?: (record: ActivityRecord) => void;
 }): ActivityStore {
   const maxItems = options.maxItems ?? DEFAULT_ACTIVITY_RETENTION;
   const memory = new Map<string, ActivityRecord>();
@@ -211,6 +213,11 @@ export function createActivityStore(options: {
       memory.set(record.id, record);
       byIdempotency.set(idempotencyIndexKey(record), record.id);
       await persist(record);
+      try {
+        options.onPendingApproval?.(record);
+      } catch {
+        // A notifier must never break the approval it announces.
+      }
       return grouped(record);
     },
     async findPendingForDiagnosis(
@@ -275,13 +282,13 @@ async function readFileSafe(path: string): Promise<ActivityRecord | undefined> {
     if (typeof parsed.id !== "string" || !ID_RE.test(parsed.id))
       return undefined;
     if (
-      parsed.kind !== "container.restart" &&
-      parsed.kind !== "container.diagnose"
+      parsed.kind !== "container_restart" &&
+      parsed.kind !== "container_diagnose"
     ) {
       return undefined;
     }
     if (
-      parsed.kind === "container.restart" &&
+      parsed.kind === "container_restart" &&
       parsed.status !== "pending" &&
       typeof parsed.receiptId !== "string"
     ) {

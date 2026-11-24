@@ -176,7 +176,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
       sessionId: parent.thebeSessionId,
     });
     const footer = tui.children.at(-1) as {
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     expect(footer.render(100).join("\n")).toContain("Tasks");
     expect(footer.render(100).join("\n")).toContain("click/Ctrl+G open");
@@ -524,7 +524,7 @@ describe("Thebe TUI (@earendil-works/pi-tui chat-simple)", () => {
             typeof (child as { render?: unknown }).render === "function"
         )
         .map((child) =>
-          (child as { render: (width: number) => string[] })
+          (child as { render: (width: number) => readonly string[] })
             .render(80)
             .join("\n")
         )
@@ -566,6 +566,116 @@ describe("Thebe TUI agent slash commands", () => {
       .map((child) => child.render(80).join("\n"))
       .join("\n");
     expect(sessionText).toContain(meta.thebeSessionId);
+  });
+
+  it("issues a one-time connector pairing code through /pair", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const issueOAuthPairingCode = vi.fn(async () => ({
+      code: "ABCDE-23456",
+      expiresAt: "2026-11-10T06:15:00.000Z",
+      issuer: "https://home.example",
+      resource: "https://home.example/mcp",
+    }));
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+      issueOAuthPairingCode,
+    });
+
+    await handleSlash("/pair");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(issueOAuthPairingCode).toHaveBeenCalledOnce();
+    expect(shown).toContain("OAuth pairing code: ABCDE-23456");
+    expect(shown).toContain("Expires: 2026-11-10T06:15:00.000Z");
+    expect(shown).toContain("Issuer: https://home.example");
+    expect(shown).toContain("Resource: https://home.example/mcp");
+  });
+
+  it("explains how to enable OAuth when /pair is unavailable", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+    });
+
+    await handleSlash("/pair");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(shown).toContain("THEBE_OAUTH_ISSUER");
+  });
+
+  it("lists and revokes OAuth connectors through /connections", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const oauthConnectors = {
+      list: vi.fn(async () => [
+        {
+          id: "grant-1",
+          clientId: "home-connector",
+          clientName: "Claude connector",
+          scopes: ["mcp:read", "offline_access"],
+          createdAt: "2026-11-10T06:00:00.000Z",
+          expiresAt: "2026-12-10T06:00:00.000Z",
+          refreshToken: true,
+        },
+      ]),
+      revoke: vi.fn(async (id: string) => id === "grant-1"),
+    };
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+      oauthConnectors,
+    });
+
+    await handleSlash("/connections list");
+    await handleSlash("/connections revoke grant-1");
+    await handleSlash("/connections revoke missing");
+
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(oauthConnectors.list).toHaveBeenCalledOnce();
+    expect(oauthConnectors.revoke).toHaveBeenNthCalledWith(1, "grant-1");
+    expect(oauthConnectors.revoke).toHaveBeenNthCalledWith(2, "missing");
+    expect(shown).toContain("Claude connector - grant-1");
+    expect(shown).toContain("Scopes: mcp:read, offline_access");
+    expect(shown).toContain("Expires: 2026-12-10T06:00:00.000Z");
+    expect(shown).toContain(
+      "Revoked OAuth connector grant-1. It must authorize again to reconnect."
+    );
+    expect(shown).toContain("No OAuth connector grant has id missing.");
+  });
+
+  it("explains how to enable OAuth connectors when /connections is unavailable", async () => {
+    const fake = createFakeRuntime();
+    const agent = createThebeAgent({ runtime: fake.runtime, provider });
+    const meta = await agent.createSession();
+    const tui: TUI = new TuiMainScreen(new MemoryTerminal());
+    const { handleSlash } = attachThebeChat(tui, {
+      agent,
+      sessionId: meta.thebeSessionId,
+    });
+
+    await handleSlash("/connections");
+    const shown = tui.children
+      .filter((child) => child instanceof Text)
+      .map((child) => child.render(120).join("\n"))
+      .join("\n");
+    expect(shown).toContain("THEBE_OAUTH_ISSUER");
   });
 
   it("prompts through agent and shows reply", async () => {
@@ -682,7 +792,7 @@ describe("Thebe TUI agent slash commands", () => {
       {
         kind: "tools",
         calls: [
-          { name: "container.list", id: "call_container_list", args: {} },
+          { name: "container_list", id: "call_container_list", args: {} },
         ],
       },
       { kind: "text", text: "after tool" },
@@ -701,7 +811,7 @@ describe("Thebe TUI agent slash commands", () => {
     const transcript = tui.children
       .map((child) => child.render(80).join("\n"))
       .join("\n");
-    expect(transcript).toContain("container.list");
+    expect(transcript).toContain("container_list");
     expect(transcript).toContain("after tool");
   });
 
@@ -779,7 +889,7 @@ describe("Thebe TUI agent slash commands", () => {
     expect(allText).toContain("switched to branch");
     expect(allText).toContain(meta.thebeSessionId.slice(0, 8));
     const footer = tui.children.at(-1) as {
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     const footerText = footer.render(80).join("\n");
     expect(footerText).toContain("fake-2 • thinking off");
@@ -811,7 +921,7 @@ describe("Thebe TUI agent slash commands", () => {
         (child) => child.constructor.name === "SelectList"
       ) as {
         handleInput: (data: string) => void;
-        render: (width: number) => string[];
+        render: (width: number) => readonly string[];
       };
       expect(list.render(80).join("\n")).toContain("Turn on bypassPermissions");
       list.handleInput("\x1b");
@@ -1018,7 +1128,9 @@ describe("Thebe TUI agent slash commands", () => {
             typeof (child as { render?: unknown }).render === "function"
         )
         .map((child) =>
-          (child as { render: (w: number) => string[] }).render(80).join("\n")
+          (child as { render: (w: number) => readonly string[] })
+            .render(80)
+            .join("\n")
         )
         .join("\n");
 
@@ -1184,7 +1296,7 @@ describe("Thebe TUI agent slash commands", () => {
         .map((child) => child.render(80).join("\n"))
         .join("\n");
     const footer = () =>
-      (tui.children.at(-1) as { render: (w: number) => string[] })
+      (tui.children.at(-1) as { render: (w: number) => readonly string[] })
         .render(80)
         .join("\n");
 
@@ -1222,7 +1334,7 @@ describe("Thebe TUI agent slash commands", () => {
     ) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     expect(list).toBeDefined();
@@ -1354,12 +1466,12 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     name: string
   ): {
     handleInput: (data: string) => void;
-    render: (width: number) => string[];
+    render: (width: number) => readonly string[];
   } {
     const child = tui.children.find((c) => c.constructor.name === name) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     expect(child).toBeDefined();
@@ -1371,12 +1483,12 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
     name: string
   ): {
     handleInput: (data: string) => void;
-    render: (width: number) => string[];
+    render: (width: number) => readonly string[];
   } | null {
     const child = tui.children.find((c) => c.constructor.name === name) as
       | {
           handleInput: (data: string) => void;
-          render: (width: number) => string[];
+          render: (width: number) => readonly string[];
         }
       | undefined;
     return child ?? null;
@@ -1988,7 +2100,7 @@ describe("Thebe TUI provider, model, and login apply the chosen item", () => {
       (child) => child.constructor.name === "SelectList"
     ) as {
       handleInput: (data: string) => void;
-      render: (width: number) => string[];
+      render: (width: number) => readonly string[];
     };
     expect(list.render(80).join("\n")).not.toContain("Test MCP tool");
     list.handleInput("\x1b");

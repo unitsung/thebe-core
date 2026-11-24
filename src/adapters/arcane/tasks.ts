@@ -7,6 +7,12 @@ import type {
   ProviderBackgroundTask,
 } from "../../agent/background-tasks/product.ts";
 import { redactToolOutput } from "../../agent/security/redaction.ts";
+import {
+  activitiesPath,
+  activityCancelPath,
+  detectArcaneApiStyle,
+  type ArcaneApiStyle,
+} from "./api-style.ts";
 
 type JsonObject = Record<string, unknown>;
 
@@ -20,17 +26,20 @@ export type ArcaneBackgroundTaskProviderOptions = {
   environmentId?: string;
   limit?: number;
   fetch?: typeof fetch;
+  /** Pin the route shape when the server cannot be detected (tests, nightly builds). */
+  apiStyle?: ArcaneApiStyle;
 };
 
 /**
  * Provider-owned Arcane activity source for the product Activity feed.
  *
- * Checked 2026-09-26 against Arcane `types/activity` (statuses queued, running,
- * success, failed, cancelled) and `backend/api/handlers/activities.go`:
- * `GET /environments/{id}/activities` lists background activities and
- * `POST /environments/{id}/activities/{activityId}/cancel` cancels a running
- * one (409 when it already finished). Cancelling needs an Arcane build with
- * activity cancellation (PR #2756); older builds answer 404.
+ * Checked against Arcane 2.17.3 and 3.0.0 `types/activity` (statuses queued,
+ * running, success, failed, cancelled):
+ * - 1.x/2.x: `GET /api/environments/{id}/activities` and
+ *   `POST /api/environments/{id}/activities/{activityId}/cancel`.
+ * - 3.x: `GET /api/agents/{id}/activities` and
+ *   `POST /api/agents/{id}/activities/{activityId}?action=cancel`.
+ * A finished activity answers 409. Older builds without cancellation answer 404.
  */
 export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvider {
   readonly service = "arcane";
@@ -40,6 +49,7 @@ export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvid
   private readonly environmentId: string;
   private readonly limit: number;
   private readonly fetchImpl: typeof fetch;
+  private apiStyle: ArcaneApiStyle | undefined;
 
   constructor(options: ArcaneBackgroundTaskProviderOptions) {
     this.baseUrl = options.baseUrl.trim().replace(/\/+$/, "");
@@ -50,16 +60,18 @@ export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvid
       ? Math.min(MAX_ACTIVITY_LIMIT, Math.max(1, Math.trunc(limit)))
       : DEFAULT_ACTIVITY_LIMIT;
     this.fetchImpl = options.fetch ?? fetch;
+    this.apiStyle = options.apiStyle;
   }
 
   async list(): Promise<ProviderBackgroundTask[]> {
+    const style = await this.style();
     const query = new URLSearchParams({
       start: "0",
       limit: String(this.limit),
       order: "desc",
     });
     const body = await this.requestJSON(
-      `${this.environmentPath()}/activities?${query.toString()}`
+      `${activitiesPath(style, this.environmentId)}?${query.toString()}`
     );
     const rows = Array.isArray(body.data) ? body.data : [];
     const tasks: ProviderBackgroundTask[] = [];
@@ -75,9 +87,10 @@ export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvid
     if (!id) {
       throw new ProviderError("UNKNOWN", "Arcane activity id is required");
     }
+    const style = await this.style();
     try {
       await this.requestJSON(
-        `${this.environmentPath()}/activities/${encodeURIComponent(id)}/cancel`,
+        activityCancelPath(style, this.environmentId, id),
         { method: "POST" }
       );
     } catch (cause) {
@@ -102,8 +115,15 @@ export class ArcaneBackgroundTaskProvider implements ProductBackgroundTaskProvid
     );
   }
 
-  private environmentPath(): string {
-    return `/api/environments/${encodeURIComponent(this.environmentId)}`;
+  private async style(): Promise<ArcaneApiStyle> {
+    if (this.apiStyle) return this.apiStyle;
+    const detected = await detectArcaneApiStyle({
+      baseUrl: this.baseUrl,
+      apiKey: this.apiKey,
+      fetchImpl: this.fetchImpl,
+    });
+    if (detected) this.apiStyle = detected;
+    return detected ?? "legacy";
   }
 
   private async requestJSON(

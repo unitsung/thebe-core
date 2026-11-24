@@ -26,7 +26,7 @@ export function createMusicResearchProvider(
         action: "query",
         generator: "search",
         gsrsearch: query,
-        gsrlimit: "2",
+        gsrlimit: "4",
         prop: "extracts|info",
         inprop: "url",
         exintro: "1",
@@ -91,10 +91,19 @@ export function createMusicResearchProvider(
               sources.push({ ...item, provider });
             }
           } else {
-            for (const page of Object.values(data.query?.pages ?? {}).slice(
-              0,
-              2
-            ) as Record<string, unknown>[])
+            // Pages are keyed by id, which says nothing about relevance;
+            // `index` is the search rank.
+            const pages = (
+              Object.values(data.query?.pages ?? {}) as Record<
+                string,
+                unknown
+              >[]
+            ).sort(
+              (a, b) =>
+                (typeof a.index === "number" ? a.index : Infinity) -
+                (typeof b.index === "number" ? b.index : Infinity)
+            );
+            for (const page of pages.slice(0, 4))
               sources.push({
                 provider,
                 title: page.title ?? "",

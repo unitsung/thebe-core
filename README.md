@@ -12,7 +12,7 @@ Run it on a NAS, a mini PC, a Raspberry Pi or a cloud server. Use it three ways:
 
 The name comes from Thebe, a moon of Jupiter (Jupiter XIV), pronounced /ˈθiːbi/.
 
-> **Status: first release (0.1.0).** The test suite and the container smoke test pass, but the service integrations (Emby, Jellyfin, Immich, Navidrome, OpenList, qBittorrent, aria2, Prowlarr, Arcane) are tested against recorded responses and mocks, not yet against every live release of each product. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
+> **Status: first release (0.1.0).** The test suite and the container smoke test pass, and the operator has run Core on a real server. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
 
 ## What it can do
 
@@ -63,7 +63,7 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-Point your agent's MCP configuration at that URL with the same header. An agent connected over `/mcp` can use the write tools too (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log. Set `THEBE_MCP_WRITES=off` to make `/mcp` read-only.
+Point your agent's MCP configuration at that URL with the same header. An agent connected over `/mcp` can use the write tools too (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log. Set `THEBE_MCP_WRITES=off` to make `/mcp` read-only. To give an agent less than full access, make it its own token with `thebe token create <name> --scope mcp:read` (or `mcp:write`, or `mcp:irreversible` to also allow deletes that cannot be undone): that token works only on `/mcp`, and can be sent as `Authorization: Bearer <token>`.
 
 **In the terminal.** `npm run tui` builds and starts the interactive UI. After a build, `node dist/cli.js` (or `thebe`, the package's `bin`) does the same, and `thebe -p "list my containers"` runs one prompt and exits. `thebe --help` lists the session and MCP subcommands, and `thebe doctor` reports the isolation posture.
 
@@ -75,7 +75,7 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
 
 ## Safety in short
 
-The token grants full access: there are no scopes. The container listens on loopback by default; put anything wider behind TLS (Tailscale or a reverse proxy) and list the host names in `THEBE_ALLOWED_HOSTS`. The default permission mode asks before editing files or running commands, shell commands are risk-graded and run in an OS sandbox on a host, tool output and MCP data are treated as untrusted, secrets are redacted, and every call is written to an append-only audit log (`audit.jsonl` in the agent store). [SECURITY.md](SECURITY.md) has the full model and how to report a vulnerability.
+A token grants full access unless it was made with `--scope` (see above), which limits it to `/mcp`. The container listens on loopback by default; put anything wider behind TLS (Tailscale or a reverse proxy) and list the host names in `THEBE_ALLOWED_HOSTS`. The default permission mode asks before editing files or running commands, shell commands are risk-graded and run in an OS sandbox on a host, tool output and MCP data are treated as untrusted, secrets are redacted, and every call is written to an append-only audit log (`audit.jsonl` in the agent store). [SECURITY.md](SECURITY.md) has the full model and how to report a vulnerability.
 
 ## Responsible use
 
@@ -96,7 +96,7 @@ You are responsible for what you ask Core to do with them: make sure you have th
 | Vocabulary and architecture               | [CONTEXT.md](CONTEXT.md)                                       |
 | Contributing and security                 | [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md) |
 
-Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm test`, `bash scripts/release-check.sh`.
+Development checks: `npm run typecheck`, `npm run lint`, `npm run format`, `npm test`, `bash scripts/check-release.sh`.
 
 ## License
 

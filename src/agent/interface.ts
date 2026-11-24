@@ -61,6 +61,21 @@ import type {
 import type { DiagnosisRequest, DiagnosisResult } from "./diagnosis/types.ts";
 import type { ActionReceipt, ActionRequest } from "./action/types.ts";
 import type { ActivityGroup, ActivityRecord } from "./activity/types.ts";
+import type { Ticket } from "./tickets/types.ts";
+import type { TicketTaskView } from "./tickets/control.ts";
+import type {
+  MainSessionInfo,
+  MainSessionPromptOptions,
+} from "./main-session/service.ts";
+import type { Source, Trigger } from "./sources/types.ts";
+import type { ChannelAdapter } from "./channels/types.ts";
+import type { SourceHealth } from "./sources/runner.ts";
+import type { Decision, Policy } from "./eval/types.ts";
+import type { EvalUnavailableNotice } from "./eval/service.ts";
+import type {
+  BackgroundBudgetNotice,
+  BackgroundBudgetSummary,
+} from "./usage/budget.ts";
 import type {
   AgentArtifact,
   ArtifactContent,
@@ -105,6 +120,72 @@ export type CreateThebeAgentOptions = {
   provider: ContainerInfoProvider;
   auditPath?: string;
   agentStoreDir?: string;
+  /**
+   * Sources Core watches for events (Triggers). Off unless given: a Core that was not asked to watch
+   * anything starts no timers and reads nothing.
+   */
+  sources?: {
+    containerHealth?: boolean;
+    downloadCompleted?: boolean;
+    intervalMs?: number;
+  };
+  /** Host supplied, vendor-neutral event sources polled and persisted by Core. */
+  sourceAdapters?: readonly Source[];
+  /** Host supplied, vendor-neutral reply channels for Ticket notices. */
+  channelAdapters?: readonly ChannelAdapter[];
+  onSourceFollowUpNotice?: (
+    notice: import("./channels/types.ts").SourceFollowUpNotice,
+    channel: import("./sources/types.ts").ChannelRef
+  ) => Promise<void>;
+  /**
+   * How many times an hour Eval may ask the model before the rest are recorded as `unavailable`
+   * (`assessment_limit`). A circuit breaker for a noisy Source, not a budget. Unset: 60; 0: no limit.
+   */
+  evalMaxPerHour?: number;
+  /** Called when an approval starts waiting for a person, for example to send a push notice. */
+  onPendingApproval?: (
+    record: import("./activity/types.ts").ActivityRecord
+  ) => void;
+  /** Called once when a Goal enters `person`: a question, review, blocker, or Watchdog escalation. */
+  onGoalNeedsPerson?: (
+    notice: import("./goals/service.ts").GoalNeedsPersonNotice
+  ) => Promise<void> | void;
+  /** Called once when a Goal reaches a terminal state with a person-facing completion notice. */
+  onGoalCompleted?: (
+    notice: import("./goals/service.ts").GoalCompletedNotice
+  ) => Promise<void> | void;
+  /** Called once when assessment fails and again only after a successful assessment. */
+  onEvalUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
+  /** Called once per UTC day when autonomous model work exhausts its token budget. */
+  onBackgroundBudgetPaused?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Called when autonomous model work crosses a budget warning threshold (e.g. 50%, 80%, 90%). */
+  onBackgroundBudgetThreshold?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Called for every autonomous budget notice (warning thresholds and pause). */
+  onBackgroundBudgetNotice?: (
+    notice: BackgroundBudgetNotice
+  ) => Promise<void> | void;
+  /** Called when Thebe Main Session emits a proactive message for the person. */
+  onProactiveMessage?: (
+    notice: import("./main-session/proactive.ts").ProactiveNotice
+  ) => Promise<void> | void;
+  /** Tokens autonomous work may use per UTC day. Default: one million; zero pauses it. */
+  dailyBackgroundTokenBudget?: number;
+  /** Maximum word/token limit for proactive messages (default: 100). */
+  maxProactiveWords?: number;
+  /** Threshold ratios (strictly between 0 and 1) at which warnings fire. Default: [0.5, 0.8, 0.9, 1.0]. */
+  dailyBackgroundTokenBudgetThresholds?: number[];
+  /** Deterministic stuck-task thresholds. Defaults: 60 s scan; Goal 30/60 min; worker/reviewer 10/10 min. */
+  watchdog?: {
+    intervalMs?: number;
+    goalFirstMs?: number;
+    goalSecondMs?: number;
+    workerFirstMs?: number;
+    workerSecondMs?: number;
+  };
   now?: () => Date;
   callerId?: string;
   maxToolCalls?: number;
@@ -122,6 +203,8 @@ export type CreateThebeAgentOptions = {
   builtinTools?: readonly string[];
   enabledResources?: EnabledResource[];
   model?: RuntimeModelRef;
+  /** Optional cheaper model for the one durable main Session; defaults to the host model. */
+  mainSessionModel?: RuntimeModelRef;
   autoCompact?: boolean;
   autoSummary?: boolean;
   autoSummaryDelayMs?: number;
@@ -174,14 +257,33 @@ export type CreateThebeAgentOptions = {
   artifactStore?: ArtifactStore;
 };
 
+/**
+ * Who is calling over `/mcp`, as far as the write gate cares: whether their token may run write tools,
+ * and whether it may also run the deletes that cannot be undone.
+ */
+export type McpCaller = {
+  /** The token's name, recorded in the audit log; absent when no token is configured. */
+  name?: string;
+  writes: boolean;
+  irreversible: boolean;
+};
+
 /** Stable agent seam consumed by CLI, Serve, TUI, and integrations. */
 export interface ThebeAgent {
   readonly runtime: AgentRuntime;
   readonly workspacePath: string | undefined;
+  readonly mainSessionId: string;
 
   prompt(
     input: string | PromptInput,
     options?: ThebePromptOptions
+  ): Promise<ThebePromptResult>;
+  /** The one durable entry point; undefined until the person first speaks to it. */
+  getMainSession(): Promise<MainSessionInfo | undefined>;
+  /** Start or resume the main Session and send it one person-facing turn. */
+  askMainSession(
+    input: string | PromptInput,
+    options?: MainSessionPromptOptions
   ): Promise<ThebePromptResult>;
   send(text: string, thebeSessionId?: string): Promise<ThebePromptResult>;
   toolNames(): string[];
@@ -204,6 +306,22 @@ export interface ThebeAgent {
   recentEvents(
     limit?: number
   ): Array<NormalizedEvent & { thebeSessionId: string }>;
+  /** App-control calls waiting for the paired Thebe App. */
+  listClientToolRequests(
+    thebeSessionId: string
+  ): Promise<import("./app-control/client-tools.ts").ClientToolRequest[]>;
+  getClientToolRequest(
+    thebeSessionId: string,
+    requestId: string
+  ): Promise<
+    import("./app-control/client-tools.ts").ClientToolRequest | undefined
+  >;
+  /** The App's result for one pending App-control call; false when it is no longer pending. */
+  resolveClientToolRequest(
+    thebeSessionId: string,
+    requestId: string,
+    result: import("./app-control/client-tools.ts").ClientToolResult
+  ): Promise<boolean>;
 
   createSession(init?: CreateSessionInput): Promise<AgentSessionMeta>;
   listSessions(query?: {
@@ -287,6 +405,7 @@ export interface ThebeAgent {
     profileName: string;
     taskPrompt: string;
     parentSessionId: string;
+    background?: boolean;
   }): Promise<SubagentRun>;
   listSubagents(parentSessionId?: string): Promise<SubagentRun[]>;
   restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void;
@@ -315,6 +434,12 @@ export interface ThebeAgent {
     goal: string;
     criteria?: string[];
     maxIterations?: number;
+    /** Run read-only: report what it finds and would do, change nothing. */
+    observe?: boolean;
+    /** Let the worker ask the person one question mid-run; without it a need becomes `blocked`. */
+    allowAsk?: boolean;
+    /** After the independent review passes, wait for the person to accept before finishing. */
+    reviewBeforeDone?: boolean;
   }): Promise<GoalRun>;
   listSchedules(): Promise<GoalSchedule[]>;
   getSchedule(id: string): Promise<GoalSchedule>;
@@ -334,6 +459,19 @@ export interface ThebeAgent {
   waitGoal(thebeSessionId: string): Promise<GoalRun>;
   pauseGoal(thebeSessionId: string): Promise<GoalRun>;
   resumeGoal(thebeSessionId: string): Promise<GoalRun>;
+  /** Retry failed, blocked, or checkpoint-limited work under the same Goal and Mandate. */
+  retryGoal(thebeSessionId: string): Promise<GoalRun>;
+  /** Answer the one open question on a paused Goal, or accept / send back a result waiting for review. */
+  answerGoal(
+    thebeSessionId: string,
+    input: {
+      attentionId: string;
+      answer?: string;
+      decision?: "accept" | "reject";
+    }
+  ): Promise<GoalRun>;
+  /** Add durable guidance for the Goal's next worker checkpoint without interrupting it. */
+  addGoalGuidance(thebeSessionId: string, note: string): Promise<GoalRun>;
   stopGoal(thebeSessionId: string): Promise<GoalRun>;
   clearGoal(thebeSessionId: string): void;
 
@@ -401,11 +539,14 @@ export interface ThebeAgent {
   ): Promise<{ text: string; isError: boolean }>;
   /**
    * `invokeToolDetailed` for a caller on `/mcp`: read tools run as before, and a write tool runs
-   * only when the host has enabled writes over `/mcp`. The call is audited.
+   * only when the host has enabled writes over `/mcp` and the caller may write. The caller is
+   * required, so a route that forgets it does not compile instead of quietly allowing writes.
+   * The call is audited.
    */
   invokeMcpTool(
     name: string,
-    args: unknown
+    args: unknown,
+    caller: McpCaller
   ): Promise<{ text: string; isError: boolean }>;
   invokeCapability(
     id: string,
@@ -425,6 +566,93 @@ export interface ThebeAgent {
   listArtifacts(query?: ArtifactQuery): Promise<AgentArtifact[]>;
   getArtifact(artifactId: string): Promise<AgentArtifact | undefined>;
   getArtifactContent(artifactId: string): Promise<ArtifactContent | undefined>;
+  /** Tickets: the authorised units of work. The Goal behind one keeps its status, report and attention. */
+  listTickets(): Promise<Ticket[]>;
+  getTicket(id: string): Promise<Ticket | undefined>;
+  getTicketTask(id: string): Promise<TicketTaskView | undefined>;
+  listTicketTasks(): Promise<TicketTaskView[]>;
+  getTicketLog(
+    id: string
+  ): Promise<import("./tickets/log.ts").TicketExecutionLog | undefined>;
+  getTicketForGoal(goalId: string): Promise<Ticket | undefined>;
+  /** Delegate one direct Ticket and Goal from the person-facing HTTP API. Idempotent by key. */
+  delegateTicket(
+    input: Record<string, unknown>
+  ): Promise<TicketTaskView & { reused: boolean }>;
+  /** Answer or review a Ticket's Attention, or resolve one of its pending worker permissions. */
+  replyTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
+  /** Add guidance for the next checkpoint of a live Ticket. */
+  noteTicket(input: Record<string, unknown>): Promise<TicketTaskView>;
+  /** Pause, resume, stop, or retry the Goal carrying out a Ticket. */
+  controlTicket(input: {
+    ticketId: string;
+    action: "pause" | "resume" | "stop" | "retry";
+  }): Promise<TicketTaskView>;
+  /** The rules and mode Eval weighs events by. Changing it never rewrites a past Decision. */
+  getPolicy(): Promise<Policy & { modes: string[] }>;
+  setPolicy(input: {
+    rules?: unknown;
+    acceptMode?: unknown;
+    model?: unknown;
+  }): Promise<Policy & { modes: string[] }>;
+  /** What Eval decided, newest first. In observe, `wouldAccept` marks what Core would have taken on. */
+  listDecisions(query?: {
+    thread?: string;
+    limit?: number;
+  }): Promise<Decision[]>;
+  getDecision(id: string): Promise<Decision | undefined>;
+  /** Accept a positive Eval candidate as an explicit Ticket. The original Decision stays immutable. */
+  acceptDecision(decisionId: string): Promise<
+    TicketTaskView & {
+      decisionId: string;
+      candidate: false;
+      reused: boolean;
+    }
+  >;
+  /** Attach one Decision's events to an explicitly named Ticket without another Eval. */
+  attachDecision(input: {
+    decisionId: string;
+    ticketId: string;
+    note?: string;
+  }): Promise<
+    TicketTaskView & {
+      decisionId: string;
+      attachedTicketId: string;
+      reused: boolean;
+    }
+  >;
+  /** Hide one positive candidate from pending attention without rewriting its Decision. */
+  dismissDecision(input: { decisionId: string; reason?: string }): Promise<{
+    decision: Decision & {
+      candidate: boolean;
+      dismissed: boolean;
+      dismissedAt?: string;
+      dismissalReason?: string;
+    };
+    reused: boolean;
+  }>;
+  /** Ask Eval to weigh one recorded Trigger again under the current Policy. */
+  requeueTrigger(triggerId: string): Promise<{
+    queued: true;
+    triggerId: string;
+    requeueId: string;
+  }>;
+  /** Drop every Ticket subscription to one Thread without ending existing work. */
+  unsubscribeThread(thread: string): Promise<{
+    thread: string;
+    removedFrom: string[];
+  }>;
+  /** Events the enabled Sources observed, newest first. They feed fan-out and Eval. */
+  listTriggers(query?: { thread?: string; limit?: number }): Promise<Trigger[]>;
+  /** Read health for each enabled Source, including consecutive failures and the latest error. */
+  sourceHealth?(): SourceHealth[];
+  /** Records the Ticket for a Goal the person asked for. Idempotent. */
+  recordGoalTicket(
+    run: GoalRun,
+    options?: { threads?: string[] }
+  ): Promise<Ticket>;
+  /** Attaches a trigger to an open subscribed ticket as an input. Returns ticket ids if attached. */
+  attachTrigger?(trigger: Trigger): Promise<string[]>;
   listActivity(group?: ActivityGroup): Promise<ActivityRecord[]>;
   getActivity(id: string): Promise<ActivityRecord | undefined>;
   denyActivity(id: string): Promise<boolean>;
@@ -432,6 +660,21 @@ export interface ThebeAgent {
   getAudit(id: string): Promise<AuditRecord | undefined>;
   getContext(thebeSessionId: string): Promise<ThebeSessionContext>;
   getContextUsage(thebeSessionId: string): Promise<ThebeSessionContext>;
+  /** Today's autonomous token usage, durable budget and the 15-day budget suggestion. */
+  getBackgroundBudgetSummary(): Promise<BackgroundBudgetSummary>;
+  /** Record autonomous usage against today's budget. Returns false if already recorded with this id. */
+  recordBackgroundUsage?(
+    input: import("./usage/budget.ts").RecordBackgroundUsageInput
+  ): Promise<boolean>;
+  /** Set the autonomous token budget. The owner's normal chat never uses this budget. */
+  setDailyBackgroundTokenBudget(
+    dailyTokens?: number,
+    thresholds?: number[]
+  ): Promise<BackgroundBudgetSummary>;
+  /** Accept or ignore the one-time budget suggestion. */
+  resolveBackgroundBudgetSuggestion(
+    action: "accept" | "ignore"
+  ): Promise<BackgroundBudgetSummary>;
   stopToolCall(thebeSessionId: string, toolCallId: string): Promise<void>;
   listBackgroundTasks(thebeSessionId: string): Promise<ProductBackgroundTask[]>;
   listAllBackgroundTasks(): Promise<ProductBackgroundTask[]>;
@@ -456,6 +699,9 @@ export interface ThebeAgent {
     output: string;
     truncated: boolean;
   }>;
+  onProactiveMessage?: (
+    notice: import("./main-session/proactive.ts").ProactiveNotice
+  ) => Promise<void> | void;
   quiesce(): Promise<void>;
   unquiesce(): Promise<void>;
   reapIdleSessions(idleMs?: number): Promise<{ reaped: number }>;

@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { QBittorrentDownloadProvider } from "./qbittorrent-downloads.ts";
 import { OpenListFilesProvider } from "./openlist-files.ts";
@@ -7,7 +10,10 @@ import {
   availablePipelineTools,
   createPipelineTools,
 } from "../../agent/tools/pipeline-tools.ts";
-import { PIPELINE_WRITE_TOOL_NAMES } from "../../agent/capabilities/pipeline.ts";
+import {
+  PIPELINE_WRITE_TOOL_NAMES,
+  type FilesProviderSnapshot,
+} from "../../agent/capabilities/pipeline.ts";
 import { downloadItem } from "../../testing/download-item.ts";
 
 const hash = "a".repeat(40);
@@ -191,7 +197,7 @@ describe("qBittorrent pause and resume", () => {
   it("exposes the tools only when the provider supports them, and routes to it", async () => {
     const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
     expect(availablePipelineTools({ downloads: base })).not.toContain(
-      "download.pause"
+      "download_pause"
     );
     const pause = vi.fn(async () => {});
     const resume = vi.fn(async () => {});
@@ -207,10 +213,10 @@ describe("qBittorrent pause and resume", () => {
     const downloads = { ...base, get, pause, resume };
     const names = availablePipelineTools({ downloads });
     expect(names).toEqual(
-      expect.arrayContaining(["download.pause", "download.resume"])
+      expect.arrayContaining(["download_pause", "download_resume"])
     );
     expect(PIPELINE_WRITE_TOOL_NAMES).toEqual(
-      expect.arrayContaining(["download.pause", "download.resume"])
+      expect.arrayContaining(["download_pause", "download_resume"])
     );
 
     const allow = { allow: () => ({ ok: true }) } as any;
@@ -219,7 +225,7 @@ describe("qBittorrent pause and resume", () => {
       { policy: allow, callerId: "c" }
     );
     const result = await tools
-      .find((tool) => tool.name === "download.pause")!
+      .find((tool) => tool.name === "download_pause")!
       .execute("1", { hashes: [hash] });
     expect(pause).toHaveBeenCalledWith([hash]);
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({
@@ -227,12 +233,12 @@ describe("qBittorrent pause and resume", () => {
       hashes: [hash],
     });
     await tools
-      .find((tool) => tool.name === "download.resume")!
+      .find((tool) => tool.name === "download_resume")!
       .execute("2", { hashes: [hash] });
     expect(resume).toHaveBeenCalledWith([hash]);
     await expect(
       tools
-        .find((tool) => tool.name === "download.pause")!
+        .find((tool) => tool.name === "download_pause")!
         .execute("3", { hashes: [] })
     ).rejects.toThrow("must not be empty");
     expect(pause).toHaveBeenCalledTimes(1);
@@ -249,13 +255,13 @@ describe("qBittorrent pause and resume", () => {
     );
     await expect(
       tools
-        .find((tool) => tool.name === "download.pause")!
+        .find((tool) => tool.name === "download_pause")!
         .execute("3b", { hashes: [hash] })
     ).rejects.toThrow("does not offer pause while paused");
     get.mockResolvedValueOnce(undefined as never);
     await expect(
       tools
-        .find((tool) => tool.name === "download.resume")!
+        .find((tool) => tool.name === "download_resume")!
         .execute("3c", { hashes: [hash] })
     ).rejects.toThrow("Unknown download");
     expect(pause).toHaveBeenCalledTimes(1);
@@ -265,7 +271,7 @@ describe("qBittorrent pause and resume", () => {
     const blocked = createPipelineTools(
       { downloads },
       { policy: deny, callerId: "c" }
-    ).find((tool) => tool.name === "download.resume")!;
+    ).find((tool) => tool.name === "download_resume")!;
     await expect(blocked.execute("4", { hashes: [hash] })).rejects.toThrow(
       "blocked"
     );
@@ -334,7 +340,7 @@ describe("qBittorrent delete", () => {
   it("is exposed only with provider support, needs an explicit deleteFiles, and is policy-gated", async () => {
     const base = { service: "q", add: vi.fn(), list: vi.fn(), get: vi.fn() };
     expect(availablePipelineTools({ downloads: base })).not.toContain(
-      "download.delete"
+      "download_delete"
     );
     const remove = vi.fn(async () => {});
     const get = vi.fn(async () =>
@@ -347,14 +353,14 @@ describe("qBittorrent delete", () => {
       })
     );
     const downloads = { ...base, get, remove };
-    expect(availablePipelineTools({ downloads })).toContain("download.delete");
-    expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download.delete");
+    expect(availablePipelineTools({ downloads })).toContain("download_delete");
+    expect(PIPELINE_WRITE_TOOL_NAMES).toContain("download_delete");
 
     const allow = { allow: () => ({ ok: true }) } as any;
     const tool = createPipelineTools(
       { downloads },
       { policy: allow, callerId: "c" }
-    ).find((item) => item.name === "download.delete")!;
+    ).find((item) => item.name === "download_delete")!;
     await expect(tool.execute("1", { hashes: [hash] })).rejects.toThrow(
       "deleteFiles"
     );
@@ -382,7 +388,7 @@ describe("qBittorrent delete", () => {
     const blocked = createPipelineTools(
       { downloads },
       { policy: deny, callerId: "c" }
-    ).find((item) => item.name === "download.delete")!;
+    ).find((item) => item.name === "download_delete")!;
     await expect(
       blocked.execute("4", { hashes: [hash], deleteFiles: true })
     ).rejects.toThrow("blocked");
@@ -415,13 +421,19 @@ describe("OpenList files", () => {
     const { provider, calls } = openlist({
       total: 2,
       content: [
-        { name: "a.mkv", is_dir: false, size: 5 },
+        {
+          name: "a.mkv",
+          is_dir: false,
+          size: 5,
+          hash_info: { sha256: "a".repeat(64) },
+        },
         { name: "Season 1", is_dir: true },
       ],
     });
     const listing = await provider.list({ path: "media//movies/" });
     expect(calls[0]?.body.path).toBe("/media/movies");
     expect(calls[0]?.auth).toBe("tok");
+    expect(listing.entries[0]?.sha256).toBe("a".repeat(64));
     expect(listing.entries[1]).toMatchObject({
       path: "/media/movies/Season 1",
       isDirectory: true,
@@ -437,8 +449,9 @@ describe("OpenList files", () => {
         names: ["Movie"],
       })
     ).toEqual({ taskIds: ["t1"] });
-    expect(calls[0]?.url).toContain("/api/fs/copy");
-    expect(calls[0]?.body).toMatchObject({
+    expect(calls[0]?.url).toContain("/api/fs/list"); // the destination is read first
+    expect(calls[1]?.url).toContain("/api/fs/copy");
+    expect(calls[1]?.body).toMatchObject({
       src_dir: "/dl",
       dst_dir: "/lib/Movies",
       names: ["Movie"],
@@ -453,6 +466,75 @@ describe("OpenList files", () => {
     await expect(provider.mkdir("/lib/../etc")).rejects.toThrow("..");
   });
 
+  it("refuses a copy or move at once when the destination already has that name", async () => {
+    const calls: string[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input) => {
+      calls.push(String(input));
+      return Response.json({
+        code: 200,
+        data: {
+          total: 2,
+          content: [
+            { name: "Movie", is_dir: true },
+            { name: "Other", is_dir: false },
+          ],
+        },
+      });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    for (const act of ["copy", "move"] as const) {
+      await expect(
+        provider[act]({
+          sourceDir: "/dl",
+          destinationDir: "/lib",
+          names: ["Movie", "New"],
+        })
+      ).rejects.toThrow(
+        /Movie already exists in \/lib; nothing was copied or moved/
+      );
+    }
+    expect(calls.every((url) => url.includes("/api/fs/list"))).toBe(true);
+  });
+
+  it("looks through every page of a large destination before it copies", async () => {
+    const calls: Array<{ url: string; page?: number }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push({ url: String(input), page: body.page });
+      if (String(input).includes("/api/fs/list")) {
+        const names =
+          body.page === 1
+            ? Array.from({ length: 200 }, (_, i) => `f${i}`)
+            : ["Movie"];
+        return Response.json({
+          code: 200,
+          data: {
+            total: 201,
+            content: names.map((name) => ({ name, is_dir: false })),
+          },
+        });
+      }
+      return Response.json({ code: 200, data: { tasks: [{ id: "t" }] } });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    await expect(
+      provider.copy({
+        sourceDir: "/dl",
+        destinationDir: "/lib",
+        names: ["Movie"],
+      })
+    ).rejects.toThrow("Movie already exists");
+    expect(calls.map((c) => c.page)).toEqual([1, 2]);
+  });
+
   it("surfaces application level errors", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () =>
       Response.json({ code: 500, message: "storage not found" })
@@ -465,6 +547,109 @@ describe("OpenList files", () => {
     await expect(provider.list({ path: "/x" })).rejects.toThrow(
       "storage not found"
     );
+  });
+
+  it("renames in place and uploads a local file without overwriting", async () => {
+    const calls: Array<{
+      url: string;
+      method: string;
+      headers: Headers;
+      body?: string;
+    }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      calls.push({
+        url: String(input),
+        method: init?.method ?? "GET",
+        headers: new Headers(init?.headers),
+        ...(init?.body
+          ? {
+              body: await new Response(
+                init.body as ReadableStream<Uint8Array>
+              ).text(),
+            }
+          : {}),
+      });
+      return Response.json({ code: 200, data: null });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    await provider.rename({ dir: "/lib", name: "Old.mkv", newName: "New.mkv" });
+    expect(calls[0]).toMatchObject({
+      url: "https://ol.example/api/fs/rename",
+      method: "POST",
+    });
+    expect(JSON.parse(calls[0]!.body!)).toEqual({
+      path: "/lib/Old.mkv",
+      name: "New.mkv",
+      overwrite: false,
+    });
+
+    const dir = await mkdtemp(join(tmpdir(), "thebe-openlist-upload-"));
+    try {
+      const source = join(dir, "clip.mkv");
+      await writeFile(source, "video");
+      await provider.upload({
+        dir: "/lib/My Shows",
+        name: "clip.mkv",
+        sourcePath: source,
+      });
+      const put = calls[1]!;
+      expect(put.method).toBe("PUT");
+      expect(put.url).toBe("https://ol.example/api/fs/put");
+      expect(put.headers.get("file-path")).toBe("/lib/My%20Shows/clip.mkv");
+      expect(put.headers.get("overwrite")).toBe("false");
+      expect(put.headers.get("content-length")).toBe("5");
+      expect(put.body).toBe("video");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("removes only an empty folder unless recursive is true", async () => {
+    const calls: Array<{ url: string; body: any }> = [];
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ url, body });
+      if (url.endsWith("/api/fs/get"))
+        return Response.json({
+          code: 200,
+          data: { is_dir: String(body?.path).endsWith("Show") },
+        });
+      if (url.endsWith("/api/fs/list"))
+        return Response.json({
+          code: 200,
+          data: { total: 1, content: [{ name: "ep.mkv" }] },
+        });
+      return Response.json({ code: 200, data: null });
+    });
+    const provider = new OpenListFilesProvider({
+      baseUrl: "https://ol.example",
+      token: "t",
+      fetch: fetchImpl,
+    });
+    const removes = () =>
+      calls.filter((call) => call.url.endsWith("/api/fs/remove"));
+
+    await expect(
+      provider.remove({ dir: "/lib", names: ["Show"], recursive: false })
+    ).rejects.toThrow("Show is not empty");
+    expect(removes()).toEqual([]);
+
+    await provider.remove({ dir: "/lib", names: ["Show"], recursive: true });
+    expect(removes()[0]?.body).toEqual({ dir: "/lib", names: ["Show"] });
+
+    calls.length = 0;
+    await provider.remove({
+      dir: "/lib",
+      names: ["file.mkv"],
+      recursive: false,
+    });
+    expect(removes()[0]?.body).toEqual({ dir: "/lib", names: ["file.mkv"] });
+    expect(calls.some((call) => call.url.endsWith("/api/fs/list"))).toBe(false);
   });
 });
 
@@ -610,17 +795,17 @@ describe("pipeline tools", () => {
       libraries: [{ service: "emby", scan: vi.fn(), refreshItem: vi.fn() }],
     });
     expect(names).toEqual([
-      "download.add",
-      "download.list",
-      "download.status",
-      "library.scan",
-      "library.refresh_item",
+      "download_add",
+      "download_list",
+      "download_status",
+      "library_scan",
+      "library_refresh_item",
     ]);
     expect(
       names.filter((name) =>
         (PIPELINE_WRITE_TOOL_NAMES as readonly string[]).includes(name)
       )
-    ).toContain("download.add");
+    ).toContain("download_add");
   });
 
   it("routes calls to the provider and honours the policy", async () => {
@@ -630,7 +815,7 @@ describe("pipeline tools", () => {
       { downloads },
       { policy: allow, callerId: "c" }
     );
-    const tool = tools.find((candidate) => candidate.name === "download.add")!;
+    const tool = tools.find((candidate) => candidate.name === "download_add")!;
     const result = await tool.execute("1", {
       urls: ["magnet:?xt=1"],
       category: "tv",
@@ -652,12 +837,12 @@ describe("pipeline tools", () => {
     await expect(blocked.execute("3", {})).rejects.toThrow("blocked");
   });
 
-  it("passes the named engine to download.add and says which engine took the links", async () => {
+  it("passes the named engine to download_add and says which engine took the links", async () => {
     const add = vi.fn(async () => ({ submitted: 1, engine: "aria2" }));
     const tool = createPipelineTools(
       { downloads: { service: "q", add, list: vi.fn(), get: vi.fn() } },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "download.add")!;
+    ).find((candidate) => candidate.name === "download_add")!;
     const result = await tool.execute("1", {
       urls: ["https://f.example/a.iso"],
       engine: "aria2",
@@ -696,7 +881,7 @@ describe("pipeline tools", () => {
         },
       },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "download.list")!;
+    ).find((candidate) => candidate.name === "download_list")!;
     const result = await tool.execute("1", { engine: "qbittorrent", limit: 5 });
     expect(listWithProblems).toHaveBeenCalledWith(
       expect.objectContaining({ engine: "qbittorrent", limit: 5 })
@@ -715,11 +900,230 @@ describe("pipeline tools", () => {
     const tool = createPipelineTools(
       { libraries },
       { policy: allow, callerId: "c" }
-    ).find((candidate) => candidate.name === "library.scan")!;
+    ).find((candidate) => candidate.name === "library_scan")!;
     await expect(tool.execute("1", {})).rejects.toThrow("provider is required");
     await tool.execute("2", { provider: "jellyfin" });
     expect(libraries[1]!.scan).toHaveBeenCalled();
     expect(libraries[0]!.scan).not.toHaveBeenCalled();
+  });
+
+  it("exposes file write tools only when a provider supports them and a root exists", () => {
+    const base = {
+      service: "openlist",
+      list: vi.fn(),
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+    };
+    expect(availablePipelineTools({ files: base })).toEqual([
+      "files_list",
+      "files_mkdir",
+      "files_copy",
+      "files_move",
+    ]);
+    const files = {
+      ...base,
+      rename: vi.fn(),
+      remove: vi.fn(),
+      upload: vi.fn(),
+    };
+    expect(availablePipelineTools({ files })).not.toContain("files_upload");
+    expect(
+      availablePipelineTools({ files, uploadRoots: ["/workspace"] })
+    ).toEqual(
+      expect.arrayContaining(["files_rename", "files_remove", "files_upload"])
+    );
+    expect(PIPELINE_WRITE_TOOL_NAMES).toEqual(
+      expect.arrayContaining(["files_rename", "files_remove", "files_upload"])
+    );
+  });
+
+  it("needs a provider choice when several file managers exist and routes to the chosen one", async () => {
+    const openlist = {
+      service: "openlist",
+      list: vi.fn(async () => ({ entries: [], total: 0 })),
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+    };
+    const local = {
+      service: "local",
+      list: vi.fn(async () => ({ entries: [], total: 0 })),
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+    };
+    const tools = createPipelineTools(
+      { fileProviders: [openlist, local] },
+      { policy: allow, callerId: "c" }
+    );
+    const mkdirTool = tools.find((tool) => tool.name === "files_mkdir")!;
+    await expect(mkdirTool.execute("1", { path: "/x" })).rejects.toThrow(
+      "provider is required"
+    );
+    await mkdirTool.execute("2", { path: "/x", provider: "local" });
+    expect(local.mkdir).toHaveBeenCalledWith("/x");
+    expect(openlist.mkdir).not.toHaveBeenCalled();
+    await expect(
+      mkdirTool.execute("3", { path: "/x", provider: "nope" })
+    ).rejects.toThrow("is not configured");
+
+    const listing = await tools
+      .find((tool) => tool.name === "files_list")!
+      .execute("4", { path: "/", provider: "openlist" });
+    expect(JSON.parse(listing.content[0]!.text)).toMatchObject({
+      provider: "openlist",
+      providers: ["openlist", "local"],
+      entries: [],
+      total: 0,
+    });
+  });
+
+  it("reads the live storage registry on every call", async () => {
+    const listA = vi.fn(async () => ({ entries: [], total: 0 }));
+    const listB = vi.fn(async () => ({ entries: [], total: 0 }));
+    const a = {
+      service: "a",
+      list: listA,
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+    };
+    const b = {
+      service: "b",
+      list: listB,
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+    };
+    let snapshot: FilesProviderSnapshot = {
+      providers: [a],
+      defaultProvider: a,
+    };
+    const providers = {
+      storage: { snapshot: () => snapshot },
+      uploadRoots: ["/workspace"],
+    };
+    expect(availablePipelineTools(providers)).toEqual(
+      expect.arrayContaining([
+        "files_list",
+        "files_rename",
+        "files_remove",
+        "files_upload",
+      ])
+    );
+    const tool = createPipelineTools(providers, {
+      policy: allow,
+      callerId: "c",
+    }).find((candidate) => candidate.name === "files_list")!;
+    await tool.execute("1", { path: "/" });
+    expect(listA).toHaveBeenCalledTimes(1);
+    expect(listB).not.toHaveBeenCalled();
+
+    // A backend added while the session is open is visible to the next call.
+    snapshot = { providers: [a, b], defaultProvider: b };
+    const listing = await tool.execute("2", { path: "/", provider: "b" });
+    expect(listB).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(listing.content[0]!.text)).toMatchObject({
+      provider: "b",
+      providers: ["a", "b"],
+    });
+    await expect(tool.execute("3", { path: "/" })).rejects.toThrow(
+      "provider is required"
+    );
+
+    // Removing every backend leaves the tool in place with a useful error.
+    snapshot = { providers: [] };
+    const empty = createPipelineTools(providers, {
+      policy: allow,
+      callerId: "c",
+    }).find((candidate) => candidate.name === "files_list")!;
+    await expect(empty.execute("4", { path: "/" })).rejects.toThrow(
+      "No storage backend is configured"
+    );
+  });
+
+  it("requires recursive on files_remove", async () => {
+    const remove = vi.fn(async () => {});
+    const files = {
+      service: "openlist",
+      list: vi.fn(),
+      mkdir: vi.fn(),
+      copy: vi.fn(),
+      move: vi.fn(),
+      remove,
+    };
+    const tool = createPipelineTools(
+      { files },
+      { policy: allow, callerId: "c" }
+    ).find((candidate) => candidate.name === "files_remove")!;
+    await expect(
+      tool.execute("1", { dir: "/lib", names: ["Show"] })
+    ).rejects.toThrow("recursive must be stated");
+    expect(remove).not.toHaveBeenCalled();
+    await tool.execute("2", { dir: "/lib", names: ["Show"], recursive: false });
+    expect(remove).toHaveBeenCalledWith({
+      dir: "/lib",
+      names: ["Show"],
+      recursive: false,
+    });
+  });
+
+  it("uploads only from the workspace or outputs directory", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-upload-"));
+    try {
+      const workspace = join(dir, "workspace");
+      const outside = join(dir, "outside");
+      await mkdir(workspace);
+      await mkdir(outside);
+      const source = join(workspace, "clip.mkv");
+      await writeFile(source, "v");
+      await writeFile(join(outside, "secret.txt"), "s");
+      const upload = vi.fn(async () => {});
+      const files = {
+        service: "openlist",
+        list: vi.fn(),
+        mkdir: vi.fn(),
+        copy: vi.fn(),
+        move: vi.fn(),
+        upload,
+      };
+      const tool = createPipelineTools(
+        { files, uploadRoots: [workspace] },
+        { policy: allow, callerId: "c" }
+      ).find((candidate) => candidate.name === "files_upload")!;
+      await expect(
+        tool.execute("1", {
+          destinationDir: "/lib",
+          sourcePath: join(outside, "secret.txt"),
+        })
+      ).rejects.toThrow("must be inside");
+      await expect(
+        tool.execute("2", { destinationDir: "/lib", sourcePath: workspace })
+      ).rejects.toThrow("regular file");
+      const result = await tool.execute("3", {
+        destinationDir: "/lib/",
+        sourcePath: source,
+      });
+      expect(upload).toHaveBeenCalledWith({
+        dir: "/lib/",
+        name: "clip.mkv",
+        sourcePath: await realpath(source),
+      });
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+        uploaded: true,
+        path: "/lib/clip.mkv",
+      });
+      await tool.execute("4", {
+        destinationDir: "/lib",
+        sourcePath: "clip.mkv",
+      });
+      expect(upload).toHaveBeenLastCalledWith(
+        expect.objectContaining({ name: "clip.mkv" })
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

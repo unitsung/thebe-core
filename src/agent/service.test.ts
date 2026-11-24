@@ -12,6 +12,19 @@ import { createJsonAgentSettingsStore } from "./settings/store.ts";
 
 const CANARY = "sk-canary-s3cret-leak";
 
+async function storedGoalStatus(
+  dir: string,
+  goalId: string
+): Promise<string | undefined> {
+  try {
+    const text = await readFile(join(dir, `${goalId}.json`), "utf8");
+    return (JSON.parse(text) as { goalRun?: { status?: string } }).goalRun
+      ?.status;
+  } catch {
+    return undefined;
+  }
+}
+
 function emptyProvider(): ContainerInfoProvider {
   return {
     listContainers: async () => [],
@@ -418,6 +431,39 @@ describe("Thebe agent service (fake runtime)", () => {
     ).toEqual(["goal-worker", "goal-reviewer"]);
   });
 
+  it("runs an observe-mode goal with the read-only observer, never the writing worker", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "Found two stale links; I would repair both." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: listed the two links\nREMAINING: none",
+      },
+    ]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "observe" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Look at the library links",
+      maxIterations: 2,
+      observe: true,
+    });
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      {
+        status: "completed",
+        observe: true,
+      }
+    );
+    expect(
+      (await agent.listSubagents(session.thebeSessionId)).map(
+        (run) => run.profileName
+      )
+    ).toEqual(["goal-observer", "goal-reviewer"]);
+  });
+
   it("restores completed Goal and child results from the saved session metadata", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-goal-resume-"));
     const fake = createFakeRuntime();
@@ -462,6 +508,279 @@ describe("Thebe agent service (fake runtime)", () => {
       "persisted worker result",
       "VERDICT: pass\nEVIDENCE: persisted child evidence\nREMAINING: none",
     ]);
+  });
+
+  it("stops a blocked goal at the first blocker, and keeps that and observe mode across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-blocked-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      { kind: "text", text: "I could not reach the share." },
+      {
+        kind: "text",
+        text: "VERDICT: blocked\nEVIDENCE: mount missing\nREMAINING: mount the NAS share at /media",
+      },
+    ]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({ title: "blocked goal" });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 6,
+      observe: true,
+    });
+    const done = await first.waitGoal(session.thebeSessionId);
+    // One worker and one reviewer: it did not burn the other five checkpoints.
+    expect(done).toMatchObject({
+      status: "failed",
+      iteration: 1,
+      blocked: true,
+      error: "mount the NAS share at /media",
+    });
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "failed",
+      blocked: true,
+      observe: true,
+    });
+  });
+
+  describe("structured goal reports", () => {
+    const report = (args: Record<string, unknown>) => ({
+      kind: "tools" as const,
+      calls: [{ name: "goal_report", args }],
+    });
+    async function runGoal(
+      turns: Array<
+        | { kind: "text"; text: string }
+        | { kind: "tools"; calls: Array<{ name: string; args?: unknown }> }
+      >,
+      goal: Record<string, unknown> = {},
+      agentStoreDir?: string
+    ) {
+      const fake = createFakeRuntime();
+      fake.queueTurns(turns);
+      const agent = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir,
+      });
+      const session = await agent.createSession({ title: "report" });
+      await agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Move the library",
+        maxIterations: 4,
+        ...goal,
+      });
+      const done = await agent.waitGoal(session.thebeSessionId);
+      return { agent, fake, session, done };
+    }
+
+    it("stops at once on a reported blocker, without paying for the reviewer", async () => {
+      const { agent, session, done } = await runGoal([
+        report({ state: "blocked", blocker: "mount the NAS share at /media" }),
+      ]);
+      expect(done).toMatchObject({
+        status: "failed",
+        blocked: true,
+        iteration: 1,
+        error: "mount the NAS share at /media",
+        report: { state: "blocked" },
+      });
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+
+    it("ends as completed, with the reason, when the worker reports nothing needs doing", async () => {
+      const { done } = await runGoal([
+        report({ state: "dropped", reason: "the links are all healthy" }),
+      ]);
+      expect(done.status).toBe("completed");
+      expect(done.summary).toContain("the links are all healthy");
+    });
+
+    it("hands a ready report to the independent reviewer, which still decides", async () => {
+      const { agent, session, done } = await runGoal([
+        report({
+          state: "ready",
+          summary: "moved it",
+          evidence: "ls shows 120 files",
+        }),
+        // After a tool call the worker's turn continues with its closing text.
+        { kind: "text", text: "Moved the library." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: ls shows 120 files\nREMAINING: none",
+        },
+      ]);
+      expect(done).toMatchObject({
+        status: "completed",
+        report: { state: "ready" },
+      });
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(2);
+    });
+
+    it("pauses with one open question when the task allows asking", async () => {
+      const { done, agent, session } = await runGoal(
+        [
+          report({
+            state: "ask",
+            question: "Which library?",
+            options: ["Movies", "Shows"],
+          }),
+        ],
+        { allowAsk: true }
+      );
+      expect(done.status).toBe("paused");
+      expect(done.attention).toMatchObject({
+        kind: "answer",
+        question: "Which library?",
+        options: ["Movies", "Shows"],
+      });
+      expect(done.attention?.id).toEqual(expect.any(String));
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+
+    it("reaches the person before the paused state is written", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "thebe-goal-notice-"));
+      const fake = createFakeRuntime();
+      fake.queueTurns([report({ state: "ask", question: "Which library?" })]);
+      const seen: Array<string | undefined> = [];
+      const agent = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir: dir,
+        onGoalNeedsPerson: async (notice) => {
+          // A crash right after this hook must leave the notice queued while the stored Goal
+          // still has to be paused by recovery, not already reported as stopped. Give any
+          // already queued write time to land before looking.
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          seen.push(await storedGoalStatus(dir, notice.goalId));
+        },
+      });
+      const session = await agent.createSession({ title: "notice order" });
+      await agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Move the library",
+        maxIterations: 4,
+        allowAsk: true,
+      });
+      await agent.waitGoal(session.thebeSessionId);
+
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).not.toBe("paused");
+    });
+
+    it("clears the open question when a person stops the paused task", async () => {
+      const { done, agent, session } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true }
+      );
+      expect(done.attention).toBeDefined();
+
+      const stopped = await agent.stopGoal(session.thebeSessionId);
+      expect(stopped).toMatchObject({ status: "cancelled" });
+      expect(stopped.attention).toBeUndefined();
+    });
+
+    it("applies one answer when the same question is answered twice", async () => {
+      const { done, agent, session, fake } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true }
+      );
+      const attentionId = done.attention!.id;
+      fake.queueTurns([
+        { kind: "text", text: "Moved the library into Movies." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: the files are in Movies\nREMAINING: none",
+        },
+      ]);
+
+      const results = await Promise.allSettled([
+        agent.answerGoal(session.thebeSessionId, {
+          attentionId,
+          answer: "Movies",
+        }),
+        agent.answerGoal(session.thebeSessionId, {
+          attentionId,
+          answer: "Shows",
+        }),
+      ]);
+      expect(
+        results.filter((result) => result.status === "fulfilled")
+      ).toHaveLength(1);
+      const rejected = results.find((result) => result.status === "rejected");
+      expect(rejected).toMatchObject({
+        status: "rejected",
+        reason: { status: 409, code: "attention_stale" },
+      });
+
+      await expect(
+        agent.waitGoal(session.thebeSessionId)
+      ).resolves.toMatchObject({ status: "completed" });
+      // The original worker plus one new worker and its reviewer, not two of each.
+      await expect(
+        agent.listSubagents(session.thebeSessionId)
+      ).resolves.toHaveLength(3);
+    });
+
+    it("turns a question into a blocker when the task did not opt in to being interrupted", async () => {
+      const { done } = await runGoal([
+        report({ state: "ask", question: "Which library?" }),
+      ]);
+      expect(done).toMatchObject({
+        status: "failed",
+        blocked: true,
+        error: "Which library?",
+      });
+      expect(done.attention).toBeUndefined();
+    });
+
+    it("keeps the question across a Core restart", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "thebe-goal-ask-"));
+      const { done, session, fake } = await runGoal(
+        [report({ state: "ask", question: "Which library?" })],
+        { allowAsk: true, reviewBeforeDone: true },
+        dir
+      );
+      const second = createThebeAgent({
+        runtime: fake.runtime,
+        provider: emptyProvider(),
+        agentStoreDir: dir,
+      });
+      await second.resume(session.thebeSessionId);
+      expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+        status: "paused",
+        allowAsk: true,
+        reviewBeforeDone: true,
+        attention: { id: done.attention?.id, question: "Which library?" },
+        report: { state: "ask" },
+      });
+    });
+
+    it("says what is wrong with a report so the worker can correct it, and falls back to the text", async () => {
+      const { done } = await runGoal([
+        report({ state: "ready", summary: "no evidence given" }),
+        // The tool refuses the report; the worker's turn goes on and closes with text.
+        { kind: "text", text: "Done, but I could not record the report." },
+        {
+          kind: "text",
+          text: "VERDICT: pass\nEVIDENCE: checked\nREMAINING: none",
+        },
+      ]);
+      // An invalid report is not recorded; the text path decides as it always did.
+      expect(done.report).toBeUndefined();
+      expect(done.status).toBe("completed");
+    });
   });
 
   it("pauses and resumes a goal with a fresh child checkpoint", async () => {
@@ -510,6 +829,319 @@ describe("Thebe agent service (fake runtime)", () => {
     ).resolves.toHaveLength(3);
   });
 
+  it("starts one new checkpoint when a paused goal is resumed twice", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "goal-double-resume" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Finish the task",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        agent.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await agent.pauseGoal(session.thebeSessionId);
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "paused" }
+    );
+
+    fake.queueTurns([
+      { kind: "text", text: "checkpoint complete" },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: task artifact exists\nREMAINING: none",
+      },
+    ]);
+    const resumed = await Promise.all([
+      agent.resumeGoal(session.thebeSessionId),
+      agent.resumeGoal(session.thebeSessionId),
+    ]);
+    expect(resumed[0]?.status).toBe("running");
+    await expect(agent.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "completed", iteration: 2 }
+    );
+    // The paused worker plus the one new worker and its reviewer.
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(3);
+  });
+
+  it("starts one checkpoint when the same session is started twice at once", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "goal-double-start" });
+
+    const results = await Promise.allSettled([
+      agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "First request",
+        maxIterations: 3,
+      }),
+      agent.startGoal({
+        thebeSessionId: session.thebeSessionId,
+        goal: "Second request",
+        maxIterations: 3,
+      }),
+    ]);
+    expect(
+      results.filter((result) => result.status === "fulfilled")
+    ).toHaveLength(1);
+    expect(
+      results.find((result) => result.status === "rejected")
+    ).toMatchObject({
+      status: "rejected",
+      reason: { message: "a goal is already running for this session" },
+    });
+    await vi.waitFor(async () => {
+      expect(await agent.listSubagents(session.thebeSessionId)).toHaveLength(1);
+    });
+    await agent.quiesce();
+  });
+
+  it("keeps the resumed checkpoint separate from the pause that asked", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([
+      {
+        kind: "tools",
+        calls: [
+          {
+            name: "goal_report",
+            args: { state: "ask", question: "Which library?" },
+          },
+        ],
+      },
+      // The fake runtime continues a tool turn with the next queued turn in the same worker.
+      { kind: "text", text: "Waiting for your answer." },
+      { kind: "text", text: "Moved the library into Movies." },
+      {
+        kind: "text",
+        text: "VERDICT: pass\nEVIDENCE: the files are in Movies\nREMAINING: none",
+      },
+    ]);
+    let answer: (() => Promise<unknown>) | undefined;
+    let sessionId = "";
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      onGoalNeedsPerson: async () => {
+        // Answer while the pause notice is being written: the pause must still report itself,
+        // and the resumed checkpoint must keep its own promise.
+        await answer?.();
+        answer = undefined;
+      },
+    });
+    const session = await agent.createSession({
+      title: "answer during notice",
+    });
+    sessionId = session.thebeSessionId;
+    answer = async () => {
+      const goal = agent.getGoal(sessionId)!;
+      return agent.answerGoal(sessionId, {
+        attentionId: goal.attention!.id,
+        answer: "Movies",
+      });
+    };
+    await agent.startGoal({
+      thebeSessionId: sessionId,
+      goal: "Move the library",
+      maxIterations: 4,
+      allowAsk: true,
+    });
+
+    await expect(agent.waitGoal(sessionId)).resolves.toMatchObject({
+      status: "paused",
+    });
+    await expect(agent.waitGoal(sessionId)).resolves.toMatchObject({
+      status: "completed",
+    });
+    await agent.quiesce();
+  });
+
+  it("persists guidance added while a goal checkpoint is running", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-guidance-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({ title: "live guidance" });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+
+    await expect(
+      first.addGoalGuidance(
+        session.thebeSessionId,
+        "  Put it in Movies and keep the original names.  "
+      )
+    ).resolves.toMatchObject({
+      status: "running",
+      guidance: ["Put it in Movies and keep the original names."],
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await expect(first.waitGoal(session.thebeSessionId)).resolves.toMatchObject(
+      { status: "cancelled" }
+    );
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "cancelled",
+      guidance: ["Put it in Movies and keep the original names."],
+    });
+  });
+
+  it("finishes a persisting stop after a restart instead of resuming the work", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-stop-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({
+      title: "stopped before restart",
+    });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await first.waitGoal(session.thebeSessionId);
+
+    // Rewind the persisted status to what a crash between stop and the terminal transition leaves:
+    // the person's stop intent is already durable, the loop never wrote `cancelled`.
+    const path = join(dir, `${session.thebeSessionId}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    expect(stored.goalRun.stopRequested).toBe(true);
+    stored.goalRun.status = "running";
+    await writeFile(path, JSON.stringify(stored));
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "cancelled",
+      stopRequested: true,
+    });
+    await second.quiesce();
+  });
+
+  it("keeps a finish that raced with a stop instead of rewriting it as cancelled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-goal-stop-race-"));
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const first = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    const session = await first.createSession({
+      title: "stop raced with finish",
+    });
+    await first.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Move the library",
+      maxIterations: 3,
+    });
+    await vi.waitFor(() => {
+      expect(
+        first.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await first.stopGoal(session.thebeSessionId);
+    await first.waitGoal(session.thebeSessionId);
+
+    // The stop landed after the loop had already recorded a successful finish, so the durable
+    // snapshot carries both. Recovery must keep the finish: the work really succeeded.
+    const path = join(dir, `${session.thebeSessionId}.json`);
+    const stored = JSON.parse(await readFile(path, "utf8"));
+    stored.goalRun.stopRequested = true;
+    stored.goalRun.status = "succeeded";
+    await writeFile(path, JSON.stringify(stored));
+
+    const second = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      agentStoreDir: dir,
+    });
+    await second.resume(session.thebeSessionId);
+    expect(second.getGoal(session.thebeSessionId)).toMatchObject({
+      status: "succeeded",
+    });
+    await second.quiesce();
+  });
+
+  it("refuses to resume a Ticket executor when its Ticket is missing", async () => {
+    const fake = createFakeRuntime();
+    fake.queueTurns([{ kind: "hang" }]);
+    const agent = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+    });
+    const session = await agent.createSession({ title: "missing-ticket" });
+    await agent.startGoal({
+      thebeSessionId: session.thebeSessionId,
+      goal: "Carry out an unattended Ticket",
+      maxIterations: 2,
+      executor: "ticket",
+    } as Parameters<typeof agent.startGoal>[0]);
+    await vi.waitFor(() => {
+      expect(
+        agent.getGoal(session.thebeSessionId)?.activeSubagent?.status
+      ).toBe("running");
+    });
+    await agent.pauseGoal(session.thebeSessionId);
+    await agent.waitGoal(session.thebeSessionId);
+    const before = await agent.listSubagents(session.thebeSessionId);
+
+    await expect(
+      agent.resumeGoal(session.thebeSessionId)
+    ).rejects.toMatchObject({
+      status: 409,
+      code: "ticket_mandate_invalid",
+      message: expect.stringContaining("Ticket is missing"),
+    });
+    expect(agent.getGoal(session.thebeSessionId)?.status).toBe("paused");
+    await expect(
+      agent.listSubagents(session.thebeSessionId)
+    ).resolves.toHaveLength(before.length);
+  });
+
   it("registers Pi built-ins together with container tools", () => {
     const fake = createFakeRuntime();
     const agent = createThebeAgent({
@@ -523,8 +1155,8 @@ describe("Thebe agent service (fake runtime)", () => {
         "read",
         "edit",
         "write",
-        "container.list",
-        "container.inspect",
+        "container_list",
+        "container_inspect",
       ])
     );
   });
@@ -544,7 +1176,7 @@ describe("Thebe agent service (fake runtime)", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -870,7 +1502,7 @@ describe("Thebe agent service (fake runtime)", () => {
           jsonrpc: "2.0",
           id: 1,
           method: "tools/call",
-          params: { name: "container.status_summary" },
+          params: { name: "container_status_summary" },
         }),
       })
     );
@@ -921,7 +1553,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
     const listed = await rpc("tools/list");
     const summary = listed.result?.tools?.find(
-      (tool) => tool.name === "container.status_summary"
+      (tool) => tool.name === "container_status_summary"
     );
     expect(summary?.annotations).toMatchObject({
       readOnlyHint: true,
@@ -929,14 +1561,14 @@ describe("Thebe agent service (fake runtime)", () => {
     });
     expect(summary?._meta?.["thebe/category"]).toBe("containers");
     const restart = listed.result?.tools?.find(
-      (tool) => tool.name === "container.restart"
+      (tool) => tool.name === "container_restart"
     );
     expect(restart?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
     });
 
-    const ok = await rpc("tools/call", { name: "container.status_summary" });
+    const ok = await rpc("tools/call", { name: "container_status_summary" });
     expect(ok.result?.structuredContent).toMatchObject({
       runningContainers: 2,
     });
@@ -944,7 +1576,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
     // A failing tool is a result the model can read, not a protocol error.
     const failed = await rpc("tools/call", {
-      name: "container.logs",
+      name: "container_logs",
       arguments: { id: "x" },
     });
     expect(failed.error).toBeUndefined();
@@ -1379,7 +2011,7 @@ describe("Thebe agent service (fake runtime)", () => {
 
       const tools = await agent.listMcpTools();
       expect(tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["container.list", "list_core_events"])
+        expect.arrayContaining(["container_list", "list_core_events"])
       );
       const servers = await agent.listMcpServers();
       expect(servers.map((server) => server.name)).toContain("notes");
@@ -1543,12 +2175,12 @@ describe("Thebe agent service (fake runtime)", () => {
       await mkdir(join(dir, ".thebe", "agents"), { recursive: true });
       await writeFile(
         join(dir, ".thebe", "agents", "limited.md"),
-        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container.list]\n---\nDo one diagnostic turn.\n"
+        "---\nname: limited\ndescription: One turn\nmaxTurns: 1\ninheritContext: true\ntools: [container_list]\n---\nDo one diagnostic turn.\n"
       );
       const fake = createFakeRuntime();
       fake.queueTurns([
         { kind: "text", text: "parent-secret" },
-        { kind: "tools", calls: [{ name: "container.list" }] },
+        { kind: "tools", calls: [{ name: "container_list" }] },
         { kind: "text", text: "must-not-run" },
       ]);
       const createCalls: Array<
@@ -1583,12 +2215,13 @@ describe("Thebe agent service (fake runtime)", () => {
         status: "failed",
         turns: 1,
         maxTurns: 1,
+        turnLimitReached: true,
       });
       expect(completed.result).toBe("");
       expect(completed.error).toContain("turn limit");
       const childCreate = createCalls.at(-1)!;
       expect(childCreate.inMemory).toBe(true);
-      expect(childCreate.builtinTools).toEqual(["container.list"]);
+      expect(childCreate.builtinTools).toEqual(["container_list"]);
       expect(childCreate.systemPrompt).not.toContain("parent-secret");
       expect(agent.messages().map((message) => message.text)).toEqual([
         "parent task",

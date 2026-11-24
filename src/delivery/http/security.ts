@@ -35,7 +35,7 @@ export function validateRequestSecurity(
       }
     })();
   if (allowedHosts && allowedHosts.size > 0) {
-    if (!host || !hostAllowed(host, allowedHosts)) {
+    if (!host || !requestHostAllowed(host, allowedHosts)) {
       return { ok: false, reason: "host not allowed" };
     }
   }
@@ -50,7 +50,10 @@ export function validateRequestSecurity(
     try {
       const originUrl = new URL(origin);
       if (originUrl.host !== host) {
-        if (!allowedHosts || !hostAllowed(originUrl.host, allowedHosts)) {
+        if (
+          !allowedHosts ||
+          !requestHostAllowed(originUrl.host, allowedHosts)
+        ) {
           return {
             ok: false,
             reason: "cross-origin browser requests rejected",
@@ -79,7 +82,10 @@ function hostInAllowlist(hostHeader: string, allowed: Set<string>): boolean {
 }
 
 /** Allowlist entry, or a name this host can be reached by on a local network. */
-function hostAllowed(hostHeader: string, allowed: Set<string>): boolean {
+export function requestHostAllowed(
+  hostHeader: string,
+  allowed: Set<string>
+): boolean {
   if (allowed.has("*")) {
     return true;
   }

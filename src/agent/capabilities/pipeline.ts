@@ -104,9 +104,9 @@ export interface DownloadProvider {
     engine?: string;
   }): Promise<{ downloads: DownloadItem[]; unreachable: string[] }>;
   get(hash: string): Promise<DownloadItem | undefined>;
-  /** Optional. Providers without it simply do not expose download.pause. */
+  /** Optional. Providers without it simply do not expose download_pause. */
   pause?(hashes: string[]): Promise<void>;
-  /** Optional. Providers without it simply do not expose download.resume. */
+  /** Optional. Providers without it simply do not expose download_resume. */
   resume?(hashes: string[]): Promise<void>;
   /** Optional and irreversible. Removes the tasks; deleteFiles also removes downloaded data. */
   remove?(hashes: string[], deleteFiles: boolean): Promise<void>;
@@ -118,6 +118,8 @@ export type FileEntry = {
   isDirectory: boolean;
   sizeBytes?: number;
   modifiedAt?: string;
+  /** Content digest supplied by the storage provider for a regular file. */
+  sha256?: string;
 };
 
 export interface FilesProvider {
@@ -126,23 +128,61 @@ export interface FilesProvider {
     path: string;
     page?: number;
     perPage?: number;
+    refresh?: boolean;
   }): Promise<{ entries: FileEntry[]; total: number }>;
   mkdir(path: string): Promise<void>;
   copy(input: {
     sourceDir: string;
     destinationDir: string;
     names: string[];
-  }): Promise<{ taskIds: string[] }>;
+  }): Promise<{ taskIds?: string[] }>;
   move(input: {
     sourceDir: string;
     destinationDir: string;
     names: string[];
-  }): Promise<{ taskIds: string[] }>;
-  offlineDownload(input: {
+  }): Promise<{ taskIds?: string[] }>;
+  /** Optional. Providers without it simply do not expose files_rename. */
+  rename?(input: { dir: string; name: string; newName: string }): Promise<void>;
+  /** Optional. Providers without it simply do not expose files_remove. */
+  remove?(input: {
+    dir: string;
+    names: string[];
+    /** Required to delete a folder that still has contents. */
+    recursive?: boolean;
+  }): Promise<void>;
+  /** Optional. Copy a local file into the storage; providers without it do not expose files_upload. */
+  upload?(input: {
+    dir: string;
+    name: string;
+    sourcePath: string;
+  }): Promise<void>;
+  /** Optional. Providers without it simply do not expose files_offline_download. */
+  offlineDownload?(input: {
     urls: string[];
     destinationDir: string;
     tool?: string;
   }): Promise<{ taskIds: string[] }>;
+}
+
+/** A live set of file backends, rebuilt by the composition root when configuration changes. */
+export interface FilesProviderSnapshot {
+  providers: FilesProvider[];
+  /** The backend used when a tool call omits `provider`. */
+  defaultProvider?: FilesProvider;
+  /** Configured id of the default backend, when it is known. */
+  defaultId?: string;
+  /** Where the current set came from: the config file, legacy environment, or nowhere. */
+  source?: "config" | "env" | "none";
+  /** Non-fatal problems, one human-readable line each. */
+  issues?: string[];
+}
+
+/**
+ * Read through this on every tool call, not once when a session opens: storage
+ * configuration must apply to sessions that are already running.
+ */
+export interface FilesProviderRegistry {
+  snapshot(): FilesProviderSnapshot;
 }
 
 export interface LibraryRefreshProvider {
@@ -179,22 +219,25 @@ export interface CloudTransferProvider {
 }
 
 export const PIPELINE_READ_TOOL_NAMES = [
-  "download.list",
-  "download.status",
-  "files.list",
+  "download_list",
+  "download_status",
+  "files_list",
 ] as const;
 
 export const PIPELINE_WRITE_TOOL_NAMES = [
-  "download.add",
-  "download.pause",
-  "download.resume",
-  "download.delete",
-  "files.mkdir",
-  "files.copy",
-  "files.move",
-  "files.offline_download",
-  "library.scan",
-  "library.refresh_item",
+  "download_add",
+  "download_pause",
+  "download_resume",
+  "download_delete",
+  "files_mkdir",
+  "files_copy",
+  "files_move",
+  "files_rename",
+  "files_remove",
+  "files_upload",
+  "files_offline_download",
+  "library_scan",
+  "library_refresh_item",
 ] as const;
 
 export const PIPELINE_TOOL_NAMES = [
@@ -211,11 +254,19 @@ const stringArray = (description: string) => ({
   description,
 });
 
+const providerField = {
+  provider: {
+    type: "string",
+    description:
+      "Storage backend from files_list (openlist, local, webdav). Required when several are configured.",
+  },
+};
+
 export const PIPELINE_TOOL_SCHEMAS: Record<
   PipelineToolName,
   Record<string, unknown>
 > = {
-  "download.add": {
+  download_add: {
     type: "object",
     properties: {
       urls: stringArray(
@@ -225,7 +276,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
         type: "string",
         enum: [...DOWNLOAD_ENGINES],
         description:
-          "Which engine takes the links. Omit it: magnets, .torrent URLs and an indexer's download address (a release's downloadUrl from resource.search) go to qBittorrent, every other link to aria2.",
+          "Which engine takes the links. Omit it: magnets, .torrent URLs and an indexer's download address (a release's downloadUrl from resource_search) go to qBittorrent, every other link to aria2.",
       },
       savePath: {
         type: "string",
@@ -243,29 +294,29 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     },
     required: ["urls"],
   },
-  "download.pause": {
+  download_pause: {
     type: "object",
     properties: {
       hashes: stringArray(
-        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no pause-all."
+        "Download ids (`id`) from download_list or download_status: torrent info-hashes or aria2 ids. Always name the downloads; there is no pause-all."
       ),
     },
     required: ["hashes"],
   },
-  "download.resume": {
+  download_resume: {
     type: "object",
     properties: {
       hashes: stringArray(
-        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no resume-all."
+        "Download ids (`id`) from download_list or download_status: torrent info-hashes or aria2 ids. Always name the downloads; there is no resume-all."
       ),
     },
     required: ["hashes"],
   },
-  "download.delete": {
+  download_delete: {
     type: "object",
     properties: {
       hashes: stringArray(
-        "Download ids (`id`) from download.list or download.status: torrent info-hashes or aria2 ids. Always name the downloads; there is no delete-all."
+        "Download ids (`id`) from download_list or download_status: torrent info-hashes or aria2 ids. Always name the downloads; there is no delete-all."
       ),
       deleteFiles: {
         type: "boolean",
@@ -275,7 +326,7 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
     },
     required: ["hashes", "deleteFiles"],
   },
-  "download.list": {
+  download_list: {
     type: "object",
     properties: {
       filter: {
@@ -291,18 +342,18 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       },
     },
   },
-  "download.status": {
+  download_status: {
     type: "object",
     properties: {
       hash: {
         type: "string",
         description:
-          "Download id from download.list: a torrent info-hash or an aria2 id.",
+          "Download id from download_list: a torrent info-hash or an aria2 id.",
       },
     },
     required: ["hash"],
   },
-  "files.list": {
+  files_list: {
     type: "object",
     properties: {
       path: {
@@ -311,38 +362,99 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       },
       page: { type: "integer", minimum: 1 },
       perPage: { type: "integer", minimum: 1, maximum: 200 },
+      ...providerField,
     },
     required: ["path"],
   },
-  "files.mkdir": {
+  files_mkdir: {
     type: "object",
     properties: {
       path: {
         type: "string",
         description: "Directory to create (parents are created too).",
       },
+      ...providerField,
     },
     required: ["path"],
   },
-  "files.copy": {
+  files_copy: {
     type: "object",
     properties: {
       sourceDir: { type: "string" },
       destinationDir: { type: "string" },
       names: stringArray("File or folder names inside sourceDir."),
+      ...providerField,
     },
     required: ["sourceDir", "destinationDir", "names"],
   },
-  "files.move": {
+  files_move: {
     type: "object",
     properties: {
       sourceDir: { type: "string" },
       destinationDir: { type: "string" },
       names: stringArray("File or folder names inside sourceDir."),
+      ...providerField,
     },
     required: ["sourceDir", "destinationDir", "names"],
   },
-  "files.offline_download": {
+  files_rename: {
+    type: "object",
+    properties: {
+      dir: {
+        type: "string",
+        description: "Directory that holds the entry.",
+      },
+      name: {
+        type: "string",
+        description: "Current file or folder name inside dir.",
+      },
+      newName: {
+        type: "string",
+        description:
+          "New name in the same directory. Must not contain a slash.",
+      },
+      ...providerField,
+    },
+    required: ["dir", "name", "newName"],
+  },
+  files_remove: {
+    type: "object",
+    properties: {
+      dir: {
+        type: "string",
+        description: "Directory that holds the entries.",
+      },
+      names: stringArray("File or folder names inside dir."),
+      recursive: {
+        type: "boolean",
+        description:
+          "Must be stated. true deletes a folder and its contents; false refuses a folder that is not empty.",
+      },
+      ...providerField,
+    },
+    required: ["dir", "names", "recursive"],
+  },
+  files_upload: {
+    type: "object",
+    properties: {
+      destinationDir: {
+        type: "string",
+        description: "Directory in the file manager that receives the file.",
+      },
+      name: {
+        type: "string",
+        description:
+          "Name in the destination. Defaults to the source file name.",
+      },
+      sourcePath: {
+        type: "string",
+        description: "Local file inside the workspace or outputs directory.",
+      },
+      ...providerField,
+    },
+    required: ["destinationDir", "sourcePath"],
+  },
+  files_offline_download: {
     type: "object",
     properties: {
       urls: stringArray(
@@ -354,10 +466,11 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
         description:
           "Downloader name configured in the file manager, e.g. qBittorrent, aria2, SimpleHttp.",
       },
+      ...providerField,
     },
     required: ["urls", "destinationDir"],
   },
-  "library.scan": {
+  library_scan: {
     type: "object",
     properties: {
       provider: {
@@ -367,13 +480,13 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
       },
     },
   },
-  "library.refresh_item": {
+  library_refresh_item: {
     type: "object",
     properties: {
       provider: { type: "string", enum: ["emby", "jellyfin"] },
       id: {
         type: "string",
-        description: "Library item id from emby.search / jellyfin.search.",
+        description: "Library item id from emby_search / jellyfin_search.",
       },
       replaceAllMetadata: {
         type: "boolean",
@@ -386,30 +499,36 @@ export const PIPELINE_TOOL_SCHEMAS: Record<
 };
 
 export const PIPELINE_TOOL_DESCRIPTIONS: Record<PipelineToolName, string> = {
-  "download.add":
-    "Submit magnet, .torrent or direct links to the configured download engines (qBittorrent for torrents, aria2 for direct links). Requires approval. Afterwards poll download.status until it completes; submission is not completion.",
-  "download.pause":
-    "Pause the named downloads without deleting them or their files. Requires approval. Afterwards confirm with download.status that state is paused.",
-  "download.delete":
-    "Remove the named downloads from the downloader. Irreversible and requires approval. deleteFiles must be stated: false keeps the downloaded files, true deletes them too. Prefer download.pause unless the user asked to delete. Afterwards confirm with download.list.",
-  "download.resume":
-    "Resume the named paused downloads. Requires approval. A finished download resumes as seeding. Afterwards confirm with download.status.",
-  "download.list":
+  download_add:
+    "Submit magnet, .torrent or direct links to the configured download engines (qBittorrent for torrents, aria2 for direct links). Requires approval. Afterwards poll download_status until it completes; submission is not completion.",
+  download_pause:
+    "Pause the named downloads without deleting them or their files. Requires approval. Afterwards confirm with download_status that state is paused.",
+  download_delete:
+    "Remove the named downloads from the downloader. Irreversible and requires approval. deleteFiles must be stated: false keeps the downloaded files, true deletes them too. Prefer download_pause unless the user asked to delete. Afterwards confirm with download_list.",
+  download_resume:
+    "Resume the named paused downloads. Requires approval. A finished download resumes as seeding. Afterwards confirm with download_status.",
+  download_list:
     "List downloads from every configured engine (qBittorrent, aria2). Each has an engine, an id, a phase (queued, downloading, paused, error, completed), badges, progress and the actions its capabilities allow. An engine that did not answer is named in unreachable. Read-only.",
-  "download.status":
+  download_status:
     "Get one download by id (torrent info-hash or aria2 id): phase, progress, save path and content path. Read-only.",
-  "files.list":
+  files_list:
     "List a directory in the file manager (OpenList). Read-only. Use it to inspect a share or the library folder before copying.",
-  "files.mkdir": "Create a directory in the file manager. Requires approval.",
-  "files.copy":
-    "Copy files or folders between directories in the file manager (asynchronous task). Requires approval.",
-  "files.move":
-    "Move files or folders between directories in the file manager (asynchronous task). Requires approval. Prefer copy until the result is verified.",
-  "files.offline_download":
+  files_mkdir: "Create a directory in the file manager. Requires approval.",
+  files_copy:
+    "Copy files or folders between directories in the file manager. Requires approval. An asynchronous backend returns taskIds; verify with files_list.",
+  files_move:
+    "Move files or folders between directories in the file manager. Requires approval. Prefer copy until the result is verified.",
+  files_rename:
+    "Rename one file or folder in place. Requires approval. Refuses to overwrite an existing name. Verify with files_list.",
+  files_remove:
+    "Delete files or folders. Irreversible and requires approval. recursive must be stated: false refuses a folder that is not empty, true deletes it with its contents. Use files_list first. Verify afterwards.",
+  files_upload:
+    "Upload a local file from the workspace or outputs directory into the file manager. Requires approval. Refuses to overwrite an existing name. Verify with files_list.",
+  files_offline_download:
     "Ask the file manager to download URLs into a directory with its offline downloader (asynchronous task). Requires approval.",
-  "library.scan":
-    "Ask Emby or Jellyfin to scan its library folders for new files. Requires approval. Scanning is asynchronous; verify with emby.search / jellyfin.search afterwards.",
-  "library.refresh_item":
+  library_scan:
+    "Ask Emby or Jellyfin to scan its library folders for new files. Requires approval. Scanning is asynchronous; verify with emby_search / jellyfin_search afterwards.",
+  library_refresh_item:
     "Re-scrape metadata and images for one library item. Requires approval. Use after files were renamed or identified wrongly.",
 };
 
@@ -420,7 +539,7 @@ export type ReleaseCandidate = {
   seeders?: number;
   leechers?: number;
   publishedAt?: string;
-  /** magnet: or http(s) .torrent address ready for download.add. */
+  /** magnet: or http(s) .torrent address ready for download_add. */
   downloadUrl: string;
   infoUrl?: string;
   /** Parsed from the title when recognisable. */
@@ -442,10 +561,10 @@ export interface ReleaseSearchProvider {
   ownsAddress?(url: string): boolean;
 }
 
-export const RESOURCE_SEARCH_TOOL_NAME = "resource.search" as const;
+export const RESOURCE_SEARCH_TOOL_NAME = "resource_search" as const;
 export const PIPELINE_JOB_TOOL_NAMES = [
-  "pipeline.acquire",
-  "pipeline.advance",
-  "pipeline.status",
+  "pipeline_acquire",
+  "pipeline_advance",
+  "pipeline_status",
 ] as const;
-export const PIPELINE_JOB_WRITE_TOOL_NAMES = ["pipeline.acquire"] as const;
+export const PIPELINE_JOB_WRITE_TOOL_NAMES = ["pipeline_acquire"] as const;

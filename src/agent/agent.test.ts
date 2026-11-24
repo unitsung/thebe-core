@@ -1,9 +1,10 @@
 import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createThebeAgent } from "./index.ts";
 import type { ContainerInfoProvider } from "./capabilities/containers.ts";
+import type { Source } from "./sources/types.ts";
 import { createFakeRuntime } from "../testing/runtime/index.ts";
 
 function emptyProvider(): ContainerInfoProvider {
@@ -32,6 +33,221 @@ describe("Thebe agent", () => {
     await expect(thebe.send("ping")).resolves.toMatchObject({ text: "pong" });
   });
 
+  it("polls and persists a host supplied Source adapter", async () => {
+    const event = {
+      id: "c".repeat(32),
+      source: "local-events",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "inspect this" },
+      actor: { source: "local-events", id: "person-7" },
+      human: true,
+      channel: {
+        source: "local-events",
+        thread: "conversation:42",
+        address: { conversationId: "42" },
+      },
+    };
+    const source: Source = {
+      id: "local-events",
+      scope: "one local conversation",
+      read: async () => ({ triggers: [event], cursor: "offset-1" }),
+    };
+    const thebe = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      sourceAdapters: [source],
+    });
+
+    await vi.waitFor(async () => {
+      expect(await thebe.listTriggers()).toEqual([event]);
+    });
+    expect(thebe.sourceHealth?.()).toEqual([
+      expect.objectContaining({ id: source.id, state: "healthy" }),
+    ]);
+    await thebe.quiesce();
+  });
+
+  it("weighs event kinds declared by a host supplied Source", async () => {
+    const fake = createFakeRuntime();
+    const event = {
+      id: "f".repeat(32),
+      source: "local-events",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "please review this message" },
+    };
+    let release!: () => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const source: Source = {
+      id: "local-events",
+      scope: "one local conversation",
+      assessedKinds: ["message.created"],
+      read: async (cursor) => {
+        if (cursor) return { triggers: [], cursor };
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          readStarted();
+        });
+        return { triggers: [event], cursor: "offset-1" };
+      },
+    };
+    const thebe = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      sourceAdapters: [source],
+    });
+
+    try {
+      await started;
+      const policy = await thebe.setPolicy({ rules: ["Review new messages"] });
+      fake.queueTurns([
+        {
+          kind: "text",
+          text: JSON.stringify({
+            decision: "accept",
+            matched: [policy.rules[0]!.id],
+            reason: "The message asks for a review.",
+          }),
+        },
+      ]);
+      release();
+
+      await vi.waitFor(async () => {
+        expect(await thebe.listDecisions()).toMatchObject([
+          expect.objectContaining({
+            triggerIds: [event.id],
+            outcome: "ignore",
+            wouldAccept: true,
+          }),
+        ]);
+      });
+    } finally {
+      release();
+      await thebe.quiesce();
+    }
+  });
+
+  it("routes explicitly admitted Source requests to Main Session without Eval", async () => {
+    const fake = createFakeRuntime();
+    const event = {
+      id: "b".repeat(32),
+      source: "direct-messages",
+      kind: "message.created",
+      at: "2026-11-06T10:00:00.000Z",
+      threads: ["conversation:42"],
+      payload: { text: "Please inspect this" },
+      actor: { source: "direct-messages", id: "person-7" },
+      human: true,
+      addressed: "direct" as const,
+      channel: {
+        source: "direct-messages",
+        thread: "conversation:42",
+        address: { conversationId: "42" },
+      },
+    };
+    let release!: () => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const source: Source = {
+      id: "direct-messages",
+      scope: "one conversation",
+      assessedKinds: ["message.created"],
+      admit: (trigger) =>
+        trigger.human && trigger.addressed === "direct" ? "explicit" : "ignore",
+      read: async (cursor) => {
+        if (cursor) return { triggers: [], cursor };
+        await new Promise<void>((resolve) => {
+          release = resolve;
+          readStarted();
+        });
+        return { triggers: [event], cursor: "offset-1" };
+      },
+    };
+    const thebe = createThebeAgent({
+      runtime: fake.runtime,
+      provider: emptyProvider(),
+      sourceAdapters: [source],
+    });
+
+    try {
+      await started;
+      await thebe.setPolicy({
+        rules: ["Inspect explicitly addressed requests"],
+        acceptMode: "auto",
+      });
+      fake.queueTurns([{ kind: "text", text: "Main Session ready." }]);
+      await thebe.askMainSession("Initialize the Main Session.");
+      const session = await thebe.getSession("thebe-main");
+      fake.queueTurns([{ kind: "text", text: "No additional action." }]);
+      release();
+
+      await vi.waitFor(() => {
+        const messages = fake.snapshot(session.runtimeSessionId).messages;
+        expect(JSON.stringify(messages)).toContain("admission: explicit");
+        expect(JSON.stringify(messages)).toContain(event.id);
+      });
+      expect(await thebe.listDecisions()).toEqual([]);
+    } finally {
+      release();
+      await thebe.quiesce();
+    }
+  });
+
+  it("quiesce aborts an in-flight Source read and waits for it to settle", async () => {
+    let signal: AbortSignal | undefined;
+    let release!: (result: {
+      triggers: import("./sources/types.ts").Trigger[];
+      cursor: string;
+    }) => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    const source: Source = {
+      id: "slow-events",
+      scope: "test source",
+      read: (_cursor, readSignal) => {
+        signal = readSignal;
+        readStarted();
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    };
+    const thebe = createThebeAgent({
+      runtime: createFakeRuntime().runtime,
+      provider: emptyProvider(),
+      sourceAdapters: [source],
+    });
+
+    let quiescing: Promise<void> | undefined;
+    try {
+      await started;
+      let quiesced = false;
+      quiescing = thebe.quiesce().then(() => {
+        quiesced = true;
+      });
+      expect(signal?.aborted).toBe(true);
+      await Promise.resolve();
+      expect(quiesced).toBe(false);
+      release({ triggers: [], cursor: "offset-1" });
+      await quiescing;
+      expect(await thebe.listTriggers()).toEqual([]);
+    } finally {
+      release({ triggers: [], cursor: "offset-1" });
+      if (quiescing) await quiescing;
+      else await thebe.quiesce();
+    }
+  });
+
   it("registers Pi built-ins plus the four container tools", () => {
     const fake = createFakeRuntime();
     const thebe = createThebeAgent({
@@ -42,11 +258,11 @@ describe("Thebe agent", () => {
       expect.arrayContaining([
         "bash",
         "read",
-        "container.list",
-        "container.inspect",
-        "container.logs",
-        "container.status_summary",
-      ]),
+        "container_list",
+        "container_inspect",
+        "container_logs",
+        "container_status_summary",
+      ])
     );
   });
 
@@ -65,12 +281,14 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
     const thebe = createThebeAgent({ runtime: fake.runtime, provider });
-    await expect(thebe.send("inspect nginx")).resolves.toMatchObject({ text: "inspected" });
+    await expect(thebe.send("inspect nginx")).resolves.toMatchObject({
+      text: "inspected",
+    });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.text).toContain("API_TOKEN=***REDACTED***");
     expect(toolResult?.text).toContain("NODE_ENV=production");
@@ -95,7 +313,7 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -116,12 +334,12 @@ describe("Thebe agent", () => {
     expect(JSON.stringify(thebe.messages())).not.toContain(CANARY);
   });
 
-  it("refuses container.start when the model tries to call it", async () => {
+  it("refuses container_start when the model tries to call it", async () => {
     const fake = createFakeRuntime();
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.start", args: { id: "abc123" } }],
+        calls: [{ name: "container_start", args: { id: "abc123" } }],
       },
       { kind: "text", text: "stopped" },
     ]);
@@ -129,10 +347,12 @@ describe("Thebe agent", () => {
       runtime: fake.runtime,
       provider: emptyProvider(),
     });
-    await expect(thebe.send("start nginx")).resolves.toMatchObject({ text: "stopped" });
+    await expect(thebe.send("start nginx")).resolves.toMatchObject({
+      text: "stopped",
+    });
     const toolResult = thebe.messages().find((m) => m.role === "tool");
     expect(toolResult?.isError).toBe(true);
-    expect(toolResult?.toolName).toBe("container.start");
+    expect(toolResult?.toolName).toBe("container_start");
   });
 
   it("appends JSONL audit without raw secrets", async () => {
@@ -152,7 +372,7 @@ describe("Thebe agent", () => {
     fake.queueTurns([
       {
         kind: "tools",
-        calls: [{ name: "container.inspect", args: { id: "abc123" } }],
+        calls: [{ name: "container_inspect", args: { id: "abc123" } }],
       },
       { kind: "text", text: "inspected" },
     ]);
@@ -168,10 +388,10 @@ describe("Thebe agent", () => {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line) as Record<string, unknown>);
-    const inspectLine = lines.find((row) => row.method === "container.inspect");
+    const inspectLine = lines.find((row) => row.method === "container_inspect");
     expect(inspectLine).toMatchObject({
       timestamp: "2026-09-05T12:00:00.000Z",
-      method: "container.inspect",
+      method: "container_inspect",
       redactionFired: true,
     });
     expect(JSON.stringify(lines)).not.toContain("s3cret");
@@ -183,8 +403,8 @@ describe("Thebe agent", () => {
       {
         kind: "tools",
         calls: [
-          { name: "container.list", args: {} },
-          { name: "container.list", args: {} },
+          { name: "container_list", args: {} },
+          { name: "container_list", args: {} },
         ],
       },
       { kind: "text", text: "should not run" },

@@ -3,8 +3,8 @@ export const DEFAULT_LOG_TAIL = 200;
 export const TRUNCATION_MARKER = "[... truncated ...]";
 const HIGH_RISK_TOOL_NAMES = new Set([
   "bash",
-  "service_api_write",
-  "navidrome.playlist.delete",
+  "service_write",
+  "navidrome_playlist_delete",
 ]);
 
 const SENSITIVE_ENV_KEY =
@@ -43,7 +43,7 @@ export function redactLogs(text: string, tail = DEFAULT_LOG_TAIL): string {
 export function redactToolOutput(text: string): string {
   const envStyle = text.replace(
     /(SECRET|TOKEN|KEY|PASSWORD|PASS|CREDENTIAL|PRIVATE)("?\s*[:=]\s*"?)([^"\s,}]+)/gi,
-    `$1$2${REDACTED}`,
+    `$1$2${REDACTED}`
   );
   return redactSecrets(envStyle);
 }
@@ -74,7 +74,9 @@ export function summarizeArgs(args: unknown, maxChars = 500): string {
 function redactSecrets(text: string): string {
   let redacted = text;
   for (const pattern of LOG_SECRET_PATTERNS) {
-    redacted = redacted.replace(pattern, (...match: unknown[]) => typeof match[1] === "string" ? `${match[1]}${REDACTED}` : REDACTED);
+    redacted = redacted.replace(pattern, (...match: unknown[]) =>
+      typeof match[1] === "string" ? `${match[1]}${REDACTED}` : REDACTED
+    );
   }
   return redacted;
 }

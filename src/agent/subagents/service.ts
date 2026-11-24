@@ -24,7 +24,6 @@ import {
 import { httpError } from "../types.ts";
 
 const DEFAULT_MAX_TURNS = 5;
-const MAX_ALLOWED_TURNS = 50;
 const MAX_RETAINED_RUNS = 100;
 export const SUBAGENT_RUN_INTERRUPTED_ERROR =
   "Subagent run interrupted when Core restarted.";
@@ -52,19 +51,27 @@ export function createSubagentRunManager(options: {
   onSnapshot?: (run: SubagentRun) => void | Promise<void>;
   beforeTerminal?: (run: SubagentExecutionRun) => void | Promise<void>;
   onTerminal?: (run: SubagentRun) => void | Promise<void>;
+  captureUsage?: (
+    run: SubagentExecutionRun,
+    session: RuntimeSession
+  ) => Promise<void> | void;
 }) {
   const now = options.now ?? (() => new Date());
   const maxConcurrent = normalizeAgentSubagentLimit(
     options.maxConcurrent,
-    DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY,
+    DEFAULT_AGENT_MAX_SUBAGENT_CONCURRENCY
   );
   const maxPerParent = Math.min(
     maxConcurrent,
     normalizeAgentSubagentLimit(
       options.maxPerParent,
-      DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT,
-    ),
+      DEFAULT_AGENT_MAX_SUBAGENTS_PER_PARENT
+    )
   );
+  // One slot stays available for a person's request. With a total of one there is
+  // no separate background capacity; otherwise background work can never use the reserve.
+  const humanReserve = maxConcurrent > 1 ? 1 : 0;
+  const maxBackground = maxConcurrent - humanReserve;
   const runs = new Map<string, MutableRun>();
   const finished = new Set<string>();
   const sessions = new Map<string, RuntimeSession>();
@@ -78,11 +85,12 @@ export function createSubagentRunManager(options: {
   const queue: MutableRun[] = [];
   const activeByParent = new Map<string, number>();
   let activeCount = 0;
+  let activeBackground = 0;
 
   const appendRunActivity = (
     run: MutableRun,
     activity: Parameters<typeof appendActivity>[1],
-    merge = false,
+    merge = false
   ): void => appendActivity(run, activity, now, merge);
   const recordRunEvent = (run: MutableRun, event: NormalizedEvent): void =>
     recordEvent(run, event, now);
@@ -130,7 +138,10 @@ export function createSubagentRunManager(options: {
   }
 
   function notify(run: MutableRun, event?: NormalizedEvent): void {
-    const update: SubagentUpdate = { run: snapshot(run), ...(event ? { event } : {}) };
+    const update: SubagentUpdate = {
+      run: snapshot(run),
+      ...(event ? { event } : {}),
+    };
     const callbacks = listeners.get(run.runId);
     if (callbacks) {
       for (const callback of callbacks) callback(update);
@@ -157,7 +168,7 @@ export function createSubagentRunManager(options: {
   function incrementParent(parentSessionId: string): void {
     activeByParent.set(
       parentSessionId,
-      (activeByParent.get(parentSessionId) ?? 0) + 1,
+      (activeByParent.get(parentSessionId) ?? 0) + 1
     );
   }
 
@@ -165,6 +176,14 @@ export function createSubagentRunManager(options: {
     const next = (activeByParent.get(parentSessionId) ?? 1) - 1;
     if (next <= 0) activeByParent.delete(parentSessionId);
     else activeByParent.set(parentSessionId, next);
+  }
+
+  function incrementLane(run: MutableRun): void {
+    if (run.background) activeBackground += 1;
+  }
+
+  function decrementLane(run: MutableRun): void {
+    if (run.background && activeBackground > 0) activeBackground -= 1;
   }
 
   function trimHistory(): void {
@@ -180,15 +199,22 @@ export function createSubagentRunManager(options: {
 
   function pump(): void {
     while (activeCount < maxConcurrent) {
-      const index = queue.findIndex(
-        (run) =>
-          (activeByParent.get(run.parentSessionId) ?? 0) < maxPerParent,
+      const eligible = (run: MutableRun): boolean =>
+        (activeByParent.get(run.parentSessionId) ?? 0) < maxPerParent &&
+        (!run.background || activeBackground < maxBackground);
+      // People go first. Background work may fill the remaining slots, but
+      // never the reserved one.
+      const humanIndex = queue.findIndex(
+        (run) => !run.background && eligible(run)
       );
+      const index =
+        humanIndex >= 0 ? humanIndex : queue.findIndex((run) => eligible(run));
       if (index < 0) return;
       const [run] = queue.splice(index, 1);
       if (!run || run.cancelRequested) continue;
       activeCount += 1;
       incrementParent(run.parentSessionId);
+      incrementLane(run);
       void executeSubagentRun(run, {
         now,
         createSession: options.createSession,
@@ -199,11 +225,13 @@ export function createSubagentRunManager(options: {
         appendActivity: appendRunActivity,
         recordEvent: recordRunEvent,
         notify,
+        captureUsage: options.captureUsage,
         finish,
         onSnapshot: (child) => options.onSnapshot?.(snapshot(child)),
         onFinished: () => {
           activeCount -= 1;
           decrementParent(run.parentSessionId);
+          decrementLane(run);
           trimHistory();
           pump();
         },
@@ -220,7 +248,7 @@ export function createSubagentRunManager(options: {
   function resolveRunId(requestedId: string): string {
     if (runs.has(requestedId)) return requestedId;
     const matches = [...runs.keys()].filter((runId) =>
-      runId.startsWith(requestedId),
+      runId.startsWith(requestedId)
     );
     if (matches.length === 1) return matches[0]!;
     if (matches.length > 1) {
@@ -231,7 +259,7 @@ export function createSubagentRunManager(options: {
 
   async function cancelRun(
     runId: string,
-    parentSessionId?: string,
+    parentSessionId?: string
   ): Promise<SubagentRun> {
     const resolvedId = resolveRunId(runId);
     const run = runs.get(resolvedId)!;
@@ -256,10 +284,10 @@ export function createSubagentRunManager(options: {
 
   async function cancelForParent(parentSessionId: string): Promise<void> {
     const active = [...runs.values()].filter(
-      (run) => run.parentSessionId === parentSessionId && !terminal(run.status),
+      (run) => run.parentSessionId === parentSessionId && !terminal(run.status)
     );
     await Promise.all(
-      active.map((run) => cancelRun(run.runId, parentSessionId)),
+      active.map((run) => cancelRun(run.runId, parentSessionId))
     );
   }
 
@@ -268,6 +296,8 @@ export function createSubagentRunManager(options: {
       profile: SubagentProfile;
       task: string;
       parentSessionId: string;
+      /** Goal workers and other autonomous work yield the reserved human slot. */
+      background?: boolean;
     }): SubagentRun {
       const task = input.task.trim();
       if (!task) throw new Error("subagent task cannot be empty");
@@ -284,6 +314,7 @@ export function createSubagentRunManager(options: {
         cancelRequested: false,
         profile: input.profile,
         nextActivityId: 1,
+        background: input.background === true,
       };
       appendRunActivity(run, { kind: "status", title: "queued" });
       runs.set(run.runId, run);
@@ -296,8 +327,7 @@ export function createSubagentRunManager(options: {
     list(parentSessionId?: string): SubagentRun[] {
       return [...runs.values()]
         .filter(
-          (run) =>
-            !parentSessionId || run.parentSessionId === parentSessionId,
+          (run) => !parentSessionId || run.parentSessionId === parentSessionId
         )
         .map(snapshot)
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -316,7 +346,7 @@ export function createSubagentRunManager(options: {
 
     subscribe(
       runId: string,
-      listener: (update: SubagentUpdate) => void,
+      listener: (update: SubagentUpdate) => void
     ): () => void {
       let resolvedId: string;
       try {
@@ -335,7 +365,7 @@ export function createSubagentRunManager(options: {
 
     subscribeAll(
       parentSessionId: string | undefined,
-      listener: (update: SubagentUpdate) => void,
+      listener: (update: SubagentUpdate) => void
     ): () => void {
       const entry = { parentSessionId, listener };
       allListeners.add(entry);
@@ -360,17 +390,21 @@ export function createSubagentRunManager(options: {
     restore(restoredRuns: SubagentRun[]): SubagentRun[] {
       const recovered: SubagentRun[] = [];
       for (const record of restoredRuns) {
-        if (runs.has(record.runId) || (!terminal(record.status) && !active(record.status))) continue;
-        const recoveryAt = active(record.status) ? now().toISOString() : undefined;
+        if (
+          runs.has(record.runId) ||
+          (!terminal(record.status) && !active(record.status))
+        )
+          continue;
+        const recoveryAt = active(record.status)
+          ? now().toISOString()
+          : undefined;
         const activity = (record.activity ?? []).map((entry) => {
           const restored = { ...entry };
           migrateLegacyToolDetail(restored);
           return restored;
         });
-        let nextActivityId = Math.max(
-          0,
-          ...activity.map((entry) => entry.id),
-        ) + 1;
+        let nextActivityId =
+          Math.max(0, ...activity.map((entry) => entry.id)) + 1;
         const recoveredRecord: SubagentRun = active(record.status)
           ? {
               ...record,
@@ -393,6 +427,7 @@ export function createSubagentRunManager(options: {
           cancelRequested: false,
           profile: restoredProfile(recoveredRecord),
           nextActivityId,
+          background: false,
         };
         runs.set(restored.runId, restored);
         if (terminal(restored.status)) finished.add(restored.runId);
@@ -405,14 +440,15 @@ export function createSubagentRunManager(options: {
     limits: {
       maxConcurrent,
       maxPerParent,
-      maxTurns: MAX_ALLOWED_TURNS,
+      maxBackground,
+      humanReserve,
     },
   };
 }
 
 function normalizeTurns(value: number | undefined): number {
   if (!Number.isFinite(value)) return DEFAULT_MAX_TURNS;
-  return Math.max(1, Math.min(MAX_ALLOWED_TURNS, Math.floor(value as number)));
+  return Math.max(1, Math.floor(value as number));
 }
 
 function active(status: SubagentRunStatus): boolean {

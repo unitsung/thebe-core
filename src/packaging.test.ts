@@ -24,7 +24,7 @@ describe("Node packaging", () => {
       await readFile(join(root, "package.json"), "utf8")
     ) as { dependencies?: Record<string, string> };
     expect(pkg.dependencies?.["@earendil-works/pi-coding-agent"]).toBe(
-      "^1.2.0"
+      "^1.6.0"
     );
     expect(pkg.dependencies?.["@earendil-works/pi-agent-core"]).toBeUndefined();
     expect(pkg.dependencies?.["@earendil-works/pi-ai"]).toBeUndefined();
@@ -33,7 +33,20 @@ describe("Node packaging", () => {
     ) as { packages?: Record<string, { version?: string }> };
     expect(
       lock.packages?.["node_modules/@earendil-works/pi-coding-agent"]?.version
-    ).toBe("1.2.0");
+    ).toBe("1.6.0");
+  });
+
+  it("keeps sandbox runtime on the patched Zod release", async () => {
+    const pkg = JSON.parse(
+      await readFile(join(root, "package.json"), "utf8")
+    ) as {
+      overrides?: Record<string, { zod?: string }>;
+    };
+    expect(pkg.overrides?.["@anthropic-ai/sandbox-runtime"]?.zod).toBe("4.6.7");
+    const lock = JSON.parse(
+      await readFile(join(root, "package-lock.json"), "utf8")
+    ) as { packages?: Record<string, { version?: string }> };
+    expect(lock.packages?.["node_modules/zod"]?.version).toBe("4.6.7");
   });
 
   it("dist keeps Node entries at the root and shared code in hashed chunks/", async () => {

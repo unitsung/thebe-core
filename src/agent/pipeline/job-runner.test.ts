@@ -303,7 +303,7 @@ describe("cloud transfer job", () => {
     expect(job.failure).toBeUndefined();
   });
 
-  it("is exposed through pipeline.acquire only when a transfer backend exists", async () => {
+  it("is exposed through pipeline_acquire only when a transfer backend exists", async () => {
     const files = {
       service: "ol",
       list: vi.fn(),
@@ -314,13 +314,13 @@ describe("cloud transfer job", () => {
     };
     const { allPipelineToolNames, createPipelineTools } =
       await import("../tools/pipeline-tools.ts");
-    expect(allPipelineToolNames({ files })).not.toContain("pipeline.acquire");
+    expect(allPipelineToolNames({ files })).not.toContain("pipeline_acquire");
     expect(
       allPipelineToolNames({
         files,
         transfer: transfer({ current: { state: "pending" } }),
       })
-    ).toContain("pipeline.acquire");
+    ).toContain("pipeline_acquire");
     const allow = { allow: () => ({ ok: true }) } as any;
     const acquired: string[] = [];
     const sharedBook = createJobBook({
@@ -335,7 +335,7 @@ describe("cloud transfer job", () => {
         book: sharedBook,
         onAcquired: (jobId) => acquired.push(jobId),
       }
-    ).find((candidate) => candidate.name === "pipeline.acquire")!;
+    ).find((candidate) => candidate.name === "pipeline_acquire")!;
     expect(tool).toBeDefined();
     const result = await tool.execute("1", {
       kind: "cloud_transfer",

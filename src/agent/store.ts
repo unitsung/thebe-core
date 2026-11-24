@@ -5,6 +5,7 @@ import type { GoalRun, SubagentRun, SubagentRunStatus } from "./types.ts";
 import { httpError } from "./types.ts";
 
 export type StoredGoalEvent = {
+  sequence?: number;
   event:
     | {
         type: "goal_started";
@@ -36,6 +37,15 @@ export type StoredGoalEvent = {
     | {
         type: "goal_status";
         status: "running" | "pausing" | "paused" | "cancelled" | "failed";
+        message?: string;
+      }
+    | {
+        type: "goal_watchdog";
+        action: "status_check" | "retry_worker" | "pause";
+        reason:
+          | "goal_no_progress"
+          | "worker_inactivity"
+          | "reviewer_inactivity";
         message?: string;
       };
   at: string;
@@ -75,6 +85,11 @@ export type AgentSessionMeta = {
    */
   permissionMode?: import("./runtime/interface.ts").PermissionMode;
   builtinTools?: string[];
+  /**
+   * The model this session was pinned to. A session that has not yet run a prompt is not written by
+   * the runtime, so without this a restart would resume it on the default model.
+   */
+  model?: { providerId: string; modelId: string };
   firstMessage?: string;
   messageCount?: number;
   /** Current Pi/fake tree leaf. Used with `branch_in_place` forks. */

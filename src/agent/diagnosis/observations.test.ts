@@ -21,6 +21,7 @@ describe("diagnosis observations", () => {
         name: "emby",
         image: "emby/embyserver:latest",
         state: "exited",
+        health: "unhealthy",
         config: {
           env: [`API_TOKEN=${secret}`, "NODE_ENV=production"],
           cmd: ["/init"],
@@ -42,16 +43,29 @@ describe("diagnosis observations", () => {
     });
 
     expect(result.observations.length).toBeGreaterThan(0);
-    expect(result.observations.some((item) => item.kind === "state")).toBe(true);
-    expect(result.observations.some((item) => /no space/i.test(item.fact))).toBe(true);
+    expect(result.observations.some((item) => item.kind === "state")).toBe(
+      true
+    );
+    expect(
+      result.observations.some(
+        (item) =>
+          item.kind === "health" &&
+          item.fact === "Docker healthcheck reports unhealthy."
+      )
+    ).toBe(true);
+    expect(
+      result.observations.some((item) => /no space/i.test(item.fact))
+    ).toBe(true);
     const serialized = JSON.stringify(result);
     expect(serialized).not.toContain(secret);
     expect(serialized).toContain(REDACTED);
-    expect(result.evidence.every((item) => item.excerpt.length <= 800)).toBe(true);
+    expect(result.evidence.every((item) => item.excerpt.length <= 800)).toBe(
+      true
+    );
     expect(result.toolTranscript.map((item) => item.tool)).toEqual([
-      "container.inspect",
-      "container.logs",
-      "container.status_summary",
+      "container_inspect",
+      "container_logs",
+      "container_status_summary",
     ]);
   });
 

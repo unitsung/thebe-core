@@ -32,6 +32,7 @@ import {
   toPiMcpConfig,
 } from "./mcp-extension.ts";
 import { toPiTool } from "./pi-tools.ts";
+import { createToolNameMap } from "./tool-names.ts";
 import { wrapSession as wrapPiSession } from "./wrap-session.ts";
 import type { PiModelShape } from "../config/model-shape.ts";
 import type { BackgroundTaskRegistry } from "./background-tasks.ts";
@@ -105,9 +106,13 @@ export async function openPiSession(
   }
 ): Promise<RuntimeSession> {
   const { create, sessionManager, cwd, live, backgroundTasks } = args;
+  // The model sees a provider-safe name for each custom tool; Core keeps its own.
+  const toolNames = createToolNameMap(
+    create.customTools.map((tool) => tool.name)
+  );
   const tools = [
     ...(create.builtinTools ?? PI_BUILTIN_TOOLS),
-    ...create.customTools.map((tool) => tool.name),
+    ...create.customTools.map((tool) => toolNames.toWire(tool.name)),
   ];
   const hasMcp = Boolean(create.mcp);
   const hasDiscovery = hasMcp || create.customTools.length > 0;
@@ -159,17 +164,19 @@ export async function openPiSession(
             }) => {
               const required = new Set(create.toolsRequiringApproval ?? []);
               pi.on("tool_call", async (event) => {
-                if (!required.has(event.toolName)) {
+                // The approval list, the policy and the Mandate all use Core's name for the tool.
+                const toolName = toolNames.fromWire(event.toolName);
+                if (!required.has(toolName)) {
                   return undefined;
                 }
                 const permissionId = randomUUID();
                 const request = {
                   permissionId,
-                  toolName: event.toolName,
+                  toolName,
                   toolCallId: event.toolCallId ?? permissionId,
                   args: event.input,
                   argsSummary: summarizeArgs(event.input),
-                  risk: permissionRisk(event.toolName),
+                  risk: permissionRisk(toolName),
                 };
                 const preflight = await permissionHandler.preflight(request);
                 if (preflight === "allow") {
@@ -362,7 +369,10 @@ export async function openPiSession(
   });
   const piCustomTools = [
     ...create.customTools.map((tool) =>
-      abortablePiTool(toPiTool(sdk, tool), controllers)
+      abortablePiTool(
+        toPiTool(sdk, tool, toolNames.toWire(tool.name)),
+        controllers
+      )
     ),
     ...(tools.includes("bash")
       ? [abortablePiTool(sanitizedBash, controllers)]

@@ -1,0 +1,302 @@
+import { createHash, createPublicKey, verify } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import { join } from "node:path";
+
+const SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
+const MAX_BODY = 8 * 1024;
+const MAX_SKEW_SECONDS = 300;
+const EVENTS_PER_MINUTE = 30;
+/** How long a delivered event id is remembered. Core retries one notice under one id. */
+const SEEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Must match `pushEventMessage` in Core's `src/app/push/identity.ts`. */
+export function eventMessage(event) {
+  return JSON.stringify([
+    "thebe-push-v2",
+    event.relayDeviceId,
+    event.id,
+    event.ts,
+    event.category,
+    event.title,
+    event.body,
+    event.deepLink,
+    event.ticket ?? null,
+    event.seq ?? null,
+  ]);
+}
+
+/**
+ * The relay: devices register an APNs token together with the public key of the Core they trust;
+ * the relay then forwards only events that Core signed, to only that device. It never sees a
+ * conversation, a filename or a credential, because Core sends none.
+ */
+export function createRelay({
+  dataDir,
+  apns,
+  now = () => Date.now(),
+  /** Registrations one client may attempt in a minute. */
+  registrationsPerMinute = 10,
+  /** How many devices the relay holds; a full registry refuses new ones. */
+  maxRegistrations = 1000,
+}) {
+  const file = join(dataDir, "registrations.json");
+  const seenFile = join(dataDir, "seen.json");
+  let registrations = load();
+  const seen = loadSeen();
+  const recent = new Map();
+  const recentRegistrations = new Map();
+
+  function load() {
+    try {
+      return new Map(Object.entries(JSON.parse(readFileSync(file, "utf8"))));
+    } catch (error) {
+      if (error.code === "ENOENT") return new Map();
+      throw error;
+    }
+  }
+
+  function write(target, value) {
+    mkdirSync(dataDir, { recursive: true });
+    const temporary = `${target}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+    renameSync(temporary, target);
+  }
+
+  function persist() {
+    write(file, Object.fromEntries(registrations));
+  }
+
+  /** Delivered event ids survive a restart, so a retry after one is still sent once. */
+  function loadSeen() {
+    try {
+      const parsed = JSON.parse(readFileSync(seenFile, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        return new Map();
+      }
+      return new Map(
+        Object.entries(parsed).filter(
+          ([, expires]) =>
+            typeof expires === "number" && Number.isFinite(expires)
+        )
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
+  function persistSeen() {
+    write(seenFile, Object.fromEntries(seen));
+  }
+
+  const idFor = (token, publicKey) =>
+    `rl_${createHash("sha256").update(`${token}\n${publicKey}`).digest("hex").slice(0, 32)}`;
+
+  function verifySignature(event, publicKey) {
+    try {
+      const key = createPublicKey({
+        key: Buffer.concat([SPKI_PREFIX, Buffer.from(publicKey, "base64url")]),
+        format: "der",
+        type: "spki",
+      });
+      return verify(
+        null,
+        Buffer.from(eventMessage(event)),
+        key,
+        Buffer.from(event.signature, "base64url")
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  function underRateLimit(id) {
+    const cutoff = now() - 60_000;
+    const stamps = (recent.get(id) ?? []).filter((stamp) => stamp > cutoff);
+    if (stamps.length >= EVENTS_PER_MINUTE) return false;
+    stamps.push(now());
+    recent.set(id, stamps);
+    return true;
+  }
+
+  /** An unauthenticated registration is cheap to send, so refuse it before any work or write. */
+  function underRegistrationRateLimit(client) {
+    const cutoff = now() - 60_000;
+    const stamps = (recentRegistrations.get(client) ?? []).filter(
+      (stamp) => stamp > cutoff
+    );
+    if (stamps.length >= registrationsPerMinute) return false;
+    stamps.push(now());
+    recentRegistrations.set(client, stamps);
+    return true;
+  }
+
+  const isText = (value, max) =>
+    typeof value === "string" && value.length > 0 && value.length <= max;
+
+  async function register(body, client) {
+    if (!underRegistrationRateLimit(client)) {
+      return [429, { error: "too many registrations, try again later" }];
+    }
+    const { apnsToken, corePublicKey, environment } = body;
+    if (!isText(apnsToken, 200) || !/^[0-9a-fA-F]+$/.test(apnsToken))
+      return [400, { error: "apnsToken must be hex" }];
+    if (
+      !isText(corePublicKey, 64) ||
+      Buffer.from(corePublicKey, "base64url").length !== 32
+    ) {
+      return [
+        400,
+        { error: "corePublicKey must be a 32-byte Ed25519 key, base64url" },
+      ];
+    }
+    if (environment !== "development" && environment !== "production") {
+      return [400, { error: "environment must be development or production" }];
+    }
+    const id = idFor(apnsToken, corePublicKey);
+    if (!registrations.has(id) && registrations.size >= maxRegistrations) {
+      return [429, { error: "registration limit reached" }];
+    }
+    registrations.set(id, {
+      apnsToken,
+      corePublicKey,
+      environment,
+      registeredAt: new Date(now()).toISOString(),
+    });
+    persist();
+    return [200, { ok: true, relayDeviceId: id }];
+  }
+
+  async function unregister(id, body) {
+    const entry = registrations.get(id);
+    // The token is the proof of ownership; without it anyone could drop another device.
+    if (!entry || body.apnsToken !== entry.apnsToken)
+      return [404, { error: "not found" }];
+    registrations.delete(id);
+    persist();
+    return [200, { ok: true }];
+  }
+
+  async function deliver(event) {
+    if (
+      !isText(event.relayDeviceId, 128) ||
+      !isText(event.id, 128) ||
+      !Number.isInteger(event.ts)
+    )
+      return [400, { error: "malformed event" }];
+    if (
+      !isText(event.category, 64) ||
+      !isText(event.title, 64) ||
+      !isText(event.body, 200)
+    )
+      return [400, { error: "malformed event" }];
+    if (!isText(event.deepLink, 512) || !event.deepLink.startsWith("thebe://"))
+      return [400, { error: "deepLink must be a thebe:// route" }];
+    if (event.ticket !== undefined && !isText(event.ticket, 128))
+      return [400, { error: "malformed event" }];
+    if (
+      event.seq !== undefined &&
+      !(Number.isInteger(event.seq) && event.seq > 0)
+    )
+      return [400, { error: "malformed event" }];
+    if (!isText(event.signature, 200))
+      return [400, { error: "unsigned event" }];
+    const entry = registrations.get(event.relayDeviceId);
+    if (!entry) return [404, { error: "unknown device" }];
+    if (!verifySignature(event, entry.corePublicKey))
+      return [401, { error: "bad signature" }];
+    if (Math.abs(Math.floor(now() / 1000) - event.ts) > MAX_SKEW_SECONDS)
+      return [400, { error: "stale event" }];
+    const replayKey = `${event.relayDeviceId}:${event.id}`;
+    for (const [key, expires] of seen) if (expires < now()) seen.delete(key);
+    if (seen.has(replayKey)) return [200, { ok: true, duplicate: true }];
+    if (!underRateLimit(event.relayDeviceId))
+      return [429, { error: "too many events" }];
+
+    const result = await apns.send({
+      token: entry.apnsToken,
+      environment: entry.environment,
+      // The device shows one notice per id even if APNs is handed it twice.
+      collapseId: createHash("sha256")
+        .update(event.id)
+        .digest("hex")
+        .slice(0, 32),
+      payload: {
+        aps: {
+          alert: { title: event.title, body: event.body },
+          sound: "default",
+          category: event.category,
+        },
+        deepLink: event.deepLink,
+        id: event.id,
+        ...(event.ticket === undefined ? {} : { ticket: event.ticket }),
+        ...(event.seq === undefined ? {} : { seq: event.seq }),
+      },
+    });
+    if (
+      result.status === 410 ||
+      result.reason === "BadDeviceToken" ||
+      result.reason === "Unregistered"
+    ) {
+      registrations.delete(event.relayDeviceId);
+      persist();
+      return [410, { error: "device token is no longer valid" }];
+    }
+    if (result.status === 200) {
+      for (const [key, expires] of seen) if (expires < now()) seen.delete(key);
+      seen.set(replayKey, now() + SEEN_TTL_MS);
+      persistSeen();
+      return [200, { ok: true }];
+    }
+    // APNs did not deliver it: leave the id unclaimed so Core can retry under the same id.
+    return [502, { error: "APNs refused the notice", reason: result.reason }];
+  }
+
+  async function route(request, body) {
+    const url = new URL(request.url, "http://relay");
+    if (request.method === "GET" && url.pathname === "/healthz")
+      return [200, { ok: true }];
+    if (request.method === "POST" && url.pathname === "/v1/registrations")
+      // The socket address is the client. A forwarding header is caller-controlled and not trusted.
+      return register(body, request.socket.remoteAddress ?? "unknown");
+    if (request.method === "POST" && url.pathname === "/v1/events")
+      return deliver(body);
+    const match = /^\/v1\/registrations\/([\w-]+)$/.exec(url.pathname);
+    if (request.method === "DELETE" && match) return unregister(match[1], body);
+    return [404, { error: "not found" }];
+  }
+
+  const server = createServer((request, response) => {
+    const chunks = [];
+    let size = 0;
+    request.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > MAX_BODY) request.destroy();
+      else chunks.push(chunk);
+    });
+    request.on("end", async () => {
+      let body = {};
+      try {
+        if (chunks.length > 0)
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        response
+          .writeHead(400, { "content-type": "application/json" })
+          .end('{"error":"invalid JSON"}');
+        return;
+      }
+      try {
+        const [status, payload] = await route(request, body ?? {});
+        response
+          .writeHead(status, { "content-type": "application/json" })
+          .end(JSON.stringify(payload));
+      } catch {
+        response
+          .writeHead(500, { "content-type": "application/json" })
+          .end('{"error":"internal error"}');
+      }
+    });
+  });
+
+  return { server, registrations: () => registrations };
+}

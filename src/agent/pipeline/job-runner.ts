@@ -6,6 +6,8 @@ import type {
   LibraryRefreshProvider,
 } from "../capabilities/pipeline.ts";
 import type { MediaLibraryProvider } from "../capabilities/media.ts";
+import { join } from "node:path/posix";
+import { httpError } from "../types.ts";
 
 /**
  * Deterministic acquisition job.
@@ -62,6 +64,9 @@ export type Job = Omit<JobSpec, "kind"> & {
   stage: JobStage;
   /** Folder or file name of the finished download/transfer. */
   contentName?: string;
+  ticketId?: string;
+  placementSkill?: PlacementSkill;
+  placement?: Placement;
   attempts: Record<string, number>;
   copiedAt?: number;
   log: Array<{ at: string; stage: JobStage; message: string }>;
@@ -69,6 +74,23 @@ export type Job = Omit<JobSpec, "kind"> & {
   createdAt: string;
   updatedAt: string;
 };
+
+export type Placement = {
+  id: string;
+  source: string;
+  destination: string;
+  digest: string;
+  state: "pending" | "denied" | "dispatching" | "verified" | "uncertain";
+  decidedAt?: string;
+  dispatchedAt?: string;
+  verifiedAt?: string;
+  verification?: "sha256";
+  stoppedAt?: string;
+  skill?: PlacementSkill;
+};
+
+export type PlacementSkill = { name: string; digest: string };
+export type PlacementContext = { ticketId: string; skill: PlacementSkill };
 
 export type JobDeps = {
   downloads?: DownloadProvider;
@@ -83,6 +105,7 @@ export type JobDeps = {
 export interface JobStore {
   load(): Job[];
   save(jobs: Job[]): void;
+  saveStrict?(jobs: Job[]): void;
 }
 
 export const MAX_ATTEMPTS = { copy: 3, scan: 3, readd: 1 } as const;
@@ -250,7 +273,7 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
           fail(
             job,
             "the transfer finished but its content name is unknown",
-            "Copy the result into the library with files.copy, then scan the library, or re-import with the expected folder name.",
+            "Copy the result into the library with files_copy, then scan the library, or re-import with the expected folder name.",
             now()
           );
           return;
@@ -317,6 +340,50 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
     }
     case "place": {
       const name = job.contentName!;
+      if (job.ticketId) {
+        if (!job.placement) {
+          if (
+            !name ||
+            name === "." ||
+            name === ".." ||
+            /[\\/]/.test(name) ||
+            ![job.filesSourceDir, job.libraryDir].every(
+              (path) =>
+                path === path.trim() &&
+                path.startsWith("/") &&
+                !path.split("/").includes("..")
+            )
+          ) {
+            fail(
+              job,
+              "Placement requires absolute directories and one file name",
+              "Use absolute source and library directories without parent traversal.",
+              now()
+            );
+            return;
+          }
+          const source = await findFile(deps.files, job.filesSourceDir, name);
+          const digest = fileDigest(source);
+          if (!digest) {
+            fail(
+              job,
+              "Source file identity is unavailable",
+              "Use a single file on a provider that reports its SHA-256 digest.",
+              now()
+            );
+            return;
+          }
+          job.placement = {
+            id: randomUUID(),
+            source: join(job.filesSourceDir, name),
+            destination: join(job.libraryDir, name),
+            digest,
+            skill: job.placementSkill,
+            state: "pending",
+          };
+        }
+        return;
+      }
       const present = await exists(deps.files, job.libraryDir, name);
       if (present) {
         note(job, "files are in the library folder", now());
@@ -400,12 +467,35 @@ async function step(job: Job, deps: JobDeps, now: () => Date): Promise<void> {
       fail(
         job,
         "the media server did not pick the item up after repeated scans",
-        "Check the folder name (Title (Year)) and file names, then use library.refresh_item or rename and run acquire again.",
+        "Check the folder name (Title (Year)) and file names, then use library_refresh_item or rename and run acquire again.",
         now()
       );
       return;
     }
   }
+}
+
+async function findFile(files: FilesProvider, path: string, name: string) {
+  const perPage = 200;
+  for (let page = 1; ; page += 1) {
+    const listing = await files.list({ path, page, perPage, refresh: true });
+    const found = listing.entries.find((entry) => entry.name === name);
+    if (
+      found ||
+      page * perPage >= listing.total ||
+      listing.entries.length === 0
+    )
+      return found;
+  }
+}
+
+function fileDigest(
+  file: Awaited<ReturnType<typeof findFile>>
+): string | undefined {
+  const digest = file?.sha256;
+  return !file?.isDirectory && digest && /^[a-f0-9]{64}$/i.test(digest)
+    ? digest.toLowerCase()
+    : undefined;
 }
 
 async function exists(
@@ -439,7 +529,22 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
   const jobs = new Map<string, Job>(
     (store?.load() ?? []).map((job) => [job.id, job])
   );
-  const persist = () => store?.save([...jobs.values()].slice(-50));
+  const persist = () => {
+    const all = [...jobs.values()];
+    store?.save([
+      ...all.filter((job) => job.ticketId),
+      ...all.filter((job) => !job.ticketId).slice(-50),
+    ]);
+  };
+  const savePlacement = () => {
+    if (!store?.saveStrict)
+      throw httpError(
+        503,
+        "Placement requires durable job storage",
+        "placement_store_unavailable"
+      );
+    store.saveStrict([...jobs.values()]);
+  };
   // One book may be driven by a tool call and the background advancer at once;
   // serialize so a job is never stepped twice concurrently.
   let chain: Promise<unknown> = Promise.resolve();
@@ -451,21 +556,172 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
     );
     return run;
   }
+  function saveTransition(job: Job, next: Placement): void {
+    const previous = job.placement;
+    job.placement = previous?.stoppedAt
+      ? { ...next, stoppedAt: previous.stoppedAt }
+      : next;
+    try {
+      savePlacement();
+    } catch (error) {
+      job.placement = previous;
+      throw error;
+    }
+  }
   return {
-    acquire(spec: JobSpec): Promise<Job> {
+    stopPlacements(ticketId: string): boolean {
+      const jobsForTicket = [...jobs.values()].filter(
+        (job) =>
+          job.ticketId === ticketId &&
+          job.placement &&
+          (job.placement.stoppedAt ||
+            (job.stage !== "done" && job.stage !== "failed"))
+      );
+      if (!jobsForTicket.length) return false;
+      const at = (deps.now ?? (() => new Date()))().toISOString();
+      const previous = jobsForTicket.map((job) => job.placement!);
+      for (const job of jobsForTicket) {
+        job.placement = {
+          ...job.placement!,
+          stoppedAt: job.placement!.stoppedAt ?? at,
+        };
+      }
+      try {
+        savePlacement();
+      } catch (error) {
+        jobsForTicket.forEach((job, index) => {
+          job.placement = previous[index];
+        });
+        throw error;
+      }
+      return true;
+    },
+    recoverPlacements(): Promise<void> {
+      return serial(async () => {
+        for (const job of jobs.values()) {
+          const placement = job.placement;
+          if (!job.ticketId || placement?.state !== "dispatching") continue;
+          await verifyPlacement(job, placement);
+          if (job.placement?.state === "dispatching") {
+            saveTransition(job, { ...placement, state: "uncertain" });
+          }
+        }
+      });
+    },
+    decidePlacement(input: {
+      ticketId: string;
+      placementId: string;
+      decision: "allow" | "deny";
+      authorize: () => Promise<void>;
+    }): Promise<string> {
+      return serial(async () => {
+        const job = [...jobs.values()].find(
+          (row) =>
+            row.ticketId === input.ticketId &&
+            row.placement?.id === input.placementId
+        );
+        const placement = job?.placement;
+        if (!job || placement?.state !== "pending" || placement.stoppedAt) {
+          throw httpError(
+            409,
+            "Placement approval is no longer pending",
+            "placement_stale"
+          );
+        }
+        const now = deps.now ?? (() => new Date());
+        if (input.decision === "deny") {
+          saveTransition(job, {
+            ...placement,
+            state: "denied",
+            decidedAt: now().toISOString(),
+          });
+          return job.id;
+        }
+        const name = job.contentName!;
+        const source = await findFile(deps.files, job.filesSourceDir, name);
+        if (
+          fileDigest(source) !== placement.digest ||
+          join(job.filesSourceDir, name) !== placement.source ||
+          join(job.libraryDir, name) !== placement.destination
+        ) {
+          throw httpError(
+            409,
+            "The approved file or destination changed",
+            "placement_changed"
+          );
+        }
+        if (await findFile(deps.files, job.libraryDir, name)) {
+          throw httpError(
+            409,
+            "A file already exists at the destination",
+            "placement_destination_exists"
+          );
+        }
+        await input.authorize();
+        if (job.placement?.stoppedAt) {
+          throw httpError(409, "Placement has been stopped", "ticket_stopped");
+        }
+        const at = now().toISOString();
+        const dispatched = {
+          ...placement,
+          state: "dispatching" as const,
+          decidedAt: at,
+          dispatchedAt: at,
+        };
+        saveTransition(job, dispatched);
+        try {
+          await deps.files.copy({
+            sourceDir: job.filesSourceDir,
+            destinationDir: job.libraryDir,
+            names: [name],
+          });
+        } catch {
+          saveTransition(job, { ...dispatched, state: "uncertain" });
+          return job.id;
+        }
+        await verifyPlacement(job, dispatched);
+        return job.id;
+      });
+    },
+    acquire(spec: JobSpec, placement?: PlacementContext): Promise<Job> {
       return serial(async () => {
         const job = createJob(spec, (deps.now ?? (() => new Date()))());
-        jobs.set(job.id, job);
+        const ticketId = placement?.ticketId;
+        if (ticketId && !store?.saveStrict)
+          throw httpError(
+            503,
+            "Placement requires durable job storage",
+            "placement_store_unavailable"
+          );
+        if (placement) {
+          job.ticketId = placement.ticketId;
+          job.placementSkill = placement.skill;
+        }
         await advanceJob(job, deps);
-        persist();
+        jobs.set(job.id, job);
+        if (ticketId) {
+          try {
+            savePlacement();
+          } catch (error) {
+            jobs.delete(job.id);
+            throw error;
+          }
+        } else persist();
         return job;
       });
     },
     advance(id: string): Promise<Job> {
       return serial(async () => {
-        const job = jobs.get(id);
-        if (!job) throw new Error(`unknown job ${id}`);
-        if (job.stage === "failed") {
+        const previous = jobs.get(id);
+        if (!previous) throw new Error(`unknown job ${id}`);
+        // A copy in progress only receives read-back checks. It cannot dispatch from advance.
+        if (previous.placement?.state === "dispatching") {
+          await verifyPlacement(previous, previous.placement);
+          return previous;
+        }
+        if (previous.placement?.stoppedAt) return previous;
+        const job = previous.ticketId ? structuredClone(previous) : previous;
+        if (job.stage === "failed" && !job.placement) {
           job.failure = undefined;
           job.attempts = {};
           // A cloud transfer that never got a handle restarts from submit; one
@@ -476,7 +732,16 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
               : "download";
         }
         await advanceJob(job, deps);
-        persist();
+        if (previous.placement?.stoppedAt) return previous;
+        if (job.ticketId) {
+          jobs.set(id, job);
+          try {
+            savePlacement();
+          } catch (error) {
+            jobs.set(id, previous);
+            throw error;
+          }
+        } else persist();
         return job;
       });
     },
@@ -484,6 +749,42 @@ export function createJobBook(deps: JobDeps, store?: JobStore) {
       return id ? (jobs.has(id) ? [jobs.get(id)!] : []) : [...jobs.values()];
     },
   };
+
+  async function verifyPlacement(
+    job: Job,
+    placement: Placement
+  ): Promise<void> {
+    let destination;
+    try {
+      destination = await findFile(
+        deps.files,
+        job.libraryDir,
+        job.contentName!
+      );
+    } catch {
+      // Read-back may be temporarily unavailable while the provider copies.
+      return;
+    }
+    if (!destination) return;
+    if (fileDigest(destination) !== placement.digest) {
+      saveTransition(job, { ...placement, state: "uncertain" });
+      return;
+    }
+    const now = deps.now ?? (() => new Date());
+    const before = job.stage;
+    job.stage = "scan";
+    try {
+      saveTransition(job, {
+        ...placement,
+        state: "verified",
+        verifiedAt: now().toISOString(),
+        verification: "sha256",
+      });
+    } catch (error) {
+      job.stage = before;
+      throw error;
+    }
+  }
 }
 
 export type JobBook = ReturnType<typeof createJobBook>;

@@ -31,7 +31,12 @@ export async function handleSessionCommands(
 
   // During maintenance, reads remain available and the two controls needed
   // to finish an in-flight run (interrupt and permission) remain usable.
-  if (method !== "GET" && action !== "interrupt" && action !== "permission") {
+  if (
+    method !== "GET" &&
+    action !== "interrupt" &&
+    action !== "permission" &&
+    action !== "client-tools"
+  ) {
     const blocked = quiescedWrite(context);
     if (blocked) return blocked;
   }
@@ -41,6 +46,77 @@ export async function handleSessionCommands(
   }
   if (!id) {
     return undefined;
+  }
+  if (action === "client-tools") {
+    if (!extra) {
+      if (method !== "GET") {
+        return json(
+          {
+            ok: false,
+            error: "method not allowed",
+            code: "method_not_allowed",
+          },
+          405
+        );
+      }
+      return json({ requests: await agent.listClientToolRequests(id) });
+    }
+    if (method === "GET") {
+      const pending = await agent.getClientToolRequest(id, extra);
+      if (!pending) {
+        return json(
+          {
+            ok: false,
+            error: "App-control request is no longer pending",
+            code: "not_found",
+          },
+          404
+        );
+      }
+      return json(pending);
+    }
+    if (method === "POST") {
+      const body = await readJson(request);
+      if (typeof body.ok !== "boolean") {
+        return json(
+          {
+            ok: false,
+            error: "ok must be a boolean",
+            code: "invalid_body",
+          },
+          400
+        );
+      }
+      const result = {
+        ok: body.ok,
+        ...(typeof body.summary === "string"
+          ? { summary: body.summary.slice(0, 4_000) }
+          : {}),
+        ...(body.data === undefined ? {} : { data: body.data }),
+        ...(typeof body.errorCode === "string"
+          ? { errorCode: body.errorCode.slice(0, 100) }
+          : {}),
+        ...(typeof body.errorMessage === "string"
+          ? { errorMessage: body.errorMessage.slice(0, 4_000) }
+          : {}),
+      };
+      const resolved = await agent.resolveClientToolRequest(id, extra, result);
+      if (!resolved) {
+        return json(
+          {
+            ok: false,
+            error: "App-control request is no longer pending",
+            code: "not_found",
+          },
+          404
+        );
+      }
+      return json({ ok: true });
+    }
+    return json(
+      { ok: false, error: "method not allowed", code: "method_not_allowed" },
+      405
+    );
   }
   if (method === "PATCH" && parts.length === 3) {
     const body = await readJson(request);
@@ -103,7 +179,8 @@ export async function handleSessionCommands(
       if (method === "PUT") {
         const body = await readJson(request);
         // `mode: null` returns the session to the host default.
-        const mode = body.mode === null ? undefined : parsePermissionMode(body.mode);
+        const mode =
+          body.mode === null ? undefined : parsePermissionMode(body.mode);
         if (body.mode !== null && !mode) {
           return json(
             {
@@ -138,7 +215,11 @@ export async function handleSessionCommands(
     const body = await readJson(request);
     if (typeof body.command !== "string" || !body.command.trim()) {
       return json(
-        { ok: false, error: "command must be a non-empty string", code: "invalid_body" },
+        {
+          ok: false,
+          error: "command must be a non-empty string",
+          code: "invalid_body",
+        },
         400
       );
     }

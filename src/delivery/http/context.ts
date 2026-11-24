@@ -1,6 +1,12 @@
 import type { ThebeAgent } from "../../agent/index.ts";
+import type { NotificationService } from "../../agent/notifications/service.ts";
+import type { NotificationChannelConfigService } from "../../agent/notifications/channel-config-service.ts";
+import type { ImGateway } from "../../agent/im/gateway.ts";
 import { json } from "./json.ts";
 import type { DeviceRegistry } from "./devices.ts";
+import type { PushOutboxStatus } from "./push-status.ts";
+import type { QuietHoursStore } from "../../agent/notifications/quiet-hours.ts";
+import type { TokenCaller } from "./token-store.ts";
 
 /** The shared seam between HTTP dispatch and focused route modules. */
 export type ThebeHttpContext = {
@@ -10,8 +16,24 @@ export type ThebeHttpContext = {
   parts: string[];
   version: string;
   agent?: ThebeAgent;
+  /** Who sent the request and what their token may do; absent when no token is configured. */
+  caller?: TokenCaller;
   /** Durable device registration state used by the device push endpoint. */
   deviceRegistry?: DeviceRegistry;
+  /** Where devices register for push and the key Core signs events with; absent when push is off. */
+  pushIdentity?: { publicKey: string; relayUrl: string };
+  /** Push delivery state for the health response; absent when push is off. */
+  pushOutbox?: { status(): PushOutboxStatus };
+  /** The daily window in which Core holds its pushes. */
+  quietHours?: QuietHoursStore;
+  /** Multi-channel notifications: settings, routing, and the durable outbox. */
+  notifications?: NotificationService;
+  /** Owner-only channel credential config and its live adapter rebuild. */
+  notificationConfig?: NotificationChannelConfigService;
+  /** Two-way IM channels, their bindings and durable inbound queue. */
+  im?: ImGateway;
+  /** Whether the optional MCP OAuth authorization server is configured. */
+  mcpOAuth?: boolean;
   /** The authorization boundary, used by the isolation report. */
   workspacePath?: string;
 };
@@ -20,18 +42,31 @@ export type ThebeHttpRoute = (
   context: ThebeHttpContext
 ) => Response | undefined | Promise<Response | undefined>;
 
+/** The path as routes match it: no trailing slash. The token scope gate uses this same function. */
+export function normalizedPath(url: URL): string {
+  return url.pathname.replace(/\/$/, "") || "/";
+}
+
 export function createThebeHttpContext(
   request: Request,
   options: {
     version: string;
     agent?: ThebeAgent;
+    caller?: TokenCaller;
     path?: string;
     deviceRegistry?: DeviceRegistry;
+    pushIdentity?: { publicKey: string; relayUrl: string };
+    pushOutbox?: ThebeHttpContext["pushOutbox"];
+    quietHours?: QuietHoursStore;
+    notifications?: ThebeHttpContext["notifications"];
+    notificationConfig?: ThebeHttpContext["notificationConfig"];
+    im?: ThebeHttpContext["im"];
+    mcpOAuth?: boolean;
     workspacePath?: string;
   }
 ): ThebeHttpContext {
   const url = new URL(request.url);
-  const path = options.path ?? (url.pathname.replace(/\/$/, "") || "/");
+  const path = options.path ?? normalizedPath(url);
   return {
     request,
     url,
@@ -39,7 +74,15 @@ export function createThebeHttpContext(
     parts: path.split("/").filter(Boolean),
     version: options.version,
     agent: options.agent,
+    caller: options.caller,
     deviceRegistry: options.deviceRegistry,
+    pushIdentity: options.pushIdentity,
+    pushOutbox: options.pushOutbox,
+    quietHours: options.quietHours,
+    notifications: options.notifications,
+    notificationConfig: options.notificationConfig,
+    im: options.im,
+    mcpOAuth: options.mcpOAuth,
     workspacePath: options.workspacePath,
   };
 }

@@ -50,6 +50,12 @@ import {
   STRM_REPAIR_SCHEMA,
   type StrmRepairProvider,
 } from "../capabilities/strm.ts";
+import {
+  TICKET_TOOL_DESCRIPTIONS,
+  TICKET_TOOL_NAMES,
+  TICKET_TOOL_SCHEMAS,
+  TICKET_TOOL_WRITE_NAMES,
+} from "../tickets/tools.ts";
 
 export const HOMELAB_CAPABILITY_CATEGORIES = [
   "files",
@@ -137,6 +143,8 @@ export type HomelabCapability = {
   execution?: HomelabCapabilityExecution;
   background?: boolean;
   destructive?: boolean;
+  /** The operator's word, from `.thebe/mcp.json`, on whether a call cannot be undone; beats the server's hint. */
+  irreversible?: boolean;
   outputKind?: string;
 };
 
@@ -171,6 +179,8 @@ export type McpServerRegistration = {
   description?: string;
   /** How the model reaches the tools; the runtime's default is `codemode`. */
   exposure?: "codemode" | "deferred" | "direct" | "hidden";
+  /** Tools the operator confirms only read, so Core never treats them as writes. */
+  readTools?: string[];
 };
 
 export type McpRegistry = {
@@ -263,10 +273,21 @@ export type McpWireTool = {
  * destructive unless Core classified it `risk: "low"`, which is the safe default for unclassified
  * external tools. Hosts treat these as hints; Core's policy engine remains the enforcement point.
  */
-export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
-  const readOnly =
+/**
+ * Whether calling this capability changes something: the effect it declares, else its permission.
+ * The one rule behind both the `readOnlyHint` a client sees and the write gate over `/mcp`.
+ */
+export function capabilityChangesThings(
+  capability: Pick<HomelabCapability, "effect" | "permission">
+): boolean {
+  return (
     (capability.effect ??
-      (capability.permission === "read" ? "read" : "write")) === "read";
+      (capability.permission === "read" ? "read" : "write")) !== "read"
+  );
+}
+
+export function toMcpWireTool(capability: HomelabCapability): McpWireTool {
+  const readOnly = !capabilityChangesThings(capability);
   return {
     name: capability.name,
     description: capability.description,
@@ -307,42 +328,42 @@ const MEDIA_RESOURCE_KINDS: Record<
   (typeof MEDIA_READ_TOOL_NAMES)[number],
   string[]
 > = {
-  "emby.libraries": [HOMELAB_RESOURCE_KINDS.mediaLibrary],
-  "emby.recent": [HOMELAB_RESOURCE_KINDS.mediaItem],
-  "emby.sessions": [HOMELAB_RESOURCE_KINDS.playbackSession],
-  "jellyfin.libraries": [HOMELAB_RESOURCE_KINDS.mediaLibrary],
-  "jellyfin.recent": [HOMELAB_RESOURCE_KINDS.mediaItem],
-  "jellyfin.sessions": [HOMELAB_RESOURCE_KINDS.playbackSession],
-  "immich.assets": [HOMELAB_RESOURCE_KINDS.photo],
-  "immich.albums": [HOMELAB_RESOURCE_KINDS.album],
-  "immich.statistics": [HOMELAB_RESOURCE_KINDS.photo],
+  emby_libraries: [HOMELAB_RESOURCE_KINDS.mediaLibrary],
+  emby_recent: [HOMELAB_RESOURCE_KINDS.mediaItem],
+  emby_sessions: [HOMELAB_RESOURCE_KINDS.playbackSession],
+  jellyfin_libraries: [HOMELAB_RESOURCE_KINDS.mediaLibrary],
+  jellyfin_recent: [HOMELAB_RESOURCE_KINDS.mediaItem],
+  jellyfin_sessions: [HOMELAB_RESOURCE_KINDS.playbackSession],
+  immich_assets: [HOMELAB_RESOURCE_KINDS.photo],
+  immich_albums: [HOMELAB_RESOURCE_KINDS.album],
+  immich_statistics: [HOMELAB_RESOURCE_KINDS.photo],
 };
 
 const NAVIDROME_RESOURCE_KINDS: Record<NavidromeToolName, string[]> = {
-  "navidrome.library": [
+  navidrome_library: [
     HOMELAB_RESOURCE_KINDS.mediaLibrary,
     HOMELAB_RESOURCE_KINDS.artist,
     HOMELAB_RESOURCE_KINDS.album,
     HOMELAB_RESOURCE_KINDS.song,
     HOMELAB_RESOURCE_KINDS.playlist,
   ],
-  "navidrome.search": [
+  navidrome_search: [
     HOMELAB_RESOURCE_KINDS.artist,
     HOMELAB_RESOURCE_KINDS.album,
     HOMELAB_RESOURCE_KINDS.song,
   ],
-  "navidrome.artist": [HOMELAB_RESOURCE_KINDS.artist],
-  "navidrome.lyrics": [HOMELAB_RESOURCE_KINDS.song],
-  "navidrome.queue": [HOMELAB_RESOURCE_KINDS.playbackSession],
-  "navidrome.playlist.create": [HOMELAB_RESOURCE_KINDS.playlist],
-  "navidrome.playlist.update": [HOMELAB_RESOURCE_KINDS.playlist],
-  "navidrome.playlist.delete": [HOMELAB_RESOURCE_KINDS.playlist],
+  navidrome_artist: [HOMELAB_RESOURCE_KINDS.artist],
+  navidrome_lyrics: [HOMELAB_RESOURCE_KINDS.song],
+  navidrome_queue: [HOMELAB_RESOURCE_KINDS.playbackSession],
+  navidrome_playlist_create: [HOMELAB_RESOURCE_KINDS.playlist],
+  navidrome_playlist_update: [HOMELAB_RESOURCE_KINDS.playlist],
+  navidrome_playlist_delete: [HOMELAB_RESOURCE_KINDS.playlist],
 };
 
 function defaultResourceKinds(capability: HomelabCapability): string[] {
   if (capability.category === "containers")
     return [HOMELAB_RESOURCE_KINDS.container];
-  if (capability.id.startsWith("strm.")) return [HOMELAB_RESOURCE_KINDS.strm];
+  if (capability.id.startsWith("strm_")) return [HOMELAB_RESOURCE_KINDS.strm];
   const mediaKinds =
     MEDIA_RESOURCE_KINDS[
       capability.id as (typeof MEDIA_READ_TOOL_NAMES)[number]
@@ -376,6 +397,28 @@ export function listCoreMcpTools(
   } = {}
 ): McpToolInfo[] {
   const tools: McpToolInfo[] = [];
+  for (const name of TICKET_TOOL_NAMES) {
+    const write = TICKET_TOOL_WRITE_NAMES.has(name);
+    tools.push(
+      withProductMetadata({
+        id: name,
+        name,
+        description: TICKET_TOOL_DESCRIPTIONS[name],
+        inputSchema: TICKET_TOOL_SCHEMAS[name],
+        category: "automation",
+        permission: write ? "confirm" : "read",
+        effect: write ? "write" : "read",
+        risk: "low",
+        approval: "none",
+        service: "tickets",
+        source: CORE_CAPABILITY_SOURCE,
+        serverName: CORE_CAPABILITY_SERVER,
+        execution: "goal",
+        background: false,
+        destructive: write,
+      })
+    );
+  }
   if (options.musicResearch)
     tools.push(
       withProductMetadata({
@@ -520,9 +563,9 @@ export function listCoreMcpTools(
     ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
   ];
   for (const name of lookupNames) {
-    const service = name.startsWith("emby.")
+    const service = name.startsWith("emby_")
       ? MEDIA_PROVIDER_IDS.emby
-      : name.startsWith("jellyfin.")
+      : name.startsWith("jellyfin_")
         ? MEDIA_PROVIDER_IDS.jellyfin
         : MEDIA_PROVIDER_IDS.immich;
     tools.push(
@@ -540,7 +583,7 @@ export function listCoreMcpTools(
         source: CORE_CAPABILITY_SOURCE,
         serverName: CORE_CAPABILITY_SERVER,
         resourceKinds: [
-          name.startsWith("immich.")
+          name.startsWith("immich_")
             ? HOMELAB_RESOURCE_KINDS.photo
             : HOMELAB_RESOURCE_KINDS.mediaItem,
         ],
@@ -570,7 +613,7 @@ export function listCoreMcpTools(
           resourceKinds: NAVIDROME_RESOURCE_KINDS[name],
           execution: meta.effect === "write" ? "agent" : "direct",
           background: false,
-          outputKind: name === "navidrome.queue" ? "audio_queue" : "json",
+          outputKind: name === "navidrome_queue" ? "audio_queue" : "json",
         })
       );
     }

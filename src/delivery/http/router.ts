@@ -10,41 +10,69 @@ import { handleArtifactRoutes } from "./routes/artifacts.ts";
 import { handleAuditRoutes } from "./routes/audit.ts";
 import { handleCapabilityRoutes } from "./routes/capability.ts";
 import { handleDiagnosisRoutes } from "./routes/diagnosis.ts";
-import { handleGoalRoutes } from "./routes/goal.ts";
+import { handleTicketRoutes } from "./routes/tickets.ts";
+import { handleMainSessionRoutes } from "./routes/main-session.ts";
+import { handleEvalRoutes } from "./routes/eval.ts";
 import { handleScheduleRoutes } from "./routes/schedules.ts";
 import { handleMcpProductRoutes } from "./routes/mcp-product.ts";
 import { handlePermissionRoutes } from "./routes/permission.ts";
 import { handleResourceRoutes } from "./routes/resources.ts";
 import { handleMemoryRoutes } from "./routes/memory.ts";
+import { handleNotificationRoutes } from "./routes/notifications.ts";
+import { handleImRoutes } from "./routes/im.ts";
 import { handleSettingsRoutes } from "./routes/settings.ts";
+import { handleStorageRoutes } from "./routes/storage.ts";
 import { handleSkillRoutes } from "./routes/skills.ts";
 import { handleSubagentRoutes } from "./routes/subagent.ts";
 import { handleSystemRoutes } from "./routes/system.ts";
+import { handleMetricsRoutes } from "./routes/metrics.ts";
+import { handleUsageRoutes } from "./routes/usage.ts";
 import {
   createOpenApiDocument,
   swaggerUiAsset,
   swaggerUiHtml,
 } from "./openapi.ts";
 import { PRODUCT_HTTP_PATH } from "./product-paths.ts";
+import { createRateLimiter, mcpRateLimitFromEnv } from "./rate-limit.ts";
+import type { TokenCaller } from "./token-store.ts";
+import type { OAuthHttpIntegration } from "./oauth/service.ts";
+import { handleOAuthRoutes } from "./routes/oauth.ts";
 
 export type ThebeHttpRouterOptions = {
   version: string;
   agent?: ThebeHttpContext["agent"];
   deviceStoreDir?: string;
   deviceRegistry?: DeviceRegistry;
+  pushIdentity?: ThebeHttpContext["pushIdentity"];
+  pushOutbox?: ThebeHttpContext["pushOutbox"];
+  quietHours?: ThebeHttpContext["quietHours"];
+  notifications?: ThebeHttpContext["notifications"];
+  notificationConfig?: ThebeHttpContext["notificationConfig"];
+  im?: ThebeHttpContext["im"];
   workspacePath?: string;
+  /** Calls a minute an external agent (a scoped token) may make over `/mcp`; 0 is no limit. */
+  mcpRateLimit?: number;
+  oauth?: OAuthHttpIntegration;
 };
 
 export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
   const deviceRegistry =
     options.deviceRegistry ??
     createDeviceRegistry({ dir: options.deviceStoreDir });
+  const mcpLimiter = createRateLimiter({
+    limit: options.mcpRateLimit ?? mcpRateLimitFromEnv(),
+  });
   return {
-    async handle(request: Request): Promise<Response> {
+    async handle(request: Request, caller?: TokenCaller): Promise<Response> {
       const context = createThebeHttpContext(request, {
         ...options,
+        caller,
         deviceRegistry,
+        mcpOAuth: options.oauth !== undefined,
       });
+
+      const oauthPublic = options.oauth?.publicResponse(request);
+      if (oauthPublic) return oauthPublic;
 
       if (request.method === "GET" && context.path === "/openapi.json") {
         return json(createOpenApiDocument(options.version), 200, {
@@ -73,9 +101,19 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (healthResponse) {
         return healthResponse;
       }
+      const oauthResponse = await handleOAuthRoutes(context, options.oauth);
+      if (oauthResponse) return oauthResponse;
       const systemResponse = await handleSystemRoutes(context);
       if (systemResponse) {
         return systemResponse;
+      }
+      const metricsResponse = await handleMetricsRoutes(context);
+      if (metricsResponse) {
+        return metricsResponse;
+      }
+      const usageResponse = await handleUsageRoutes(context);
+      if (usageResponse) {
+        return usageResponse;
       }
 
       const diagnosisResponse = await handleDiagnosisRoutes(context);
@@ -122,6 +160,14 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (resourceResponse) {
         return resourceResponse;
       }
+      const notificationResponse = await handleNotificationRoutes(context);
+      if (notificationResponse) {
+        return notificationResponse;
+      }
+      const imResponse = await handleImRoutes(context);
+      if (imResponse) return imResponse;
+      const storageResponse = await handleStorageRoutes(context);
+      if (storageResponse) return storageResponse;
       const settingsResponse = await handleSettingsRoutes(context);
       if (settingsResponse) {
         return settingsResponse;
@@ -130,10 +176,12 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
       if (memoryResponse) {
         return memoryResponse;
       }
-      const goalResponse = await handleGoalRoutes(context);
-      if (goalResponse) {
-        return goalResponse;
-      }
+      const evalResponse = await handleEvalRoutes(context);
+      if (evalResponse) return evalResponse;
+      const ticketResponse = await handleTicketRoutes(context);
+      if (ticketResponse) return ticketResponse;
+      const mainSessionResponse = await handleMainSessionRoutes(context);
+      if (mainSessionResponse) return mainSessionResponse;
       const scheduleResponse = await handleScheduleRoutes(context);
       if (scheduleResponse) return scheduleResponse;
       if (isAgentRoute(context.path)) {
@@ -150,6 +198,19 @@ export function createThebeHttpRouter(options: ThebeHttpRouterOptions) {
             },
             405,
             { allow: "POST" }
+          );
+        }
+        // A scoped token is an external agent; the app and the operator's own tokens are not throttled.
+        const wait = caller?.scopes ? mcpLimiter.take(caller.name) : undefined;
+        if (wait !== undefined) {
+          return json(
+            {
+              ok: false,
+              error: `Too many calls over /mcp for ${caller?.name}; try again in ${wait}s (THEBE_MCP_RATE_LIMIT sets the limit)`,
+              code: "rate_limited",
+            },
+            429,
+            { "retry-after": String(wait) }
           );
         }
         return handleMcp(context);
@@ -176,7 +237,6 @@ function isAgentRoute(path: string): boolean {
     path.startsWith("/v1/provider") ||
     path.startsWith("/v1/model") ||
     path.startsWith("/v1/auth") ||
-    path === PRODUCT_HTTP_PATH.capabilities ||
-    path.startsWith("/v1/goals")
+    path === PRODUCT_HTTP_PATH.capabilities
   );
 }

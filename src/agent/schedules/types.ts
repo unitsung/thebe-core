@@ -12,6 +12,16 @@ export type GoalScheduleInput = {
   cron?: string;
   /** IANA zone the cron is read in; defaults to the Core host's zone. */
   timeZone?: string;
+  /**
+   * What an occurrence may do. `auto` (the default) works like any Goal. `observe` runs it read-only:
+   * the worker has no edit, write or shell tool, so it reports what it found and what it would do and
+   * changes nothing. Use it to see whether a new schedule is worth trusting before it can act.
+   */
+  acceptMode?: "auto" | "observe";
+  /** Let each occurrence's worker ask the person one question mid-run; without it a need becomes `blocked`. */
+  allowAsk?: boolean;
+  /** After an occurrence passes its independent review, wait for the person to accept before it finishes. */
+  reviewBeforeDone?: boolean;
 };
 
 export type GoalSchedule = GoalScheduleInput & {

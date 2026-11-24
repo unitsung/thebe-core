@@ -30,9 +30,11 @@ type Operation = {
   tag: string;
   response?: number;
   responseContentType?: string;
+  streamResponse?: boolean;
   requestBody?: Record<string, unknown>;
   requestSchema?: string;
   responseSchema?: string;
+  alternateResponseSchema?: string;
   extraStatuses?: Array<{
     status: number;
     description: string;
@@ -120,7 +122,14 @@ const operations: Operation[] = [
     parameters: [idParameter()],
     responseSchema: "GoalSchedule",
   },
-  { method: "get", path: "/v1/health", summary: "Health check", tag: "system" },
+  {
+    method: "get",
+    path: "/v1/health",
+    summary:
+      "Health check, including Source read health and durable push state when enabled",
+    tag: "system",
+    responseSchema: "Health",
+  },
   {
     method: "get",
     path: "/v1/events",
@@ -156,6 +165,203 @@ const operations: Operation[] = [
     tag: "compatibility",
     parameters: [idParameter("registrationId")],
     responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: "/v1/push/quiet-hours",
+    summary: "Read the daily window in which Core holds its pushes",
+    tag: "compatibility",
+  },
+  {
+    method: "put",
+    path: "/v1/push/quiet-hours",
+    summary:
+      "Set the quiet-hours window ({quietHours: {start, end, timeZone?}}) or turn it off with null",
+    tag: "compatibility",
+    requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/settings",
+    summary: "Read notification targets with credentials masked",
+    tag: "system",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/settings",
+    summary: "Replace notification targets and global routing policy",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationSettingsInput",
+    responseSchema: "NotificationSettings",
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/config",
+    summary:
+      "Read owner-only notification channel credentials with secret fields masked",
+    tag: "system",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "put",
+    path: "/v1/notifications/config",
+    summary:
+      "Replace notification channel credentials; a running Core reloads adapters",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationChannelConfigInput",
+    responseSchema: "NotificationChannelConfigView",
+  },
+  {
+    method: "get",
+    path: "/v1/notifications/status",
+    summary: "Read per-target pending, dropped, unknown, and last error state",
+    tag: "system",
+    responseSchema: "NotificationStatus",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/test",
+    summary: "Send one test notice to a configured target",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "NotificationTestRequest",
+    responseSchema: "NotificationTestResult",
+  },
+  {
+    method: "post",
+    path: "/v1/notifications/send",
+    summary:
+      "Queue a notification for every configured target (external entry point for devloop)",
+    tag: "system",
+    response: 202,
+    requestBody: { required: true },
+    requestSchema: "NotificationSendRequest",
+    responseSchema: "NotificationSendResult",
+  },
+  {
+    method: "get",
+    path: "/v1/im/channels",
+    summary: "List IM channels with health, capabilities and binding count",
+    tag: "system",
+    responseSchema: "ImChannels",
+  },
+  {
+    method: "get",
+    path: "/v1/im/platforms",
+    summary:
+      "List registered IM platforms with their credential fields and login support",
+    tag: "system",
+    responseSchema: "ImPlatformList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels",
+    summary:
+      "Add an IM channel; the credential is stored in an owner-only file and never returned",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImAddChannelRequest",
+    responseSchema: "ImChannelResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/channels/{channelId}",
+    summary:
+      "Remove an IM channel and its bindings (environment channels are refused)",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/channels/{channelId}/test",
+    summary: "Send a test message to the channel's bound owner chat",
+    tag: "system",
+    parameters: [idParameter("channelId")],
+    responseSchema: "ImSendResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins",
+    summary: "Start a QR, link or code login for a platform",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImLoginStartRequest",
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "get",
+    path: "/v1/im/logins/{loginId}",
+    summary:
+      "Poll an IM login; the confirmed response never includes credentials",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/logins/{loginId}/code",
+    summary: "Submit a phone PIN for an IM login that needs one",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    requestBody: { required: true },
+    requestSchema: "ImLoginCodeRequest",
+    responseSchema: "ImLoginResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/logins/{loginId}",
+    summary: "Cancel an in-progress IM login",
+    tag: "system",
+    parameters: [idParameter("loginId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "get",
+    path: "/v1/im/status",
+    summary: "Read IM channel health and the durable inbound queue depth",
+    tag: "system",
+    responseSchema: "ImStatus",
+  },
+  {
+    method: "get",
+    path: "/v1/im/conversations",
+    summary: "List chats seen by an IM adapter, with their binding if any",
+    tag: "system",
+    responseSchema: "ImConversationList",
+  },
+  {
+    method: "post",
+    path: "/v1/im/bind",
+    summary:
+      "Bind an IM chat to the main Session; only direct chats may bind as owner",
+    tag: "system",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "ImBindRequest",
+    responseSchema: "ImBindingResult",
+  },
+  {
+    method: "delete",
+    path: "/v1/im/bind/{bindingId}",
+    summary: "Remove an IM chat binding",
+    tag: "system",
+    parameters: [idParameter("bindingId")],
+    responseSchema: "Ok",
+  },
+  {
+    method: "post",
+    path: "/v1/im/send",
+    summary: "Send text through a configured IM channel (local owner control)",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "ImSendRequest",
+    responseSchema: "ImSendResult",
   },
   {
     method: "post",
@@ -210,6 +416,47 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.metricsSummary,
+    summary:
+      "Summarize how the assistant has been working (Goal outcomes and durations, approval waits, external-agent calls), computed on request from what Core already keeps",
+    tag: "metrics",
+    parameters: [
+      queryParameter("days", {
+        type: "integer",
+        minimum: 1,
+        maximum: 365,
+        default: 30,
+      }),
+    ],
+    responseSchema: "MetricsSummary",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.usageSummary,
+    summary: "Read today's autonomous token usage and durable daily budget",
+    tag: "metrics",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "put",
+    path: PRODUCT_HTTP_PATH.backgroundBudget,
+    summary: "Set the autonomous daily token budget",
+    tag: "metrics",
+    requestBody: { required: true },
+    requestSchema: "BackgroundBudgetUpdate",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "post",
+    path: PRODUCT_HTTP_PATH.backgroundBudgetSuggestion,
+    summary: "Accept or ignore the one-time 15-day budget suggestion",
+    tag: "metrics",
+    requestBody: { required: true },
+    requestSchema: "BackgroundBudgetSuggestionDecision",
+    responseSchema: "BackgroundBudgetSummary",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.audit,
     summary: "Read the redacted append-only audit log",
     tag: "audit",
@@ -223,6 +470,7 @@ const operations: Operation[] = [
       queryParameter("cursor", { type: "string" }),
       queryParameter("sessionId"),
       queryParameter("method"),
+      queryParameter("identity"),
       queryParameter("result", {
         type: "string",
         enum: ["ok", "error", "denied"],
@@ -557,6 +805,31 @@ const operations: Operation[] = [
   },
   {
     method: "get",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Read file storage backends (secrets redacted)",
+    tag: "settings",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "put",
+    path: PRODUCT_HTTP_PATH.storageSettings,
+    summary: "Replace file storage backends",
+    tag: "settings",
+    requestBody: { required: true },
+    requestSchema: "StorageSettingsWrite",
+    responseSchema: "StorageSettings",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.storageSettings}/test`,
+    summary: "Test one or all file storage backends",
+    tag: "settings",
+    requestBody: { required: false },
+    requestSchema: "StorageTestRequest",
+    responseSchema: "StorageTestResult",
+  },
+  {
+    method: "get",
     path: PRODUCT_HTTP_PATH.memory,
     summary: "Read Thebe Memory",
     tag: "settings",
@@ -602,7 +875,7 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/action",
-    summary: "Execute an approved container.restart",
+    summary: "Execute an approved container_restart",
     tag: "action",
     requestBody: { required: true },
     requestSchema: "ActionRequest",
@@ -646,6 +919,10 @@ const operations: Operation[] = [
           "background_task",
         ],
       }),
+      queryParameter("stage", {
+        type: "string",
+        enum: ["person", "working", "idle", "ended"],
+      }),
       queryParameter("status"),
       queryParameter("updatedAfter", { type: "string", format: "date-time" }),
       queryParameter("updatedBefore", { type: "string", format: "date-time" }),
@@ -675,65 +952,230 @@ const operations: Operation[] = [
     parameters: [idParameter()],
   },
   {
+    method: "get",
+    path: "/v1/policy",
+    summary: "Read the rules and accept mode Eval weighs events by",
+    tag: "ticket",
+    responseSchema: "Policy",
+  },
+  {
+    method: "put",
+    path: "/v1/policy",
+    summary:
+      "Change the rules, the accept mode (off, observe or auto) or the model",
+    tag: "ticket",
+    requestBody: { required: true },
+    requestSchema: "PolicyInput",
+    responseSchema: "Policy",
+  },
+  {
+    method: "get",
+    path: "/v1/decisions",
+    summary: "List Eval decisions, newest first; ?thread= and ?limit= filter",
+    tag: "ticket",
+    responseSchema: "DecisionList",
+  },
+  {
+    method: "get",
+    path: "/v1/decisions/{id}",
+    summary: "Read one Decision",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "Decision",
+  },
+  {
     method: "post",
-    path: "/v1/goals",
-    summary: "Create a session and start a Goal",
-    tag: "goal",
+    path: "/v1/decisions/{id}/accept",
+    summary:
+      "Accept a positive Eval candidate as an explicit Ticket without rewriting the Decision",
+    tag: "ticket",
+    parameters: [idParameter()],
+    response: 201,
+    responseSchema: "TicketTask",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "This Decision already has its Ticket",
+        schema: "TicketTask",
+      },
+    ],
+  },
+  {
+    method: "post",
+    path: "/v1/decisions/{id}/attach",
+    summary:
+      "Attach one Decision's events to an explicitly named Ticket without another Eval",
+    tag: "ticket",
+    parameters: [idParameter()],
     response: 201,
     requestBody: { required: true },
-    requestSchema: "GoalCreateRequest",
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "get",
-    path: "/v1/goals",
-    summary: "List persisted Goals",
-    tag: "goal",
-    responseSchema: "ProductGoalList",
-  },
-  {
-    method: "get",
-    path: "/v1/goals/{id}",
-    summary: "Read one Goal (id is thebeSessionId)",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
+    requestSchema: "DecisionAttachRequest",
+    responseSchema: "DecisionAttachment",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "These events were already attached to this Ticket",
+        schema: "DecisionAttachment",
+      },
+    ],
   },
   {
     method: "post",
-    path: "/v1/goals/{id}/pause",
-    summary: "Pause a running Goal after the current checkpoint",
-    tag: "goal",
+    path: "/v1/decisions/{id}/dismiss",
+    summary: "Dismiss a positive candidate without rewriting its Decision",
+    tag: "ticket",
     parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/resume",
-    summary: "Resume a paused Goal",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
-  },
-  {
-    method: "post",
-    path: "/v1/goals/{id}/stop",
-    summary: "Cancel a Goal",
-    tag: "goal",
-    parameters: [idParameter()],
-    responseSchema: "ProductGoal",
+    response: 201,
+    requestBody: { required: false },
+    requestSchema: "DecisionDismissRequest",
+    responseSchema: "DecisionDismissal",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "This candidate was already dismissed",
+        schema: "DecisionDismissal",
+      },
+    ],
   },
   {
     method: "get",
-    path: "/v1/goals/{id}/log",
-    summary: "Read Goal events or follow an SSE log",
-    tag: "goal",
+    path: "/v1/tickets",
+    summary: "List Tickets, newest first",
+    tag: "ticket",
+    parameters: [
+      queryParameter("view", { type: "string", enum: ["execution"] }),
+    ],
+    responseSchema: "TicketList",
+    alternateResponseSchema: "TicketExecutionList",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets",
+    summary:
+      "Delegate one direct Ticket and Goal, idempotent by the caller's key",
+    tag: "ticket",
+    response: 201,
+    requestBody: { required: true },
+    requestSchema: "TicketDelegateRequest",
+    responseSchema: "TicketDelegation",
+    extraStatuses: [
+      {
+        status: 200,
+        description: "The same idempotency key returned the existing Ticket",
+        schema: "TicketDelegation",
+      },
+    ],
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}",
+    summary: "Read one Ticket",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "Ticket",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}/execution",
+    summary: "Read Ticket progress, Assignment history, controls and Attention",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "get",
+    path: "/v1/tickets/{id}/log",
+    summary: "Read Ticket execution events or follow an SSE log",
+    tag: "ticket",
     parameters: [
       idParameter(),
       queryParameter("follow", { type: "boolean" }),
       queryParameter("after", { type: "integer", minimum: 0 }),
     ],
-    responseContentType: "text/event-stream",
+    responseSchema: "TicketEventPage",
+    streamResponse: true,
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/reply",
+    summary:
+      "Answer or review a Ticket's Attention, or resolve one pending worker permission",
+    tag: "ticket",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "TicketReplyRequest",
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/note",
+    summary:
+      "Add guidance for a live Ticket's next worker checkpoint without interrupting it",
+    tag: "ticket",
+    parameters: [idParameter()],
+    requestBody: { required: true },
+    requestSchema: "TicketNoteRequest",
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/pause",
+    summary: "Pause a running Ticket after the current checkpoint",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/resume",
+    summary:
+      "Resume a paused Ticket, or return 409 while it is waiting for a reply",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/stop",
+    summary: "Stop a running or paused Ticket",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "post",
+    path: "/v1/tickets/{id}/retry",
+    summary:
+      "Start a fresh checkpoint under the same Ticket after failed or blocked work",
+    tag: "ticket",
+    parameters: [idParameter()],
+    responseSchema: "TicketTask",
+  },
+  {
+    method: "get",
+    path: PRODUCT_HTTP_PATH.mainSession,
+    summary:
+      "Read the durable main Session without creating it; initialized is false until its first message",
+    tag: "main-session",
+    responseSchema: "MainSession",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.mainSession}/${PRODUCT_HTTP_SEGMENT.messages}`,
+    summary:
+      "Start or resume the one durable person-facing Session and run one turn",
+    tag: "main-session",
+    requestBody: { required: true },
+    requestSchema: "MainSessionPromptRequest",
+    responseSchema: "MainSessionPromptResponse",
+  },
+  {
+    method: "post",
+    path: `${PRODUCT_HTTP_PATH.mainSession}/${PRODUCT_HTTP_SEGMENT.interrupt}`,
+    summary:
+      "Interrupt the current main Session turn without creating an uninitialized Session",
+    tag: "main-session",
+    responseSchema: "Ok",
   },
   {
     method: "get",
@@ -909,6 +1351,28 @@ const operations: Operation[] = [
     summary: "Resolve a permission request",
     tag: "prompt",
     parameters: [idParameter(), idParameter("permissionId")],
+    requestBody: { required: true },
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/client-tools",
+    summary: "List App-control calls waiting for the paired Thebe App",
+    tag: "session",
+    parameters: [idParameter()],
+  },
+  {
+    method: "get",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Read one pending App-control call and its exact arguments",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
+  },
+  {
+    method: "post",
+    path: "/v1/session/{id}/client-tools/{requestId}",
+    summary: "Return the paired App's result for one App-control call",
+    tag: "session",
+    parameters: [idParameter(), idParameter("requestId")],
     requestBody: { required: true },
   },
   {
@@ -1129,6 +1593,28 @@ const operations: Operation[] = [
   },
   {
     method: "post",
+    path: "/v1/oauth/pairing-code",
+    summary: "Issue a short-lived one-time OAuth pairing code",
+    tag: "mcp",
+    response: 201,
+    responseSchema: "OAuthPairingCode",
+  },
+  {
+    method: "get",
+    path: "/v1/oauth/connections",
+    summary: "List authorised MCP OAuth connector grants",
+    tag: "mcp",
+    responseSchema: "OAuthConnectionList",
+  },
+  {
+    method: "delete",
+    path: "/v1/oauth/connections/{grantId}",
+    summary: "Revoke an MCP OAuth connector grant",
+    tag: "mcp",
+    parameters: [idParameter("grantId")],
+  },
+  {
+    method: "post",
     path: "/mcp",
     summary: "MCP JSON-RPC endpoint",
     tag: "mcp",
@@ -1139,6 +1625,32 @@ const operations: Operation[] = [
 function schemaRef(name?: string): Record<string, unknown> {
   return name ? { $ref: `#/components/schemas/${name}` } : jsonSchema;
 }
+
+/**
+ * Where an Activity item stands for the person, derived on every read and never stored. `person` needs
+ * them now (`reason` approval: a write waits for their yes; stalled: Watchdog exhausted its bounded
+ * self-help; failed: it did not finish in the last 24 hours), `working` is queued or running, `idle`
+ * is a plain pause, `ended` is history. The stages never
+ * overlap and cover every item; `GET /v1/activity?stage=person` is the list Home counts.
+ */
+const ACTIVITY_STAGE_PROPERTIES = {
+  stage: { type: "string", enum: ["person", "working", "idle", "ended"] },
+  reason: {
+    type: "string",
+    enum: ["approval", "failed", "blocked", "answer", "review", "stalled"],
+  },
+} as const;
+
+/** A count with the median and 95th percentile of what was counted. */
+const SPREAD = {
+  type: "object",
+  required: ["count"],
+  properties: {
+    count: { type: "integer" },
+    p50: { type: "number" },
+    p95: { type: "number" },
+  },
+} as const;
 
 export function createOpenApiDocument(version: string): OpenApiDocument {
   const paths: OpenApiDocument["paths"] = {};
@@ -1152,11 +1664,21 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             ? "Feature is not available"
             : "Successful response",
         content: {
+          ...(operation.streamResponse
+            ? { "text/event-stream": { schema: { type: "string" } } }
+            : {}),
           [operation.responseContentType ?? "application/json"]: {
             schema:
               operation.responseContentType === "text/event-stream"
                 ? { type: "string" }
-                : schemaRef(operation.responseSchema),
+                : operation.alternateResponseSchema
+                  ? {
+                      anyOf: [
+                        schemaRef(operation.responseSchema),
+                        schemaRef(operation.alternateResponseSchema),
+                      ],
+                    }
+                  : schemaRef(operation.responseSchema),
           },
         },
       },
@@ -1207,7 +1729,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     servers: [{ url: "/" }],
     // Token auth is optional in development and required in production; the
     // empty requirement keeps both deployment modes accurately documented.
-    security: [{}, { ThebeToken: [] }],
+    security: [{}, { ThebeToken: [] }, { ThebeBearer: [] }],
     tags: [
       { name: "system", description: "Health and lifecycle controls" },
       { name: "session", description: "Session lifecycle and metadata" },
@@ -1222,6 +1744,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "capabilities",
         description: "Homelab capability discovery and Agent-mediated invoke",
+      },
+      {
+        name: "metrics",
+        description:
+          "Read-only summary computed from existing records; nothing is collected or sent anywhere",
       },
       {
         name: "audit",
@@ -1266,7 +1793,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
       {
         name: "action",
         description:
-          "Approved write actions (container.restart) with deterministic verification receipts",
+          "Approved write actions (container_restart) with deterministic verification receipts",
       },
       {
         name: "activity",
@@ -1274,9 +1801,19 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           "Typed Approval, Receipt, Diagnosis, Goal, Capability Run, Worker, and Background Task items; lifecycle remains owned by each source object",
       },
       {
+        name: "ticket",
+        description:
+          "Tickets: durable authorised units of work. The Ticket carries identity and mandate; the Goal behind it keeps progress, reports, Attention and pending permissions.",
+      },
+      {
+        name: "main-session",
+        description:
+          "The one durable person-facing Session. It can inspect and control Tickets but has no shell, file or edit tools.",
+      },
+      {
         name: "goal",
         description:
-          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Session-scoped aliases live under /v1/session/{id}/goal*.",
+          "Durable ProductGoal attached to one parent session. Identity is thebeSessionId (id === sessionId). Runtime pausing collapses to running. Read and control it through the Ticket that carries it.",
       },
       {
         name: "compatibility",
@@ -1288,6 +1825,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
     components: {
       securitySchemes: {
         ThebeToken: { type: "apiKey", in: "header", name: "X-Thebe-Token" },
+        ThebeBearer: { type: "http", scheme: "bearer" },
       },
       schemas: {
         Error: {
@@ -1301,6 +1839,683 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         Ok: {
           type: "object",
           properties: { ok: { type: "boolean" } },
+        },
+        Health: {
+          type: "object",
+          required: ["ok", "version", "capabilities"],
+          properties: {
+            ok: { type: "boolean" },
+            version: { type: "string" },
+            capabilities: {
+              type: "array",
+              items: { type: "string" },
+            },
+            sources: {
+              type: "array",
+              items: { $ref: "#/components/schemas/SourceHealth" },
+            },
+            push: { $ref: "#/components/schemas/PushOutboxStatus" },
+          },
+        },
+        MainSession: {
+          type: "object",
+          required: ["id", "initialized"],
+          properties: {
+            id: {
+              type: "string",
+              enum: ["thebe-main"],
+              description:
+                "The stable id of the one main Session owned by this Core.",
+            },
+            initialized: {
+              type: "boolean",
+              description:
+                "False until a person sends the main Session its first message.",
+            },
+            session: {
+              type: "object",
+              additionalProperties: true,
+              description:
+                "Session metadata and current run state when initialized.",
+            },
+          },
+        },
+        MainSessionPromptRequest: {
+          type: "object",
+          description:
+            "The main Session accepts the same text, file attachments and prompt modes as a normal Session; its id cannot be overridden. Model and thinking selections are applied before the prompt.",
+          properties: {
+            text: { type: "string" },
+            mode: {
+              type: "string",
+              enum: ["prompt", "steer", "followUp"],
+            },
+            files: {
+              type: "array",
+              items: { type: "object", additionalProperties: true },
+            },
+            model: {
+              type: "object",
+              required: ["providerId", "modelId"],
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
+            thinking: {
+              type: "string",
+              enum: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+            },
+          },
+        },
+        MainSessionPromptResponse: {
+          type: "object",
+          required: ["text", "tools", "thebeSessionId"],
+          properties: {
+            text: { type: "string" },
+            tools: { type: "array", items: { type: "string" } },
+            thebeSessionId: {
+              type: "string",
+              enum: ["thebe-main"],
+            },
+          },
+        },
+        SourceHealth: {
+          type: "object",
+          required: ["id", "scope", "state", "consecutiveFailures"],
+          properties: {
+            id: { type: "string" },
+            scope: { type: "string" },
+            state: {
+              type: "string",
+              enum: ["starting", "healthy", "failing"],
+            },
+            consecutiveFailures: { type: "integer", minimum: 0 },
+            lastAttemptAt: { type: "string", format: "date-time" },
+            lastSuccessAt: { type: "string", format: "date-time" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            lastError: { type: "string" },
+          },
+        },
+        PushOutboxStatus: {
+          type: "object",
+          required: ["pending", "consecutiveFailures", "dropped"],
+          properties: {
+            pending: { type: "integer", minimum: 0 },
+            consecutiveFailures: { type: "integer", minimum: 0 },
+            dropped: { type: "integer", minimum: 0 },
+            lastError: { type: "string" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            lastDrop: {
+              type: "object",
+              required: ["id", "reason", "at"],
+              properties: {
+                id: { type: "string" },
+                reason: { type: "string" },
+                at: { type: "string", format: "date-time" },
+              },
+            },
+          },
+        },
+        NotificationCategory: {
+          type: "string",
+          enum: [
+            "attention",
+            "completed",
+            "failed",
+            "budget",
+            "watchdog",
+            "source_health",
+            "pipeline",
+          ],
+        },
+        NotificationPriority: {
+          type: "string",
+          enum: ["critical", "normal", "low"],
+        },
+        NotificationTarget: {
+          type: "object",
+          required: ["id", "channel", "categories", "enabled"],
+          properties: {
+            id: { type: "string" },
+            label: { type: "string" },
+            channel: {
+              type: "object",
+              required: ["source", "thread"],
+              properties: {
+                source: { type: "string" },
+                thread: { type: "string" },
+                address: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                },
+              },
+            },
+            categories: {
+              oneOf: [
+                { type: "string", enum: ["all"] },
+                {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              ],
+            },
+            minPriority: {
+              $ref: "#/components/schemas/NotificationPriority",
+            },
+            quietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string", example: "23:00" },
+                end: { type: "string", example: "07:00" },
+                timeZone: { type: "string" },
+              },
+            },
+            digest: {
+              type: "object",
+              required: ["windowMinutes", "categories"],
+              properties: {
+                windowMinutes: { type: "integer", minimum: 1, maximum: 1440 },
+                categories: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/NotificationCategory" },
+                },
+              },
+            },
+            enabled: { type: "boolean" },
+          },
+        },
+        NotificationChannelConfigView: {
+          type: "object",
+          required: ["config", "fields"],
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "label", "fields"],
+                properties: {
+                  id: { type: "string" },
+                  label: { type: "string" },
+                  fields: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["key", "label"],
+                      properties: {
+                        key: { type: "string" },
+                        label: { type: "string" },
+                        secret: { type: "boolean" },
+                        kind: { type: "string" },
+                        placeholder: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        NotificationChannelConfigInput: {
+          type: "object",
+          properties: {
+            config: {
+              type: "object",
+              additionalProperties: {
+                type: "object",
+                additionalProperties: { type: "string" },
+              },
+            },
+          },
+          additionalProperties: true,
+        },
+        NotificationSettings: {
+          type: "object",
+          required: [
+            "version",
+            "targets",
+            "criticalBypassesQuietHours",
+            "rateLimitPerHour",
+            "updatedAt",
+          ],
+          properties: {
+            version: { type: "integer", enum: [1] },
+            targets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/NotificationTarget" },
+            },
+            defaultQuietHours: {
+              type: "object",
+              required: ["start", "end"],
+              properties: {
+                start: { type: "string" },
+                end: { type: "string" },
+                timeZone: { type: "string" },
+              },
+            },
+            criticalBypassesQuietHours: { type: "boolean" },
+            rateLimitPerHour: { type: "integer", minimum: 0 },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSettingsInput: {
+          type: "object",
+          properties: {
+            settings: { $ref: "#/components/schemas/NotificationSettings" },
+          },
+          additionalProperties: true,
+        },
+        NotificationStatus: {
+          type: "object",
+          required: ["pending", "dropped", "unknown", "targets"],
+          properties: {
+            pending: { type: "integer", minimum: 0 },
+            dropped: { type: "integer", minimum: 0 },
+            unknown: { type: "integer", minimum: 0 },
+            lastError: { type: "string" },
+            lastFailureAt: { type: "string", format: "date-time" },
+            targets: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: true,
+              },
+            },
+          },
+        },
+        NotificationTestRequest: {
+          type: "object",
+          required: ["targetId"],
+          properties: { targetId: { type: "string" } },
+        },
+        NotificationTestResult: {
+          type: "object",
+          required: ["ok", "targetId", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            targetId: { type: "string" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            reason: { type: "string" },
+          },
+        },
+        NotificationSendRequest: {
+          type: "object",
+          required: ["category", "priority", "title", "body"],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Stable deduplication key; omitted ids are generated per request.",
+            },
+            category: { $ref: "#/components/schemas/NotificationCategory" },
+            priority: { $ref: "#/components/schemas/NotificationPriority" },
+            title: { type: "string" },
+            body: { type: "string" },
+            deepLink: { type: "string" },
+            ticketId: { type: "string" },
+            goalId: { type: "string" },
+            resource: {
+              type: "object",
+              required: ["kind", "id"],
+              properties: {
+                kind: { type: "string" },
+                id: { type: "string" },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        NotificationSendResult: {
+          type: "object",
+          required: ["ok", "id", "targets", "skipped"],
+          properties: {
+            ok: { type: "boolean" },
+            id: { type: "string" },
+            targets: { type: "array", items: { type: "string" } },
+            skipped: { type: "integer", minimum: 0 },
+          },
+        },
+        ImChat: {
+          type: "object",
+          required: ["kind", "id"],
+          properties: {
+            kind: { type: "string", enum: ["direct", "group"] },
+            id: { type: "string" },
+            threadId: {
+              type: "string",
+              description:
+                "Platform forum topic or thread id, when the platform addresses one.",
+            },
+            title: { type: "string" },
+          },
+        },
+        ImCapabilities: {
+          type: "object",
+          required: [
+            "proactive",
+            "replyOnly",
+            "recall",
+            "media",
+            "maxTextLength",
+          ],
+          properties: {
+            proactive: { type: "boolean" },
+            replyOnly: { type: "boolean" },
+            replyWindowMs: { type: "integer", minimum: 0 },
+            maxMessagesPerWindow: { type: "integer", minimum: 1 },
+            recall: { type: "boolean" },
+            media: {
+              type: "boolean",
+              description:
+                "True only when this adapter can actually send images or files.",
+            },
+            maxTextLength: { type: "integer", minimum: 1 },
+            markdown: { type: "boolean" },
+            threads: { type: "boolean" },
+            typing: { type: "boolean" },
+          },
+        },
+        ImPlatformInfo: {
+          type: "object",
+          required: ["platform", "credentials", "login"],
+          properties: {
+            platform: { type: "string" },
+            credentials: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["key"],
+                properties: {
+                  key: { type: "string" },
+                  label: { type: "string" },
+                  required: { type: "boolean" },
+                  secret: { type: "boolean" },
+                },
+              },
+            },
+            login: { type: "boolean" },
+          },
+        },
+        ImPlatformList: {
+          type: "object",
+          required: ["ok", "platforms"],
+          properties: {
+            ok: { type: "boolean" },
+            platforms: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImPlatformInfo" },
+            },
+          },
+        },
+        ImChannel: {
+          type: "object",
+          required: [
+            "id",
+            "platform",
+            "label",
+            "enabled",
+            "health",
+            "source",
+            "bindings",
+          ],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            label: { type: "string" },
+            enabled: { type: "boolean" },
+            createdAt: { type: "string", format: "date-time" },
+            source: { type: "string", enum: ["settings", "environment"] },
+            health: {
+              type: "object",
+              required: ["state"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "stopped",
+                    "starting",
+                    "connected",
+                    "needs_login",
+                    "error",
+                  ],
+                },
+                detail: { type: "string" },
+                code: { type: "string" },
+                since: { type: "string", format: "date-time" },
+                retryAt: { type: "string", format: "date-time" },
+              },
+            },
+            capabilities: { $ref: "#/components/schemas/ImCapabilities" },
+            bindings: { type: "integer", minimum: 0 },
+            lastInboundAt: { type: "string", format: "date-time" },
+            lastOutboundAt: { type: "string", format: "date-time" },
+            lastError: { type: "string" },
+          },
+        },
+        ImChannels: {
+          type: "object",
+          required: ["ok", "channels"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+          },
+        },
+        ImChannelResult: {
+          type: "object",
+          required: ["ok", "channel"],
+          properties: {
+            ok: { type: "boolean" },
+            channel: { $ref: "#/components/schemas/ImChannel" },
+          },
+        },
+        ImAddChannelRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: {
+              type: "string",
+              description:
+                "Registered platform id; the built-in adapter is telegram.",
+            },
+            label: { type: "string" },
+            credentials: {
+              type: "object",
+              additionalProperties: { type: "string" },
+              writeOnly: true,
+              description:
+                "Platform-declared credential fields. Stored in an owner-only file and never returned.",
+            },
+            token: {
+              type: "string",
+              writeOnly: true,
+              deprecated: true,
+              description:
+                "Telegram shorthand for credentials.token; responses never include it.",
+            },
+          },
+        },
+        ImBinding: {
+          type: "object",
+          required: [
+            "id",
+            "accountId",
+            "chat",
+            "sessionId",
+            "role",
+            "createdAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            role: { type: "string", enum: ["owner", "guest"] },
+            senderId: {
+              type: "string",
+              description:
+                "Platform sender id pinned for an owner binding; only this sender may prompt.",
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        ImBindingResult: {
+          type: "object",
+          required: ["ok", "binding"],
+          properties: {
+            ok: { type: "boolean" },
+            binding: { $ref: "#/components/schemas/ImBinding" },
+          },
+        },
+        ImBindRequest: {
+          type: "object",
+          required: ["accountId", "chat"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            role: { type: "string", enum: ["owner", "guest"] },
+            sessionId: { type: "string", enum: ["thebe-main"] },
+            senderId: {
+              type: "string",
+              description:
+                "Optional owner sender id; it must match the last sender observed in the chat. When omitted, the observed sender is pinned.",
+            },
+          },
+        },
+        ImStatus: {
+          type: "object",
+          required: ["ok", "channels", "pending"],
+          properties: {
+            ok: { type: "boolean" },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ImChannel" },
+            },
+            pending: { type: "integer", minimum: 0 },
+          },
+        },
+        ImConversationList: {
+          type: "object",
+          required: ["ok", "conversations"],
+          properties: {
+            ok: { type: "boolean" },
+            conversations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  accountId: { type: "string" },
+                  platform: { type: "string" },
+                  chat: { $ref: "#/components/schemas/ImChat" },
+                  lastSeenAt: { type: "string", format: "date-time" },
+                  binding: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      role: { type: "string", enum: ["owner", "guest"] },
+                      sessionId: { type: "string" },
+                      senderId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        ImSendRequest: {
+          type: "object",
+          required: ["accountId", "chat", "text"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            text: { type: "string" },
+            mode: { type: "string", enum: ["reply", "proactive"] },
+            replyTo: { type: "string" },
+            contextToken: { type: "string" },
+            idempotencyKey: { type: "string" },
+          },
+        },
+        ImSendResult: {
+          type: "object",
+          required: ["ok", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            status: {
+              type: "string",
+              enum: ["sent", "retry", "discard", "unknown"],
+            },
+            platformMessageId: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+        ImLoginStartRequest: {
+          type: "object",
+          required: ["platform"],
+          properties: {
+            platform: { type: "string" },
+            label: { type: "string" },
+          },
+        },
+        ImLoginCodeRequest: {
+          type: "object",
+          required: ["code"],
+          properties: {
+            code: { type: "string", minLength: 1, maxLength: 128 },
+          },
+        },
+        ImLogin: {
+          type: "object",
+          required: ["id", "platform", "kind", "expiresAt", "state"],
+          properties: {
+            id: { type: "string" },
+            platform: { type: "string" },
+            kind: { type: "string", enum: ["qr", "link", "code"] },
+            content: {
+              type: "string",
+              description:
+                "QR payload or login URL. Returned only when the login begins; never persisted or logged.",
+            },
+            expiresAt: { type: "string", format: "date-time" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "scanned",
+                "need_verifycode",
+                "confirmed",
+                "expired",
+                "failed",
+                "cancelled",
+              ],
+            },
+            detail: { type: "string" },
+            retryAfterMs: { type: "integer", minimum: 0 },
+            accountId: {
+              type: "string",
+              description: "Set when a confirmed login created an IM channel.",
+            },
+          },
+        },
+        ImLoginResult: {
+          type: "object",
+          required: ["ok", "login"],
+          properties: {
+            ok: { type: "boolean" },
+            login: { $ref: "#/components/schemas/ImLogin" },
+          },
         },
         OAuthAuthorizeRequest: {
           type: "object",
@@ -1325,6 +2540,48 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             deviceCode: { type: "object", additionalProperties: true },
           },
         },
+        OAuthPairingCode: {
+          type: "object",
+          required: ["ok", "code", "expiresAt"],
+          properties: {
+            ok: { type: "boolean" },
+            code: { type: "string" },
+            expiresAt: { type: "string", format: "date-time" },
+          },
+        },
+        OAuthConnection: {
+          type: "object",
+          required: [
+            "id",
+            "clientId",
+            "clientName",
+            "scopes",
+            "createdAt",
+            "refreshToken",
+          ],
+          properties: {
+            id: { type: "string" },
+            clientId: { type: "string" },
+            clientName: { type: "string" },
+            scopes: {
+              type: "array",
+              items: { type: "string" },
+            },
+            createdAt: { type: "string", format: "date-time" },
+            expiresAt: { type: "string", format: "date-time" },
+            refreshToken: { type: "boolean" },
+          },
+        },
+        OAuthConnectionList: {
+          type: "object",
+          required: ["connections"],
+          properties: {
+            connections: {
+              type: "array",
+              items: { $ref: "#/components/schemas/OAuthConnection" },
+            },
+          },
+        },
         AuditRecord: {
           type: "object",
           required: [
@@ -1341,6 +2598,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             timestamp: { type: "string" },
             method: { type: "string" },
             parameterHash: { type: "string" },
+            summary: {
+              type: "string",
+              description:
+                "For a call that changes something: its arguments, redacted and shortened.",
+            },
             responseBytes: { type: "number" },
             budgetConsumed: { type: "number" },
             redactionFired: { type: "boolean" },
@@ -1350,6 +2612,200 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sessionId: { type: "string" },
             result: { type: "string", enum: ["ok", "error", "denied"] },
             durationMs: { type: "number" },
+          },
+        },
+        BackgroundBudgetUpdate: {
+          type: "object",
+          properties: {
+            dailyTokens: {
+              type: "integer",
+              minimum: 0,
+              description:
+                "Autonomous input + output + cache-write tokens per UTC day. Zero pauses autonomous work.",
+            },
+            thresholds: {
+              type: "array",
+              items: { type: "number", minimum: 0, maximum: 1 },
+              description:
+                "Threshold ratios strictly between 0 and 1 at which to alert the owner.",
+            },
+          },
+        },
+        BackgroundBudgetSuggestionDecision: {
+          type: "object",
+          required: ["action"],
+          properties: {
+            action: { type: "string", enum: ["accept", "ignore"] },
+          },
+        },
+        BackgroundUsageTokens: {
+          type: "object",
+          required: [
+            "input",
+            "output",
+            "cacheWrite",
+            "cacheRead",
+            "counted",
+            "cost",
+          ],
+          properties: {
+            input: { type: "integer" },
+            output: { type: "integer" },
+            cacheWrite: { type: "integer" },
+            cacheRead: {
+              type: "integer",
+              description: "Reported but not counted against the budget.",
+            },
+            counted: {
+              type: "integer",
+              description: "input + output + cacheWrite.",
+            },
+            cost: {
+              type: "number",
+              description: "Estimated USD cost reported by the runtime.",
+            },
+          },
+        },
+        BackgroundBudgetSummary: {
+          type: "object",
+          required: ["generatedAt", "day", "budget", "usage", "history"],
+          properties: {
+            generatedAt: { type: "string", format: "date-time" },
+            day: { type: "string", format: "date" },
+            budget: {
+              type: "object",
+              required: [
+                "dailyTokens",
+                "remainingTokens",
+                "paused",
+                "resetsAt",
+                "thresholds",
+                "notifiedThresholds",
+              ],
+              properties: {
+                dailyTokens: { type: "integer" },
+                remainingTokens: { type: "integer" },
+                paused: { type: "boolean" },
+                resetsAt: { type: "string", format: "date-time" },
+                pausedNotice: { type: "string" },
+                thresholds: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+                notifiedThresholds: {
+                  type: "array",
+                  items: { type: "number" },
+                },
+              },
+            },
+            usage: { $ref: "#/components/schemas/BackgroundUsageTokens" },
+            history: {
+              type: "array",
+              items: {
+                allOf: [
+                  { $ref: "#/components/schemas/BackgroundUsageTokens" },
+                  {
+                    type: "object",
+                    required: ["day"],
+                    properties: {
+                      day: { type: "string", format: "date" },
+                    },
+                  },
+                ],
+              },
+            },
+            suggestion: {
+              type: "object",
+              required: [
+                "id",
+                "status",
+                "basedOnDays",
+                "p95Tokens",
+                "dailyTokens",
+                "createdAt",
+              ],
+              properties: {
+                id: { type: "string" },
+                status: {
+                  type: "string",
+                  enum: ["pending", "accepted", "ignored"],
+                },
+                basedOnDays: { type: "integer" },
+                p95Tokens: { type: "integer" },
+                dailyTokens: { type: "integer" },
+                createdAt: { type: "string", format: "date-time" },
+                resolvedAt: { type: "string", format: "date-time" },
+              },
+            },
+          },
+        },
+        MetricsSummary: {
+          type: "object",
+          required: [
+            "windowDays",
+            "generatedAt",
+            "goals",
+            "approvals",
+            "gateway",
+          ],
+          properties: {
+            windowDays: { type: "integer" },
+            generatedAt: { type: "string" },
+            goals: {
+              type: "object",
+              required: [
+                "started",
+                "outcomes",
+                "observeOnly",
+                "completionSeconds",
+              ],
+              properties: {
+                started: { type: "integer" },
+                outcomes: {
+                  type: "object",
+                  properties: {
+                    succeeded: { type: "integer" },
+                    failed: { type: "integer" },
+                    blocked: { type: "integer" },
+                    cancelled: { type: "integer" },
+                    running: { type: "integer" },
+                    paused: { type: "integer" },
+                  },
+                },
+                observeOnly: { type: "integer" },
+                completionSeconds: SPREAD,
+              },
+            },
+            approvals: {
+              type: "object",
+              required: ["decided", "pending", "waitSeconds"],
+              properties: {
+                decided: { type: "integer" },
+                pending: { type: "integer" },
+                waitSeconds: SPREAD,
+              },
+            },
+            gateway: {
+              type: "object",
+              required: ["calls", "denied", "errors", "byCaller"],
+              properties: {
+                calls: { type: "integer" },
+                denied: { type: "integer" },
+                errors: { type: "integer" },
+                byCaller: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      identity: { type: "string" },
+                      calls: { type: "integer" },
+                      denied: { type: "integer" },
+                      errors: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
           },
         },
         AuditList: {
@@ -1477,7 +2933,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             runId: { type: "string" },
             artifactId: { type: "string" },
-            actionId: { type: "string", enum: ["container.diagnose"] },
+            actionId: { type: "string", enum: ["container_diagnose"] },
             status: {
               type: "string",
               enum: [
@@ -1507,7 +2963,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           type: "object",
           required: ["actionId", "resource"],
           properties: {
-            actionId: { type: "string", enum: ["container.restart"] },
+            actionId: { type: "string", enum: ["container_restart"] },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             diagnosisRunId: { type: "string" },
             idempotencyKey: { type: "string" },
@@ -1537,7 +2993,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
           properties: {
             receiptId: { type: "string" },
             artifactId: { type: "string" },
-            actionId: { type: "string", enum: ["container.restart"] },
+            actionId: { type: "string", enum: ["container_restart"] },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             diagnosisRunId: { type: "string" },
             approval: { type: "object", additionalProperties: true },
@@ -1587,11 +3043,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             kind: {
               type: "string",
-              enum: ["container.restart", "container.diagnose"],
+              enum: ["container_restart", "container_diagnose"],
             },
             actionId: {
               type: "string",
-              enum: ["container.restart", "container.diagnose"],
+              enum: ["container_restart", "container_diagnose"],
             },
             resource: { $ref: "#/components/schemas/ResourceRef" },
             status: {
@@ -1640,6 +3096,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["needs_approval"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             approval: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1651,6 +3108,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             receipt: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1662,6 +3120,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             diagnosis: { $ref: "#/components/schemas/ActivityRecord" },
           },
         },
@@ -1673,6 +3132,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             goal: { $ref: "#/components/schemas/ProductGoal" },
           },
         },
@@ -1684,6 +3144,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             run: { $ref: "#/components/schemas/CapabilityRun" },
           },
         },
@@ -1695,6 +3156,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             worker: { $ref: "#/components/schemas/ProductWorker" },
           },
         },
@@ -1706,6 +3168,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             id: { type: "string" },
             group: { type: "string", enum: ["running", "recent"] },
             updatedAt: { type: "string" },
+            ...ACTIVITY_STAGE_PROPERTIES,
             task: { $ref: "#/components/schemas/ProductBackgroundTask" },
           },
         },
@@ -1866,6 +3329,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             registrationId: { type: "string" },
             platform: { type: "string", enum: ["ios"] },
             deviceId: { type: "string" },
+            relayDeviceId: { type: "string" },
             categories: { type: "array", items: { type: "string" } },
             registeredAt: { type: "string", format: "date-time" },
             updatedAt: { type: "string", format: "date-time" },
@@ -2401,6 +3865,109 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sandboxDeniedDomains: { type: "array", items: { type: "string" } },
           },
         },
+        StorageBackend: {
+          type: "object",
+          required: ["id", "type"],
+          properties: {
+            id: { type: "string" },
+            type: { type: "string", enum: ["openlist", "local", "webdav"] },
+            baseUrl: { type: "string" },
+            url: { type: "string" },
+            roots: { type: "array", items: { type: "string" } },
+            username: { type: "string" },
+            hasToken: { type: "boolean" },
+            hasPassword: { type: "boolean" },
+          },
+        },
+        StorageSettings: {
+          type: "object",
+          required: ["path", "source", "backends", "issues"],
+          properties: {
+            path: { type: "string" },
+            source: {
+              type: "string",
+              enum: ["config", "env", "none"],
+            },
+            default: { type: "string" },
+            backends: {
+              type: "array",
+              items: { $ref: "#/components/schemas/StorageBackend" },
+            },
+            issues: { type: "array", items: { type: "string" } },
+          },
+        },
+        StorageSettingsWrite: {
+          type: "object",
+          required: ["backends"],
+          additionalProperties: false,
+          properties: {
+            default: {
+              type: "string",
+              nullable: true,
+              description:
+                "Backend id; null picks the first. Omit to keep the current default.",
+            },
+            backends: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type"],
+                additionalProperties: true,
+                properties: {
+                  id: { type: "string" },
+                  type: {
+                    type: "string",
+                    enum: ["openlist", "local", "webdav"],
+                  },
+                  baseUrl: { type: "string" },
+                  url: { type: "string" },
+                  roots: { type: "array", items: { type: "string" } },
+                  username: { type: "string" },
+                  token: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored token for the same id and type.",
+                  },
+                  password: {
+                    type: "string",
+                    description:
+                      "Omit to keep the stored password for the same id and type.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        StorageTestRequest: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            id: { type: "string", description: "Omit to test every backend." },
+          },
+        },
+        StorageTestResult: {
+          type: "object",
+          required: ["ok", "results"],
+          properties: {
+            ok: { type: "boolean" },
+            issues: { type: "array", items: { type: "string" } },
+            results: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "type", "ok"],
+                properties: {
+                  id: { type: "string" },
+                  type: { type: "string" },
+                  ok: { type: "boolean" },
+                  total: { type: "integer" },
+                  entries: { type: "array", items: { type: "string" } },
+                  error: { type: "string" },
+                },
+              },
+            },
+          },
+        },
         ProductGoalRun: {
           type: "object",
           required: [
@@ -2421,28 +3988,6 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             currentStep: { type: "string" },
             createdAt: { type: "string" },
             updatedAt: { type: "string" },
-          },
-        },
-        GoalCreateRequest: {
-          type: "object",
-          required: ["goal"],
-          properties: {
-            goal: { type: "string", minLength: 1 },
-            criteria: {
-              type: "array",
-              items: { type: "string", minLength: 1 },
-            },
-            maxIterations: { type: "integer", minimum: 1, maximum: 32 },
-            model: {
-              type: "object",
-              required: ["providerId", "modelId"],
-              description:
-                "Model for a new Goal session; its workers and reviewer use it. Ignored when the Goal is started on an existing session.",
-              properties: {
-                providerId: { type: "string" },
-                modelId: { type: "string" },
-              },
-            },
           },
         },
         GoalScheduleInput: {
@@ -2475,7 +4020,28 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               maxItems: 32,
               items: { type: "string", minLength: 1, maxLength: 2000 },
             },
-            maxIterations: { type: "integer", minimum: 1, maximum: 32 },
+            maxIterations: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
+            },
+            acceptMode: {
+              type: "string",
+              enum: ["auto", "observe"],
+              description:
+                "observe runs each occurrence read-only: its worker has no edit, write or shell tool and reports what it found and would do.",
+            },
+            allowAsk: {
+              type: "boolean",
+              description:
+                "Each occurrence's worker may ask the person one question mid-run.",
+            },
+            reviewBeforeDone: {
+              type: "boolean",
+              description:
+                "Each occurrence waits for the person to accept after it passes its independent review.",
+            },
             model: {
               type: "object",
               required: ["providerId", "modelId"],
@@ -2523,6 +4089,713 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             },
           },
         },
+        PolicyRule: {
+          type: "object",
+          required: ["id", "text"],
+          properties: { id: { type: "string" }, text: { type: "string" } },
+        },
+        Policy: {
+          type: "object",
+          required: ["rules", "acceptMode", "revision", "updatedAt"],
+          properties: {
+            rules: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PolicyRule" },
+            },
+            acceptMode: {
+              type: "string",
+              enum: ["off", "observe", "auto"],
+              description:
+                "off: record events, weigh none. observe (the default): weigh each against the rules and record what Core WOULD have taken on; it takes on nothing. auto: a positive assessment is taken on as a Ticket, which an executor carries out within its Mandate. The rules are the authority; nothing acts until the person picks auto.",
+            },
+            modes: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "The accept modes this Core has, so a client offers auto only where it exists. Sent in responses; an older Core does not send it.",
+            },
+            model: {
+              type: "object",
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+              description:
+                "The model that weighs events; unset means Core's default.",
+            },
+            revision: { type: "integer" },
+            updatedAt: { type: "string", format: "date-time" },
+          },
+        },
+        PolicyInput: {
+          type: "object",
+          description:
+            "Any of these; what is left out stays as it was. rules is a list of plain-language strings (at most 20, 500 characters each). model: null returns to Core's default.",
+          properties: {
+            rules: { type: "array", items: { type: "string" } },
+            acceptMode: { type: "string", enum: ["off", "observe", "auto"] },
+            model: {
+              type: "object",
+              nullable: true,
+              properties: {
+                providerId: { type: "string" },
+                modelId: { type: "string" },
+              },
+            },
+          },
+        },
+        DecisionList: {
+          type: "object",
+          required: ["decisions"],
+          properties: {
+            decisions: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Decision" },
+            },
+          },
+        },
+        Decision: {
+          type: "object",
+          description:
+            "What Eval decided about the events on one thread. In observe a positive assessment is outcome ignore with wouldAccept true. In auto, outcome accept means it was taken on as a Ticket (ticketId, goalId); a positive assessment that was not taken on stays ignore with wouldAccept and notTakenOn. unavailable means no answer could be had (limit, timeout, bad reply): never read it as a no.",
+          required: [
+            "id",
+            "evalId",
+            "thread",
+            "triggerIds",
+            "at",
+            "outcome",
+            "matchedRuleIds",
+            "reason",
+            "policyVersion",
+            "decidedAt",
+          ],
+          properties: {
+            id: { type: "string" },
+            evalId: { type: "string" },
+            thread: {
+              type: "string",
+              description: "e.g. resource:container:emby",
+            },
+            triggerIds: { type: "array", items: { type: "string" } },
+            at: { type: "string", format: "date-time" },
+            outcome: {
+              type: "string",
+              enum: ["accept", "stop", "ignore", "unavailable"],
+            },
+            wouldAccept: { type: "boolean" },
+            matchedRuleIds: { type: "array", items: { type: "string" } },
+            matchedRules: {
+              type: "array",
+              description:
+                "The matched Policy rules as they read when the Decision was made, so a person can later accept a candidate after a Policy edit.",
+              items: {
+                type: "object",
+                required: ["id", "text"],
+                properties: {
+                  id: { type: "string" },
+                  text: { type: "string" },
+                },
+              },
+            },
+            intent: {
+              type: "string",
+              description:
+                "The Assessment's one-sentence description of the work proposed by a positive Decision.",
+            },
+            reason: { type: "string" },
+            unavailableReason: { type: "string" },
+            gate: {
+              type: "boolean",
+              description:
+                "The deterministic Gate stopped it before any model was asked.",
+            },
+            requeueIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Explicit human requeues whose fresh Assessment this Decision answered.",
+            },
+            ticketId: {
+              type: "string",
+              description:
+                "auto, accepted: the Ticket that was made. Its Mandate says what the work may touch.",
+            },
+            goalId: {
+              type: "string",
+              description:
+                "auto, accepted: the Goal that carries the Ticket out.",
+            },
+            acceptedTicketId: {
+              type: "string",
+              description:
+                "Derived when any Ticket links this Decision, including a candidate a person accepted.",
+            },
+            candidate: {
+              type: "boolean",
+              description:
+                "True only for a positive Decision that no Ticket has accepted or attached.",
+            },
+            attachedTicketId: {
+              type: "string",
+              description:
+                "Derived when one of this Decision's source events was explicitly attached to a Ticket.",
+            },
+            dismissed: {
+              type: "boolean",
+              description:
+                "True when a person dismissed this candidate. The Decision itself remains unchanged.",
+            },
+            dismissedAt: { type: "string", format: "date-time" },
+            dismissalReason: { type: "string" },
+            notTakenOn: {
+              type: "string",
+              description:
+                "auto, a positive assessment that was not taken on, and why: thread_limit (one thread is taken on only so often in an hour), quiesced, no_executor or accept_failed.",
+            },
+            policyVersion: { type: "string" },
+            decidedAt: { type: "string", format: "date-time" },
+          },
+        },
+        DecisionAttachRequest: {
+          type: "object",
+          required: ["ticketId"],
+          properties: {
+            ticketId: {
+              type: "string",
+              description:
+                "The existing Ticket the person explicitly named as the owner of this event.",
+            },
+            note: {
+              type: "string",
+              maxLength: 4000,
+              description:
+                "Optional routing context. It reaches the next worker checkpoint as untrusted data and grants no authority.",
+            },
+          },
+          additionalProperties: false,
+        },
+        DecisionDismissRequest: {
+          type: "object",
+          properties: {
+            reason: {
+              type: "string",
+              minLength: 1,
+              maxLength: 500,
+              description:
+                "Optional person-authored explanation kept with the dismissal.",
+            },
+          },
+          additionalProperties: false,
+        },
+        DecisionDismissal: {
+          type: "object",
+          required: ["decision", "reused"],
+          properties: {
+            decision: { $ref: "#/components/schemas/Decision" },
+            reused: {
+              type: "boolean",
+              description: "True when the candidate was already dismissed.",
+            },
+          },
+        },
+        TicketList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/Ticket" },
+            },
+          },
+        },
+        Ticket: {
+          type: "object",
+          description:
+            "One authorised unit of work. It wraps existing objects (a Goal keeps its own id and progress); its stage is derived from them, not stored.",
+          required: [
+            "id",
+            "title",
+            "mandate",
+            "subscriptions",
+            "inputs",
+            "origins",
+            "channels",
+            "links",
+            "createdAt",
+          ],
+          properties: {
+            id: {
+              type: "string",
+              description:
+                "Derived from the decision that produced it, so the same request gives the same id.",
+            },
+            title: { type: "string" },
+            mandate: {
+              type: "object",
+              required: ["strength", "decidedBy", "evalId", "requester"],
+              properties: {
+                strength: { type: "string", enum: ["explicit", "inferred"] },
+                decidedBy: { type: "string", enum: ["direct", "eval"] },
+                evalId: { type: "string" },
+                requester: { type: "string" },
+                policyVersion: {
+                  type: "string",
+                  description: "Eval only: the policy it was taken on under.",
+                },
+                matchedRuleIds: { type: "array", items: { type: "string" } },
+                scope: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Eval only: what the Ticket may touch, as service:write (container:write): writes on that service that are not irreversible. Inferred from what the event is about, never from what the model said. Empty authorises nothing to be done without the person.",
+                },
+              },
+            },
+            subscriptions: { type: "array", items: { type: "string" } },
+            inputs: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketInput" },
+              description:
+                "Later events on subscribed threads attached to the ticket without a new assessment. Fresh inputs reach the worker's next checkpoint as untrusted data.",
+            },
+            origins: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketOrigin" },
+              description:
+                "Actor and human classification for the events that produced this Ticket.",
+            },
+            channels: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ChannelRef" },
+              description:
+                "Write destinations recorded from Source events attached to this Ticket.",
+            },
+            assignments: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "state", "createdAt"],
+                properties: {
+                  id: { type: "string" },
+                  state: {
+                    type: "string",
+                    enum: ["pending", "running", "ended"],
+                  },
+                  createdAt: { type: "string", format: "date-time" },
+                  startedAt: { type: "string", format: "date-time" },
+                  endedAt: { type: "string", format: "date-time" },
+                  endedReason: { type: "string" },
+                  report: {
+                    type: "object",
+                    required: ["state", "summary", "at"],
+                    properties: {
+                      state: { type: "string" },
+                      summary: { type: "string" },
+                      at: { type: "string", format: "date-time" },
+                      evidence: { type: "string" },
+                      artifactId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+            links: {
+              type: "object",
+              required: ["sessionIds"],
+              properties: {
+                legacyGoalId: { type: "string" },
+                sessionIds: { type: "array", items: { type: "string" } },
+                decisionId: {
+                  type: "string",
+                  description: "The Decision that took the work on.",
+                },
+              },
+            },
+            createdAt: { type: "string", format: "date-time" },
+          },
+        },
+        TicketDelegateRequest: {
+          type: "object",
+          required: ["task", "idempotencyKey"],
+          properties: {
+            task: {
+              type: "string",
+              maxLength: 16000,
+              description:
+                "The complete long-running objective. The worker does not inherit the caller's conversation.",
+            },
+            idempotencyKey: {
+              type: "string",
+              minLength: 1,
+              maxLength: 256,
+              description:
+                "Stable caller-generated key. Retrying with the same key returns the existing Ticket.",
+            },
+            criteria: {
+              type: "array",
+              maxItems: 20,
+              items: { type: "string", minLength: 1, maxLength: 500 },
+            },
+            maxIterations: {
+              type: "integer",
+              minimum: 1,
+              description:
+                "Optional positive checkpoint budget; defaults to 8. There is no fixed upper bound.",
+            },
+            observe: {
+              type: "boolean",
+              description: "Inspect and report without changing anything.",
+            },
+            allowAsk: {
+              type: "boolean",
+              default: true,
+              description:
+                "Let the worker pause with a question answerable through /v1/tickets/{id}/reply.",
+            },
+            reviewBeforeDone: {
+              type: "boolean",
+              description:
+                "After independent review passes, wait for the person to accept the result.",
+            },
+            threads: {
+              type: "array",
+              description:
+                "Thread keys this Ticket concerns, e.g. resource:container:emby or {kind, id}. While it is open, later triggers on these threads attach as inputs without a new assessment.",
+              items: {
+                oneOf: [
+                  { type: "string", minLength: 1 },
+                  {
+                    type: "object",
+                    required: ["kind", "id"],
+                    additionalProperties: false,
+                    properties: {
+                      kind: { type: "string", minLength: 1 },
+                      id: { type: "string", minLength: 1 },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketReplyRequest: {
+          type: "object",
+          properties: {
+            attentionId: {
+              type: "string",
+              description: "The open Attention id from the Ticket or its Goal.",
+            },
+            answer: {
+              type: "string",
+              maxLength: 4000,
+              description:
+                "The answer, or feedback when sending a reviewed result back.",
+            },
+            decision: {
+              type: "string",
+              enum: ["accept", "reject"],
+              description: "Required when the Attention is a review.",
+            },
+            permissionId: {
+              type: "string",
+              description:
+                "A pending permission id from TicketTask.pendingPermissions.",
+            },
+            permissionDecision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "The decision for permissionId.",
+            },
+            placementId: {
+              type: "string",
+              description:
+                "The pending operation id from receipt.placementAttention.",
+            },
+            placementDecision: {
+              type: "string",
+              enum: ["allow", "deny"],
+              description: "The operator decision for placementId.",
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketPlacement: {
+          type: "object",
+          required: ["id", "source", "destination", "state"],
+          properties: {
+            id: { type: "string" },
+            source: { type: "string" },
+            destination: { type: "string" },
+            state: {
+              type: "string",
+              enum: [
+                "pending",
+                "denied",
+                "dispatching",
+                "verified",
+                "uncertain",
+              ],
+            },
+            decidedAt: { type: "string", format: "date-time" },
+            dispatchedAt: { type: "string", format: "date-time" },
+            verifiedAt: { type: "string", format: "date-time" },
+            stoppedAt: { type: "string", format: "date-time" },
+            verification: { type: "string", enum: ["sha256"] },
+            skill: {
+              type: "object",
+              required: ["name", "digest"],
+              properties: {
+                name: { type: "string" },
+                digest: { type: "string" },
+              },
+            },
+          },
+        },
+        TicketNoteRequest: {
+          type: "object",
+          required: ["note"],
+          properties: {
+            note: {
+              type: "string",
+              minLength: 1,
+              maxLength: 4000,
+              description:
+                "Guidance for the next worker checkpoint. It does not interrupt the active checkpoint.",
+            },
+          },
+          additionalProperties: false,
+        },
+        TicketExecutionList: {
+          type: "object",
+          required: ["tickets"],
+          properties: {
+            tickets: {
+              type: "array",
+              items: { $ref: "#/components/schemas/TicketTask" },
+            },
+          },
+        },
+        TicketEventPage: {
+          type: "object",
+          required: ["events", "next"],
+          properties: {
+            events: {
+              type: "array",
+              items: {
+                type: "object",
+                required: ["id", "ticketId", "type", "at"],
+                properties: {
+                  id: { type: "string" },
+                  ticketId: { type: "string" },
+                  type: { type: "string" },
+                  at: { type: "string", format: "date-time" },
+                },
+                additionalProperties: true,
+              },
+            },
+            next: { type: "integer", minimum: 0 },
+          },
+        },
+        TicketTask: {
+          type: "object",
+          required: ["ticket", "stage", "pendingPermissions", "receipt"],
+          properties: {
+            ticket: { $ref: "#/components/schemas/Ticket" },
+            stage: {
+              type: "string",
+              enum: [
+                "unassigned",
+                "running",
+                "attention",
+                "paused",
+                "completed",
+                "blocked",
+                "failed",
+                "cancelled",
+              ],
+            },
+            goal: { $ref: "#/components/schemas/ProductGoal" },
+            pendingPermissions: {
+              type: "array",
+              items: { $ref: "#/components/schemas/PendingPermission" },
+            },
+            execution: {
+              type: "object",
+              required: [
+                "status",
+                "phase",
+                "iteration",
+                "maxIterations",
+                "updatedAt",
+                "controls",
+              ],
+              properties: {
+                status: { type: "string" },
+                phase: { type: "string" },
+                progress: { type: "number" },
+                currentStep: { type: "string" },
+                iteration: { type: "integer" },
+                maxIterations: { type: "integer" },
+                updatedAt: { type: "string", format: "date-time" },
+                watchdog: { $ref: "#/components/schemas/GoalWatchdog" },
+                controls: {
+                  type: "object",
+                  required: ["pause", "resume", "stop", "retry", "reply"],
+                  properties: {
+                    pause: { type: "boolean" },
+                    resume: { type: "boolean" },
+                    stop: { type: "boolean" },
+                    retry: { type: "boolean" },
+                    reply: { type: "boolean" },
+                  },
+                },
+              },
+            },
+            receipt: {
+              type: "object",
+              required: ["state", "complete"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "unassigned",
+                    "running",
+                    "attention",
+                    "paused",
+                    "completed",
+                    "blocked",
+                    "failed",
+                    "cancelled",
+                  ],
+                },
+                complete: { type: "boolean" },
+                placementAttention: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
+                placementReport: {
+                  $ref: "#/components/schemas/TicketPlacement",
+                },
+                summary: { type: "string" },
+                report: {
+                  $ref: "#/components/schemas/ProductGoal/properties/report",
+                },
+                attention: {
+                  type: "object",
+                  required: ["id", "kind", "question", "askedAt"],
+                  properties: {
+                    id: { type: "string" },
+                    kind: { type: "string", enum: ["answer", "review"] },
+                    question: { type: "string" },
+                    options: { type: "array", items: { type: "string" } },
+                    askedAt: { type: "string", format: "date-time" },
+                  },
+                },
+                finalReport: { type: "string" },
+                artifactId: { type: "string" },
+                error: { type: "string" },
+              },
+            },
+          },
+        },
+        TicketDelegation: {
+          allOf: [
+            { $ref: "#/components/schemas/TicketTask" },
+            {
+              type: "object",
+              required: ["reused"],
+              properties: {
+                reused: {
+                  type: "boolean",
+                  description:
+                    "True when this key already named a Ticket and no task was started.",
+                },
+              },
+            },
+          ],
+        },
+        DecisionAttachment: {
+          allOf: [
+            { $ref: "#/components/schemas/TicketTask" },
+            {
+              type: "object",
+              required: ["decisionId", "attachedTicketId", "reused"],
+              properties: {
+                decisionId: { type: "string" },
+                attachedTicketId: { type: "string" },
+                reused: { type: "boolean" },
+              },
+            },
+          ],
+        },
+        TicketInput: {
+          type: "object",
+          description:
+            "One later event on a subscribed thread attached to the ticket without a new assessment.",
+          required: [
+            "triggerId",
+            "seq",
+            "source",
+            "kind",
+            "thread",
+            "at",
+            "attachedAt",
+          ],
+          properties: {
+            triggerId: { type: "string" },
+            seq: { type: "integer" },
+            source: { type: "string" },
+            kind: { type: "string" },
+            thread: { type: "string" },
+            at: { type: "string", format: "date-time" },
+            attachedAt: { type: "string", format: "date-time" },
+            actor: { $ref: "#/components/schemas/ActorRef" },
+            human: {
+              type: "boolean",
+              description:
+                "Whether the Source classifies the event as human-originated.",
+            },
+            channel: { $ref: "#/components/schemas/ChannelRef" },
+            note: {
+              type: "string",
+              description:
+                "Optional routing context supplied when a person explicitly attached this event.",
+            },
+            payload: { type: "object" },
+          },
+        },
+        ActorRef: {
+          type: "object",
+          required: ["source", "id"],
+          properties: {
+            source: { type: "string" },
+            id: { type: "string" },
+          },
+        },
+        ChannelRef: {
+          type: "object",
+          required: ["source", "thread"],
+          properties: {
+            source: { type: "string" },
+            thread: { type: "string" },
+            address: {
+              type: "object",
+              additionalProperties: { type: "string" },
+            },
+          },
+        },
+        TicketOrigin: {
+          type: "object",
+          required: ["triggerId", "source"],
+          properties: {
+            triggerId: { type: "string" },
+            source: { type: "string" },
+            actor: { $ref: "#/components/schemas/ActorRef" },
+            human: { type: "boolean" },
+            channel: { $ref: "#/components/schemas/ChannelRef" },
+          },
+        },
         ProductGoalList: {
           type: "object",
           required: ["goals"],
@@ -2562,6 +4835,11 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             updatedAt: { type: "string" },
             finishedAt: { type: "string" },
             summary: { type: "string" },
+            finalReport: {
+              type: "string",
+              description:
+                "The isolated worker/reviewer result retained with a terminal Goal.",
+            },
             artifactId: { type: "string" },
             currentRun: { $ref: "#/components/schemas/ProductGoalRun" },
             error: {
@@ -2576,10 +4854,88 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               type: "object",
               properties: {
                 pause: { type: "boolean" },
-                resume: { type: "boolean" },
+                resume: {
+                  type: "boolean",
+                  description:
+                    "False while the Goal waits on an `attention`: answer it instead of resuming.",
+                },
                 stop: { type: "boolean" },
               },
             },
+            attention: {
+              type: "object",
+              description:
+                "The one open request for the person, present while the Goal is paused waiting: a question to answer (kind answer) or a finished result to accept (kind review). Answer it with POST /v1/tickets/{id}/reply.",
+              required: ["id", "kind", "question", "askedAt"],
+              properties: {
+                id: { type: "string" },
+                kind: { type: "string", enum: ["answer", "review"] },
+                question: { type: "string" },
+                options: { type: "array", items: { type: "string" } },
+                askedAt: { type: "string" },
+              },
+            },
+            ticketId: {
+              type: "string",
+              description:
+                "The Ticket that authorises this task, when one was recorded.",
+            },
+            report: {
+              type: "object",
+              description:
+                "What the worker last reported through the goal_report tool.",
+              required: ["state", "at"],
+              properties: {
+                state: {
+                  type: "string",
+                  enum: [
+                    "progress",
+                    "ready",
+                    "blocked",
+                    "waiting",
+                    "ask",
+                    "dropped",
+                  ],
+                },
+                summary: { type: "string" },
+                evidence: { type: "string" },
+                blocker: { type: "string" },
+                question: { type: "string" },
+                options: { type: "array", items: { type: "string" } },
+                reason: { type: "string" },
+                at: { type: "string" },
+              },
+            },
+            watchdog: {
+              $ref: "#/components/schemas/GoalWatchdog",
+            },
+          },
+        },
+        GoalWatchdog: {
+          type: "object",
+          description:
+            "The Watchdog's latest bounded intervention. `waiting_for_person` is a paused Goal in Activity's person/stalled stage.",
+          required: ["state", "reason", "action", "since", "at"],
+          properties: {
+            state: {
+              type: "string",
+              enum: ["checking", "retrying", "waiting_for_person"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "goal_no_progress",
+                "worker_inactivity",
+                "reviewer_inactivity",
+              ],
+            },
+            action: {
+              type: "string",
+              enum: ["status_check", "retry_worker", "pause"],
+            },
+            since: { type: "string", format: "date-time" },
+            at: { type: "string", format: "date-time" },
+            summary: { type: "string" },
           },
         },
       },

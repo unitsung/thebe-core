@@ -6,6 +6,7 @@ import { redactToolOutput } from "../security/redaction.ts";
 import type { ThebeAgent } from "../interface.ts";
 import type { GoalSchedule, GoalScheduleInput } from "./types.ts";
 import { isValidTimeZone, nextCronRun, parseCron } from "./cron.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
 
 type GoalPort = Pick<ThebeAgent, "createSession" | "startGoal" | "listGoals">;
 
@@ -17,6 +18,7 @@ export function createScheduleApi(options: {
   goals: GoalPort;
   checkWritable: () => void;
   isQuiesced: () => boolean;
+  backgroundBudget?: Pick<BackgroundBudgetService, "exhausted">;
 }) {
   let rows: GoalSchedule[] = [];
   let loaded = false;
@@ -95,6 +97,14 @@ export function createScheduleApi(options: {
 
   async function dispatch(row: GoalSchedule, manual = false) {
     options.checkWritable();
+    if (!manual && (await options.backgroundBudget?.exhausted())) {
+      await save({
+        ...advance(row),
+        lastError:
+          "Occurrence skipped because today's background token budget is spent.",
+      });
+      return;
+    }
     const previous = row.lastSessionId
       ? (await options.goals.listGoals()).find(
           (goal) => goal.thebeSessionId === row.lastSessionId
@@ -139,6 +149,9 @@ export function createScheduleApi(options: {
         goal: row.goal,
         criteria: row.criteria,
         maxIterations: row.maxIterations,
+        ...(row.acceptMode === "observe" ? { observe: true } : {}),
+        ...(row.allowAsk ? { allowAsk: true } : {}),
+        ...(row.reviewBeforeDone ? { reviewBeforeDone: true } : {}),
       });
       await save({ ...reserved, dispatching: false });
     } catch (error) {
@@ -277,6 +290,9 @@ export function createScheduleApi(options: {
           cron: normalized.cron,
           timeZone: normalized.timeZone,
           maxIterations: normalized.maxIterations,
+          acceptMode: normalized.acceptMode,
+          allowAsk: normalized.allowAsk,
+          reviewBeforeDone: normalized.reviewBeforeDone,
           model: normalized.model,
           enabled: row.enabled ? scheduled.enabled : false,
           nextRunAt: row.enabled ? scheduled.nextRunAt : undefined,
@@ -399,13 +415,11 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
     );
   if (
     input.maxIterations !== undefined &&
-    (!Number.isInteger(input.maxIterations) ||
-      input.maxIterations < 1 ||
-      input.maxIterations > 32)
+    (!Number.isSafeInteger(input.maxIterations) || input.maxIterations < 1)
   )
     throw httpError(
       400,
-      "maxIterations must be an integer from 1 to 32",
+      "maxIterations must be a positive integer",
       "invalid_body"
     );
   if (
@@ -422,6 +436,16 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
       "criteria must contain up to 32 nonempty strings",
       "invalid_body"
     );
+  if (
+    input.acceptMode !== undefined &&
+    input.acceptMode !== "auto" &&
+    input.acceptMode !== "observe"
+  )
+    throw httpError(400, "acceptMode must be auto or observe", "invalid_body");
+  for (const flag of ["allowAsk", "reviewBeforeDone"] as const) {
+    if (input[flag] !== undefined && typeof input[flag] !== "boolean")
+      throw httpError(400, `${flag} must be true or false`, "invalid_body");
+  }
   const model = input.model;
   if (
     model !== undefined &&
@@ -450,6 +474,11 @@ export function validate(input: GoalScheduleInput): GoalScheduleInput {
         }
       : {}),
     maxIterations: input.maxIterations,
+    ...(input.acceptMode === "observe"
+      ? { acceptMode: "observe" as const }
+      : {}),
+    ...(input.allowAsk === true ? { allowAsk: true } : {}),
+    ...(input.reviewBeforeDone === true ? { reviewBeforeDone: true } : {}),
     ...(model
       ? {
           model: {

@@ -1,0 +1,528 @@
+import { key } from "../tickets/ids.ts";
+import type { Trigger } from "../sources/types.ts";
+import {
+  buildAssessmentPrompt,
+  MAX_REASON_CHARS,
+  parseAssessment,
+  type Assessment,
+  type ThreadTicket,
+} from "./assess.ts";
+import type { DecisionStore } from "./decision-store.ts";
+import { policyVersion, type PolicyStore } from "./policy-store.ts";
+import type {
+  Decision,
+  NotTakenOn,
+  Policy,
+  SpeculativePreparation,
+} from "./types.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
+
+/** Built-in kinds worth weighing. Sources may add their own kinds through `assessedKinds`. */
+export const ASSESSED_KINDS: ReadonlySet<string> = new Set([
+  "container.went_down",
+  "container.unhealthy",
+  "container.recovered",
+  "container.removed",
+  "container.appeared",
+  "download.completed",
+]);
+
+const HOUR_MS = 60 * 60 * 1000;
+export const DEFAULT_ASSESSMENTS_PER_HOUR = 60;
+/** How often one thread may be taken on in an hour. The next one is left to the person, and recorded. */
+export const DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR = 3;
+/** Triggers older than this are not weighed after a restart: the moment to act has passed. */
+export const DEFAULT_BACKLOG_AGE_MS = 24 * 60 * 60 * 1000;
+/** Read-only preparation is useful, never worth silently holding the Assessment. */
+export const DEFAULT_PREPARATION_TIMEOUT_MS = 20_000;
+
+export type EvalService = {
+  /** Triggers just recorded. Weighed one thread at a time. Never throws. */
+  enqueue(triggers: readonly Trigger[]): void;
+  /** Weighs one recorded Trigger again for an explicit human requeue. */
+  requeue(trigger: Trigger, requeueId: string): void;
+  /** After a start: weigh recorded Triggers that no Decision covers yet. */
+  recover(triggers: readonly Trigger[]): Promise<void>;
+  /** Resolves when everything queued so far has been decided. */
+  idle(): Promise<void>;
+  stop(): void;
+  start(): void;
+};
+
+export type EvalUnavailableNotice = {
+  /** Stable for this Decision, so the push outbox and relay deduplicate a retry. */
+  id: string;
+  decisionId: string;
+  thread: string;
+  at: string;
+  unavailableReason: string;
+  message: string;
+};
+
+export function createEvalService(options: {
+  policy: PolicyStore;
+  decisions: DecisionStore;
+  /** What the enabled Sources are, folded into the policy version. */
+  sources: string;
+  /** Additional event kinds declared by host supplied Sources. */
+  assessedKinds?: readonly string[];
+  /** Durable admission for autonomous model work. */
+  backgroundBudget?: Pick<BackgroundBudgetService, "exhausted">;
+  /** Asks the model; returns its raw reply. Rejects on a timeout or provider failure. */
+  assess: (prompt: string, model: Policy["model"]) => Promise<string>;
+  now: () => Date;
+  /** Questions to the model per hour before the rest are recorded as `assessment_limit`. 0 is no limit. */
+  maxPerHour?: number;
+  /**
+   * What `auto` does with a positive assessment: make the Ticket and hand it to an executor. It is given
+   * the Eval's own id, so a Decision made again after a crash gets the same Ticket and not a second.
+   */
+  accept?: (input: {
+    evalId: string;
+    decisionId: string;
+    thread: string;
+    triggers: Trigger[];
+    policy: Policy;
+    assessment: Assessment;
+    preparation?: SpeculativePreparation;
+    at: string;
+    policyVersion: string;
+  }) => Promise<{ ticketId: string; goalId?: string }>;
+  /** Work already taken on for a thread, shown to the assessment so it does not start the same work twice. */
+  threadTickets?: (thread: string) => Promise<ThreadTicket[]>;
+  /**
+   * Best-effort read-only work before the Assessment. A failure is not an Assessment failure: the model
+   * still weighs the Triggers, and no user attention is created for unused preparation.
+   */
+  prepare?: (input: {
+    thread: string;
+    triggers: Trigger[];
+  }) => Promise<SpeculativePreparation | undefined>;
+  /** Upper bound for read-only preparation. Defaults to 20 seconds. */
+  preparationTimeoutMs?: number;
+  /** How often one thread may be taken on in an hour. 0 is no limit. */
+  maxAcceptsPerThreadPerHour?: number;
+  backlogAgeMs?: number;
+  /**
+   * Called for the first failed assessment in an outage. A later successful assessment ends the
+   * outage, so another failure after recovery is announced once again.
+   */
+  onUnavailable?: (notice: EvalUnavailableNotice) => Promise<void> | void;
+  onError?: (error: unknown) => void;
+}): EvalService {
+  // A limit of 0 (or less) turns the breaker off; unset keeps the default.
+  const configured = options.maxPerHour ?? DEFAULT_ASSESSMENTS_PER_HOUR;
+  const maxPerHour = configured > 0 ? configured : Number.POSITIVE_INFINITY;
+  const acceptsConfigured =
+    options.maxAcceptsPerThreadPerHour ?? DEFAULT_ACCEPTS_PER_THREAD_PER_HOUR;
+  const maxAccepts =
+    acceptsConfigured > 0 ? acceptsConfigured : Number.POSITIVE_INFINITY;
+  const backlogAgeMs = options.backlogAgeMs ?? DEFAULT_BACKLOG_AGE_MS;
+  const assessedKinds = new Set([
+    ...ASSESSED_KINDS,
+    ...(options.assessedKinds ?? []),
+  ]);
+  const preparationTimeoutMs =
+    options.preparationTimeoutMs ?? DEFAULT_PREPARATION_TIMEOUT_MS;
+  type QueuedTrigger = {
+    trigger: Trigger;
+    requeueIds: string[];
+  };
+  const pending = new Map<string, QueuedTrigger[]>();
+  const assessedAt: number[] = [];
+  let draining: Promise<void> | undefined;
+  let stopped = false;
+
+  function startDrain(): void {
+    if (draining || stopped) return;
+    draining = drain().finally(() => {
+      draining = undefined;
+      // Resume work that arrived during a quiesce or while the previous round was finishing.
+      if (pending.size > 0 && !stopped) startDrain();
+    });
+  }
+
+  function queue(
+    triggers: readonly Trigger[],
+    requeueIdsByTrigger: ReadonlyMap<string, readonly string[]> = new Map()
+  ): void {
+    for (const trigger of triggers) {
+      const requeueIds = [...(requeueIdsByTrigger.get(trigger.id) ?? [])];
+      for (const thread of trigger.threads) {
+        const list = pending.get(thread) ?? [];
+        const existing = list.find((row) => row.trigger.id === trigger.id);
+        if (existing) {
+          existing.requeueIds = [
+            ...new Set([...existing.requeueIds, ...requeueIds]),
+          ];
+        } else {
+          list.push({ trigger, requeueIds });
+        }
+        pending.set(thread, list);
+      }
+    }
+    startDrain();
+  }
+
+  // At most one Eval runs at a time, and every Trigger that queued on a thread meanwhile is weighed
+  // together in the next one, so a container that flaps costs one question, not one per flip.
+  async function drain(): Promise<void> {
+    while (!stopped && pending.size > 0) {
+      const [thread, triggers] = pending.entries().next().value as [
+        string,
+        QueuedTrigger[],
+      ];
+      pending.delete(thread);
+      try {
+        await decide(thread, triggers);
+      } catch (error) {
+        options.onError?.(error);
+      }
+    }
+  }
+
+  async function decide(thread: string, all: QueuedTrigger[]): Promise<void> {
+    const [decided, decidedRequeues] = await Promise.all([
+      options.decisions.decidedTriggerIds(),
+      options.decisions.decidedRequeueIds(),
+    ]);
+    const fresh = all
+      .flatMap((row) => {
+        const requeueIds = row.requeueIds.filter(
+          (id) => !decidedRequeues.has(id)
+        );
+        if (requeueIds.length === 0 && row.requeueIds.length > 0) return [];
+        if (requeueIds.length === 0 && decided.has(row.trigger.id)) return [];
+        return [{ trigger: row.trigger, requeueIds }];
+      })
+      .sort((left, right) =>
+        left.trigger.at < right.trigger.at
+          ? -1
+          : left.trigger.at > right.trigger.at
+            ? 1
+            : 0
+      );
+    if (fresh.length === 0) return;
+    const triggers = fresh.map((row) => row.trigger);
+    const requeueIds = [
+      ...new Set(fresh.flatMap((row) => row.requeueIds)),
+    ].sort();
+
+    const policy = await options.policy.get();
+    const version = policyVersion(policy, options.sources);
+    const latest = triggers[triggers.length - 1]!.at;
+    const triggerIds = triggers.map((row) => row.id);
+    // Built from the Triggers' own times, never the clock: a re-run after a crash is the same Decision.
+    const evalId = key(
+      "eval",
+      thread,
+      version,
+      latest,
+      ...triggerIds,
+      ...requeueIds.map((id) => `requeue:${id}`)
+    );
+    const base = {
+      id: key("decision", evalId),
+      evalId,
+      thread,
+      triggerIds,
+      ...(requeueIds.length > 0 ? { requeueIds } : {}),
+      at: latest,
+      policyVersion: version,
+      decidedAt: options.now().toISOString(),
+    };
+    const record = (
+      rest: Pick<Decision, "outcome" | "reason"> & Partial<Decision>
+    ) => options.decisions.add({ matchedRuleIds: [], ...base, ...rest });
+    const recordUnavailable = async (
+      reason: string,
+      unavailableReason: string
+    ) => {
+      const decision = await record({
+        outcome: "unavailable",
+        reason,
+        unavailableReason,
+      });
+      await notifyUnavailable(decision);
+    };
+
+    // Gate: deterministic, no model.
+    if (policy.acceptMode === "off") {
+      await record({
+        outcome: "ignore",
+        gate: true,
+        reason: "accept mode is off",
+        unavailableReason: "mode_off",
+      });
+      return;
+    }
+    if (policy.rules.length === 0) {
+      await record({
+        outcome: "ignore",
+        gate: true,
+        reason: "no rules are set",
+        unavailableReason: "no_rules",
+      });
+      return;
+    }
+    if (!triggers.some((row) => assessedKinds.has(row.kind))) {
+      await record({
+        outcome: "ignore",
+        gate: true,
+        reason: "this kind of change is not weighed",
+        unavailableReason: "kind_not_assessed",
+      });
+      return;
+    }
+    if (await options.backgroundBudget?.exhausted()) {
+      await record({
+        outcome: "unavailable",
+        gate: true,
+        reason: "today's background token budget is spent",
+        unavailableReason: "daily_budget",
+      });
+      return;
+    }
+    const hourAgo = options.now().getTime() - HOUR_MS;
+    while (assessedAt.length > 0 && assessedAt[0]! < hourAgo)
+      assessedAt.shift();
+    if (assessedAt.length >= maxPerHour) {
+      const decision = await record({
+        outcome: "unavailable",
+        gate: true,
+        reason: "too many assessments this hour",
+        unavailableReason: "assessment_limit",
+      });
+      await notifyUnavailable(decision);
+      return;
+    }
+
+    // Assessment. A failure is never a "no": it is recorded as unavailable.
+    assessedAt.push(options.now().getTime());
+    let reply: string;
+    let preparation: SpeculativePreparation | undefined;
+    try {
+      const earlierPromise =
+        options.threadTickets?.(thread).catch(() => []) ?? Promise.resolve([]);
+      const preparationPromise = options.prepare
+        ? boundedPreparation(
+            options.prepare({ thread, triggers }),
+            preparationTimeoutMs,
+            options.onError
+          )
+        : Promise.resolve(undefined);
+      const [earlier, prepared] = await Promise.all([
+        earlierPromise,
+        preparationPromise,
+      ]);
+      preparation = prepared;
+      reply = await options.assess(
+        buildAssessmentPrompt(policy.rules, triggers, earlier, preparation),
+        policy.model
+      );
+    } catch (error) {
+      await recordUnavailable(
+        "the assessment could not be made",
+        error instanceof Error
+          ? error.message.slice(0, MAX_REASON_CHARS)
+          : "assessment failed"
+      );
+      return;
+    }
+    const verdict = parseAssessment(reply, policy.rules);
+    if (!verdict) {
+      await recordUnavailable(
+        "the model did not answer in the agreed form",
+        "unparseable_reply"
+      );
+      return;
+    }
+    if (await options.backgroundBudget?.exhausted()) {
+      await record({
+        outcome: "unavailable",
+        gate: true,
+        wouldAccept: verdict.decision === "accept",
+        matchedRuleIds: verdict.matchedRuleIds,
+        matchedRules: policy.rules.filter((rule) =>
+          verdict.matchedRuleIds.includes(rule.id)
+        ),
+        ...(verdict.intent ? { intent: verdict.intent } : {}),
+        reason: "today's background token budget is spent",
+        unavailableReason: "daily_budget",
+      });
+      return;
+    }
+    const wouldAccept = verdict.decision === "accept";
+    if (policy.acceptMode === "auto" && wouldAccept) {
+      const positive = {
+        wouldAccept: true,
+        matchedRuleIds: verdict.matchedRuleIds,
+        matchedRules: policy.rules.filter((rule) =>
+          verdict.matchedRuleIds.includes(rule.id)
+        ),
+        ...(verdict.intent ? { intent: verdict.intent } : {}),
+        reason: verdict.reason,
+      };
+      // A positive assessment that is not taken on stays a "would have", and says why.
+      const held = (notTakenOn: NotTakenOn) =>
+        record({ outcome: "ignore", ...positive, notTakenOn });
+      if (!options.accept) {
+        await held("no_executor");
+        return;
+      }
+      // A quiesce that came while the model was thinking still stops it.
+      if (stopped) {
+        await held("quiesced");
+        return;
+      }
+      const hourStart = options.now().getTime() - HOUR_MS;
+      const takenOn = (await options.decisions.list({ thread })).filter(
+        (row) =>
+          row.outcome === "accept" && Date.parse(row.decidedAt) >= hourStart
+      ).length;
+      if (takenOn >= maxAccepts) {
+        await held("thread_limit");
+        return;
+      }
+      let ticket: { ticketId: string; goalId?: string };
+      try {
+        ticket = await options.accept({
+          evalId,
+          decisionId: base.id,
+          thread,
+          triggers,
+          policy,
+          assessment: verdict,
+          ...(preparation ? { preparation } : {}),
+          at: latest,
+          policyVersion: version,
+        });
+      } catch (error) {
+        options.onError?.(error);
+        await held("accept_failed");
+        return;
+      }
+      await record({
+        outcome: "accept",
+        ...positive,
+        ticketId: ticket.ticketId,
+        ...(ticket.goalId ? { goalId: ticket.goalId } : {}),
+      });
+      return;
+    }
+    // observe: a positive assessment is what Core WOULD have taken on; it takes on nothing.
+    await record({
+      outcome: "ignore",
+      wouldAccept,
+      matchedRuleIds: verdict.matchedRuleIds,
+      matchedRules: policy.rules.filter((rule) =>
+        verdict.matchedRuleIds.includes(rule.id)
+      ),
+      ...(verdict.intent ? { intent: verdict.intent } : {}),
+      reason: verdict.reason,
+    });
+  }
+
+  async function notifyUnavailable(decision: Decision): Promise<void> {
+    if (!options.onUnavailable) return;
+    try {
+      const rows = await options.decisions.list();
+      const previous = rows.find(
+        (row) => row.id !== decision.id && isAssessmentAttempt(row)
+      );
+      if (previous?.outcome === "unavailable") return;
+      await options.onUnavailable({
+        id: `eval-unavailable-${decision.id}`,
+        decisionId: decision.id,
+        thread: decision.thread,
+        at: decision.decidedAt,
+        unavailableReason: decision.unavailableReason ?? "assessment failed",
+        message: unavailableMessage(decision),
+      });
+    } catch (error) {
+      options.onError?.(error);
+    }
+  }
+
+  return {
+    enqueue: queue,
+    requeue(trigger, requeueId) {
+      queue([trigger], new Map([[trigger.id, [requeueId]]]));
+    },
+    async recover(triggers) {
+      const cutoff = options.now().getTime() - backlogAgeMs;
+      const decided = await options.decisions.decidedTriggerIds();
+      queue(
+        triggers
+          .filter((row) => !decided.has(row.id) && Date.parse(row.at) >= cutoff)
+          .sort((a, b) => (a.at < b.at ? -1 : 1))
+          .slice(-maxPerHour)
+      );
+    },
+    async idle() {
+      while (draining) await draining;
+    },
+    stop() {
+      stopped = true;
+    },
+    start() {
+      stopped = false;
+      startDrain();
+    },
+  };
+}
+
+function boundedPreparation(
+  preparation: Promise<SpeculativePreparation | undefined>,
+  timeoutMs: number,
+  onError?: (error: unknown) => void
+): Promise<SpeculativePreparation | undefined> {
+  return new Promise((resolve) => {
+    const report = (error: unknown) => {
+      try {
+        onError?.(error);
+      } catch {
+        // Observability must not turn best-effort preparation into a failed Assessment.
+      }
+    };
+    const timer = setTimeout(() => {
+      report(new Error("read-only preparation timed out"));
+      resolve(undefined);
+    }, timeoutMs);
+    timer.unref?.();
+    preparation.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        report(error);
+        resolve(undefined);
+      }
+    );
+  });
+}
+
+function isAssessmentAttempt(decision: Decision): boolean {
+  // Deterministic gates say nothing about whether the model recovered. The hourly limit does.
+  return (
+    (!decision.gate || decision.unavailableReason === "assessment_limit") &&
+    decision.unavailableReason !== "daily_budget"
+  );
+}
+
+function unavailableMessage(decision: Decision): string {
+  const reason = decision.unavailableReason ?? "assessment failed";
+  if (reason === "assessment_limit") {
+    return "Automatic event checks reached their hourly limit. They will try again after the hour.";
+  }
+  if (reason === "daily_budget") {
+    return "Automatic work paused after using today's background token budget. It will resume tomorrow.";
+  }
+  if (reason === "unparseable_reply") {
+    return "The model did not return a usable assessment, so automatic event checks need attention.";
+  }
+  const detail = reason.length <= 300 ? reason : `${reason.slice(0, 300)}...`;
+  return `Automatic event checks could not reach the model provider: ${detail}`;
+}

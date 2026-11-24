@@ -5,7 +5,7 @@ import type { Job, JobBook } from "./job-runner.ts";
  * download-to-library run finishes under Core while the phone sleeps.
  *
  * Only jobs acquired by this Core process are tracked: a job restored from disk
- * after a restart is left for an explicit `pipeline.advance`, matching the
+ * after a restart is left for an explicit `pipeline_advance`, matching the
  * "never silently replay an interrupted write-capable run" rule. Terminal jobs
  * (done/failed) stop being tracked; failures still need an explicit retry.
  */
@@ -41,6 +41,18 @@ export function createPipelineAdvancer(input: {
     try {
       for (const job of input.book.status()) {
         if (!tracked.has(job.id)) continue;
+        if (job.placement?.stoppedAt && job.placement.state !== "dispatching") {
+          tracked.delete(job.id);
+          continue;
+        }
+        if (job.placement?.state === "pending") continue;
+        if (
+          job.placement?.state === "denied" ||
+          job.placement?.state === "uncertain"
+        ) {
+          tracked.delete(job.id);
+          continue;
+        }
         if (job.stage === "done" || job.stage === "failed") {
           tracked.delete(job.id);
           continue;
@@ -84,4 +96,3 @@ export function createPipelineAdvancer(input: {
     size: () => tracked.size,
   };
 }
-

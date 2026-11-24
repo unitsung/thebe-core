@@ -4,8 +4,10 @@ import { CONTAINER_RESTART_ACTION_ID } from "../capabilities/containers.ts";
 import {
   SERVICE_API_CONFIRM_TOOL_NAME,
   SERVICE_API_OPERATION_PREFIX,
+  SERVICE_API_OPERATION_SEPARATOR,
   SERVICE_API_TOOL_NAMES,
   SERVICE_API_WRITE_TOOL_NAME,
+  serviceCallContext,
   serviceOperationExposable,
   serviceOperationRequest,
   serviceOperationToolName,
@@ -39,6 +41,7 @@ import {
 } from "../action/types.ts";
 import {
   CORE_EVENT_TOOLS,
+  capabilityChangesThings,
   listCoreMcpTools,
   withProductMetadata,
   type HomelabCapability,
@@ -72,6 +75,19 @@ import {
   type ProductBackgroundTask,
 } from "../background-tasks/product.ts";
 
+import type { McpCaller } from "../interface.ts";
+import {
+  irreversibleReason,
+  irreversibleRefusal,
+} from "../security/irreversible.ts";
+import type { TicketControlApi } from "../tickets/control.ts";
+import {
+  TICKET_REPLY_TOOL_NAME,
+  TICKET_TOOL_NAMES,
+  TICKET_TOOL_WRITE_NAMES,
+  type TicketToolName,
+} from "../tickets/tools.ts";
+
 const RESTART_REQUIRES_ON_DEVICE_APPROVAL = `${CONTAINER_RESTART_ACTION_ID} requires on-device approval; use POST /v1/action`;
 const RUNTIME_APPROVAL_REQUIRED =
   "This write requires runtime approval in an agent conversation";
@@ -82,6 +98,7 @@ export function createControlApi(
   deps: {
     /** The approved-action path; a restart over `/mcp` goes through it so it gets a receipt. */
     executeAction?: (request: ActionRequest) => Promise<ActionReceipt>;
+    tickets?: TicketControlApi;
   } = {}
 ) {
   const {
@@ -211,6 +228,25 @@ export function createControlApi(
     args: unknown
   ): Promise<{ text: string; isError: boolean }> {
     const ok = (text: string) => ({ text, isError: false });
+    const ticketTool = asTicketToolName(name);
+    if (ticketTool) {
+      if (!deps.tickets) {
+        throw httpError(503, "Ticket control is unavailable");
+      }
+      const params =
+        args && typeof args === "object" && !Array.isArray(args)
+          ? (args as Record<string, unknown>)
+          : {};
+      return ok(
+        JSON.stringify(
+          await deps.tickets.invoke(ticketTool, params, {
+            name: "agent",
+            writes: true,
+            irreversible: true,
+          })
+        )
+      );
+    }
     if (name === CONTAINER_RESTART_ACTION_ID) {
       throw httpError(403, RESTART_REQUIRES_ON_DEVICE_APPROVAL);
     }
@@ -226,7 +262,7 @@ export function createControlApi(
         if (input.resource.kind !== "strm") {
           throw httpError(
             400,
-            "strm.repair requires resource.kind=strm",
+            "strm_repair requires resource.kind=strm",
             "invalid_body"
           );
         }
@@ -238,7 +274,7 @@ export function createControlApi(
         ) {
           throw httpError(
             400,
-            `strm.repair requires resource.provider=${options.strmRepairProvider.service}`,
+            `strm_repair requires resource.provider=${options.strmRepairProvider.service}`,
             "invalid_body"
           );
         }
@@ -284,6 +320,19 @@ export function createControlApi(
     };
   }
 
+  /** Core's own capabilities, as the options of this Agent switch them on. */
+  const coreCapabilities = () =>
+    listCoreMcpTools({
+      strmRepairProvider: options.strmRepairProvider,
+      navidrome: Boolean(options.navidrome),
+      musicResearch: Boolean(options.musicResearch),
+      netease: Boolean(options.musicSources?.netease),
+      sqmusic: Boolean(options.musicSources?.sqmusic),
+      emby: Boolean(options.emby),
+      jellyfin: Boolean(options.jellyfin),
+      immich: Boolean(options.immich),
+    });
+
   /** Whether calling this tool changes something, by what Core knows about it. */
   async function isMcpWrite(name: string): Promise<boolean> {
     if (
@@ -306,14 +355,121 @@ export function createControlApi(
       const tool = (await mcp.listTools()).find((item) => item.name === name);
       return !tool || tool.permission !== "read";
     }
-    return false;
+    // Any other Core capability (`strm_repair`, `sqmusic_download`, ...) by what it declares, the same
+    // rule that sets its `readOnlyHint`, so a write cannot slip past because no name list mentions it.
+    const core = coreCapabilities().find((item) => item.name === name);
+    return core ? capabilityChangesThings(core) : false;
   }
 
+  /** What Core knows about a write beyond its name and arguments: the HTTP method or the server's hint. */
+  async function irreversibleContext(
+    name: string,
+    params: Record<string, unknown>
+  ): Promise<{
+    httpMethod?: string;
+    destructiveHint?: boolean;
+    operatorMark?: boolean;
+    /** What the call will really send, when its own arguments only name it (a confirm token). */
+    sends?: Record<string, unknown>;
+  }> {
+    if (name === SERVICE_API_CONFIRM_TOOL_NAME) {
+      // The confirm is the call that executes, whoever made the preview: judge the request it will send.
+      const token = typeof params.token === "string" ? params.token : "";
+      const pending = token ? pendingWrites.get(token) : undefined;
+      return pending
+        ? {
+            httpMethod: pending.request.method,
+            operatorMark: pending.irreversible,
+            sends: { body: pending.request.body },
+          }
+        : {};
+    }
+    if (
+      name === SERVICE_API_WRITE_TOOL_NAME ||
+      name.startsWith(SERVICE_API_OPERATION_PREFIX)
+    ) {
+      return serviceCallContext(
+        options.serviceAPIProviders ?? [],
+        name,
+        params
+      );
+    }
+    if (name.startsWith("mcp:")) {
+      const tool = (await mcp.listTools()).find((item) => item.name === name);
+      // The operator's override beats what the server says about itself.
+      return {
+        destructiveHint:
+          tool?.irreversible ?? tool?.annotations?.destructiveHint === true,
+      };
+    }
+    return {};
+  }
+
+  /** The refusals of the `/mcp` gate: a call stopped for want of permission, not one that failed. */
+  const MCP_DENIAL_CODES = new Set([
+    "mcp_writes_not_enabled",
+    "mcp_scope_required",
+    "mcp_irreversible_required",
+  ]);
+
+  /**
+   * One audit row per `/mcp` call, with the token's name, so an operator can see what each external
+   * agent did and what it was refused. Core's own tools also write their detailed rows.
+   */
   async function invokeMcpTool(
     name: string,
-    args: unknown
+    args: unknown,
+    caller: McpCaller
   ): Promise<{ text: string; isError: boolean }> {
-    if (!(await isMcpWrite(name))) return invokeToolDetailed(name, args);
+    const started = Date.now();
+    const record = async (
+      result: "ok" | "error" | "denied",
+      responseBytes: number
+    ) => {
+      try {
+        await audit?.append({
+          method: name,
+          parameterHash: hashParameters(args),
+          responseBytes,
+          budgetConsumed: 0,
+          redactionFired: false,
+          source: "mcp",
+          identity: caller.name ?? "anonymous",
+          result,
+          durationMs: Date.now() - started,
+        });
+      } catch {
+        // A full disk must not turn a finished call into a failure.
+      }
+    };
+    try {
+      const done = await runMcpTool(name, args, caller);
+      await record(done.isError ? "error" : "ok", Buffer.byteLength(done.text));
+      return done;
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      await record(
+        typeof code === "string" && MCP_DENIAL_CODES.has(code)
+          ? "denied"
+          : "error",
+        0
+      );
+      throw error;
+    }
+  }
+
+  async function runMcpTool(
+    name: string,
+    args: unknown,
+    caller: McpCaller
+  ): Promise<{ text: string; isError: boolean }> {
+    const ticketTool = asTicketToolName(name);
+    if (!ticketTool && !(await isMcpWrite(name))) {
+      return invokeToolDetailed(name, args);
+    }
+    if (ticketTool && !TICKET_TOOL_WRITE_NAMES.has(ticketTool)) {
+      return invokeTicketTool(ticketTool, args, caller);
+    }
     if (!ctx.mcpWritesAllowed) {
       throw httpError(
         403,
@@ -321,7 +477,30 @@ export function createControlApi(
         "mcp_writes_not_enabled"
       );
     }
+    if (!caller.writes) {
+      throw httpError(
+        403,
+        `${name} changes things, and this token may only read over /mcp. Make a token that may write with: thebe token create <name> --scope mcp:write`,
+        "mcp_scope_required"
+      );
+    }
     const params = (args ?? {}) as Record<string, unknown>;
+    if (!caller.irreversible) {
+      const { sends, ...context } = await irreversibleContext(name, params);
+      const reason = irreversibleReason({
+        name,
+        args: { ...params, ...sends },
+        ...context,
+      });
+      if (reason) {
+        throw httpError(
+          403,
+          irreversibleRefusal(name, reason),
+          "mcp_irreversible_required"
+        );
+      }
+    }
+    if (ticketTool) return invokeTicketTool(ticketTool, args, caller);
     if (name === CONTAINER_RESTART_ACTION_ID) {
       if (!deps.executeAction) {
         throw httpError(503, "container actions are not available");
@@ -355,32 +534,66 @@ export function createControlApi(
       return runBaseTool(name, args);
     }
     if (!name.startsWith("mcp:")) return invokeToolDetailed(name, args);
-    // Core's own tools write their audit record; a provider's tool does not, so Core does.
-    const record = (text: string, result: "ok" | "error") =>
-      audit?.append({
-        method: name,
-        parameterHash: hashParameters(params),
-        responseBytes: Buffer.byteLength(text),
-        budgetConsumed: 0,
-        redactionFired: false,
-        source: "mcp",
-        result,
-      });
-    try {
-      const done = await invokeToolDetailed(name, args);
-      await record(done.text, done.isError ? "error" : "ok");
-      return done;
-    } catch (error) {
-      await record(
-        error instanceof Error ? error.message : String(error),
-        "error"
-      );
-      throw error;
+    return invokeToolDetailed(name, args);
+  }
+
+  async function invokeTicketTool(
+    name: TicketToolName,
+    args: unknown,
+    caller: McpCaller
+  ): Promise<{ text: string; isError: boolean }> {
+    if (!deps.tickets) {
+      throw httpError(503, "Ticket control is unavailable");
     }
+    const params =
+      args && typeof args === "object" && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : {};
+    if (
+      name === TICKET_REPLY_TOOL_NAME &&
+      params.permissionDecision === "allow" &&
+      !caller.irreversible
+    ) {
+      const ticket = await deps.tickets.get(String(params.ticketId ?? ""));
+      const pending = ticket?.pendingPermissions.find(
+        (item) => item.id === params.permissionId
+      );
+      if (pending) {
+        const callArgs =
+          pending.input &&
+          typeof pending.input === "object" &&
+          !Array.isArray(pending.input)
+            ? (pending.input as Record<string, unknown>)
+            : {};
+        const { sends, ...context } = await irreversibleContext(
+          pending.toolName,
+          callArgs
+        );
+        const reason =
+          pending.toolName === "bash"
+            ? "runs an arbitrary shell command"
+            : irreversibleReason({
+                name: pending.toolName,
+                args: { ...callArgs, ...sends },
+                ...context,
+              });
+        if (reason) {
+          throw httpError(
+            403,
+            irreversibleRefusal(pending.toolName, reason),
+            "mcp_irreversible_required"
+          );
+        }
+      }
+    }
+    return {
+      text: JSON.stringify(await deps.tickets.invoke(name, params, caller)),
+      isError: false,
+    };
   }
 
   // Per-operation service writes are two-phase: the tool returns a preview and a
-  // single-use confirm token, and only service_api.confirm executes it. Read
+  // single-use confirm token, and only service_confirm executes it. Read
   // tools run directly. Writes and confirmations are audited.
   const CONFIRM_TTL_MS = 5 * 60_000;
   const MAX_PENDING_WRITES = 64;
@@ -391,6 +604,8 @@ export function createControlApi(
       request: { method: string; path: string; body?: unknown };
       operationId: string;
       service: string;
+      /** The operator's mark on the operation, kept so the confirm is judged the same way as the preview. */
+      irreversible?: boolean;
       expires: number;
     }
   >();
@@ -399,8 +614,8 @@ export function createControlApi(
     name: string
   ): Promise<{ provider: ServiceAPIProvider; operation: ServiceAPIOperation }> {
     const rest = name.slice(SERVICE_API_OPERATION_PREFIX.length);
-    const dot = rest.indexOf(".");
-    const serviceId = dot > 0 ? rest.slice(0, dot) : "";
+    const separator = rest.indexOf(SERVICE_API_OPERATION_SEPARATOR);
+    const serviceId = separator > 0 ? rest.slice(0, separator) : "";
     const provider = (options.serviceAPIProviders ?? []).find(
       (candidate) => candidate.id === serviceId
     );
@@ -449,10 +664,11 @@ export function createControlApi(
       request,
       operationId: operation.id,
       service: provider.id,
+      irreversible: operation.irreversible,
       expires: Date.now() + CONFIRM_TTL_MS,
     });
     await audit?.append({
-      method: "service_api.write.preview",
+      method: "service__write__preview",
       parameterHash: hashParameters({
         service: provider.id,
         operation: operation.id,
@@ -495,7 +711,7 @@ export function createControlApi(
       readOnly: false,
     });
     await audit?.append({
-      method: "service_api.write",
+      method: SERVICE_API_WRITE_TOOL_NAME,
       parameterHash: hashParameters({
         service: entry.service,
         operation: entry.operationId,
@@ -657,16 +873,7 @@ export function createControlApi(
       input: CapabilityInvokeInput = {}
     ): Promise<CapabilityInvokeResult> {
       const capabilities = [
-        ...listCoreMcpTools({
-          strmRepairProvider: options.strmRepairProvider,
-          navidrome: Boolean(options.navidrome),
-          musicResearch: Boolean(options.musicResearch),
-          netease: Boolean(options.musicSources?.netease),
-          sqmusic: Boolean(options.musicSources?.sqmusic),
-          emby: Boolean(options.emby),
-          jellyfin: Boolean(options.jellyfin),
-          immich: Boolean(options.immich),
-        }),
+        ...coreCapabilities(),
         ...baseTools()
           .filter((tool) =>
             (SERVICE_API_TOOL_NAMES as readonly string[]).includes(tool.name)
@@ -700,7 +907,7 @@ export function createControlApi(
       ) {
         throw httpError(
           400,
-          "strm.repair requires resource.kind=strm",
+          "strm_repair requires resource.kind=strm",
           "invalid_body"
         );
       }
@@ -713,7 +920,7 @@ export function createControlApi(
         ) {
           throw httpError(
             400,
-            `strm.repair requires resource.provider=${capability.service}`,
+            `strm_repair requires resource.provider=${capability.service}`,
             "invalid_body"
           );
         }
@@ -821,7 +1028,7 @@ export function createControlApi(
       const text = await invokeTool(capability.id, invocationArgs);
       const result = parseCapabilityResult(text);
       const artifactResult =
-        capability.id === "navidrome.queue"
+        capability.id === "navidrome_queue"
           ? redactNavidromeQueueForStorage(result)
           : result;
       const artifact = artifactStore
@@ -1113,6 +1320,12 @@ function asStrmRepairRequest(value: unknown): StrmRepairRequest {
   };
 }
 
+function asTicketToolName(name: string): TicketToolName | undefined {
+  return (TICKET_TOOL_NAMES as readonly string[]).includes(name)
+    ? (name as TicketToolName)
+    : undefined;
+}
+
 function resourceRef(
   resource: Record<string, unknown> | undefined
 ): { kind: string; id: string } | undefined {
@@ -1133,7 +1346,9 @@ function syntheticServiceOperation(id: string): HomelabCapability {
   const service =
     id === SERVICE_API_CONFIRM_TOOL_NAME
       ? undefined
-      : id.slice(SERVICE_API_OPERATION_PREFIX.length).split(".")[0];
+      : id
+          .slice(SERVICE_API_OPERATION_PREFIX.length)
+          .split(SERVICE_API_OPERATION_SEPARATOR)[0];
   return {
     id,
     name: id,

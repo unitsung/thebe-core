@@ -70,6 +70,8 @@ export type SubagentRun = {
   status: SubagentRunStatus;
   turns: number;
   maxTurns: number;
+  /** The per-run turn budget stopped this child before it finished normally. */
+  turnLimitReached?: boolean;
   createdAt: string;
   startedAt?: string;
   finishedAt?: string;
@@ -83,6 +85,13 @@ export type SubagentRun = {
   error?: string;
 };
 
+/** The first action an unattended Ticket worker asked for that its Mandate refused. */
+export type MandateDenial = {
+  toolName: string;
+  toolCallId?: string;
+  detail: string;
+};
+
 /** A durable-objective run attached to one ordinary parent conversation. */
 export type GoalRunStatus =
   | "running"
@@ -92,6 +101,52 @@ export type GoalRunStatus =
   | "max_iterations"
   | "cancelled"
   | "failed";
+
+/** What a Goal's worker said about a checkpoint through `goal_report`. */
+export type GoalReportState =
+  | "progress"
+  | "ready"
+  | "blocked"
+  | "waiting"
+  | "ask"
+  | "dropped";
+
+export type GoalReport = {
+  state: GoalReportState;
+  summary?: string;
+  evidence?: string;
+  blocker?: string;
+  question?: string;
+  options?: string[];
+  reason?: string;
+  at: string;
+};
+
+/** The one open request for the person on a Goal: a question to answer, or a finished result to accept. */
+export type GoalAttention = {
+  id: string;
+  kind: "answer" | "review";
+  question: string;
+  options?: string[];
+  askedAt: string;
+};
+
+export type GoalWatchdogReason =
+  | "goal_no_progress"
+  | "worker_inactivity"
+  | "reviewer_inactivity";
+
+/** A bounded record of the Watchdog's last action. It never grants authority or changes a Mandate. */
+export type GoalWatchdogState = {
+  state: "checking" | "retrying" | "waiting_for_person";
+  reason: GoalWatchdogReason;
+  action: "status_check" | "retry_worker" | "pause";
+  /** What was being measured when the intervention began. */
+  since: string;
+  /** When this action was taken. */
+  at: string;
+  summary?: string;
+};
 
 export type GoalRun = {
   thebeSessionId: string;
@@ -116,6 +171,39 @@ export type GoalRun = {
   /** Bounded product Artifact containing the latest terminal report. */
   artifactId?: string;
   error?: string;
+  /** Ended `failed` because the review reported a blocker that only the person can clear. */
+  blocked?: boolean;
+  /** Read-only run: the worker cannot edit, write or run commands, only look and report. */
+  observe?: boolean;
+  /**
+   * Who carries the work out. Unset: the coding worker, for a task in the workspace. `ticket`: the home
+   * operator, for work an Eval took on (a Ticket): it has the home tools, not a shell or file editing, and
+   * what it may change is what the Ticket's Mandate allows.
+   */
+  executor?: "ticket";
+  /** Assignment accepted by the executor during the latest startup recovery. */
+  recoveryAssignmentId?: string;
+  /** The worker's latest structured report. */
+  report?: GoalReport;
+  /** Set while the Goal is paused waiting for the person; cleared by their answer. */
+  attention?: GoalAttention;
+  /** The task opted in to the worker asking the person a question mid-run. */
+  allowAsk?: boolean;
+  /** After the independent review passes, wait for the person to accept instead of finishing. */
+  reviewBeforeDone?: boolean;
+  /** The person's answers and review notes so far, given to every later checkpoint. */
+  guidance?: string[];
+  /** Highest sequence of a later Ticket event already included in a worker checkpoint. */
+  ticketInputSeq?: number;
+  /** Last semantic progress observed by the Watchdog. Audit events do not move this clock. */
+  progressAt?: string;
+  /** Set while Watchdog is checking, retrying, or waiting for the person. */
+  watchdog?: GoalWatchdogState;
+  /**
+   * A person stopped this Goal while a worker was active. Persisted so a restart finishes the stop
+   * instead of resuming work the person already ended.
+   */
+  stopRequested?: boolean;
 };
 
 /** @deprecated Use ThebePromptResult */
@@ -141,7 +229,7 @@ export const DEFAULT_MODEL_TEST_TIMEOUT_MS = 60_000;
 export function httpError(
   status: number,
   message: string,
-  code?: string,
+  code?: string
 ): Error {
   return Object.assign(new Error(message), { status, code });
 }

@@ -15,11 +15,12 @@ export function createContainerTools(
   options: {
     policy: Policy;
     callerId: string;
-  },
+  }
 ): CustomToolDefinition[] {
   const layer = createToolLayer(provider);
 
-  const run = (name: (typeof CONTAINER_TOOL_NAMES)[number]) =>
+  const run =
+    (name: (typeof CONTAINER_TOOL_NAMES)[number]) =>
     async (_toolCallId: string, params: unknown) => {
       const args = (params ?? {}) as { id?: string; tail?: number };
       const decision = options.policy.allow(name, options.callerId);
@@ -41,32 +42,32 @@ export function createContainerTools(
 
   return [
     {
-      name: "container.list",
+      name: "container_list",
       label: "List containers",
-      description: CONTAINER_TOOL_DESCRIPTIONS["container.list"],
-      parameters: CONTAINER_TOOL_SCHEMAS["container.list"],
-      execute: run("container.list"),
+      description: CONTAINER_TOOL_DESCRIPTIONS["container_list"],
+      parameters: CONTAINER_TOOL_SCHEMAS["container_list"],
+      execute: run("container_list"),
     },
     {
-      name: "container.inspect",
+      name: "container_inspect",
       label: "Inspect container",
-      description: CONTAINER_TOOL_DESCRIPTIONS["container.inspect"],
-      parameters: CONTAINER_TOOL_SCHEMAS["container.inspect"],
-      execute: run("container.inspect"),
+      description: CONTAINER_TOOL_DESCRIPTIONS["container_inspect"],
+      parameters: CONTAINER_TOOL_SCHEMAS["container_inspect"],
+      execute: run("container_inspect"),
     },
     {
-      name: "container.logs",
+      name: "container_logs",
       label: "Container logs",
-      description: CONTAINER_TOOL_DESCRIPTIONS["container.logs"],
-      parameters: CONTAINER_TOOL_SCHEMAS["container.logs"],
-      execute: run("container.logs"),
+      description: CONTAINER_TOOL_DESCRIPTIONS["container_logs"],
+      parameters: CONTAINER_TOOL_SCHEMAS["container_logs"],
+      execute: run("container_logs"),
     },
     {
-      name: "container.status_summary",
+      name: "container_status_summary",
       label: "Container status summary",
-      description: CONTAINER_TOOL_DESCRIPTIONS["container.status_summary"],
-      parameters: CONTAINER_TOOL_SCHEMAS["container.status_summary"],
-      execute: run("container.status_summary"),
+      description: CONTAINER_TOOL_DESCRIPTIONS["container_status_summary"],
+      parameters: CONTAINER_TOOL_SCHEMAS["container_status_summary"],
+      execute: run("container_status_summary"),
     },
   ];
 }

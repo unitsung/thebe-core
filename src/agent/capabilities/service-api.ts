@@ -1,6 +1,12 @@
 /** Authenticated service boundary. Credentials and transport stay in adapters. */
 export interface ServiceAPIProvider {
   id: string;
+  /**
+   * The kinds of thing this service looks after (`container`, `media-server`...), as the operator says.
+   * An event about one of these kinds gives a Ticket's executor the writes of this service. A service
+   * that names no kind is only ever reached by an executor whose event is about a kind named like it.
+   */
+  resourceKinds?: readonly string[];
   catalog(input?: {
     query?: string;
     operationId?: string;
@@ -20,26 +26,29 @@ export interface ServiceAPIProvider {
   /**
    * The operations this service documents, for per-operation tool exposure. Only
    * operations the operator allow-listed as read-only become callable tools; the
-   * rest stay behind `service_api_discover` / `service_api_write`.
+   * rest stay behind `service_discover` / `service_write`.
    */
   operations?(): Promise<ServiceAPIOperation[]> | ServiceAPIOperation[];
 }
 
+export const SERVICE_API_WRITE_TOOL_NAME = "service_write";
 export const SERVICE_API_TOOL_NAMES = [
-  "service_api_discover",
-  "service_api_read",
-  "service_api_write",
+  "service_discover",
+  "service_read",
+  SERVICE_API_WRITE_TOOL_NAME,
 ] as const;
-export const SERVICE_API_WRITE_TOOL_NAME = "service_api_write";
+/** The argument that names the configured service a generic call is about. */
+export const SERVICE_ARGUMENT = "service";
 
 /**
  * Product/MCP-only capability that executes a previewed write. Not a model tool:
- * the model's approved write path stays `service_api_write`.
+ * the model's approved write path stays `service_write`.
  */
-export const SERVICE_API_CONFIRM_TOOL_NAME = "service_api.confirm";
+export const SERVICE_API_CONFIRM_TOOL_NAME = "service_confirm";
 
-/** Id prefix for one tool per allow-listed read operation of a configured service. */
-export const SERVICE_API_OPERATION_PREFIX = "service_api.";
+/** Id prefix for one tool per allow-listed read operation of a configured service: `service__<service>__<operation>`. */
+export const SERVICE_API_OPERATION_SEPARATOR = "__";
+export const SERVICE_API_OPERATION_PREFIX = `service${SERVICE_API_OPERATION_SEPARATOR}`;
 
 export type ServiceAPIParameterLocation = "path" | "query" | "header";
 
@@ -62,6 +71,8 @@ export type ServiceAPIOperation = {
   readOnly: boolean;
   /** Operator allow-listed for a preview + confirm write tool. */
   writable: boolean;
+  /** The operator's word on whether this call cannot be undone; beats the HTTP-method rule. */
+  irreversible?: boolean;
   parameters: ServiceAPIParameter[];
   requestBody?: {
     required: boolean;
@@ -74,16 +85,18 @@ function segment(value: string): string {
   const cleaned = value
     .trim()
     .replace(/[^A-Za-z0-9_-]+/g, "_")
+    // `__` is the separator between the parts of an id, so it cannot occur inside one.
+    .replace(/_{2,}/g, "_")
     .replace(/^_+|_+$/g, "");
   return cleaned || "operation";
 }
 
-/** The tool id for one operation, e.g. `service_api.petstore.findPetsByStatus`. */
+/** The tool id for one operation, e.g. `service__petstore__findPetsByStatus`. */
 export function serviceOperationToolName(
   serviceId: string,
   operationId: string
 ): string {
-  return `${SERVICE_API_OPERATION_PREFIX}${segment(serviceId)}.${segment(operationId)}`;
+  return `${SERVICE_API_OPERATION_PREFIX}${segment(serviceId)}${SERVICE_API_OPERATION_SEPARATOR}${segment(operationId)}`;
 }
 
 /** Whether an operation can be exposed as a standalone read tool at all. */
@@ -92,10 +105,87 @@ export function serviceOperationExposable(
 ): boolean {
   if (!operation.readOnly) return false;
   // A required header parameter cannot be supplied generically (headers are
-  // operator-owned), so such an operation stays behind service_api_write.
+  // operator-owned), so such an operation stays behind service_write.
   return !operation.parameters.some(
     (parameter) => parameter.in === "header" && parameter.required
   );
+}
+
+/** What Core knows about a service call beyond its arguments: its method, and the operator's mark. */
+export type ServiceCallContext = {
+  httpMethod?: string;
+  operatorMark?: boolean;
+};
+
+function operationPathPattern(path: string): RegExp {
+  const pattern = path
+    .split(/(\{[^}]+\})/)
+    .map((part) =>
+      part.startsWith("{")
+        ? "[^/]+"
+        : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    )
+    .join("");
+  return new RegExp(`^${pattern}/?$`);
+}
+
+/**
+ * The classification context of one service call, from the same operation catalogue the `/mcp`
+ * gate reads: an operation tool by its name, a generic write by the method and path it names. A
+ * call no configured operation matches yields only the method its arguments state.
+ */
+export async function serviceCallContext(
+  providers: readonly ServiceAPIProvider[],
+  name: string,
+  params: Record<string, unknown>
+): Promise<ServiceCallContext> {
+  const fromOperation = (
+    operation: ServiceAPIOperation
+  ): ServiceCallContext => ({
+    httpMethod: operation.method,
+    ...(operation.irreversible === undefined
+      ? {}
+      : { operatorMark: operation.irreversible }),
+  });
+  const operationsOf = async (
+    provider: ServiceAPIProvider
+  ): Promise<ServiceAPIOperation[]> => {
+    if (!provider.operations) return [];
+    try {
+      return await provider.operations();
+    } catch {
+      return []; // an unreachable service classifies nothing
+    }
+  };
+  if (name === SERVICE_API_WRITE_TOOL_NAME) {
+    const method =
+      typeof params.method === "string" ? params.method : undefined;
+    if (!method) return {};
+    const provider = providers.find(
+      (candidate) => candidate.id === params.service
+    );
+    const path =
+      typeof params.path === "string" ? params.path.split("?")[0] : undefined;
+    if (!provider || !path) return { httpMethod: method };
+    const operation = (await operationsOf(provider)).find(
+      (candidate) =>
+        candidate.method.toUpperCase() === method.toUpperCase() &&
+        operationPathPattern(candidate.path).test(path)
+    );
+    return operation ? fromOperation(operation) : { httpMethod: method };
+  }
+  if (name.startsWith(SERVICE_API_OPERATION_PREFIX)) {
+    const rest = name.slice(SERVICE_API_OPERATION_PREFIX.length);
+    const separator = rest.indexOf(SERVICE_API_OPERATION_SEPARATOR);
+    const serviceId = separator > 0 ? rest.slice(0, separator) : "";
+    const provider = providers.find((candidate) => candidate.id === serviceId);
+    if (!provider) return {};
+    const operation = (await operationsOf(provider)).find(
+      (candidate) => serviceOperationToolName(serviceId, candidate.id) === name
+    );
+    return operation ? fromOperation(operation) : {};
+  }
+  return {};
 }
 
 /** Whether an operation can be exposed as a preview + confirm write tool. */

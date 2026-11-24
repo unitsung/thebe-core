@@ -4,6 +4,28 @@ import type { ThemeName } from "./theme.ts";
 
 export type ThebeTuiSend = (text: string) => Promise<string>;
 
+export type ThebeOAuthPairingCode = {
+  code: string;
+  expiresAt: string;
+  issuer?: string;
+  resource?: string;
+};
+
+export type ThebeOAuthConnection = {
+  id: string;
+  clientId: string;
+  clientName: string;
+  scopes: string[];
+  createdAt: string;
+  expiresAt?: string;
+  refreshToken: boolean;
+};
+
+export type ThebeOAuthConnectorAdmin = {
+  list(): Promise<ThebeOAuthConnection[]>;
+  revoke(id: string): Promise<boolean>;
+};
+
 export type ThebeTuiOptions = {
   agent?: ThebeAgent;
   sessionId?: string;
@@ -18,6 +40,12 @@ export type ThebeTuiOptions = {
   cwd?: string;
   /** Invoked after `/tui` persists a mode so the host can swap the live screen. */
   onTuiModeChange?: (mode: TuiMode) => void | Promise<void>;
+  /** Issues a one-time pairing code when the MCP OAuth gateway is enabled. */
+  issueOAuthPairingCode?: () =>
+    | ThebeOAuthPairingCode
+    | Promise<ThebeOAuthPairingCode>;
+  /** Lists and revokes authorised MCP OAuth connectors when the gateway is enabled. */
+  oauthConnectors?: ThebeOAuthConnectorAdmin;
   /**
    * Stops the OS-sandbox proxies. The host that bootstrapped Core supplies it;
    * delivery never imports the sandbox library (see `architecture.test.ts`).

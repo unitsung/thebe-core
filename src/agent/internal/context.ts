@@ -1,3 +1,9 @@
+import {
+  isUnattended,
+  mandateAllows,
+  mandateRefusal,
+} from "../tickets/mandate.ts";
+import type { TicketMandate } from "../tickets/types.ts";
 import { join, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import {
@@ -9,6 +15,7 @@ import {
   PI_BUILTIN_TOOLS,
   TOOLS_REQUIRING_APPROVAL,
   asPromptInput,
+  type CustomToolDefinition,
   type EnabledResource,
   type NormalizedEvent,
   type PermissionPreflightDecision,
@@ -39,44 +46,35 @@ import { createContainerTools } from "../../agent/tools/container-tools.ts";
 import { createNavidromeTools } from "../../agent/tools/navidrome-tools.ts";
 import { createMusicResearchTools } from "../tools/music-research-tools.ts";
 import { createMusicSourcesTools } from "../tools/music-sources-tools.ts";
-import {
-  NETEASE_TOOL_NAME,
-  SQMUSIC_DOWNLOAD_TOOL_NAME,
-  SQMUSIC_TOOL_NAME,
-} from "../capabilities/music-sources.ts";
+import {} from "../capabilities/music-sources.ts";
 import { createWebSearchTools } from "../tools/web-search-tools.ts";
 import { createServiceAPITools } from "../tools/service-api-tools.ts";
 import {
   allPipelineToolNames,
-  availablePipelineTools,
   canRunPipelineJobs,
   createPipelineTools,
 } from "../tools/pipeline-tools.ts";
-import { createJobBook } from "../pipeline/job-runner.ts";
+import {
+  createJobBook,
+  type PlacementContext,
+} from "../pipeline/job-runner.ts";
+import { createFileJobStore } from "../pipeline/job-store.ts";
 import {
   createPipelineAdvancer,
   DEFAULT_INTERVAL_MS as PIPELINE_ADVANCE_INTERVAL_MS,
 } from "../pipeline/advancer.ts";
-import { PIPELINE_WRITE_TOOL_NAMES } from "../capabilities/pipeline.ts";
 import {
-  SERVICE_API_TOOL_NAMES,
+  serviceCallContext,
+  SERVICE_API_OPERATION_PREFIX,
   SERVICE_API_WRITE_TOOL_NAME,
 } from "../capabilities/service-api.ts";
 import {
   createImmichSearchTools,
   createMediaLibraryTools,
 } from "../../agent/tools/media-library-tools.ts";
-import { CONTAINER_TOOL_NAMES } from "../capabilities/containers.ts";
-import {
-  EMBY_LOOKUP_TOOL_NAMES,
-  IMMICH_SEARCH_TOOL_NAMES,
-  JELLYFIN_LOOKUP_TOOL_NAMES,
-} from "../capabilities/media.ts";
-import {
-  NAVIDROME_TOOL_NAMES,
-  NAVIDROME_WRITE_TOOL_NAMES,
-} from "../capabilities/navidrome.ts";
-import { createEmptyMcpRegistry, CORE_EVENT_TOOLS } from "../extensions/mcp.ts";
+import {} from "../capabilities/media.ts";
+import {} from "../capabilities/navidrome.ts";
+import { createEmptyMcpRegistry } from "../extensions/mcp.ts";
 import { createAgentStore } from "../store.ts";
 import {
   httpError,
@@ -89,6 +87,11 @@ import { createRuntimeMcpOptions } from "../tools/mcp-tools.ts";
 import { createCoreEventTools } from "../tools/core-event-tools.ts";
 import type { CreateThebeAgentOptions } from "../interface.ts";
 import { createAutoSummary } from "./auto-summary.ts";
+import {
+  APP_CONTROL_TOOL_NAMES,
+  createAppControlTools,
+  createClientToolBridge,
+} from "../app-control/client-tools.ts";
 export { DEFAULT_AUTO_SUMMARY_DELAY_MS } from "./auto-summary.ts";
 import { createEventLog } from "./event-log.ts";
 import { createPermissionControl } from "./permission-control.ts";
@@ -113,11 +116,7 @@ import {
   type MemoryOperation,
   type MemoryTarget,
 } from "../memory/memory.ts";
-import {
-  createMemoryTools,
-  MEMORY_TOOL_NAME,
-  type MemoryView,
-} from "../tools/memory-tool.ts";
+import { createMemoryTools, type MemoryView } from "../tools/memory-tool.ts";
 import {
   checkAgentInstructions,
   clampStoredInstructions,
@@ -311,23 +310,8 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     now,
     maxToolCalls: options.maxToolCalls,
     maxBlocks: options.maxBlocks,
-    allowedToolNames: [
-      ...Object.keys(CORE_EVENT_TOOLS),
-      ...(options.musicResearch ? ["music_research"] : []),
-      ...(options.musicSources?.netease ? [NETEASE_TOOL_NAME] : []),
-      ...(options.musicSources?.sqmusic
-        ? [SQMUSIC_TOOL_NAME, SQMUSIC_DOWNLOAD_TOOL_NAME]
-        : []),
-      ...(options.webSearch ? ["web_search"] : []),
-      ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
-      ...CONTAINER_TOOL_NAMES,
-      ...(options.navidrome ? NAVIDROME_TOOL_NAMES : []),
-      ...(options.emby ? EMBY_LOOKUP_TOOL_NAMES : []),
-      ...(options.jellyfin ? JELLYFIN_LOOKUP_TOOL_NAMES : []),
-      ...(options.immich ? IMMICH_SEARCH_TOOL_NAMES : []),
-      ...(options.serviceAPIProviders?.length ? SERVICE_API_TOOL_NAMES : []),
-      ...(options.pipeline ? allPipelineToolNames(options.pipeline) : []),
-    ],
+    // Every tool the session builds is registered once they exist (below), so the list is the tools.
+    allowedToolNames: [],
   });
   const audit = options.auditPath
     ? createAuditLog(options.auditPath, now)
@@ -354,6 +338,13 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       withUserInstructions(baseSystemPrompt, instructions),
       options.memoryStore?.load() ?? emptyMemory()
     );
+  type SessionOptionsDecoration = {
+    customTools: CustomToolDefinition[];
+    systemPrompt?: string;
+  };
+  let decorateSessionOptions:
+    | ((thebeSessionId: string) => SessionOptionsDecoration | undefined)
+    | undefined;
 
   function memoryView(): MemoryView {
     const snapshot = options.memoryStore?.load() ?? emptyMemory();
@@ -423,7 +414,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
             libraries: pipelineProviders.libraries,
             media: pipelineProviders.media,
           },
-          pipelineProviders.jobStore
+          pipelineProviders.jobStore ??
+            (options.agentStoreDir
+              ? createFileJobStore(
+                  join(options.agentStoreDir, "pipeline-jobs.json")
+                )
+              : undefined)
         )
       : undefined;
   const pipelineAdvancer = pipelineBook
@@ -435,6 +431,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     : undefined;
 
   const eventLog = createEventLog();
+  const clientToolBridge = createClientToolBridge({ now });
   const resourcesNeedingReload = new Set<string>();
   let getActive: () => OpenedSession | undefined = () => undefined;
 
@@ -492,6 +489,32 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
+  /**
+   * The same classification context the `/mcp` gate resolves for a service call: the operation's
+   * method and the operator's mark. A provider tool keeps its server's own hint, which the runtime
+   * applies to it; a Mandate does not cover it by name.
+   */
+  async function mandateCallContext(request: PermissionRequest) {
+    const { toolName } = request;
+    if (
+      toolName !== SERVICE_API_WRITE_TOOL_NAME &&
+      !toolName.startsWith(SERVICE_API_OPERATION_PREFIX)
+    ) {
+      return undefined;
+    }
+    const args =
+      request.args &&
+      typeof request.args === "object" &&
+      !Array.isArray(request.args)
+        ? (request.args as Record<string, unknown>)
+        : {};
+    return serviceCallContext(
+      options.serviceAPIProviders ?? [],
+      toolName,
+      args
+    );
+  }
+
   const permissions = createPermissionControl({
     initialMode: options.permissionMode,
     sessionMode: sessionModeOf,
@@ -506,6 +529,22 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           dockerGuard: hostSecurity.dockerGuard,
         },
       }),
+    mandateAllows: async (thebeSessionId, request) =>
+      mandateAllows(
+        await mandateLookup?.(thebeSessionId),
+        request.toolName,
+        request.args,
+        await mandateCallContext(request)
+      ),
+    unattended: async (thebeSessionId) =>
+      isUnattended(await mandateLookup?.(thebeSessionId)),
+    mandateRefusal: async (thebeSessionId, request) =>
+      mandateRefusal(
+        await mandateLookup?.(thebeSessionId),
+        request.toolName,
+        request.args,
+        await mandateCallContext(request)
+      ),
     preflight,
     workspaceReadTools: WORKSPACE_READ_TOOLS,
     lookupRemembered,
@@ -773,11 +812,21 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     }
   }
 
+  // Bound by the composition root once the Ticket store exists. Until then a session has no Ticket, and
+  // no Mandate covers a write.
+  let mandateLookup:
+    | ((thebeSessionId: string) => Promise<TicketMandate | undefined>)
+    | undefined;
+  let pipelinePlacementLookup:
+    | ((sessionId: string) => Promise<PlacementContext | undefined>)
+    | undefined;
+
   function baseTools(
     toolPolicy = policy,
     toolCallerId = callerId,
     modelResults = false,
-    scopeId?: string
+    scopeId?: string,
+    permissionScopeId = scopeId
   ) {
     const tools = createContainerTools(options.provider, {
       policy: toolPolicy,
@@ -859,6 +908,9 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
           policy: toolPolicy,
           callerId: toolCallerId,
           book: pipelineBook,
+          placementContext: permissionScopeId
+            ? () => pipelinePlacementLookup?.(permissionScopeId)
+            : undefined,
           onAcquired: (jobId) => pipelineAdvancer?.track(jobId),
         })
       );
@@ -877,6 +929,18 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         return sid ? eventLog.sessionLog(sid).events : eventLog.lastEvents;
       })
     );
+    // A subagent uses its own run id for events but its parent's permission scope. It must not
+    // operate the person's App on the parent session's behalf.
+    if (permissionScopeId && scopeId === permissionScopeId) {
+      const sessionId = permissionScopeId;
+      tools.push(
+        ...createAppControlTools({
+          sessionId,
+          bridge: clientToolBridge,
+          emit: (event) => eventLog.appendEvent(sessionId, event),
+        })
+      );
+    }
     return tools;
   }
 
@@ -890,14 +954,41 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     sessionCallerId = callerId,
     sessionStop?: () => void | Promise<void>
   ) {
+    const decoration = explicitSessionId
+      ? decorateSessionOptions?.(explicitSessionId)
+      : undefined;
+    if (decoration) {
+      policy.registerTools(decoration.customTools.map((tool) => tool.name));
+    }
     const effectiveBuiltinTools = sessionBuiltinTools ?? builtinTools;
-    const isChatOnly = effectiveBuiltinTools.length === 0;
+    const usesIsolatedTools = decoration !== undefined;
+    const isChatOnly =
+      effectiveBuiltinTools.length === 0 &&
+      (decoration?.customTools.length ?? 0) === 0;
+    const homeTools = isChatOnly
+      ? []
+      : (decoration?.customTools ??
+        baseTools(
+          sessionPolicy,
+          sessionCallerId,
+          true,
+          eventSessionId,
+          permissionSessionId
+        ));
+    // The tools that ask first say so themselves; the rest of the list is the host's own tools.
+    const toolsRequiringApproval = [
+      ...TOOLS_REQUIRING_APPROVAL,
+      ...WORKSPACE_READ_TOOLS,
+      ...homeTools
+        .filter((tool) => tool.requiresApproval)
+        .map((tool) => tool.name),
+    ];
     // Resolved live: a session opened without an explicit id uses the active one.
     const fullAccessScopeId = () =>
       explicitSessionId ?? getActive()?.meta.thebeSessionId;
     return {
       model: sessionModel ?? options.model,
-      ...(!isChatOnly && sessionCallerId === callerId
+      ...(!isChatOnly && !usesIsolatedTools && sessionCallerId === callerId
         ? (() => {
             const runtimeMcp = createRuntimeMcpOptions(mcp, {
               policy: sessionPolicy,
@@ -923,66 +1014,48 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
         : {}),
       customTools: isChatOnly
         ? []
-        : wrapCustomTools(
-            baseTools(sessionPolicy, sessionCallerId, true, eventSessionId),
-            {
-              policy: sessionPolicy,
-              audit,
-              toolWatchdogMs: options.toolWatchdogMs,
-              modelResultLimit:
-                options.modelResultLimit && options.modelResultLimit > 0
-                  ? options.modelResultLimit
-                  : undefined,
-              sessionId: () =>
-                explicitSessionId ?? getActive()?.meta.thebeSessionId,
-              onEvent: (event) => {
-                const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
-                if (sid) eventLog.appendEvent(sid, event);
-              },
-              onStop: () => {
-                if (sessionStop) {
-                  void sessionStop();
-                  return;
-                }
-                const sid =
-                  eventSessionId ??
-                  explicitSessionId ??
-                  getActive()?.meta.thebeSessionId;
-                if (sid) void state.openedSessions.get(sid)?.session.abort();
-              },
-            }
-          ),
+        : wrapCustomTools(homeTools, {
+            policy: sessionPolicy,
+            audit,
+            // What a call that asks for approval did is worth reading afterwards, not only hashing.
+            summarizeCall: (name) => toolsRequiringApproval.includes(name),
+            toolWatchdogMs: options.toolWatchdogMs,
+            modelResultLimit:
+              options.modelResultLimit && options.modelResultLimit > 0
+                ? options.modelResultLimit
+                : undefined,
+            sessionId: () =>
+              explicitSessionId ?? getActive()?.meta.thebeSessionId,
+            onEvent: (event) => {
+              const sid = eventSessionId ?? getActive()?.meta.thebeSessionId;
+              if (sid) eventLog.appendEvent(sid, event);
+            },
+            onStop: () => {
+              if (sessionStop) {
+                void sessionStop();
+                return;
+              }
+              const sid =
+                eventSessionId ??
+                explicitSessionId ??
+                getActive()?.meta.thebeSessionId;
+              if (sid) void state.openedSessions.get(sid)?.session.abort();
+            },
+          }),
       builtinTools: effectiveBuiltinTools,
-      systemPrompt: currentSystemPrompt(),
-      enabledResources: isChatOnly ? [] : enabledResources,
+      systemPrompt: decoration?.systemPrompt
+        ? [currentSystemPrompt(), decoration.systemPrompt]
+            .filter(Boolean)
+            .join("\n\n")
+        : currentSystemPrompt(),
+      enabledResources: isChatOnly || usesIsolatedTools ? [] : enabledResources,
       ...(workspacePath ? { cwd: workspacePath, workspacePath } : {}),
       permissionHandler: permissions.permissionHandler(
         permissionSessionId,
         fullAccessScopeId
       ),
       fullAccess: () => isSessionFullAccess(fullAccessScopeId()),
-      toolsRequiringApproval: [
-        ...TOOLS_REQUIRING_APPROVAL,
-        ...WORKSPACE_READ_TOOLS,
-        ...(options.memoryStore ? [MEMORY_TOOL_NAME] : []),
-        ...(options.musicSources?.sqmusic ? [SQMUSIC_DOWNLOAD_TOOL_NAME] : []),
-        ...(options.navidrome ? NAVIDROME_WRITE_TOOL_NAMES : []),
-        ...(options.serviceAPIProviders?.length
-          ? [SERVICE_API_WRITE_TOOL_NAME]
-          : []),
-        ...(options.pipeline
-          ? [
-              ...PIPELINE_WRITE_TOOL_NAMES.filter((name) =>
-                availablePipelineTools(options.pipeline!).includes(name)
-              ),
-              ...(allPipelineToolNames(options.pipeline).includes(
-                "pipeline.acquire"
-              )
-                ? ["pipeline.acquire"]
-                : []),
-            ]
-          : []),
-      ],
+      toolsRequiringApproval,
       autoCompact: autoCompactOverride,
     };
   }
@@ -1155,6 +1228,12 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     );
   }
 
+  // The policy allows exactly the tools the host builds: no second list to keep in step with them.
+  policy.registerTools([
+    ...baseTools().map((tool) => tool.name),
+    ...APP_CONTROL_TOOL_NAMES,
+  ]);
+
   return {
     options,
     now,
@@ -1200,6 +1279,7 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     sessionPermissionMode,
     cancelAutoSummary: autoSummary.cancel,
     openSession: registry.openSession,
+    readMessages: registry.readMessages,
     reapIdleSessions: registry.reapIdleSessions,
     get active() {
       return registry.active;
@@ -1214,12 +1294,30 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
       registry.requestStop = value;
     },
     checkNotQuiesced,
+    clientToolBridge,
     resourcesNeedingReload,
     baseTools,
+    setMandateLookup(
+      lookup: (thebeSessionId: string) => Promise<TicketMandate | undefined>
+    ): void {
+      mandateLookup = lookup;
+    },
     sessionOptions,
+    setSessionOptionsDecorator(
+      decorator:
+        | ((thebeSessionId: string) => SessionOptionsDecoration | undefined)
+        | undefined
+    ): void {
+      decorateSessionOptions = decorator;
+    },
     runPrompt,
     pipelineAdvancer,
+    pipelineBook,
+    setPipelinePlacementLookup(lookup: typeof pipelinePlacementLookup) {
+      pipelinePlacementLookup = lookup;
+    },
     lookupRemembered,
+    takeMandateDenial: permissions.takeMandateDenial,
     registerSubagentParentCanceller,
     cancelSubagentsForParent,
   };
@@ -1245,31 +1343,31 @@ function promptResult(
 function PIPELINE_PLAYBOOK(tools: readonly string[]): string {
   const has = (name: string) => tools.includes(name);
   return [
-    ...(tools.includes("pipeline.acquire")
+    ...(tools.includes("pipeline_acquire")
       ? [
-          "Preferred route: resource.search → let the user choose a release → ONE pipeline.acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline.advance until done or failed → act on failure.advice. Use the individual download.*/files.*/library.* tools only for manual repair or when no job fits.",
+          "Preferred route: resource_search → let the user choose a release → ONE pipeline_acquire (it runs download, copy, scan and verify deterministically with bounded retries) → pipeline_advance until done or failed → act on failure.advice. Use the individual download_*/files_*/library_* tools only for manual repair or when no job fits.",
         ]
       : []),
     "Acquisition pipeline (find → download → place in library → scrape → verify). Work it as an explicit plan: state the steps once, then execute them, keeping a running checklist of what is done, pending and blocked. Writes are approved one by one, so batch related arguments (several URLs, several names) into one call and never repeat a step that already succeeded.",
-    "1. Find: use navidrome.search / emby.search / jellyfin.search first to learn what already exists, and web_search, music_research or service_api_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
-    has("download.add")
-      ? "2. Download: download.add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download.status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
-      : "2. Download: no downloader tool is configured; use service_api_discover to find a download operation, or tell the user which connection is missing.",
-    ...(has("download.delete")
+    "1. Find: use navidrome_search / emby_search / jellyfin_search first to learn what already exists, and web_search, music_research or service_* for sources. Never download something the library already has unless asked. Ask the user to choose when several releases match.",
+    has("download_add")
+      ? "2. Download: download_add with the chosen magnet or .torrent URL (set savePath or category when the library folder is known, or paused:true to review). Submission is not completion: poll download_status with the returned hash until state is completed or seeding, and report errors instead of waiting forever."
+      : "2. Download: no downloader tool is configured; use service_discover to find a download operation, or tell the user which connection is missing.",
+    ...(has("download_delete")
       ? [
-          "Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download.pause otherwise.",
+          "Delete a download only when the user explicitly asks to remove it, and say whether the downloaded files go too (deleteFiles). Prefer download_pause otherwise.",
         ]
       : []),
-    ...(has("download.pause") || has("download.resume")
+    ...(has("download_pause") || has("download_resume")
       ? [
-          "Hold or restart a named download with download.pause / download.resume (hashes from download.list). Neither deletes the task or its files; confirm the new state with download.status.",
+          "Hold or restart a named download with download_pause / download_resume (hashes from download_list). Neither deletes the task or its files; confirm the new state with download_status.",
         ]
       : []),
-    has("files.copy")
-      ? "3. Place: files.list the finished folder and the library folder, files.mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files.copy (prefer copy; use files.move only after a verified copy). These are asynchronous: confirm with files.list that the files arrived."
+    has("files_copy")
+      ? "3. Place: files_list the finished folder and the library folder, files_mkdir the target (Movies/Title (Year) or Shows/Title/Season 01), then files_copy (prefer copy; use files_move only after a verified copy). These are asynchronous: confirm with files_list that the files arrived."
       : "3. Place: move or copy the finished files into the library folder with the available file tools.",
-    has("library.scan")
-      ? "4. Scrape: library.scan so the media server sees the new files, then find the item with its search tool. If it is missing or misidentified, check the folder and file names, fix them, and use library.refresh_item (replaceAllMetadata only when the match was wrong)."
+    has("library_scan")
+      ? "4. Scrape: library_scan so the media server sees the new files, then find the item with its search tool. If it is missing or misidentified, check the folder and file names, fix them, and use library_refresh_item (replaceAllMetadata only when the match was wrong)."
       : "4. Scrape: trigger a library scan on the media server through its API and verify the item appears.",
     "5. Verify and report: show the final state (file location, library entry, metadata) and any step that is still running. If a step fails, diagnose it (logs, tasks, permissions), fix the cause, and resume from that step.",
   ].join("\n");
@@ -1299,13 +1397,13 @@ function buildSystemPrompt(
     "You are Thebe. Reply in the user's language and script (Simplified or Traditional Chinese, as they write).",
     REPLY_STYLE,
     "If a capability the task needs is not among your tools, say which one is missing. Never look for credentials, tokens or connection settings in files, environment variables or containers to work around it.",
-    "You can solve multi-step tasks with the available coding tools, service APIs and MCP tools; a missing named runbook is not a reason to stop. Discover service APIs with service_api_discover when available, inspect the actual files/folders and compose operations. Use bash/read/edit/write for coding and diagnosis in the configured Core workspace when needed. After approval continue the remaining steps without repeating successful writes. Verify asynchronous provider tasks before claiming completion, and identify the precise missing connection or permission when blocked.",
+    "You can solve multi-step tasks with the available coding tools, service APIs and MCP tools; a missing named runbook is not a reason to stop. Discover service APIs with service_discover when available, inspect the actual files/folders and compose operations. Use bash/read/edit/write for coding and diagnosis in the configured Core workspace when needed. After approval continue the remaining steps without repeating successful writes. Verify asynchronous provider tasks before claiming completion, and identify the precise missing connection or permission when blocked.",
     workspacePath
       ? `Your configured workspace is ${workspacePath}. Use only this directory as the default scope for file tools.`
       : "No workspace is configured. Do not read or write host files until the user configures a workspacePath or THEBE_WORKSPACE_DIR.",
     "Return ordinary answers and research results to the parent conversation buffer by default.",
     `For rich replies requested by the user, Thebe clients support Markdown images and fenced JSON cards: ${cardCatalogPrompt()}. Use one useful card rather than decorative clutter. Never invent media URLs, credentials or completed operations; use only accessible URLs returned by tools or supplied by the user. Ordinary answers remain concise Markdown. The Thebe app already shows container, download and file listings from their tools as tables, and library lookups as cards; do not repeat those as cards, and write a table card only to reshape or choose rows.`,
-    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome.queue, so never make player cards or URLs for them.',
+    'Card syntax is a Markdown fence whose opening line is exactly ```thebe:<type>, followed by a newline, the JSON payload alone, a newline and the closing ```. Do not put the thebe:<type> marker inside a generic json fence or inside the payload. Example structure (replace the URL with a real supplied URL):\n```thebe:gallery\n{"images":["https://example.invalid/image.png"],"caption":"Image"}\n```\nFor audio use thebe:player with isAudio:true; for video use isAudio:false. Navidrome songs are played by the app through navidrome_queue, so never make player cards or URLs for them.',
     "Write files only when the user explicitly asks to create, save, or export a file, or when the coding task itself requires changing repository files.",
     "Never create output.md, docs files, or any other file merely to display an answer.",
     "outputDirectory is only the default destination for explicitly requested non-code artifacts; it is not an instruction to write output.",

@@ -1,5 +1,7 @@
 export { createThebeAgent } from "./create.ts";
-export type { ThebeAgent } from "./interface.ts";
+export type { McpCaller, ThebeAgent } from "./interface.ts";
+export { MAIN_SESSION_ID } from "./main-session/service.ts";
+export type { MainSessionInfo } from "./main-session/service.ts";
 export type {
   HomelabCapability,
   HomelabCapabilityCategory,
@@ -46,6 +48,70 @@ export {
   toProductProviderBackgroundTask,
 } from "./background-tasks/product.ts";
 export type { CreateThebeAgentOptions } from "./interface.ts";
+export type {
+  Source,
+  Trigger,
+  ActorRef,
+  ChannelRef,
+  SourceAdmission,
+} from "./sources/types.ts";
+export type {
+  ChannelAdapter,
+  ChannelSendInput,
+  TicketChannelNotice,
+} from "./channels/types.ts";
+export type {
+  Notification,
+  NotificationAdapter,
+  NotificationCapabilities,
+  NotificationDeliveryAttempt,
+  NotificationSendInput,
+  NotificationSettings,
+  NotificationTarget,
+  NoticeCategory,
+  NoticePriority,
+} from "./notifications/types.ts";
+export { createNotificationService } from "./notifications/service.ts";
+export type { NotificationService } from "./notifications/service.ts";
+export { KNOWN_IM_PLATFORMS, isKnownImPlatform } from "./im/types.ts";
+export type {
+  ImAccount,
+  ImAdapter,
+  ImAdapterCredentials,
+  ImAdapterFactory,
+  ImBinding,
+  ImCapabilities,
+  ImChannelView,
+  ImChat,
+  ImChatKind,
+  ImConversation,
+  ImCredentialField,
+  ImHealth,
+  ImInbound,
+  ImLoginAdapter,
+  ImLoginChallenge,
+  ImLoginKind,
+  ImLoginPoll,
+  ImLoginState,
+  ImLoginView,
+  ImMediaRef,
+  ImPlatform,
+  ImPlatformInfo,
+  ImSendInput,
+  ImSendMode,
+  ImSendResult,
+  ImSender,
+  ImStatus,
+  KnownImPlatform,
+} from "./im/types.ts";
+export type { ImGateway } from "./im/gateway.ts";
+export type {
+  Ticket,
+  TicketInput,
+  TicketMandate,
+  TicketOrigin,
+  TicketStrength,
+} from "./tickets/types.ts";
 export type {
   StrmRepairOutcome,
   StrmRepairProvider,
@@ -142,6 +208,12 @@ export type {
   ThinkingLevel,
 } from "./runtime/interface.ts";
 export type { PermissionMode } from "./runtime/interface.ts";
+export type {
+  BackgroundBudgetNotice,
+  BackgroundBudgetSuggestion,
+  BackgroundBudgetSummary,
+  BackgroundUsageTokens,
+} from "./usage/budget.ts";
 export type {
   AgentSettingKey,
   AgentSettingSource,

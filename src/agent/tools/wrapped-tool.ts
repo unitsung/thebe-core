@@ -1,7 +1,11 @@
 import { hashParameters } from "../security/audit/audit-log.ts";
 import type { createAuditLog } from "../security/audit/audit-log.ts";
 import type { createPolicyEngine } from "../security/policy/policy-engine.ts";
-import { REDACTED, redactToolOutput } from "../security/redaction.ts";
+import {
+  REDACTED,
+  redactToolOutput,
+  summarizeArgs,
+} from "../security/redaction.ts";
 import { fenceToolOutput } from "../security/untrusted-fence.ts";
 import { limitModelOutput } from "./model-output-limit.ts";
 import type {
@@ -13,6 +17,9 @@ import type {
 type Policy = ReturnType<typeof createPolicyEngine>;
 type Audit = ReturnType<typeof createAuditLog>;
 
+/** One line: enough to read which service and path a write went to. */
+const AUDIT_SUMMARY_MAX_CHARS = 200;
+
 export function wrapCustomTools(
   tools: CustomToolDefinition[],
   options: {
@@ -22,11 +29,17 @@ export function wrapCustomTools(
     onEvent?: (event: NormalizedEvent) => void;
     onStop?: () => void | Promise<void>;
     sessionId?: () => string | undefined;
+    /** Whether the audit record of this tool's calls also says, redacted, what the call was. */
+    summarizeCall?: (toolName: string) => boolean;
     /** Cap on the text one result adds to the model's context. Omit for callers that need the full result. */
     modelResultLimit?: number;
   }
 ): CustomToolDefinition[] {
   const limit = options.modelResultLimit;
+  const callSummary = (toolName: string, params: unknown) =>
+    options.summarizeCall?.(toolName)
+      ? { summary: summarizeArgs(params, AUDIT_SUMMARY_MAX_CHARS) }
+      : {};
   return tools.map((tool) => ({
     ...tool,
     execute: async (toolCallId, params, signal) => {
@@ -40,6 +53,7 @@ export function wrapCustomTools(
         await options.audit?.append({
           method: tool.name,
           parameterHash: hashParameters(params),
+          ...callSummary(tool.name, params),
           responseBytes: 0,
           budgetConsumed: 0,
           redactionFired: false,
@@ -105,6 +119,7 @@ export function wrapCustomTools(
         await options.audit?.append({
           method: tool.name,
           parameterHash: hashParameters(params),
+          ...callSummary(tool.name, params),
           responseBytes: Buffer.byteLength(text),
           budgetConsumed: 0,
           redactionFired: text.includes(REDACTED),
@@ -120,6 +135,7 @@ export function wrapCustomTools(
         await options.audit?.append({
           method: tool.name,
           parameterHash: hashParameters(params),
+          ...callSummary(tool.name, params),
           responseBytes: 0,
           budgetConsumed: 0,
           redactionFired: message.includes(REDACTED),

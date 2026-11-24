@@ -1,7 +1,11 @@
 /**
  * TUI delivery Interface. Implementation lives under src/delivery/tui/.
  */
-export type { ThebeTuiSend, ThebeTuiOptions } from "./types.ts";
+export type {
+  ThebeOAuthPairingCode,
+  ThebeTuiSend,
+  ThebeTuiOptions,
+} from "./types.ts";
 export type { SlashCategory, ThebeSlashCommand } from "./commands/registry.ts";
 export {
   SLASH_COMMANDS,

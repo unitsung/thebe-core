@@ -1,4 +1,8 @@
 import { RESERVED_SUBAGENT_TOOLS } from "./profiles.ts";
+import {
+  GOAL_REPORT_TOOL_NAME,
+  type GoalReportInbox,
+} from "../goals/report.ts";
 import { createPolicyEngine } from "../../agent/security/policy/policy-engine.ts";
 import type { SubagentRun, SubagentUpdate } from "../types.ts";
 import type { AgentContext } from "../internal/context.ts";
@@ -6,12 +10,15 @@ import { discoverSubagentProfiles, type SubagentProfile } from "./catalog.ts";
 import { createSubagentRunManager } from "./service.ts";
 import type { ArtifactStore } from "../artifacts/store.ts";
 import { httpError } from "../types.ts";
+import type { BackgroundBudgetService } from "../usage/budget.ts";
 
 const SUBAGENT_WRITE_TOOLS = new Set(["edit", "write"]);
 
 export function createSubagentApi(
   ctx: AgentContext,
   artifactStore?: ArtifactStore,
+  reportInbox?: GoalReportInbox,
+  backgroundBudget?: BackgroundBudgetService
 ) {
   const {
     options,
@@ -21,6 +28,7 @@ export function createSubagentApi(
     systemPrompt,
     now,
     rejectPendingPermission,
+    takeMandateDenial,
     registerSubagentParentCanceller,
     workspacePath,
     persist,
@@ -29,12 +37,16 @@ export function createSubagentApi(
   const subagentPersistence = new Map<string, Promise<void>>();
 
   async function persistSubagentSnapshot(run: SubagentRun): Promise<void> {
-    const previous = subagentPersistence.get(run.parentSessionId) ?? Promise.resolve();
+    const previous =
+      subagentPersistence.get(run.parentSessionId) ?? Promise.resolve();
     const current = previous.then(async () => {
       try {
         const meta = await lookup(run.parentSessionId);
         const previousRuns = meta.subagentRuns ?? [];
-        const next = [...previousRuns.filter((item) => item.runId !== run.runId), run].slice(-100);
+        const next = [
+          ...previousRuns.filter((item) => item.runId !== run.runId),
+          run,
+        ].slice(-100);
         await persist(touchMeta({ ...meta, subagentRuns: next }));
       } catch {
         // Persistence is best-effort; the in-memory task record remains usable.
@@ -47,7 +59,9 @@ export function createSubagentApi(
     }
   }
 
-  async function waitForSubagentPersistence(parentSessionId: string): Promise<void> {
+  async function waitForSubagentPersistence(
+    parentSessionId: string
+  ): Promise<void> {
     while (true) {
       const pending = subagentPersistence.get(parentSessionId);
       if (!pending) return;
@@ -63,9 +77,12 @@ export function createSubagentApi(
     createSession: async ({ runId, parentSessionId, profile }) => {
       const parent = await ctx.openSession(parentSessionId);
       const childModel = profile.model ?? parent.session.currentModel?.();
+      const wantsAllHomeTools = (profile.tools ?? []).includes("*");
       const childTools = (profile.tools ?? []).filter(
-        (name) => !RESERVED_SUBAGENT_TOOLS.has(name) &&
-          (profile.allowWrites || !SUBAGENT_WRITE_TOOLS.has(name)),
+        (name) =>
+          name !== "*" &&
+          !RESERVED_SUBAGENT_TOOLS.has(name) &&
+          (profile.allowWrites || !SUBAGENT_WRITE_TOOLS.has(name))
       );
       const childPolicy = createPolicyEngine({
         now,
@@ -75,12 +92,41 @@ export function createSubagentApi(
       childPolicy.beginRun();
       let stopChild: (() => Promise<void>) | undefined;
       const childOptions = sessionOptions(
-        runId, childTools, childModel, parentSessionId, runId,
-        childPolicy, `${ctx.callerId}:subagent:${runId}`, () => stopChild?.(),
+        runId,
+        childTools,
+        childModel,
+        parentSessionId,
+        runId,
+        childPolicy,
+        `${ctx.callerId}:subagent:${runId}`,
+        () => stopChild?.()
       );
+      // `*` is every home tool the session has; a read-only profile leaves out the ones that change something.
+      // Either way the permission layer still decides each write.
+      const asksApproval = new Set(childOptions.toolsRequiringApproval ?? []);
+      const homeTools = childOptions.customTools
+        .filter((tool) =>
+          wantsAllHomeTools
+            ? !profile.readOnly || !asksApproval.has(tool.name)
+            : childTools.includes(tool.name)
+        )
+        .map((tool) =>
+          profile.directTools ? { ...tool, exposure: "direct" as const } : tool
+        );
+      // The tools the session has are the ones it may call.
+      childPolicy.registerTools([
+        ...childTools,
+        ...homeTools.map((tool) => tool.name),
+      ]);
       const session = await options.runtime.createSession({
         ...childOptions,
-        customTools: childOptions.customTools.filter(tool => childTools.includes(tool.name)),
+        customTools: [
+          ...homeTools,
+          // The report tool is bound to this worker's Goal, so it exists only for a profile that lists it.
+          ...(reportInbox && childTools.includes(GOAL_REPORT_TOOL_NAME)
+            ? [reportInbox.toolFor(parentSessionId)]
+            : []),
+        ],
         inMemory: true,
         autoCompact: false,
         systemPrompt: [
@@ -88,16 +134,27 @@ export function createSubagentApi(
           `# One-shot subagent (${profile.name})`,
           "You receive one explicit task only. Do not assume or reconstruct any parent conversation context.",
           profile.systemPrompt,
-        ].filter(Boolean).join("\n\n"),
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
       });
       stopChild = () => session.abort();
       return session;
     },
     emitToParent: (parentSessionId, event) => {
-      if (event.type === "permission_requested") ctx.appendEvent(parentSessionId, event);
+      if (event.type === "permission_requested")
+        ctx.appendEvent(parentSessionId, event);
     },
     rejectPendingPermission,
     onSnapshot: persistSubagentSnapshot,
+    captureUsage: async (run, session) => {
+      if (!run.background || !backgroundBudget) return;
+      const context = await session.getContextUsage();
+      await backgroundBudget.recordSession({
+        id: `subagent:${run.runId}`,
+        context,
+      });
+    },
     beforeTerminal: async (run) => {
       if (
         artifactStore &&
@@ -134,14 +191,29 @@ export function createSubagentApi(
       profileName: string;
       taskPrompt: string;
       parentSessionId: string;
+      background?: boolean;
     }): Promise<SubagentRun> {
       checkNotQuiesced();
       const profiles = await discoverSubagentProfiles({ cwd: workspacePath });
       const profile = profiles.find((item) => item.name === spawn.profileName);
-      if (!profile) throw httpError(404, `unknown subagent profile: ${spawn.profileName}`);
-      if (!spawn.taskPrompt.trim()) throw new Error("subagent task cannot be empty");
+      if (!profile)
+        throw httpError(404, `unknown subagent profile: ${spawn.profileName}`);
+      if (!spawn.taskPrompt.trim())
+        throw new Error("subagent task cannot be empty");
       await lookup(spawn.parentSessionId);
-      const run = subagentRuns.spawn({ profile, task: spawn.taskPrompt, parentSessionId: spawn.parentSessionId });
+      if (spawn.background && (await backgroundBudget?.exhausted())) {
+        throw httpError(
+          409,
+          "today's background token budget is spent",
+          "background_budget_spent"
+        );
+      }
+      const run = subagentRuns.spawn({
+        profile,
+        task: spawn.taskPrompt,
+        parentSessionId: spawn.parentSessionId,
+        background: spawn.background,
+      });
       if (run.status === "queued") {
         await persistSubagentSnapshot(run);
       }
@@ -157,26 +229,41 @@ export function createSubagentApi(
       await Promise.all(recovered.map(persistSubagentSnapshot));
       return subagentRuns.list(parentSessionId);
     },
-    restoreSubagents(parentSessionId: string, restoredRuns: SubagentRun[]): void {
+    restoreSubagents(
+      parentSessionId: string,
+      restoredRuns: SubagentRun[]
+    ): void {
       const recovered = subagentRuns.restore(
-        restoredRuns.filter((run) => run.parentSessionId === parentSessionId),
+        restoredRuns.filter((run) => run.parentSessionId === parentSessionId)
       );
       void Promise.all(recovered.map(persistSubagentSnapshot));
     },
     getSubagent(runId: string): SubagentRun | undefined {
       return subagentRuns.get(runId);
     },
-    subscribeSubagent(runId: string, listener: (update: SubagentUpdate) => void): () => void {
+    subscribeSubagent(
+      runId: string,
+      listener: (update: SubagentUpdate) => void
+    ): () => void {
       return subagentRuns.subscribe(runId, listener);
     },
-    subscribeSubagents(parentSessionId: string | undefined, listener: (update: SubagentUpdate) => void): () => void {
+    subscribeSubagents(
+      parentSessionId: string | undefined,
+      listener: (update: SubagentUpdate) => void
+    ): () => void {
       return subagentRuns.subscribeAll(parentSessionId, listener);
     },
     waitSubagent(runId: string): Promise<SubagentRun> {
       return subagentRuns.wait(runId);
     },
-    cancelSubagent(runId: string, parentSessionId?: string): Promise<SubagentRun> {
+    cancelSubagent(
+      runId: string,
+      parentSessionId?: string
+    ): Promise<SubagentRun> {
       return subagentRuns.cancel(runId, parentSessionId);
+    },
+    takeMandateDenial(parentSessionId: string) {
+      return takeMandateDenial(parentSessionId);
     },
   };
 }

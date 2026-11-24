@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { ProviderError, type ContainerInfoProvider } from "../../agent/capabilities/containers.ts";
+import {
+  ProviderError,
+  type ContainerInfoProvider,
+} from "../../agent/capabilities/containers.ts";
 import { createThebeApp } from "../../app/create.ts";
 import { createFakeRuntime } from "../../testing/runtime/index.ts";
 
@@ -65,16 +68,18 @@ describe("POST /v1/diagnosis", () => {
             environmentId: "0",
           },
         }),
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const body = await json(res);
-    expect(body.actionId).toBe("container.diagnose");
+    expect(body.actionId).toBe("container_diagnose");
     expect(body.resource).toEqual(
-      expect.objectContaining({ id: "ctr-emby", provider: "arcane" }),
+      expect.objectContaining({ id: "ctr-emby", provider: "arcane" })
     );
     expect(Array.isArray(body.observations)).toBe(true);
-    expect(body.diagnosis).toEqual(expect.objectContaining({ code: "container_exited" }));
+    expect(body.diagnosis).toEqual(
+      expect.objectContaining({ code: "container_exited" })
+    );
     expect(Array.isArray(body.recommendations)).toBe(true);
     expect(typeof body.runId).toBe("string");
     const raw = JSON.stringify(body);
@@ -82,7 +87,7 @@ describe("POST /v1/diagnosis", () => {
     expect(raw).not.toContain("internalState");
 
     const fetched = await app.handler.handle(
-      new Request(`http://127.0.0.1:8787/v1/diagnosis/${body.runId}`),
+      new Request(`http://127.0.0.1:8787/v1/diagnosis/${body.runId}`)
     );
     expect(fetched.status).toBe(200);
     expect((await json(fetched)).runId).toBe(body.runId);
@@ -98,7 +103,7 @@ describe("POST /v1/diagnosis", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ resource: { kind: "container" } }),
-      }),
+      })
     );
     expect(res.status).toBe(400);
   });
@@ -115,7 +120,7 @@ describe("POST /v1/diagnosis", () => {
         body: JSON.stringify({
           resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
         }),
-      }),
+      })
     );
     expect(res.status).toBe(503);
     const body = await json(res);
@@ -133,7 +138,7 @@ describe("POST /v1/diagnosis", () => {
         body: JSON.stringify({
           resource: { kind: "container", id: "ctr-emby", provider: "arcane" },
         }),
-      }),
+      })
     );
     expect(res.status).toBe(503);
     const body = await json(res);

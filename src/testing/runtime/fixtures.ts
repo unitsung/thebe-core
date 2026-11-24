@@ -27,6 +27,7 @@ export type FakeSessionState = {
   autoCompact: boolean;
   tools: CustomToolDefinition[];
   builtinTools: string[];
+  mcp: CreateRuntimeSessionOptions["mcp"];
   enabledResources: CreateRuntimeSessionOptions["enabledResources"];
   model: RuntimeModelRef;
   thinkingLevel: ThinkingLevel;
@@ -41,6 +42,14 @@ export type FakeSessionState = {
   probeReply?: string;
   resourceReloads: number;
   backgroundTasks: BackgroundTask[];
+  /** Known token counts and cost for tests; replaces counts derived from message text. */
+  usage?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    cost: number;
+  };
 };
 
 export const FAKE_RUNTIME_MODELS: RuntimeModel[] = [

@@ -41,7 +41,7 @@ function receipt(overrides: Partial<ActionReceipt> = {}): ActionReceipt {
           ok: true,
           expected: "running",
           actual: "running",
-          source: "container.inspect",
+          source: "container_inspect",
           observedAt: "2026-09-17T00:00:01Z",
         },
       ],
@@ -62,7 +62,7 @@ describe("activity store", () => {
     const saved = await first.upsertFromReceipt(receipt());
     expect(saved.id).toBe("rcpt-1");
     expect(saved.status).toBe("succeeded");
-    expect(saved.kind).toBe("container.restart");
+    expect(saved.kind).toBe("container_restart");
     const onDisk = await readFile(join(dir, "rcpt-1.json"), "utf8");
     expect(onDisk).toContain("rcpt-1");
 
@@ -79,13 +79,16 @@ describe("activity store", () => {
 
   it("skips corrupt files instead of failing the list", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-activity-"));
-    const store = createActivityStore({ dir, now: () => new Date("2026-09-17T00:00:00Z") });
+    const store = createActivityStore({
+      dir,
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
     await store.upsertFromReceipt(receipt());
     await writeFile(join(dir, "broken.json"), "{not-json", "utf8");
     await writeFile(
       join(dir, "empty.json"),
       JSON.stringify({ id: "nope" }),
-      "utf8",
+      "utf8"
     );
     const second = createActivityStore({ dir, now: () => new Date() });
     const listed = await second.list();
@@ -94,9 +97,16 @@ describe("activity store", () => {
 
   it("does not create a duplicate for the same idempotency key", async () => {
     const dir = await mkdtemp(join(tmpdir(), "thebe-activity-"));
-    const store = createActivityStore({ dir, now: () => new Date("2026-09-17T00:00:00Z") });
-    const first = await store.upsertFromReceipt(receipt({ receiptId: "rcpt-a" }));
-    const second = await store.upsertFromReceipt(receipt({ receiptId: "rcpt-b" }));
+    const store = createActivityStore({
+      dir,
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
+    const first = await store.upsertFromReceipt(
+      receipt({ receiptId: "rcpt-a" })
+    );
+    const second = await store.upsertFromReceipt(
+      receipt({ receiptId: "rcpt-b" })
+    );
     expect(second.id).toBe(first.id);
     expect(await store.list()).toHaveLength(1);
   });
@@ -109,15 +119,23 @@ describe("activity store", () => {
       maxItems: 2,
       now: () => new Date(Date.UTC(2026, 8, 17, 0, 0, tick++)),
     });
-    await store.upsertFromReceipt(receipt({ receiptId: "a", idempotencyKey: "a" }));
-    await store.upsertFromReceipt(receipt({ receiptId: "b", idempotencyKey: "b" }));
-    await store.upsertFromReceipt(receipt({ receiptId: "c", idempotencyKey: "c" }));
+    await store.upsertFromReceipt(
+      receipt({ receiptId: "a", idempotencyKey: "a" })
+    );
+    await store.upsertFromReceipt(
+      receipt({ receiptId: "b", idempotencyKey: "b" })
+    );
+    await store.upsertFromReceipt(
+      receipt({ receiptId: "c", idempotencyKey: "c" })
+    );
     const listed = await store.list();
     expect(listed.map((item) => item.id).sort()).toEqual(["b", "c"]);
   });
 
   it("maps verification_failed separately from action failure", async () => {
-    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const store = createActivityStore({
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
     const record = await store.upsertFromReceipt(
       receipt({
         verification: {
@@ -128,12 +146,12 @@ describe("activity store", () => {
               ok: false,
               expected: "running",
               actual: "exited",
-              source: "container.inspect",
+              source: "container_inspect",
               observedAt: "2026-09-17T00:00:01Z",
             },
           ],
         },
-      }),
+      })
     );
     expect(record.status).toBe("verification_failed");
   });
@@ -146,7 +164,7 @@ describe("activity store", () => {
     });
     const pending = await store.upsertFromDiagnosis({
       runId: "run-diag",
-      actionId: "container.diagnose",
+      actionId: "container_diagnose",
       status: "completed",
       resource: {
         kind: "container",
@@ -169,7 +187,7 @@ describe("activity store", () => {
           detail: "needs approval",
           kind: "write",
           requiresApproval: true,
-          actionId: "container.restart",
+          actionId: "container_restart",
         },
       ],
       technicalDetails: { evidence: [], toolTranscript: [] },
@@ -184,19 +202,23 @@ describe("activity store", () => {
         receiptId: "rcpt-after",
         diagnosisRunId: "run-diag",
         idempotencyKey: "after",
-      }),
+      })
     );
     expect(mutated.id).toBe(pending?.id);
     expect(await store.list("needs_approval")).toEqual([]);
-    expect((await store.list("recent")).map((item) => item.id)).toEqual([pending?.id]);
+    expect((await store.list("recent")).map((item) => item.id)).toEqual([
+      pending?.id,
+    ]);
     expect(await store.list("running")).toEqual([]);
   });
 
   it("persists a diagnosis with no write recommendation", async () => {
-    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const store = createActivityStore({
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
     const saved = await store.upsertFromDiagnosis({
       runId: "run-ok",
-      actionId: "container.diagnose",
+      actionId: "container_diagnose",
       status: "completed",
       resource: {
         kind: "container",
@@ -218,24 +240,26 @@ describe("activity store", () => {
     expect(saved).toEqual(
       expect.objectContaining({
         id: "run-ok",
-        kind: "container.diagnose",
+        kind: "container_diagnose",
         status: "completed",
         group: "recent",
         summary: "Container is running",
         diagnosisRunId: "run-ok",
         recommendations: [],
-      }),
+      })
     );
     expect(await store.list()).toEqual([
-      expect.objectContaining({ id: "run-ok", kind: "container.diagnose" }),
+      expect.objectContaining({ id: "run-ok", kind: "container_diagnose" }),
     ]);
   });
 
   it("removes a pending approval on deny", async () => {
-    const store = createActivityStore({ now: () => new Date("2026-09-17T00:00:00Z") });
+    const store = createActivityStore({
+      now: () => new Date("2026-09-17T00:00:00Z"),
+    });
     const pending = await store.upsertFromDiagnosis({
       runId: "run-diag",
-      actionId: "container.diagnose",
+      actionId: "container_diagnose",
       status: "completed",
       resource: {
         kind: "container",
@@ -258,7 +282,7 @@ describe("activity store", () => {
           detail: "needs approval",
           kind: "write",
           requiresApproval: true,
-          actionId: "container.restart",
+          actionId: "container_restart",
         },
       ],
       technicalDetails: { evidence: [], toolTranscript: [] },

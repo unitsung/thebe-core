@@ -14,6 +14,7 @@ import { toProductEnabledResource } from "./product.ts";
 import {
   SERVICE_API_CONFIRM_TOOL_NAME,
   SERVICE_API_TOOL_NAMES,
+  SERVICE_API_WRITE_TOOL_NAME,
   serviceOperationExposable,
   serviceOperationInputSchema,
   serviceOperationToolName,
@@ -90,7 +91,8 @@ export function createExtensionApi(
           source: "core",
           serverName: "thebe-core",
           execution: "agent",
-          permission: tool.name === "service_api_write" ? "confirm" : "read",
+          permission:
+            tool.name === SERVICE_API_WRITE_TOOL_NAME ? "confirm" : "read",
         })),
       ...(await serviceOperationCapabilities(
         ctx.options.serviceAPIProviders ?? []
@@ -283,7 +285,7 @@ export function createExtensionApi(
  * One capability per read-only operation the operator allow-listed on a
  * configured OpenAPI service. These are generic — no per-service code — and give
  * MCP clients named tools with real schemas instead of one generic read.
- * Writes and header-parameter operations stay behind service_api_write.
+ * Writes and header-parameter operations stay behind service_write.
  */
 const MAX_SERVICE_OPERATION_TOOLS = 60;
 

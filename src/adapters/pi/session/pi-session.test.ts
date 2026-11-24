@@ -53,8 +53,10 @@ async function piWithFaux(sessionDir?: string) {
   const models = createModels();
   models.setProvider(faux.provider);
   const { ModelRuntime } = await loadPiSdk();
+  // A machine's own ~/.pi/agent/models.json must not choose the model under test.
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -65,7 +67,10 @@ async function piWithFaux(sessionDir?: string) {
     sessionDir,
     inMemory: !sessionDir,
     modelRuntime,
-    model: faux.getModel(),
+    model: {
+      providerId: faux.getModel().provider,
+      modelId: faux.getModel().id,
+    },
     agentDir: sessionDir ? join(sessionDir, "agent") : undefined,
   });
   return { faux, runtime, modelRuntime };
@@ -123,6 +128,8 @@ function mcpFixture(
         args: ["-e", script],
         enabled,
         exposure: initial.exposure ?? "deferred",
+        // The operator confirmed these read; the server's own readOnlyHint does not count (H5).
+        readTools: ["catalog", "leak", "env"],
         env: { CALL_LOG: log, SERVER_ONLY: "server-only" },
       },
     ],
@@ -291,6 +298,145 @@ describe("PiCodingAgentRuntime sessions", () => {
     }
   });
 
+  it("shows the model a provider-safe name for a dotted external tool, and still asks about it by Core's own name", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const ran: string[] = [];
+    const request = vi.fn(async () => "deny" as const);
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "restart container", limit: 1 }),
+      ]),
+      // The model calls the name it was shown.
+      fauxAssistantMessage([fauxToolCall("acme_restart", { name: "emby" })]),
+      fauxAssistantMessage("denied"),
+    ]);
+    const session = await runtime.createSession({
+      customTools: [
+        {
+          name: "acme.restart",
+          label: "Restart",
+          description: "Restart a container.",
+          parameters: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          } as never,
+          execute: async () => {
+            ran.push("restart");
+            return {
+              content: [{ type: "text" as const, text: "restarted" }],
+              details: {},
+            };
+          },
+        },
+      ],
+      builtinTools: ["read"],
+      toolsRequiringApproval: ["acme.restart"],
+      permissionHandler: { request },
+    });
+    const events: Array<{ type: string; toolName?: string }> = [];
+    session.subscribe((event) => events.push(event as never));
+    try {
+      await session.prompt("restart emby");
+      // The approval gate matched the tool: it asked, under Core's name, and the denial stopped it.
+      expect(request).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "acme.restart" })
+      );
+      expect(ran).toEqual([]);
+      // What Core hears about it is Core's name, not the model's.
+      const started = events
+        .filter((event) => event.type === "tool_start")
+        .map((event) => event.toolName);
+      expect(started).toContain("acme.restart");
+      expect(started).not.toContain("acme_restart");
+      expect(session.toolNames()).toContain("acme.restart");
+      expect(session.toolNames()).not.toContain("acme_restart");
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("runs a dotted write tool once the person approves it", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const ran: unknown[] = [];
+    const request = vi.fn(async () => "allow" as const);
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("tool_search", { query: "restart container", limit: 1 }),
+      ]),
+      fauxAssistantMessage([fauxToolCall("acme_restart", { name: "emby" })]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({
+      customTools: [
+        {
+          name: "acme.restart",
+          label: "Restart",
+          description: "Restart a container.",
+          parameters: {
+            type: "object",
+            properties: { name: { type: "string" } },
+          } as never,
+          execute: async (_id: string, params: unknown) => {
+            ran.push(params);
+            return {
+              content: [{ type: "text" as const, text: "restarted" }],
+              details: {},
+            };
+          },
+        },
+      ],
+      builtinTools: ["read"],
+      toolsRequiringApproval: ["acme.restart"],
+      permissionHandler: { request },
+    });
+    try {
+      await session.prompt("restart emby");
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(ran).toEqual([{ name: "emby" }]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("lets the model call a direct tool on its first turn, without looking for it", async () => {
+    const { faux, runtime } = await piWithFaux();
+    const ran: unknown[] = [];
+    faux.setResponses([
+      fauxAssistantMessage([
+        fauxToolCall("service_write", { service: "docker" }),
+      ]),
+      fauxAssistantMessage("done"),
+    ]);
+    const session = await runtime.createSession({
+      customTools: [
+        {
+          name: "service_write",
+          label: "Write",
+          description: "Write to a service.",
+          parameters: {
+            type: "object",
+            properties: { service: { type: "string" } },
+          } as never,
+          exposure: "direct",
+          execute: async (_id: string, params: unknown) => {
+            ran.push(params);
+            return {
+              content: [{ type: "text" as const, text: "ok" }],
+              details: {},
+            };
+          },
+        },
+      ],
+      builtinTools: ["read"],
+    });
+    try {
+      await session.prompt("write");
+      expect(ran).toEqual([{ service: "docker" }]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("does not ask for a tool the server marks read-only", async () => {
     const { faux, runtime } = await piWithFaux();
     const mcp = mcpFixture();
@@ -417,6 +563,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     const { ModelRuntime } = await loadPiSdk();
     const modelRuntime = await ModelRuntime.create({
       credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
       allowModelNetwork: false,
       refreshOnCreate: false,
     });
@@ -847,7 +994,7 @@ describe("PiCodingAgentRuntime sessions", () => {
     faux.setResponses([
       fauxAssistantMessage([
         fauxThinking("inspect the workspace"),
-        fauxToolCall("container.list", {}, { id: "call_container_list" }),
+        fauxToolCall("container_list", {}, { id: "call_container_list" }),
       ]),
       fauxAssistantMessage("tools are visible"),
     ]);

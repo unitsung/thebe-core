@@ -42,8 +42,10 @@ async function piProduct(provider: ContainerInfoProvider) {
   const models = createModels();
   models.setProvider(faux.provider);
   const { ModelRuntime } = await loadPiSdk();
+  // A machine's own ~/.pi/agent/models.json must not choose the model under test.
   const modelRuntime = await ModelRuntime.create({
     credentials: new InMemoryCredentialStore(),
+    modelsPath: null,
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
@@ -56,7 +58,10 @@ async function piProduct(provider: ContainerInfoProvider) {
     agentDir: join(dir, "agent"),
     inMemory: false,
     modelRuntime,
-    model: faux.getModel(),
+    model: {
+      providerId: faux.getModel().provider,
+      modelId: faux.getModel().id,
+    },
   });
   const agent = createThebeAgent({
     runtime,
@@ -82,11 +87,11 @@ describe("mixed tools and redaction", () => {
         "edit",
         "write",
         "bash",
-        "container.list",
-        "container.inspect",
-        "container.logs",
-        "container.status_summary",
-      ]),
+        "container_list",
+        "container_inspect",
+        "container_logs",
+        "container_status_summary",
+      ])
     );
   });
 
@@ -94,7 +99,7 @@ describe("mixed tools and redaction", () => {
     const { faux, agent } = await piProduct(providerWithCanary());
     faux.setResponses([
       fauxAssistantMessage([
-        fauxToolCall("container.inspect", { id: "abc123" }),
+        fauxToolCall("container_inspect", { id: "abc123" }),
       ]),
       fauxAssistantMessage("done"),
     ]);
@@ -119,20 +124,20 @@ describe("mixed tools and redaction", () => {
     const { faux, agent } = await piProduct(throwing);
     faux.setResponses([
       fauxAssistantMessage([
-        fauxToolCall("container.inspect", { id: "abc123" }),
+        fauxToolCall("container_inspect", { id: "abc123" }),
       ]),
       fauxAssistantMessage("failed"),
-      fauxAssistantMessage([
-        fauxToolCall("container.start", { id: "abc123" }),
-      ]),
+      fauxAssistantMessage([fauxToolCall("container_start", { id: "abc123" })]),
       fauxAssistantMessage("denied"),
     ]);
     await agent.send("inspect");
     await agent.send("start");
     const exported = await agent.exportSession();
-    const blob = [dump(agent.messages()), dump(agent.lastEvents()), exported.jsonl].join(
-      "\n",
-    );
+    const blob = [
+      dump(agent.messages()),
+      dump(agent.lastEvents()),
+      exported.jsonl,
+    ].join("\n");
     expect(blob).not.toContain(CANARY);
 
     const cancelling = await piProduct({
@@ -142,9 +147,7 @@ describe("mixed tools and redaction", () => {
       },
     });
     cancelling.faux.setResponses([
-      fauxAssistantMessage([
-        fauxToolCall("container.logs", { id: "abc123" }),
-      ]),
+      fauxAssistantMessage([fauxToolCall("container_logs", { id: "abc123" })]),
       fauxAssistantMessage("cancelled"),
     ]);
     await cancelling.agent.send("logs");

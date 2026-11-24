@@ -63,7 +63,7 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。经 `/mcp` 连接的 agent 也能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。每次写操作都记入审计日志。设置 `THEBE_MCP_WRITES=off` 可以让 `/mcp` 变成只读。
+在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。经 `/mcp` 连接的 agent 也能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。每次写操作都记入审计日志。设置 `THEBE_MCP_WRITES=off` 可以让 `/mcp` 变成只读。想让某个 agent 的权限小于完全访问，就为它单独做一个 token：`thebe token create <名字> --scope mcp:read`（或 `mcp:write`）。这个 token 只能用在 `/mcp`，也可以用 `Authorization: Bearer <token>` 发送。
 
 **在终端里。** `npm run tui` 会构建并启动交互界面。构建之后，`node dist/cli.js`（或包的 `bin`：`thebe`）效果相同；`thebe -p "列出我的容器"` 执行一条提示后退出。`thebe --help` 列出 session 和 MCP 子命令，`thebe doctor` 报告隔离状态。
 
@@ -75,7 +75,7 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/capabilities
 
 ## 安全要点
 
-token 拥有全部权限，没有作用域。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认；shell 命令会先做风险分级，在宿主机上运行于系统沙箱里；工具输出和 MCP 数据都当作不可信数据；密钥会被脱敏；每次调用都写入只追加的审计日志（agent store 目录下的 `audit.jsonl`）。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
+token 默认拥有全部权限；用 `--scope` 创建的 token 只能用在 `/mcp`（见上文）。容器默认只监听回环地址；要更大的访问范围，请放在 TLS 后面（Tailscale 或反向代理），并把主机名写进 `THEBE_ALLOWED_HOSTS`。默认权限模式会在改文件和执行命令前征求确认；shell 命令会先做风险分级，在宿主机上运行于系统沙箱里；工具输出和 MCP 数据都当作不可信数据；密钥会被脱敏；每次调用都写入只追加的审计日志（agent store 目录下的 `audit.jsonl`）。完整模型和漏洞报告方式见 [SECURITY.md](SECURITY.md)。
 
 ## 使用须知
 
@@ -96,7 +96,7 @@ Core 操作的是你自己运行的服务和你自己的账号，它不提供、
 | 术语与架构                 | [CONTEXT.md](CONTEXT.md)                                       |
 | 参与贡献与安全             | [CONTRIBUTING.md](CONTRIBUTING.md)、[SECURITY.md](SECURITY.md) |
 
-开发检查：`npm run typecheck`、`npm run lint`、`npm run format`、`npm test`、`bash scripts/release-check.sh`。
+开发检查：`npm run typecheck`、`npm run lint`、`npm run format`、`npm test`、`bash scripts/check-release.sh`。
 
 ## 许可证
 

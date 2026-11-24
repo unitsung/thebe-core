@@ -3,11 +3,12 @@
 /**
  * Verifies that a deployed Core install can resolve `@earendil-works/pi-ai`.
  *
- * pi-ai ships inside the Pi agent package's dependency tree, so a pnpm
- * production install keeps it nested instead of at the top level.
- * `src/adapters/pi/sdk/load-pi.ts` walks the same path at runtime, and this walk
- * is intentionally written out again: the check must stay independent of the
- * code it verifies. Run it inside the container after an upgrade:
+ * pi-ai is only a dev dependency of Core, so a production install (`npm prune
+ * --omit=dev`) keeps it inside the Pi agent package's dependency tree instead of
+ * at the top level. `src/adapters/pi/sdk/load-pi.ts` walks the same path at
+ * runtime, and this walk is intentionally written out again: the check must stay
+ * independent of the code it verifies. The container image runs it in CI after
+ * the build and prune; run it by hand after an upgrade with:
  *
  *   docker compose exec thebe-core node scripts/check-pi-resolution.mjs
  */
@@ -28,7 +29,7 @@ export function findPiAiDist(roots, limit = 12) {
         "@earendil-works",
         "pi-ai",
         "dist",
-        "index.js",
+        "index.js"
       );
       if (existsSync(candidate)) {
         return candidate;
@@ -47,7 +48,9 @@ export function piAiRoots(coreRootPath = coreRoot) {
   const roots = [coreRootPath];
   try {
     roots.push(
-      realpathSync(join(coreRootPath, "node_modules", "@earendil-works", "pi-coding-agent")),
+      realpathSync(
+        join(coreRootPath, "node_modules", "@earendil-works", "pi-coding-agent")
+      )
     );
   } catch {
     // A missing agent package is reported by the walk itself.
@@ -56,14 +59,15 @@ export function piAiRoots(coreRootPath = coreRoot) {
 }
 
 const isMain =
-  Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+  Boolean(process.argv[1]) &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) {
   const found = findPiAiDist(piAiRoots());
   if (found) {
     console.log(`pi-ai OK ${found}`);
   } else {
     console.error(
-      "pi-ai MISSING: reinstall dependencies with `corepack pnpm install --frozen-lockfile --prod`; pi-ai ships inside the pi-coding-agent package",
+      "pi-ai MISSING: reinstall dependencies with `npm ci` and keep the production tree (`npm prune --omit=dev`); pi-ai ships inside the pi-coding-agent package"
     );
     process.exitCode = 1;
   }
