@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +70,24 @@ describe("quiet hours notifier", () => {
     clock.now = new Date("2026-11-07T07:00:00Z");
     await vi.advanceTimersByTimeAsync(6 * 60 * 60_000);
     expect(sent).toEqual(["b", "c"]);
+    notifier.stop();
+  });
+
+  it("serializes concurrent held notices before persisting", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quiet-held-concurrent-"));
+    const clock = { now: new Date("2026-11-07T01:00:00Z") };
+    const { notifier } = await setup(clock, { dir });
+    const notices = Array.from({ length: 20 }, (_, index) =>
+      notice(`notice-${index}`)
+    );
+
+    await Promise.all(notices.map((row) => notifier.notify(row)));
+    const saved = JSON.parse(
+      await readFile(join(dir, "quiet-held.json"), "utf8")
+    ) as PushNotice[];
+    expect(saved.map((row) => row.id)).toEqual(
+      notices.slice(-10).map((row) => row.id)
+    );
     notifier.stop();
   });
 
