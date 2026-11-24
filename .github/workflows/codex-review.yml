@@ -32,11 +32,15 @@ jobs:
           gh api --paginate --slurp \
             "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
             > /tmp/codex-reviews.json
-          gh api graphql \
-            -f query='query($owner: String!, $repo: String!, $number: Int!) {
+          gh api graphql --paginate --slurp \
+            -f query='query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
               repository(owner: $owner, name: $repo) {
                 pullRequest(number: $number) {
-                  reviewThreads(first: 100) {
+                  reviewThreads(first: 100, after: $endCursor) {
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
                     nodes {
                       isResolved
                       path
@@ -57,9 +61,12 @@ jobs:
           const head = JSON.parse(fs.readFileSync("/tmp/codex-pr.json", "utf8")).head.sha;
           const pages = JSON.parse(fs.readFileSync("/tmp/codex-reviews.json", "utf8"));
           const reviews = pages.flat();
-          const threads = JSON.parse(
+          const threadPages = JSON.parse(
             fs.readFileSync("/tmp/codex-threads.json", "utf8"),
-          ).data.repository.pullRequest.reviewThreads.nodes;
+          );
+          const threads = threadPages.flatMap(
+            (page) => page.data.repository.pullRequest.reviewThreads.nodes,
+          );
 
           const current = reviews
             .filter(
