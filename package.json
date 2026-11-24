@@ -60,6 +60,11 @@
     "vite": "^8.3.4",
     "vitest": "^5.0.4"
   },
+  "overrides": {
+    "@anthropic-ai/sandbox-runtime": {
+      "zod": "4.6.7"
+    }
+  },
   "engines": {
     "node": ">=24.0.0"
   },
