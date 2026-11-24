@@ -33,7 +33,7 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "0.0.80",
+    "@anthropic-ai/sandbox-runtime": "0.0.83",
     "@earendil-works/pi-coding-agent": "^1.5.2",
     "@earendil-works/pi-mcp": "^1.5.2",
     "@earendil-works/pi-tui": "^1.5.2",
