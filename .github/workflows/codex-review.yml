@@ -37,28 +37,6 @@ jobs:
           gh api --paginate --slurp \
             "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
             > /tmp/codex-comments.json
-          gh api graphql --paginate --slurp \
-            -f query='query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
-              repository(owner: $owner, name: $repo) {
-                pullRequest(number: $number) {
-                  reviewThreads(first: 100, after: $endCursor) {
-                    pageInfo {
-                      hasNextPage
-                      endCursor
-                    }
-                    nodes {
-                      isResolved
-                      path
-                      line
-                    }
-                  }
-                }
-              }
-            }' \
-            -F owner="${REPOSITORY%/*}" \
-            -F repo="${REPOSITORY#*/}" \
-            -F number="${PR_NUMBER}" \
-            > /tmp/codex-threads.json
 
           set +e
           node <<'NODE' > /tmp/codex-review.log 2>&1
@@ -69,12 +47,6 @@ jobs:
             fs.readFileSync("/tmp/codex-comments.json", "utf8"),
           );
           const comments = commentPages.flat();
-          const threadPages = JSON.parse(
-            fs.readFileSync("/tmp/codex-threads.json", "utf8"),
-          );
-          const threads = threadPages.flatMap(
-            (page) => page.data.repository.pullRequest.reviewThreads.nodes,
-          );
 
           const marker = "<!-- codex-review-state:v1 ";
           const summaries = comments
@@ -118,16 +90,6 @@ jobs:
           }
           if (codeReview.status !== "completed") {
             console.error(`Codex review is ${codeReview.status} for ${head}.`);
-            process.exit(1);
-          }
-
-          const unresolved = threads.filter((thread) => !thread.isResolved);
-          if (unresolved.length > 0) {
-            for (const thread of unresolved) {
-              console.error(
-                `Unresolved Codex finding: ${thread.path}:${thread.line ?? "?"}`,
-              );
-            }
             process.exit(1);
           }
 

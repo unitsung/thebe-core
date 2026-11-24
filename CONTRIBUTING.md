@@ -55,12 +55,13 @@ staged JS/TS), then `tsc`, `oxlint` and the tests affected by the change. A `com
 6. Confirm `bash scripts/check-release.sh` passes, then open a pull request
    describing the changed behavior and the checks you ran.
 7. Wait for the required `Codex review` check. A GitHub workflow consumes the
-   pull-request review event and GitHub API data, then requires a Codex review
-   on the current head with no unresolved threads. Fix valid findings, or
-   explain with evidence why one does not apply, then request another review
+   review/comment events and GitHub API data, then requires a completed Codex
+   review on the current head. GitHub's native conversation-resolution rule
+   separately requires every review thread to be resolved. Fix valid findings,
+   or explain with evidence why one does not apply, then request another review
    with `@codex review`.
-8. Merge only after the Codex review check, CI, DCO, and every review thread
-   cover the current head and pass.
+8. Merge only after the Codex review check, CI, DCO, native thread resolution,
+   and every required gate cover the current head and pass.
 
 Preserve unrelated work in the tree. Avoid destructive Git operations and broad
 refactors that are not part of the change.
