@@ -67,6 +67,8 @@ export type Decision = {
   evalId: string;
   thread: string;
   triggerIds: string[];
+  /** Durable Correlation records that made related Threads available as context to this Eval. */
+  correlationIds?: string[];
   /** When the newest Trigger happened; part of the id, so a re-run gives the same Decision. */
   at: string;
   outcome: DecisionOutcome;
