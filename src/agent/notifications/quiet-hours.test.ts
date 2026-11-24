@@ -50,6 +50,27 @@ describe("quiet hours window", () => {
     expect(msUntilQuietEnds(night, new Date("2026-11-06T06:59:30Z"))).toBe(
       30_000
     );
+    expect(msUntilQuietEnds(night, at("07:00"))).toBe(1_000);
+  });
+
+  it("uses the real elapsed time across daylight-saving transitions", () => {
+    const newYork = {
+      start: "23:00",
+      end: "07:00",
+      timeZone: "America/New_York",
+    };
+    expect(msUntilQuietEnds(newYork, new Date("2026-11-01T04:00:00Z"))).toBe(
+      8 * 60 * 60_000
+    );
+    expect(msUntilQuietEnds(newYork, new Date("2026-03-08T06:00:00Z"))).toBe(
+      5 * 60 * 60_000
+    );
+    expect(
+      msUntilQuietEnds(
+        { start: "01:30", end: "02:00", timeZone: "America/New_York" },
+        new Date("2026-11-01T05:50:00Z")
+      )
+    ).toBe(10 * 60_000);
   });
 
   it("refuses what it cannot read instead of guessing", () => {

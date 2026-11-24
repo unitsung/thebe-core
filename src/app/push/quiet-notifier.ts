@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writeFileAtomic } from "../../atomic-write.ts";
 import {
   isQuiet,
   msUntilQuietEnds,
@@ -35,6 +36,17 @@ export function createQuietHoursNotifier(options: {
   let loaded = !file;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let stopped = false;
+  let chain = Promise.resolve();
+  let flushing: Promise<void> | undefined;
+
+  function serial<T>(operation: () => Promise<T>): Promise<T> {
+    const result = chain.then(operation, operation);
+    chain = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
+  }
 
   async function load(): Promise<void> {
     if (loaded || !file) return;
@@ -50,24 +62,41 @@ export function createQuietHoursNotifier(options: {
   async function save(): Promise<void> {
     if (!file || !options.dir) return;
     await mkdir(options.dir, { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
-    await writeFile(temp, `${JSON.stringify(held)}\n`, "utf8");
-    await rename(temp, file);
+    await writeFileAtomic(file, `${JSON.stringify(held)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
-  async function flush(): Promise<void> {
-    timer = undefined;
-    await load();
-    const window = await options.quiet.get();
-    // Still inside the window (the person moved it later): keep holding.
-    if (window && isQuiet(window, now())) {
-      arm(window);
-      return;
-    }
-    const toSend = held;
-    held = [];
-    await save();
-    for (const notice of toSend) await options.inner.notify(notice);
+  function flush(): Promise<void> {
+    if (flushing) return flushing;
+    flushing = (async () => {
+      timer = undefined;
+      const state = await serial(async () => {
+        await load();
+        const window = await options.quiet.get();
+        if (window && isQuiet(window, now())) {
+          return {
+            held: true as const,
+            window,
+            notices: [] as PushNotice[],
+          };
+        }
+        const notices = held;
+        held = [];
+        await save();
+        return { held: false as const, notices };
+      });
+      // Still inside the window (the person moved it later): keep holding.
+      if (state.held) {
+        arm(state.window);
+        return;
+      }
+      for (const notice of state.notices) await options.inner.notify(notice);
+    })().finally(() => {
+      flushing = undefined;
+    });
+    return flushing;
   }
 
   function arm(
@@ -80,23 +109,30 @@ export function createQuietHoursNotifier(options: {
 
   return {
     async notify(notice) {
-      await load();
-      const window = await options.quiet.get();
-      if (!window || !isQuiet(window, now())) {
+      const state = await serial(async () => {
+        await load();
+        const window = await options.quiet.get();
+        if (!window || !isQuiet(window, now())) return { held: false as const };
+        // The same event again replaces itself rather than being sent twice later.
+        held = [...held.filter((row) => row.id !== notice.id), notice].slice(
+          -maxHeld
+        );
+        await save();
+        return { held: true as const, window };
+      });
+      if (!state.held) {
         await options.inner.notify(notice);
         return;
       }
-      // The same event again replaces itself rather than being sent twice later.
-      held = [...held.filter((row) => row.id !== notice.id), notice].slice(
-        -maxHeld
-      );
-      await save();
-      arm(window);
+      arm(state.window);
     },
     async resume() {
       stopped = false;
-      await load();
-      if (held.length === 0) return;
+      const count = await serial(async () => {
+        await load();
+        return held.length;
+      });
+      if (count === 0) return;
       const window = await options.quiet.get();
       if (window && isQuiet(window, now())) arm(window);
       else await flush();
