@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/**/*.test.mjs"],
+    maxWorkers: 4,
     server: {
       deps: {
         external: [/^@earendil-works\/pi-coding-agent/],
