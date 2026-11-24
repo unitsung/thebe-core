@@ -5,33 +5,37 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
   pull_request_review:
     types: [submitted, edited, dismissed]
+  issue_comment:
+    types: [created, edited, deleted]
 
 permissions:
   contents: read
+  issues: read
   pull-requests: read
 
 concurrency:
-  group: codex-review-${{ github.event.pull_request.number }}
+  group: codex-review-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
 jobs:
   review:
     name: Codex review
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require a current-head Codex review
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
           gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/codex-pr.json
           gh api --paginate --slurp \
-            "repos/${REPOSITORY}/pulls/${PR_NUMBER}/reviews" \
-            > /tmp/codex-reviews.json
+            "repos/${REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            > /tmp/codex-comments.json
           gh api graphql --paginate --slurp \
             -f query='query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
               repository(owner: $owner, name: $repo) {
@@ -59,8 +63,10 @@ jobs:
           const fs = require("node:fs");
 
           const head = JSON.parse(fs.readFileSync("/tmp/codex-pr.json", "utf8")).head.sha;
-          const pages = JSON.parse(fs.readFileSync("/tmp/codex-reviews.json", "utf8"));
-          const reviews = pages.flat();
+          const commentPages = JSON.parse(
+            fs.readFileSync("/tmp/codex-comments.json", "utf8"),
+          );
+          const comments = commentPages.flat();
           const threadPages = JSON.parse(
             fs.readFileSync("/tmp/codex-threads.json", "utf8"),
           );
@@ -68,20 +74,48 @@ jobs:
             (page) => page.data.repository.pullRequest.reviewThreads.nodes,
           );
 
-          const current = reviews
+          const marker = "<!-- codex-review-state:v1 ";
+          const summaries = comments
             .filter(
-              (review) =>
-                review.user?.login === "chatgpt-codex-connector[bot]" &&
-                review.commit_id === head &&
-                review.state !== "DISMISSED",
+              (comment) =>
+                comment.user?.login === "chatgpt-codex-connector[bot]" &&
+                comment.body?.includes(marker),
             )
+            .flatMap((comment) => {
+              const start = comment.body.indexOf(marker) + marker.length;
+              const end = comment.body.indexOf(" -->", start);
+              if (end < 0) return [];
+              try {
+                return [
+                  {
+                    createdAt: comment.created_at,
+                    updatedAt: comment.updated_at,
+                    state: JSON.parse(comment.body.slice(start, end)),
+                  },
+                ];
+              } catch {
+                return [];
+              }
+            })
             .sort((left, right) =>
-              (left.submitted_at ?? "").localeCompare(right.submitted_at ?? ""),
-            )
-            .at(-1);
+              (left.updatedAt ?? left.createdAt ?? "").localeCompare(
+                right.updatedAt ?? right.createdAt ?? "",
+              ),
+            );
+          const codeReview = summaries.at(-1)?.state?.code_review;
 
-          if (!current) {
-            console.error(`Codex review has not completed for current head ${head}.`);
+          if (!codeReview) {
+            console.error(`Codex review has not reported for current head ${head}.`);
+            process.exit(1);
+          }
+          if (codeReview.commit_sha !== head) {
+            console.error(
+              `Codex reviewed ${codeReview.commit_sha}, but the current head is ${head}.`,
+            );
+            process.exit(1);
+          }
+          if (codeReview.status !== "completed") {
+            console.error(`Codex review is ${codeReview.status} for ${head}.`);
             process.exit(1);
           }
 
