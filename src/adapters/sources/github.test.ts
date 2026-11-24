@@ -494,6 +494,60 @@ describe("GitHub Source", () => {
     expect(caughtUp.warning).toBeUndefined();
     expect(caughtUp.cursor).not.toBe(baseline.cursor);
   });
+
+  it("initializes a truncated baseline and reports a later human mention", async () => {
+    const pages = new Map<string, unknown[]>();
+    const fetcher = (async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input);
+      if (!url.includes("/events")) return Response.json([]);
+      const page = new URL(url).searchParams.get("page") ?? "1";
+      return Response.json(pages.get(page) ?? [], {
+        headers: { etag: '"baseline"' },
+      });
+    }) as typeof fetch;
+    const comment = (id: string, body: string, seconds: number) =>
+      event({
+        id,
+        created_at: new Date(
+          Date.parse("2026-11-11T10:00:00.000Z") + seconds * 1000
+        ).toISOString(),
+        payload: {
+          action: "created",
+          issue: { number: 12 },
+          comment: { body },
+        },
+      });
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      comment(`base-1-${index}`, "history", 1000 + index)
+    );
+    const secondPage = Array.from({ length: 100 }, (_, index) =>
+      comment(`base-2-${index}`, "history", 2000 + index)
+    );
+    pages.set("1", firstPage);
+    pages.set("2", secondPage);
+    pages.set("3", [comment("older", "@thebe-agent old request", 10)]);
+    const source = createGithubSource({
+      repositories: ["unitsung/thebe"],
+      agentLogin: "thebe-agent",
+      fetch: fetcher,
+      maxPages: 2,
+    });
+
+    const baseline = await source.read(undefined);
+    expect(baseline.triggers).toEqual([]);
+    expect(baseline.warning).toMatch(/older events/);
+
+    pages.set("1", [
+      comment("new", "@thebe-agent please restart emby", 3000),
+      ...firstPage.slice(0, 99),
+    ]);
+    const read = await source.read(baseline.cursor);
+    expect(read.triggers).toHaveLength(1);
+    expect(read.triggers[0]?.payload).toMatchObject({
+      body: "@thebe-agent please restart emby",
+    });
+    expect(read.warning).toMatch(/older events/);
+  });
 });
 
 describe("GitHub Channel", () => {

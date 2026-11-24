@@ -121,6 +121,16 @@ export function createGithubSource(options: GithubSourceOptions): Source {
 
         const seen = new Set(saved.seen);
         const fresh = result.events.filter((event) => !seen.has(event.id));
+        const nextRepo: RepoCursor = {
+          ...(result.etag ? { etag: result.etag } : {}),
+          initialized: true,
+          seen: [
+            ...result.events.map((event) => event.id),
+            ...saved.seen.filter(
+              (id) => !result.events.some((e) => e.id === id)
+            ),
+          ].slice(0, MAX_SEEN_EVENTS),
+        };
         // A truncated read keeps the newest events but not the cursor: moving it would skip past
         // events the page limit left unread, so the repository stays where it was until a full
         // window fits and the Source's health says what happened.
@@ -129,16 +139,12 @@ export function createGithubSource(options: GithubSourceOptions): Source {
             `GitHub events for ${repo} exceed ${maxPages} page(s) of 100; older events were not read`
           );
         } else {
-          next.repos[repo] = {
-            ...(result.etag ? { etag: result.etag } : {}),
-            initialized: true,
-            seen: [
-              ...result.events.map((event) => event.id),
-              ...saved.seen.filter(
-                (id) => !result.events.some((e) => e.id === id)
-              ),
-            ].slice(0, MAX_SEEN_EVENTS),
-          };
+          next.repos[repo] = nextRepo;
+        }
+        // Even a truncated first read establishes the baseline. Otherwise a repository with more
+        // than the page window would remain uninitialized and ignore every later human request.
+        if (!saved.initialized) {
+          next.repos[repo] = nextRepo;
         }
         // The first read is a baseline: it must not announce the repository's history.
         if (!saved.initialized) continue;
