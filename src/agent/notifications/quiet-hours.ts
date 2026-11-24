@@ -54,16 +54,98 @@ function toMinutes(hhmm: string): number {
   return h! * 60 + m!;
 }
 
-function minuteOfDay(at: Date, timeZone?: string): number {
+type LocalDateTime = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+};
+
+function localDateTime(at: Date, timeZone?: string): LocalDateTime {
   const parts = new Intl.DateTimeFormat("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hourCycle: "h23",
     ...(timeZone ? { timeZone } : {}),
   }).formatToParts(at);
   const get = (type: string) =>
     Number(parts.find((p) => p.type === type)?.value ?? 0);
-  return get("hour") * 60 + get("minute");
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+function minuteOfDay(at: Date, timeZone?: string): number {
+  const local = localDateTime(at, timeZone);
+  return local.hour * 60 + local.minute;
+}
+
+function offsetMs(at: Date, timeZone?: string): number {
+  const local = localDateTime(at, timeZone);
+  const wallClock = Date.UTC(
+    local.year,
+    local.month - 1,
+    local.day,
+    local.hour,
+    local.minute,
+    local.second
+  );
+  return wallClock - (at.getTime() - at.getUTCMilliseconds());
+}
+
+function matchingLocalInstants(
+  local: Omit<LocalDateTime, "second">,
+  timeZone?: string
+): Date[] {
+  const wallClock = Date.UTC(
+    local.year,
+    local.month - 1,
+    local.day,
+    local.hour,
+    local.minute
+  );
+  const offsets = new Set<number>();
+  for (const delta of [
+    -2 * 86_400_000,
+    -86_400_000,
+    0,
+    86_400_000,
+    2 * 86_400_000,
+  ]) {
+    offsets.add(offsetMs(new Date(wallClock + delta), timeZone));
+  }
+  const matches: Date[] = [];
+  for (const offset of offsets) {
+    const candidate = new Date(wallClock - offset);
+    const actual = localDateTime(candidate, timeZone);
+    if (
+      actual.year === local.year &&
+      actual.month === local.month &&
+      actual.day === local.day &&
+      actual.hour === local.hour &&
+      actual.minute === local.minute
+    ) {
+      matches.push(candidate);
+    }
+  }
+  return matches
+    .filter(
+      (candidate, index) =>
+        matches.findIndex((row) => row.getTime() === candidate.getTime()) ===
+        index
+    )
+    .sort((left, right) => left.getTime() - right.getTime());
 }
 
 export function isQuiet(window: QuietHours, at: Date): boolean {
@@ -75,11 +157,35 @@ export function isQuiet(window: QuietHours, at: Date): boolean {
 
 /** Milliseconds from `at` until the window ends. At least one second, so a timer never fires early. */
 export function msUntilQuietEnds(window: QuietHours, at: Date): number {
-  const now = minuteOfDay(at, window.timeZone);
-  const minutes = (toMinutes(window.end) - now + 1440) % 1440;
-  const ms =
-    minutes * 60_000 - at.getUTCSeconds() * 1000 - at.getUTCMilliseconds();
-  return Math.max(1000, ms);
+  const current = localDateTime(at, window.timeZone);
+  const now = current.hour * 60 + current.minute;
+  const end = toMinutes(window.end);
+  const localDate = new Date(
+    Date.UTC(current.year, current.month - 1, current.day + (end > now ? 0 : 1))
+  );
+  const candidates = matchingLocalInstants(
+    {
+      year: localDate.getUTCFullYear(),
+      month: localDate.getUTCMonth() + 1,
+      day: localDate.getUTCDate(),
+      hour: Math.floor(end / 60),
+      minute: end % 60,
+    },
+    window.timeZone
+  ).filter((candidate) => candidate.getTime() > at.getTime());
+  const endAt = candidates.find((candidate) => !isQuiet(window, candidate));
+  if (endAt) return Math.max(1000, endAt.getTime() - at.getTime());
+
+  // A DST gap can skip the configured local end time. Fall back to the first
+  // real minute that is outside the window.
+  let cursor = new Date(Math.ceil((at.getTime() + 1) / 60_000) * 60_000);
+  for (let minute = 0; minute < 2 * 1440; minute += 1) {
+    if (!isQuiet(window, cursor)) {
+      return Math.max(1000, cursor.getTime() - at.getTime());
+    }
+    cursor = new Date(cursor.getTime() + 60_000);
+  }
+  return 24 * 60 * 60_000;
 }
 
 export type QuietHoursStore = {

@@ -52,6 +52,20 @@ describe("quiet hours window", () => {
     );
   });
 
+  it("uses the real elapsed time across daylight-saving transitions", () => {
+    const newYork = {
+      start: "23:00",
+      end: "07:00",
+      timeZone: "America/New_York",
+    };
+    expect(msUntilQuietEnds(newYork, new Date("2026-11-01T04:00:00Z"))).toBe(
+      8 * 60 * 60_000
+    );
+    expect(msUntilQuietEnds(newYork, new Date("2026-03-08T06:00:00Z"))).toBe(
+      5 * 60 * 60_000
+    );
+  });
+
   it("refuses what it cannot read instead of guessing", () => {
     expect(parseQuietHours(null)).toBeUndefined();
     expect(parseQuietHours({ start: "22:00", end: "06:30" })).toEqual({
