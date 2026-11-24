@@ -6,7 +6,7 @@ Thebe Core is a homelab agent server with approvals and an audit log. It connect
 
 Run it on a NAS, a mini PC, a Raspberry Pi or a cloud server. Use it three ways:
 
-- **As an MCP server** for the agent you already use. Any MCP client that can send an HTTP header can list and call Core's tools.
+- **As an MCP server** for the agent you already use. Clients can call the HTTP endpoint with a token or spawn the `thebe-mcp` stdio bin.
 - **As a terminal agent.** Core embeds the [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) runtime, so `thebe` gives you a TUI and a one-shot CLI that can read files, edit files and run commands in a workspace you choose.
 - **Through its HTTP API.** Sessions, goals, schedules, an activity feed, approvals and the audit log, documented in OpenAPI at `/docs`.
 
@@ -63,7 +63,26 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-Point your agent's MCP configuration at that URL with the same header. An agent connected over `/mcp` can use the write tools too (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log. Set `THEBE_MCP_WRITES=off` to make `/mcp` read-only. To give an agent less than full access, make it its own token with `thebe token create <name> --scope mcp:read` (or `mcp:write`, or `mcp:irreversible` to also allow deletes that cannot be undone): that token works only on `/mcp`, and can be sent as `Authorization: Bearer <token>`.
+Point your agent's MCP configuration at that URL with the same header. For a host that spawns stdio servers, use the package's dedicated `thebe-mcp` bin instead of starting the container or HTTP listener:
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "-p", "thebe-core", "thebe-mcp"]
+}
+```
+
+`thebe-mcp` reads newline-delimited JSON-RPC on stdin and writes protocol-only messages on stdout. It shares the same tool, write, irreversible, audit and quiesce paths as `/mcp`; logs go to stderr.
+
+An agent connected either way can use the write tools (restart a container, edit a playlist, a provider's write tools). Core does not ask anyone first on that path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. Every write is recorded in the audit log. Set `THEBE_MCP_WRITES=off` to make `/mcp` read-only. To give an agent less than full access, make it its own token with `thebe token create <name> --scope mcp:read` (or `mcp:write`, or `mcp:irreversible` to also allow deletes that cannot be undone): that token works only on `/mcp`, and can be sent as `Authorization: Bearer <token>`. Repeat `--scope` to combine grants such as:
+
+```bash
+thebe token create "Media reader" --scope mcp:read \
+  --scope mcp:tool:container_restart:write \
+  --scope mcp:service:navidrome:write
+```
+
+`tools/list` and each invocation apply the same tool/service target and read/write/irreversible level check.
 
 **In the terminal.** `npm run tui` builds and starts the interactive UI. After a build, `node dist/cli.js` (or `thebe`, the package's `bin`) does the same, and `thebe -p "list my containers"` runs one prompt and exits. `thebe --help` lists the session and MCP subcommands, and `thebe doctor` reports the isolation posture.
 

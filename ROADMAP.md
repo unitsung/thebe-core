@@ -134,21 +134,10 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
-- **IM media and local bridges.** QQ recall, a local `imsg` iMessage backend,
-  and inbound or outbound media on IM channels remain later phases. Live
-  acceptance against real accounts is an operator check.
-- **Scoped tokens.** Shipped in part: `thebe token create <name> --scope mcp:read|mcp:write`
-  limits a token to `/mcp`, read-only or with writes; full access stays the default so nothing
-  changes for existing tokens. The shipped scopes also include `mcp:irreversible`, filter
-  `tools/list`, refuse downstream irreversible calls per invocation, keep scoped tokens off all
-  `/v1` routes, support the isolated gateway listener, and record the token name in audit.
-  Still open: a scope for one service category or one named tool.
 - **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are on by default, with a host
   switch (`THEBE_MCP_WRITES=off`), and the calling agent asks its own user. A stricter option would hold
   each write until a person approves it in Core (an out-of-band queue, with scoped tokens so
   the agent cannot approve itself), and run it on approval. Revisit only if someone needs it.
-- **A light start without the container** (`npx` or stdio) so a workstation user can use
-  Core's tools without running the container.
 - **Third-party harnesses behind the same seam (low priority).** Claude Code (Claude Agent SDK, in
   process) and Codex (`codex app-server`, JSON-RPC) as additional `AgentRuntime`
   implementations next to Pi, chosen per session, so any `/v1` client keeps
