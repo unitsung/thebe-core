@@ -94,7 +94,10 @@ export function createNotificationDigest(options: {
   async function persist(): Promise<void> {
     if (!file || !state) return;
     await mkdir(options.dir!, { recursive: true });
-    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, "utf8");
+    await writeFileAtomic(file, `${JSON.stringify(state)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
   function canDigest(

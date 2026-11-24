@@ -68,7 +68,7 @@ export function createNotificationService(options: {
     onError: options.onError,
     emit: async (target, notification) => {
       await routerRef.current?.notify(notification, {
-        extraTargets: [target],
+        onlyTargets: [target],
         skipDigest: true,
       });
     },
