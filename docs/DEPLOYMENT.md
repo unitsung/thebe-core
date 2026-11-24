@@ -655,11 +655,13 @@ check.
   including SIGTERM exit `0` and a settings write surviving a Core restart).
 - OAuth directional tests pass locally, including PKCE, scope narrowing, JWT
   issuer/audience checks, restart persistence, and immediate invalidation after
-  refresh-token revocation. No real claude.ai or ChatGPT connector/device
-  acceptance run has been completed on this checkout.
+  refresh-token revocation. The owner confirmed real claude.ai and ChatGPT
+  connector acceptance on 2026-11-23; this checkout does not store the external
+  evidence.
 - The container builds and runs. The optimized image (490 MB on disk, 104 MB
   compressed; ~30% smaller than a plain `npm ci --omit=dev` image) passes
   `scripts/smoke.mjs` (8/8) inside the running container.
+- On 2026-11-23 the operator confirmed that Core has run on a real server.
 - The handwritten Seatbelt, bubblewrap, disposable-Docker and Gondolin checks
   are gone. Host bash isolation is `@anthropic-ai/sandbox-runtime`.
   The container still does not nest that sandbox.

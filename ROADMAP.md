@@ -112,6 +112,9 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   through BlueBubbles. Owner-bound messages reach the durable Main Session;
   queues, cursors, deduplication, reply-window-aware notifications, and App
   management are in place.
+- Remote push is implemented through the optional Push Relay. The App carries
+  the production entitlement, and Core signs events and stores device
+  registrations.
 
 ## Next
 
@@ -157,11 +160,6 @@ Named after the first beta.
   external agents on `/mcp`. Check each vendor's current terms before offering
   subscription sign-in. Revisit only if users ask to chat through their own
   Claude or Codex subscription; the `/mcp` item above covers most needs first.
-- **Remote push.** APNs delivery through an optional, separately deployed Thebe
-  Push Relay that Core signs minimal events for; a self-hosted Core never embeds
-  Thebe's APNs credentials. The App entitlement, Core signing, relay reference
-  implementation and device registration exist. Signed-device receipt is a
-  release-operator check in [DEPLOYMENT.md](docs/DEPLOYMENT.md).
 - **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
   `@anthropic-ai/sandbox-runtime`. The release container does not nest it.
 
