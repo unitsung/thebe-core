@@ -35,6 +35,7 @@ import {
   asPromptInput,
 } from "../../agent/runtime/interface.ts";
 import { sanitizeBashEnv } from "../../agent/security/process-env.ts";
+import { readDshApiKey, writeDshApiKey } from "./auth-store.ts";
 import { mapDshSessionEvent, type DshSessionEventLike } from "./events.ts";
 import {
   createExternalMcpSession,
@@ -778,6 +779,7 @@ export function createDeepSeekHarnessRuntime(
 ): DeepSeekHarnessRuntime {
   const cwd = resolve(options.cwd);
   const sessionRoot = resolve(options.sessionRoot);
+  const authPath = join(sessionRoot, "auth.json");
   const provider = options.provider?.trim() || DEFAULT_PROVIDER;
   const env = options.env ?? process.env;
   const modelIds = [
@@ -790,7 +792,9 @@ export function createDeepSeekHarnessRuntime(
     ),
   ];
   const defaultModel = options.model?.trim() || modelIds[0]!;
-  let apiKey = options.apiKey?.trim() || env.DEEPSEEK_API_KEY?.trim();
+  const configuredApiKey =
+    options.apiKey?.trim() || env.DEEPSEEK_API_KEY?.trim();
+  let apiKey = configuredApiKey || readDshApiKey(authPath, provider);
   const currentModel: RuntimeModelRef = {
     providerId: provider,
     modelId: defaultModel,
@@ -1024,7 +1028,9 @@ export function createDeepSeekHarnessRuntime(
           `DeepSeek Harness runtime does not own provider "${providerId}".`
         );
       }
-      apiKey = key.trim() || undefined;
+      const nextApiKey = key.trim() || undefined;
+      writeDshApiKey(authPath, provider, nextApiKey);
+      apiKey = nextApiKey || configuredApiKey;
       for (const session of live.values()) session.credentialsChanged();
     },
     async loginOAuth(): Promise<never> {
@@ -1039,7 +1045,8 @@ export function createDeepSeekHarnessRuntime(
     async logout(providerId: string) {
       if (!["deepseek", "deepseek-official", "dsh"].includes(providerId))
         return;
-      apiKey = undefined;
+      writeDshApiKey(authPath, provider, undefined);
+      apiKey = configuredApiKey;
       for (const session of live.values()) session.credentialsChanged();
     },
     async check(providerId: string) {

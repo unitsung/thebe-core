@@ -29,8 +29,11 @@ When `THEBE_RUNTIME=pi`, files managed by the Pi compatibility adapter
 The default DSH runtime gives every Core Session its own DSH home under:
 
 ```text
+~/.thebe/agent/dsh-sessions/auth.json
 ~/.thebe/agent/dsh-sessions/<runtime-session-id>/
 ```
+
+The owner-only `auth.json` stores DSH API keys set through the TUI or `/v1/auth`. Environment-provided keys take precedence.
 
 UI and agent settings belong in `config.json`; do not mix them into a runtime
 home. Configuration files can contain provider addresses and runtime homes can
@@ -52,10 +55,10 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `DEEPSEEK_API_KEY`: API key used by the default `deepseek-official` DSH provider.
 - `THEBE_DSH_PROVIDER` / `THEBE_DSH_MODEL`: DSH provider and initial model. Defaults are `deepseek-official` and `deepseek-flash`.
 - `THEBE_DSH_MODELS`: optional comma-separated model ids exposed by the DSH runtime. The first is the default when `THEBE_DSH_MODEL` is unset.
-- `THEBE_DSH_HOME`: optional root for per-Session DSH homes. Defaults to `$THEBE_AGENT_DIR/dsh-sessions`.
+- `THEBE_DSH_HOME`: optional root for DSH homes. Defaults to `$THEBE_AGENT_DIR/dsh-sessions`; its `auth.json` stores owner-only provider keys set through the TUI or API.
 - Runtime selection is process-wide. Existing Session metadata does not switch transcripts or protocols in place; use the same runtime that created a persisted Session until per-session runtime routing ships.
 - `THEBE_CONFIG_DIR`: the config directory; the file is `$THEBE_CONFIG_DIR/config.json`. When only this is set, the runtime data directory defaults to `$THEBE_CONFIG_DIR/agent`.
-- `THEBE_AGENT_DIR`: runtime data. Pi stores its agent files here; DSH stores per-Session homes below it.
+- `THEBE_AGENT_DIR`: runtime data. Pi stores its agent files here; DSH stores provider keys in `dsh-sessions/auth.json` and per-Session state below it.
 - `THEBE_AGENT_STORE_DIR`: session, goal, and subagent metadata. Pi transcripts are not stored here.
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.

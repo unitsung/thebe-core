@@ -19,8 +19,11 @@ Thebe 的用户配置文件默认位于：
 默认的 DeepSeek Harness（DSH）运行时为每个 Core Session 使用独立的 DSH home，位于：
 
 ```text
+~/.thebe/agent/dsh-sessions/auth.json
 ~/.thebe/agent/dsh-sessions/<runtime-session-id>/
 ```
+
+通过 TUI 或 `/v1/auth` 设置的 DSH API key 保存在 owner-only 的 `auth.json` 中；环境变量中的 key 优先使用。
 
 设置 `THEBE_RUNTIME=pi` 时，Pi 兼容 Adapter 使用的 agent 文件位于：
 
@@ -143,10 +146,10 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 - `DEEPSEEK_API_KEY` 是默认 `deepseek-official` DSH provider 使用的 API key。
 - `THEBE_DSH_PROVIDER` / `THEBE_DSH_MODEL` 设置 DSH provider 和初始模型，默认分别为 `deepseek-official` 与 `deepseek-flash`。
 - `THEBE_DSH_MODELS` 是逗号分隔的 DSH 模型列表；未设置 `THEBE_DSH_MODEL` 时第一项为默认值。
-- `THEBE_DSH_HOME` 可覆盖每个 Session 的 DSH home 根目录，默认 `$THEBE_AGENT_DIR/dsh-sessions`。
+- `THEBE_DSH_HOME` 可覆盖 DSH home 根目录，默认 `$THEBE_AGENT_DIR/dsh-sessions`；目录中的 `auth.json` 保存 TUI 或 API 设置的 owner-only provider key。
 - 运行时选择是进程级的。已有 Session 的 transcript 和协议不会原地迁移；在逐 Session 运行时路由完成前，持久 Session 要继续使用创建它的运行时。
 - `THEBE_CONFIG_DIR` 改变 Thebe 配置目录，配置文件将位于 `$THEBE_CONFIG_DIR/config.json`。
-- `THEBE_AGENT_DIR` 改变运行时数据目录。Pi 在这里保存 agent 文件，DSH 在各 Session home 下保存状态。
+- `THEBE_AGENT_DIR` 改变运行时数据目录。Pi 在这里保存 agent 文件；DSH 在 `dsh-sessions/auth.json` 保存 provider key，并在各 Session home 下保存状态。
 - `THEBE_AGENT_STORE_DIR` 单独改变 Thebe 的会话与 Goal/子代理元数据目录；不存储 Pi transcript。
 - `THEBE_WORKSPACE_DIR` 在未设置配置文件 `workspacePath` 时提供 Thebe 文件工具和 TUI 的工作区；两者都未设置时 Thebe 拒绝启动，不会回退到进程启动目录。
 - `THEBE_TOOL_RESULT_COMPACTION` 可选，默认关闭。设为 `on` 时，每次调用模型前把模型已经据以回答过的工具结果缩短（本轮约 3000 字符，更早的轮次约 1200 字符，更早轮次的图片会被去掉）；模型最后一条消息之后新到的结果保持完整，会话记录不变。它减小输入，但会改写服务商已经见过的文本，从改写处起丢失提示缓存命中，所以只在输入体积比缓存复用更重要时开启。

@@ -186,6 +186,51 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(harnessModels).toEqual(["deepseek-v4-pro"]);
   });
 
+  it("persists runtime API keys across DSH runtime recreation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-auth-"));
+    const sessionRoot = join(root, "sessions");
+    const authPath = join(sessionRoot, "auth.json");
+    const firstRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      env: {},
+    });
+
+    await firstRuntime.auth().setApiKey("deepseek-official", "saved-key");
+
+    const stored = JSON.parse(await readFile(authPath, "utf8"));
+    expect(stored["deepseek-official"]).toEqual({
+      type: "api_key",
+      key: "saved-key",
+    });
+    expect((await stat(authPath)).mode & 0o777).toBe(0o600);
+
+    const apiKeys: string[] = [];
+    const secondRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      env: {},
+      harnessFactory: (input) => {
+        apiKeys.push(input.apiKey ?? "");
+        return fakeHarness().harness;
+      },
+    });
+    expect(await secondRuntime.auth().check("deepseek-official")).toEqual({
+      ok: true,
+    });
+    const session = await secondRuntime.createSession({ customTools: [] });
+    await session.prompt("use the persisted credential");
+    expect(apiKeys).toEqual(["saved-key"]);
+
+    await secondRuntime.auth().logout("deepseek-official");
+    expect(await secondRuntime.auth().check("deepseek-official")).toEqual({
+      ok: false,
+    });
+    await expect(readFile(authPath, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("drops disposed sessions and reaps inactive runtime handles", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-reaper-"));
     const runtime = createDeepSeekHarnessRuntime({
