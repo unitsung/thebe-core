@@ -1,4 +1,7 @@
-import type { RuntimeAuth, RuntimeProvider } from "../../../agent/runtime/interface.ts";
+import type {
+  RuntimeAuth,
+  RuntimeProvider,
+} from "../../../agent/runtime/interface.ts";
 import { httpError } from "../../../agent/types.ts";
 
 type PendingOAuthLogin = {
@@ -23,7 +26,10 @@ type ModelRuntimeAuth = {
     providerId: string,
     method: "oauth" | "apiKey",
     opts: {
-      prompt: () => Promise<string>;
+      prompt: (request?: {
+        type: string;
+        options?: readonly { id: string }[];
+      }) => Promise<string>;
       notify: (event: {
         type: string;
         url?: string;
@@ -33,7 +39,7 @@ type ModelRuntimeAuth = {
         intervalSeconds?: number;
         expiresInSeconds?: number;
       }) => void;
-    },
+    }
   ) => Promise<unknown>;
   setRuntimeApiKey: (providerId: string, apiKey: string) => Promise<void>;
   refresh: (opts: { allowNetwork: boolean }) => Promise<unknown>;
@@ -46,12 +52,14 @@ type ModelRuntimeAuth = {
   }>;
 };
 
-export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth {
+export function createPiRuntimeAuth(
+  modelRuntime: ModelRuntimeAuth
+): RuntimeAuth {
   const pendingOAuth = new Map<string, PendingOAuthLogin>();
 
   function ensureOAuthLogin(
     providerId: string,
-    openUrl?: (url: string) => Promise<void> | void,
+    openUrl?: (url: string) => Promise<void> | void
   ): PendingOAuthLogin {
     const existing = pendingOAuth.get(providerId);
     if (existing) {
@@ -90,7 +98,15 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
     entry.completion = (async () => {
       try {
         await modelRuntime.login(providerId, "oauth", {
-          prompt: async () => promptInput,
+          prompt: async (request) => {
+            if (request?.type !== "select") return promptInput;
+            // OpenAI's login method prompt precedes the authorization URL.
+            // Return the browser choice before waiting for the pasted callback.
+            if (request.options?.some((option) => option.id === "browser")) {
+              return "browser";
+            }
+            throw new Error("Unsupported OAuth login method selection");
+          },
           notify: (event) => {
             if (event.type === "auth_url" && event.url) {
               entry.url = event.url;
@@ -156,7 +172,7 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
         entry.urlReady,
         entry.completion.then(
           () => undefined,
-          () => undefined,
+          () => undefined
         ),
       ]);
       if (!options?.force) {
@@ -177,7 +193,7 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
         (error: unknown) => {
           failed = error;
           settled = true;
-        },
+        }
       );
       await Promise.resolve();
       if (settled && failed !== undefined) {
@@ -240,7 +256,9 @@ export function createPiRuntimeAuth(modelRuntime: ModelRuntimeAuth): RuntimeAuth
       }
       return out;
     },
-    async testProvider(providerId: string): Promise<{ ok: boolean; message?: string }> {
+    async testProvider(
+      providerId: string
+    ): Promise<{ ok: boolean; message?: string }> {
       try {
         const ok = await modelRuntime.checkAuth(providerId);
         return {

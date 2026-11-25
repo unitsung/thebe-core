@@ -339,6 +339,12 @@ server，并把用户 token 原样放进 `Authorization`（OpenList 不接受 `B
 thebe mcp add openlist --url https://openlist.example.com/mcp --header "Authorization: <token>"
 ```
 
+## OpenAI 订阅登录
+
+在 App 的 Core 服务商列表中打开 OpenAI (ChatGPT Plus/Pro)，发起 OAuth 登录。
+Core 选择浏览器登录。按 App 中的说明打开授权页，并在需要时将浏览器的回调地址粘贴回 App。
+Core 保存和刷新订阅凭据，App 通过 Core 使用该服务商。
+
 ## MCP OAuth 网关
 
 OAuth 默认关闭，只有 `THEBE_OAUTH_ISSUER` 指向授权服务器稳定的公网 origin
