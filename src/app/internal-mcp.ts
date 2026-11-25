@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -206,7 +207,7 @@ async function handleSessionMcp(
           ? params.callId
           : `session-tool-${String(id)}`;
       const permission = {
-        permissionId: `dsh:${name}:${callId}`,
+        permissionId: `dsh:${name}:${randomUUID()}`,
         toolName: name,
         toolCallId: callId,
         args,

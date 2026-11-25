@@ -332,4 +332,61 @@ describe("internal DSH MCP bridge", () => {
     ]);
     expect(JSON.stringify(emitted)).not.toContain("super-secret");
   });
+
+  it("uses a unique permission id for each session-local call", async () => {
+    bridge = await startInternalMcpBridge({
+      token: "core-token",
+      handler: {
+        async handle() {
+          throw new Error("global handler should not receive session tools");
+        },
+      },
+    });
+    const permissionIds: string[] = [];
+    const register = (sessionId: string) =>
+      bridge!.registerSession(sessionId, {
+        customTools: [
+          {
+            name: "shared_tool",
+            label: "Shared tool",
+            description: "A tool shared by multiple sessions",
+            parameters: { type: "object", properties: {} },
+            requiresApproval: true,
+            execute: async () => ({
+              content: [{ type: "text", text: "executed" }],
+            }),
+          },
+        ],
+        permissionHandler: {
+          request: async (request) => {
+            permissionIds.push(request.permissionId);
+            return "allow";
+          },
+        },
+        emit: () => {},
+      });
+    const first = register("session-a");
+    const second = register("session-b");
+    const call = (url: string) =>
+      fetch(url, {
+        method: "POST",
+        headers: {
+          authorization: "Bearer core-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 6,
+          method: "tools/call",
+          params: {
+            name: "shared_tool",
+            arguments: {},
+          },
+        }),
+      });
+
+    await Promise.all([call(first.url), call(second.url)]);
+    expect(permissionIds).toHaveLength(2);
+    expect(new Set(permissionIds).size).toBe(2);
+  });
 });

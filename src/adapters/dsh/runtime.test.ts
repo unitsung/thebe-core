@@ -297,6 +297,50 @@ describe("DeepSeek Harness AgentRuntime", () => {
     ]);
   });
 
+  it("cancels a harness that finishes initialization after quiesce", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-quiesce-init-"));
+    const lateHarness = fakeHarness();
+    const nextHarness = fakeHarness({ seq: 10 });
+    let harnessStarted!: () => void;
+    const waitingForHarness = new Promise<void>((resolve) => {
+      harnessStarted = resolve;
+    });
+    let finishHarness!: (harness: DshHarnessLike) => void;
+    const deferredHarness = new Promise<DshHarnessLike>((resolve) => {
+      finishHarness = resolve;
+    });
+    const harnessFactory = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        harnessStarted();
+        return await deferredHarness;
+      })
+      .mockReturnValueOnce(nextHarness.harness);
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory,
+    });
+    const session = await runtime.createSession({ customTools: [] });
+
+    const cancelledTurn = session.prompt("must not run during quiesce");
+    await waitingForHarness;
+    await runtime.quiesce();
+    finishHarness(lateHarness.harness);
+
+    await expect(cancelledTurn).rejects.toThrow(
+      /cancelled during initialization/
+    );
+    expect(lateHarness.runs).toEqual([]);
+    expect(lateHarness.closes).toHaveBeenCalledOnce();
+
+    await runtime.unquiesce();
+    await session.prompt("run after maintenance");
+    expect(nextHarness.runs).toEqual([
+      [{ type: "text", text: "run after maintenance" }],
+    ]);
+  });
+
   it("persists steering and follow-up input in the session transcript", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-steering-"));
     const sessionRoot = join(root, "sessions");

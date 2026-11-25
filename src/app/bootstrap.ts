@@ -38,6 +38,7 @@ import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts"
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
 import {
+  selectDeepSeekHarnessModel,
   selectRuntimeBootstrap,
   selectRuntimeName,
 } from "./runtime-registry.ts";
@@ -171,10 +172,10 @@ export async function bootstrapThebe(
   if (runtimeName === "dsh") {
     const provider =
       process.env.THEBE_DSH_PROVIDER?.trim() || "deepseek-official";
-    const model =
-      options?.model?.modelId?.trim() ||
-      process.env.THEBE_DSH_MODEL?.trim() ||
-      "deepseek-flash";
+    const model = selectDeepSeekHarnessModel(
+      options?.model?.modelId,
+      process.env
+    );
     if (options?.model && options.model.providerId !== provider) {
       throw new Error(
         `THEBE_RUNTIME=dsh requires a ${provider} model, not ${options.model.providerId}.`

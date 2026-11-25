@@ -258,6 +258,7 @@ class DshRuntimeSession implements RuntimeSession {
   #cacheReadTokens = 0;
   #cacheWriteTokens = 0;
   #model: RuntimeModelRef;
+  #generation = 0;
 
   constructor(input: {
     runtimeSessionId: string;
@@ -410,6 +411,7 @@ class DshRuntimeSession implements RuntimeSession {
 
   async #engine(): Promise<DshHarnessLike> {
     if (this.#closed) throw new Error("DeepSeek Harness session is closed.");
+    const generation = this.#generation;
     if (!this.#harness) {
       const harness = await this.#createHarness(
         this.#model,
@@ -417,7 +419,13 @@ class DshRuntimeSession implements RuntimeSession {
         (event) => this.#emit(event)
       );
       const ensureNotCancelled = async () => {
-        if (!this.#closed && !this.#abortRequested) return;
+        if (
+          !this.#closed &&
+          !this.#abortRequested &&
+          generation === this.#generation
+        ) {
+          return;
+        }
         await harness.close().catch(() => {});
         throw new Error(
           "DeepSeek Harness session was cancelled during initialization."
@@ -680,6 +688,7 @@ class DshRuntimeSession implements RuntimeSession {
   }
 
   async suspend(): Promise<void> {
+    this.#generation += 1;
     const harness = this.#harness;
     if (!harness) return;
     this.#harness = undefined;

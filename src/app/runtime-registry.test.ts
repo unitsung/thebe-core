@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  selectDeepSeekHarnessModel,
   selectRuntimeBootstrap,
   selectRuntimeName,
 } from "./runtime-registry.ts";
@@ -37,5 +38,28 @@ describe("Agent runtime selection", () => {
       model: { providerId: "openai", modelId: "gpt-4o" },
       primaryApiKey: { providerId: "openai", key: "openai-key" },
     });
+  });
+
+  it("uses the first configured DSH model when no explicit default exists", () => {
+    expect(
+      selectDeepSeekHarnessModel(undefined, {
+        THEBE_DSH_MODELS: "deepseek-v4-pro, deepseek-flash",
+      })
+    ).toBe("deepseek-v4-pro");
+  });
+
+  it("preserves explicit DSH model precedence", () => {
+    expect(
+      selectDeepSeekHarnessModel("requested", {
+        THEBE_DSH_MODEL: "configured",
+        THEBE_DSH_MODELS: "listed",
+      })
+    ).toBe("requested");
+    expect(
+      selectDeepSeekHarnessModel(undefined, {
+        THEBE_DSH_MODEL: "configured",
+        THEBE_DSH_MODELS: "listed",
+      })
+    ).toBe("configured");
   });
 });

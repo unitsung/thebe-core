@@ -1,6 +1,7 @@
 export const AGENT_RUNTIME_NAMES = ["dsh", "pi"] as const;
 export type AgentRuntimeName = (typeof AGENT_RUNTIME_NAMES)[number];
 type RuntimeModelRef = { providerId: string; modelId: string };
+const DEFAULT_DSH_MODEL = "deepseek-flash";
 
 export type RuntimeBootstrapSelection = {
   model?: RuntimeModelRef;
@@ -52,4 +53,16 @@ export function selectRuntimeBootstrap(
     ...(model ? { model } : {}),
     ...(primaryApiKey ? { primaryApiKey } : {}),
   };
+}
+
+export function selectDeepSeekHarnessModel(
+  requestedModelId: string | undefined,
+  env: NodeJS.ProcessEnv
+): string {
+  const explicit = requestedModelId?.trim() || env.THEBE_DSH_MODEL?.trim();
+  if (explicit) return explicit;
+  const configured = env.THEBE_DSH_MODELS?.split(",")
+    .map((value) => value.trim())
+    .find(Boolean);
+  return configured ?? DEFAULT_DSH_MODEL;
 }
