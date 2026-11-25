@@ -19,8 +19,9 @@ projects that use the same `/v1` API.
 Core is a homelab tool server with approvals and an audit log, plus an agent for the terminal.
 It is not a general agent platform or a chat gateway. That shapes the plan:
 
-- Reach other agents through `/mcp` rather than replacing them. Write tools on `/mcp` are the
-  main gap (see "Later").
+- Reach other agents through `/mcp` rather than replacing them. Write tools, host gating,
+  irreversible checks, audit, and target-scoped tokens are shipped; an optional Core-side
+  approval queue remains in Later.
 - The built-in agent loop stays for background work, the terminal, and people who have no other
   agent. Do not grow it into a second Claude Code or Codex.
 - Keep `/v1` and `/mcp` stable; clients built on them should not need Core-specific changes.
@@ -109,18 +110,16 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
   place. Live deployment and external-agent checks are operator steps in
   [DEPLOYMENT.md](docs/DEPLOYMENT.md).
 - Two-way IM channels are implemented for Telegram, Weixin, QQ, and iMessage
-  through BlueBubbles. Owner-bound messages reach the durable Main Session;
-  queues, cursors, deduplication, reply-window-aware notifications, and App
-  management are in place.
+  through BlueBubbles or local `imsg`. Owner-bound messages reach the
+  durable Main Session; queues, cursors, deduplication, reply-window-aware
+  notifications, bounded media, QQ recall, and App management are in place.
 - Remote push is implemented through the optional Push Relay. The App carries
   the production entitlement, and Core signs events and stores device
   registrations.
 
 ## Next
 
-Work named for the first beta, not yet complete in this checkout.
-
-First-beta feature work is complete in this checkout. Operator-only release
+No first-beta feature work remains in this checkout. Operator-only release
 checks are documented in [DEPLOYMENT.md](docs/DEPLOYMENT.md); they are not
 roadmap tasks.
 
@@ -149,8 +148,6 @@ Named after the first beta.
   external agents on `/mcp`. Check each vendor's current terms before offering
   subscription sign-in. Revisit only if users ask to chat through their own
   Claude or Codex subscription; the `/mcp` item above covers most needs first.
-- **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
-  `@anthropic-ai/sandbox-runtime`. The release container does not nest it.
 
 ## Candidate directions (identified, not scheduled)
 
