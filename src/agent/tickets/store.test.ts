@@ -340,7 +340,7 @@ describe("ticket fan-out and inputs", () => {
     expect(attached).toEqual([]);
   });
 
-  it("gives the event to the newest live ticket when multiple match", async () => {
+  it("fans the event out to every live ticket subscribed to the thread", async () => {
     const store = createTicketStore({});
     const first = await store.recordDirect({
       ...request(1),
@@ -354,9 +354,57 @@ describe("ticket fan-out and inputs", () => {
       trigger: trigger(1),
       isLive: () => true,
     });
-    expect(attached).toEqual([second.id]);
-    expect((await store.get(first.id))?.inputs).toHaveLength(0);
+    expect(attached).toEqual([second.id, first.id]);
+    expect((await store.get(first.id))?.inputs).toHaveLength(1);
     expect((await store.get(second.id))?.inputs).toHaveLength(1);
+  });
+
+  it("is idempotent across every live ticket in a fan-out", async () => {
+    const store = createTicketStore({});
+    const first = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const second = await store.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+
+    expect(
+      await store.attachTrigger({
+        trigger: trigger(1),
+        isLive: () => true,
+      })
+    ).toEqual([second.id, first.id]);
+    expect(
+      await store.attachTrigger({
+        trigger: trigger(1),
+        isLive: () => true,
+      })
+    ).toEqual([second.id, first.id]);
+    expect((await store.get(first.id))?.inputs).toHaveLength(1);
+    expect((await store.get(second.id))?.inputs).toHaveLength(1);
+  });
+
+  it("fan-out skips the subscribed tickets that are no longer live", async () => {
+    const store = createTicketStore({});
+    const live = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const ended = await store.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+
+    const attached = await store.attachTrigger({
+      trigger: trigger(1),
+      isLive: (ticket) => ticket.id === live.id,
+    });
+
+    expect(attached).toEqual([live.id]);
+    expect((await store.get(live.id))?.inputs).toHaveLength(1);
+    expect((await store.get(ended.id))?.inputs).toEqual([]);
   });
 
   it("is idempotent when the same trigger is attached twice", async () => {

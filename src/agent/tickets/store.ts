@@ -130,8 +130,8 @@ export type TicketStore = {
     triggers?: readonly Trigger[];
   }): Promise<Ticket>;
   /**
-   * Fan-out: attaches a Trigger to the newest live Ticket subscribed to any of its threads.
-   * Returns the ticket id if attached, or an empty array if no live subscriber was found.
+   * Fan-out: attaches a Trigger to every live Ticket subscribed to any of its Threads.
+   * Returns every Ticket that now has the Trigger, including an idempotent retry.
    */
   attachTrigger(options: {
     trigger: Trigger;
@@ -516,13 +516,15 @@ export function createTicketStore(options: {
     async attachTrigger(options) {
       return serial(async () => {
         await ensureLoaded();
-        for (const ticket of memory.values()) {
-          if (
-            ticket.inputs.some((item) => item.triggerId === options.trigger.id)
-          ) {
-            return [ticket.id];
-          }
-        }
+        const alreadyAttached = new Set(
+          [...memory.values()]
+            .filter((ticket) =>
+              ticket.inputs.some(
+                (item) => item.triggerId === options.trigger.id
+              )
+            )
+            .map((ticket) => ticket.id)
+        );
         const matchingTickets = [...memory.values()].filter((ticket) =>
           ticket.subscriptions.some((sub) =>
             options.trigger.threads.some(
@@ -530,59 +532,69 @@ export function createTicketStore(options: {
             )
           )
         );
-        if (matchingTickets.length === 0) return [];
         const liveMatches: Ticket[] = [];
         for (const ticket of matchingTickets) {
-          if (await options.isLive(ticket)) {
+          if (
+            !alreadyAttached.has(ticket.id) &&
+            (await options.isLive(ticket))
+          ) {
             liveMatches.push(ticket);
           }
         }
-        if (liveMatches.length === 0) return [];
-        const target = newestFirst(liveMatches)[0]!;
-        const matchingThread =
-          target.subscriptions.find((sub) =>
-            options.trigger.threads.some(
-              (thread) => normalizeThread(sub) === normalizeThread(thread)
-            )
-          ) ?? options.trigger.threads[0]!;
-        const input: TicketInput = {
-          triggerId: options.trigger.id,
-          seq:
-            target.inputs.reduce(
-              (highest, item) => Math.max(highest, item.seq),
-              0
-            ) + 1,
-          source: options.trigger.source,
-          kind: options.trigger.kind,
-          thread: matchingThread,
-          at: options.trigger.at,
-          attachedAt: options.attachedAt ?? new Date().toISOString(),
-          ...(options.trigger.actor
-            ? { actor: cloneActorRef(options.trigger.actor) }
-            : {}),
-          ...(options.trigger.human !== undefined
-            ? { human: options.trigger.human }
-            : {}),
-          ...(options.trigger.admission
-            ? { admission: options.trigger.admission }
-            : {}),
-          ...(options.trigger.addressed
-            ? { addressed: options.trigger.addressed }
-            : {}),
-          ...(options.trigger.channel
-            ? { channel: cloneChannelRef(options.trigger.channel) }
-            : {}),
-          ...(options.trigger.payload
-            ? { payload: options.trigger.payload }
-            : {}),
-        };
-        target.inputs.push(input);
-        target.channels = mergeChannels(target.channels ?? [], [
-          options.trigger.channel,
-        ]);
-        if (target.inputs.length > MAX_INPUTS_PER_TICKET) target.inputs.shift();
-        await persist(target);
-        return [target.id];
+        const targets = newestFirst(liveMatches);
+        for (const target of targets) {
+          const matchingThread =
+            target.subscriptions.find((sub) =>
+              options.trigger.threads.some(
+                (thread) => normalizeThread(sub) === normalizeThread(thread)
+              )
+            ) ?? options.trigger.threads[0]!;
+          const input: TicketInput = {
+            triggerId: options.trigger.id,
+            seq:
+              target.inputs.reduce(
+                (highest, item) => Math.max(highest, item.seq),
+                0
+              ) + 1,
+            source: options.trigger.source,
+            kind: options.trigger.kind,
+            thread: matchingThread,
+            at: options.trigger.at,
+            attachedAt: options.attachedAt ?? new Date().toISOString(),
+            ...(options.trigger.actor
+              ? { actor: cloneActorRef(options.trigger.actor) }
+              : {}),
+            ...(options.trigger.human !== undefined
+              ? { human: options.trigger.human }
+              : {}),
+            ...(options.trigger.admission
+              ? { admission: options.trigger.admission }
+              : {}),
+            ...(options.trigger.addressed
+              ? { addressed: options.trigger.addressed }
+              : {}),
+            ...(options.trigger.channel
+              ? { channel: cloneChannelRef(options.trigger.channel) }
+              : {}),
+            ...(options.trigger.payload
+              ? { payload: options.trigger.payload }
+              : {}),
+          };
+          target.inputs.push(input);
+          target.channels = mergeChannels(target.channels ?? [], [
+            options.trigger.channel,
+          ]);
+          if (target.inputs.length > MAX_INPUTS_PER_TICKET) {
+            target.inputs.shift();
+          }
+          alreadyAttached.add(target.id);
+          await persist(target);
+        }
+        return newestFirst(
+          [...memory.values()].filter((ticket) =>
+            alreadyAttached.has(ticket.id)
+          )
+        ).map((ticket) => ticket.id);
       });
     },
     async attachToTicket(options) {

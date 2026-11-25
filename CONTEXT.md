@@ -63,6 +63,10 @@ Before paused work resumes, an `eval` Ticket is revalidated against the current 
 Over `/mcp`, `ticket_list` and `ticket_get` read the derived view; `ticket_list` orders by latest execution activity and can filter by stage, including `attention`, before applying its limit. `ticket_delegate` creates the direct Ticket and its first Assignment, `ticket_reply` answers Attention or decides one pending worker permission, `ticket_note` adds guidance to the next worker checkpoint without interrupting the active one, and `ticket_control` pauses, resumes, stops or retries the Assignment's Executor. Retry ends the current Assignment and appends a new one under the same Ticket and Mandate only after failed, blocked or checkpoint-limited work. Delegation, reply, note and control are writes gated by `THEBE_MCP_WRITES` and `mcp:write`; arbitrary `bash` approval and irreversible calls need `mcp:irreversible`. The person-facing HTTP controls are `POST /v1/tickets`, `POST /v1/tickets/{id}/reply`, `POST /v1/tickets/{id}/note`, and `POST /v1/tickets/{id}/pause|resume|stop|retry`; they share the same control module and are refused while quiesced.
 _Avoid_: treating Ticket as a duplicate of its Executor, storing derived status or stage on Ticket, giving a Goal or Executor its own Ticket identity, or running Eval for events on threads with an open Ticket
 
+**Subscription fan-out**:
+Every live Ticket subscribed to any Thread named by a Trigger receives that Trigger as an Input. A retry returns the same full set of Tickets without duplicating their Inputs. Ended Tickets do not receive asynchronous fan-out. The Trigger skips Eval when at least one live subscriber accepted it, while a human message can later resume a relevant ended Ticket through the explicit route that owns that decision.
+_Avoid_: choosing one newest subscriber, returning after the first matched Ticket, or treating fan-out as authorization for a write
+
 **Assignment**:
 The durable binding of one Ticket to one Executor instance, stored in the Ticket's `assignments` history. A Ticket may have several over time; retry ends the current Assignment and appends a new one. Its lifecycle is `pending` → `running` → `ended`; a paused or waiting Executor does not change the Assignment state, because `waiting` and `person` belong to the Ticket stage and `Attention`. An Assignment may carry the Executor's structured `Report`. The Executor instance id is an implementation reference (today the Goal session id), not a second work item.
 _Avoid_: deriving Assignment solely from a runtime Goal, storing Ticket stage on Assignment, or reusing one Assignment after retry
@@ -78,7 +82,7 @@ Assignment when the Ticket is retried or reopened.
 _Avoid_: treating a later Assignment's outcome as the earlier Report
 
 **AgentRuntime**:
-Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. It is a structural seam, not a claim that a second runtime is integrated.
+Agent-owned runtime Interface in `src/agent/runtime`. Delivery code imports the Agent Interface; the Pi adapter implements this boundary. DSH is the planned additional in-process runtime behind the same seam. That work is separate from Core's DSH domain vocabulary and must keep Core's approvals, command guard, audit and workspace policy outside the runtime adapter.
 _Avoid_: a top-level runtime grab bag, AgentAdapter, raw `Agent`/`AgentHarness`, Pi session objects in Agent or delivery code
 
 **CommandRisk**:

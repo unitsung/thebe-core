@@ -36,6 +36,9 @@ model. Existing Tickets gain one Assignment from their legacy Goal. The Goal
 implementation may remain temporarily behind the Executor boundary, but no new
 Goal vocabulary may enter `CONTEXT.md`, HTTP, MCP, or the App. A compatibility
 shim, if needed, must name its removal version and must not own state.
+Subscription fan-out follows DSH: every live Ticket subscribed to a Trigger's
+Threads receives it as context. A retry returns the same complete set without
+duplicating Inputs. Ended Tickets do not receive asynchronous fan-out.
 
 ## First workflow and evaluation
 

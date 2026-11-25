@@ -299,7 +299,7 @@ describe("subscriptions and fan-out", () => {
     expect(ticket.inputs).toEqual([]);
   });
 
-  it("gives an event to the newest live ticket when two share a subscription", async () => {
+  it("fans an event out to every live ticket that shares a subscription", async () => {
     vi.useFakeTimers();
     const t = setup();
     await vi.advanceTimersByTimeAsync(0);
@@ -332,15 +332,20 @@ describe("subscriptions and fan-out", () => {
     t.world.containers.emby = "exited";
     await vi.advanceTimersByTimeAsync(1000);
 
-    // Only ticket2 (newest) receives the input!
+    // Both live tickets receive the same input.
     await vi.waitFor(async () => {
-      const res = await t.call(`/v1/tickets/${ticket2}`);
-      expect(res.body.inputs).toHaveLength(1);
+      const [first, second] = await Promise.all([
+        t.call(`/v1/tickets/${ticket1}`),
+        t.call(`/v1/tickets/${ticket2}`),
+      ]);
+      expect(first.body.inputs).toHaveLength(1);
+      expect(second.body.inputs).toHaveLength(1);
     });
     const t1 = (await t.call(`/v1/tickets/${ticket1}`)).body;
     const t2 = (await t.call(`/v1/tickets/${ticket2}`)).body;
-    expect(t1.inputs).toHaveLength(0);
+    expect(t1.inputs).toHaveLength(1);
     expect(t2.inputs).toHaveLength(1);
+    expect(t1.inputs[0]?.kind).toBe("container.went_down");
     expect(t2.inputs[0]?.kind).toBe("container.went_down");
   });
 
