@@ -679,6 +679,14 @@ class DshRuntimeSession implements RuntimeSession {
     this.dispose();
   }
 
+  async suspend(): Promise<void> {
+    const harness = this.#harness;
+    if (!harness) return;
+    this.#harness = undefined;
+    this.#resumePending = true;
+    await harness.close().catch(() => {});
+  }
+
   isRunning(): boolean {
     return this.#active;
   }
@@ -1004,14 +1012,11 @@ export function createDeepSeekHarnessRuntime(
     },
     async quiesce() {
       quiesced = true;
-      const sessions = [...live.values()];
-      live.clear();
       await Promise.all(
-        sessions.map(async (session) => {
-          await session.close().catch(() => {});
+        [...live.values()].map(async (session) => {
+          await session.suspend();
         })
       );
-      liveness.clear();
     },
     async unquiesce() {
       quiesced = false;

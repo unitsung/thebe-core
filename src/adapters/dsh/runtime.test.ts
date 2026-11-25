@@ -8,7 +8,7 @@ import {
   type DshHarnessLike,
 } from "./runtime.ts";
 
-function fakeHarness(options: { resume?: boolean } = {}) {
+function fakeHarness(options: { resume?: boolean; seq?: number } = {}) {
   let requestHandler:
     | ((method: string, params: Record<string, unknown>) => Promise<unknown>)
     | undefined;
@@ -37,7 +37,7 @@ function fakeHarness(options: { resume?: boolean } = {}) {
             params: {
               sessionId: id,
               event: {
-                seq: 1,
+                seq: options.seq ?? 1,
                 time: Date.now(),
                 type: "assistant/message",
                 data: {
@@ -54,7 +54,7 @@ function fakeHarness(options: { resume?: boolean } = {}) {
             sessionId: id,
             events: [
               {
-                seq: 2,
+                seq: (options.seq ?? 1) + 1,
                 time: Date.now(),
                 type: "turn/end",
                 data: { reason: { kind: "completed" } },
@@ -265,6 +265,36 @@ describe("DeepSeek Harness AgentRuntime", () => {
 
     expect(await runtime.listSessions()).toEqual([]);
     await expect(stat(sessionHome!)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("resumes a suspended session after the runtime unquiesces", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-quiesce-"));
+    const firstHarness = fakeHarness();
+    const secondHarness = fakeHarness({ seq: 10 });
+    const harnessFactory = vi
+      .fn()
+      .mockReturnValueOnce(firstHarness.harness)
+      .mockReturnValueOnce(secondHarness.harness);
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory,
+    });
+    const session = await runtime.createSession({ customTools: [] });
+    await session.prompt("before maintenance");
+
+    await runtime.quiesce();
+    await runtime.unquiesce();
+    await session.prompt("after maintenance");
+
+    expect(firstHarness.closes).toHaveBeenCalledOnce();
+    expect(secondHarness.resumes).toEqual([session.runtimeSessionId]);
+    expect(session.messages()).toEqual([
+      expect.objectContaining({ role: "user", text: "before maintenance" }),
+      expect.objectContaining({ role: "assistant", text: "DSH replied." }),
+      expect.objectContaining({ role: "user", text: "after maintenance" }),
+      expect.objectContaining({ role: "assistant", text: "DSH replied." }),
+    ]);
   });
 
   it("persists steering and follow-up input in the session transcript", async () => {
