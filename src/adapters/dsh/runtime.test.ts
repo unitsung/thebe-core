@@ -183,6 +183,31 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(harnessModels).toEqual(["deepseek-v4-pro"]);
   });
 
+  it("drops disposed sessions and reaps inactive runtime handles", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-reaper-"));
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: () => fakeHarness().harness,
+    });
+
+    const disposed = await runtime.createSession({ customTools: [] });
+    disposed.dispose();
+    expect(runtime.reapInactiveSessions?.()).toBe(0);
+
+    await runtime.createSession({ customTools: [] });
+    expect(runtime.reapInactiveSessions?.()).toBe(1);
+
+    const retained = await runtime.createSession({ customTools: [] });
+    const release = runtime.registerSessionLiveness?.(
+      retained.runtimeSessionId,
+      () => true
+    );
+    expect(runtime.reapInactiveSessions?.()).toBe(0);
+    release?.();
+    expect(runtime.reapInactiveSessions?.()).toBe(1);
+  });
+
   it("routes DSH approval requests through the Core permission handler", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-approval-"));
     const fake = fakeHarness();

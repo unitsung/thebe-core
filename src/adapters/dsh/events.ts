@@ -2,6 +2,7 @@ import type {
   NormalizedEvent,
   RuntimeMessage,
 } from "../../agent/runtime/interface.ts";
+import { summarizeArgs } from "../../agent/security/redaction.ts";
 
 export type DshSessionEventLike = {
   seq?: number;
@@ -46,6 +47,15 @@ function parseArguments(value: unknown): unknown {
   }
 }
 
+function redactedArgs(value: unknown): unknown {
+  if (value == null) return undefined;
+  try {
+    return JSON.parse(summarizeArgs(value, 8_000));
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Projects the durable DeepSeek Harness Session vocabulary into the events a
  * Thebe session subscriber already understands. Tool result events identify a
@@ -83,7 +93,7 @@ export function mapDshSessionEvent(
     const toolCallId =
       typeof data.callId === "string" ? data.callId : "unknown-tool-call";
     const toolName = typeof data.name === "string" ? data.name : "tool";
-    const args = parseArguments(data.arguments);
+    const args = redactedArgs(parseArguments(data.arguments));
     return {
       events: [
         {

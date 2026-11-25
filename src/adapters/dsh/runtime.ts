@@ -232,7 +232,7 @@ class DshRuntimeSession implements RuntimeSession {
     create: CreateRuntimeSessionOptions,
     emit: (event: NormalizedEvent) => void
   ) => Promise<DshHarnessLike>;
-  readonly #unregisterSession?: (sessionId: string) => void;
+  readonly #disposeSession?: () => void;
   readonly #listeners = new Set<(event: NormalizedEvent) => void>();
   readonly #messages: RuntimeMessage[] = [];
   readonly #events: DshSessionEventLike[] = [];
@@ -263,14 +263,14 @@ class DshRuntimeSession implements RuntimeSession {
       create: CreateRuntimeSessionOptions,
       emit: (event: NormalizedEvent) => void
     ) => Promise<DshHarnessLike>;
-    unregisterSession?: (sessionId: string) => void;
+    disposeSession?: () => void;
   }) {
     this.runtimeSessionId = input.runtimeSessionId;
     this.#transcriptPath = input.transcriptPath;
     this.#provider = input.provider;
     this.#createOptions = input.create;
     this.#createHarness = input.createHarness;
-    this.#unregisterSession = input.unregisterSession;
+    this.#disposeSession = input.disposeSession;
     this.#resumePending = input.resume;
     this.#model = input.create.model ?? input.getModel();
     if (this.#model.providerId !== this.#provider) {
@@ -638,7 +638,7 @@ class DshRuntimeSession implements RuntimeSession {
     if (this.#closed) return;
     this.#abortRequested = this.#active;
     this.#closed = true;
-    this.#unregisterSession?.(this.runtimeSessionId);
+    this.#disposeSession?.();
     const harness = this.#harness;
     this.#harness = undefined;
     void harness?.close().catch(() => {});
@@ -647,6 +647,10 @@ class DshRuntimeSession implements RuntimeSession {
 
   async close(): Promise<void> {
     this.dispose();
+  }
+
+  isRunning(): boolean {
+    return this.#active;
   }
 
   credentialsChanged(): void {
@@ -680,6 +684,7 @@ export function createDeepSeekHarnessRuntime(
     modelId: defaultModel,
   };
   const live = new Map<string, DshRuntimeSession>();
+  const liveness = new Map<string, () => boolean>();
   let quiesced = false;
   let coreMcp = options.coreMcp;
   let unregisterSessionMcp: ((sessionId: string) => void) | undefined;
@@ -803,7 +808,8 @@ export function createDeepSeekHarnessRuntime(
   ): Promise<RuntimeSession> {
     const home = join(sessionRoot, runtimeSessionId);
     await mkdir(home, { recursive: true, mode: 0o700 });
-    const session = new DshRuntimeSession({
+    let session!: DshRuntimeSession;
+    session = new DshRuntimeSession({
       runtimeSessionId,
       transcriptPath: join(home, "thebe-transcript.jsonl"),
       provider,
@@ -812,7 +818,13 @@ export function createDeepSeekHarnessRuntime(
       getModel: () => ({ ...currentModel }),
       createHarness: (model, create, emit) =>
         createHarness(runtimeSessionId, model, create, emit),
-      unregisterSession: (id) => unregisterSessionMcp?.(id),
+      disposeSession: () => {
+        if (live.get(runtimeSessionId) === session) {
+          live.delete(runtimeSessionId);
+        }
+        liveness.delete(runtimeSessionId);
+        unregisterSessionMcp?.(runtimeSessionId);
+      },
     });
     await session.loadTranscript();
     live.set(runtimeSessionId, session);
@@ -912,8 +924,8 @@ export function createDeepSeekHarnessRuntime(
     async deleteSession(runtimeSessionId) {
       const session = live.get(runtimeSessionId);
       live.delete(runtimeSessionId);
+      liveness.delete(runtimeSessionId);
       await session?.close().catch(() => {});
-      unregisterSessionMcp?.(runtimeSessionId);
       await rm(join(sessionRoot, runtimeSessionId), {
         recursive: true,
         force: true,
@@ -947,6 +959,7 @@ export function createDeepSeekHarnessRuntime(
           await session.close().catch(() => {});
         })
       );
+      liveness.clear();
     },
     async unquiesce() {
       quiesced = false;
@@ -954,8 +967,26 @@ export function createDeepSeekHarnessRuntime(
     isQuiesced() {
       return quiesced;
     },
+    registerSessionLiveness(sessionId, isActive) {
+      liveness.set(sessionId, isActive);
+      return () => {
+        if (liveness.get(sessionId) === isActive) {
+          liveness.delete(sessionId);
+        }
+      };
+    },
     reapInactiveSessions() {
-      return 0;
+      let reaped = 0;
+      for (const [sessionId, session] of live) {
+        if (liveness.get(sessionId)?.() === true || session.isRunning()) {
+          continue;
+        }
+        live.delete(sessionId);
+        liveness.delete(sessionId);
+        session.dispose();
+        reaped += 1;
+      }
+      return reaped;
     },
   };
 }

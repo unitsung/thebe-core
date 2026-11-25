@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { REDACTED } from "../../agent/security/redaction.ts";
 import { mapDshSessionEvent } from "./events.ts";
 
 describe("DeepSeek Harness event mapping", () => {
@@ -84,6 +85,29 @@ describe("DeepSeek Harness event mapping", () => {
       text: "file contents",
       isError: false,
     });
+  });
+
+  it("redacts credentials in tool-call arguments", () => {
+    const mapped = mapDshSessionEvent({
+      seq: 3,
+      time: 3,
+      type: "tool/call",
+      data: {
+        callId: "call-secret",
+        name: "bash",
+        arguments: '{"command":"API_TOKEN=super-secret"}',
+      },
+    });
+
+    expect(mapped.events).toEqual([
+      {
+        type: "tool_start",
+        toolName: "bash",
+        toolCallId: "call-secret",
+        args: { command: `API_TOKEN=${REDACTED}` },
+      },
+    ]);
+    expect(JSON.stringify(mapped.events)).not.toContain("super-secret");
   });
 
   it("maps an aborted turn to interrupted", () => {

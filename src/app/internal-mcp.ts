@@ -9,6 +9,7 @@ import type {
   NormalizedEvent,
   PermissionHandler,
 } from "../agent/runtime/interface.ts";
+import { summarizeArgs } from "../agent/security/redaction.ts";
 
 const MAX_BRIDGE_BODY_BYTES = 10 * 1024 * 1024;
 const SESSION_PATH = /^\/sessions\/([^/]+)\/mcp$/;
@@ -210,18 +211,21 @@ async function handleSessionMcp(
         toolCallId: callId,
         args,
       };
-      binding.emit({
-        type: "permission_requested",
-        permissionId: permission.permissionId,
-        toolName: name,
-        toolCallId: callId,
-        ...(args === undefined
-          ? {}
-          : {
-              argsSummary: JSON.stringify(args).slice(0, 500),
-            }),
-        risk: "standard",
-      });
+      const requestApproval = async () => {
+        binding.emit({
+          type: "permission_requested",
+          permissionId: permission.permissionId,
+          toolName: name,
+          toolCallId: callId,
+          ...(args === undefined
+            ? {}
+            : {
+                argsSummary: summarizeArgs(args),
+              }),
+          risk: "standard",
+        });
+        return await abortable(handler.request(permission), controller.signal);
+      };
       if (handler.preflight) {
         const decision = await abortable(
           handler.preflight(permission),
@@ -237,11 +241,7 @@ async function handleSessionMcp(
             }),
           };
         }
-        if (
-          decision !== "allow" &&
-          (await abortable(handler.request(permission), controller.signal)) !==
-            "allow"
-        ) {
+        if (decision !== "allow" && (await requestApproval()) !== "allow") {
           if (controller.signal.aborted) return cancelledResponse(id);
           return {
             status: 200,
@@ -251,10 +251,7 @@ async function handleSessionMcp(
             }),
           };
         }
-      } else if (
-        (await abortable(handler.request(permission), controller.signal)) !==
-        "allow"
-      ) {
+      } else if ((await requestApproval()) !== "allow") {
         if (controller.signal.aborted) return cancelledResponse(id);
         return {
           status: 200,

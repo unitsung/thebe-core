@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { REDACTED } from "../agent/security/redaction.ts";
 import {
   startInternalMcpBridge,
   type InternalMcpBridge,
@@ -255,5 +256,80 @@ describe("internal DSH MCP bridge", () => {
       },
     });
     expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("publishes a redacted approval event only after preflight asks", async () => {
+    bridge = await startInternalMcpBridge({
+      token: "core-token",
+      handler: {
+        async handle() {
+          throw new Error("global handler should not receive session tools");
+        },
+      },
+    });
+    const emitted: Array<{ type: string; argsSummary?: string }> = [];
+    let preflightStarted!: () => void;
+    const waitingForPreflight = new Promise<void>((resolve) => {
+      preflightStarted = resolve;
+    });
+    let finishPreflight!: (decision: "ask") => void;
+    const preflight = new Promise<"ask">((resolve) => {
+      finishPreflight = resolve;
+    });
+    const request = vi.fn(async () => "allow" as const);
+    const tools = bridge.registerSession("session-delayed-preflight", {
+      customTools: [
+        {
+          name: "delayed_preflight",
+          label: "Delayed preflight",
+          description: "Wait for preflight before approval",
+          parameters: { type: "object", properties: {} },
+          requiresApproval: true,
+          execute: async () => ({
+            content: [{ type: "text", text: "executed" }],
+          }),
+        },
+      ],
+      permissionHandler: {
+        preflight: async () => {
+          preflightStarted();
+          return preflight;
+        },
+        request,
+      },
+      emit: (event) => emitted.push(event),
+    });
+
+    const response = fetch(tools.url, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer core-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "delayed_preflight",
+          arguments: { command: "API_TOKEN=super-secret" },
+        },
+      }),
+    });
+    await waitingForPreflight;
+    expect(emitted).toEqual([]);
+    finishPreflight("ask");
+
+    await expect((await response).json()).resolves.toMatchObject({
+      result: { content: [{ type: "text", text: "executed" }] },
+    });
+    expect(request).toHaveBeenCalledOnce();
+    expect(emitted).toMatchObject([
+      {
+        type: "permission_requested",
+        argsSummary: expect.stringContaining(`API_TOKEN=${REDACTED}`),
+      },
+    ]);
+    expect(JSON.stringify(emitted)).not.toContain("super-secret");
   });
 });
