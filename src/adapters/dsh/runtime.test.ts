@@ -14,13 +14,15 @@ function fakeHarness(options: { resume?: boolean } = {}) {
     | undefined;
   const runs: unknown[] = [];
   const resumes: string[] = [];
+  const prompts: Array<{ sessionId: string; blocks: unknown[] }> = [];
   const closes = vi.fn(async () => {});
   const harness: DshHarnessLike = {
     client: {
       onRequest(handler) {
         requestHandler = handler;
       },
-      async prompt() {
+      async prompt(sessionId, blocks) {
+        prompts.push({ sessionId, blocks });
         return "queued";
       },
     },
@@ -75,6 +77,7 @@ function fakeHarness(options: { resume?: boolean } = {}) {
     harness,
     runs,
     resumes,
+    prompts,
     closes,
     request: async (method: string, params: Record<string, unknown>) => {
       if (!requestHandler) throw new Error("request handler not installed");
@@ -208,6 +211,75 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(runtime.reapInactiveSessions?.()).toBe(1);
   });
 
+  it("closes a late harness when the session is disposed during initialization", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-init-abort-"));
+    const fake = fakeHarness();
+    let harnessStarted!: () => void;
+    const waitingForHarness = new Promise<void>((resolve) => {
+      harnessStarted = resolve;
+    });
+    let finishHarness!: (harness: DshHarnessLike) => void;
+    const deferredHarness = new Promise<DshHarnessLike>((resolve) => {
+      finishHarness = resolve;
+    });
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: async () => {
+        harnessStarted();
+        return await deferredHarness;
+      },
+    });
+    const session = await runtime.createSession({ customTools: [] });
+
+    const turn = session.prompt("must not run");
+    await waitingForHarness;
+    session.dispose();
+    finishHarness(fake.harness);
+
+    await expect(turn).rejects.toThrow(/cancelled during initialization/);
+    expect(fake.runs).toEqual([]);
+    expect(fake.closes).toHaveBeenCalledOnce();
+  });
+
+  it("persists steering and follow-up input in the session transcript", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-steering-"));
+    const sessionRoot = join(root, "sessions");
+    const fake = fakeHarness();
+    const firstRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      harnessFactory: () => fake.harness,
+    });
+    const first = await firstRuntime.createSession({ customTools: [] });
+    await first.steer("steer this way");
+    await first.followUp("then do this");
+    expect(fake.prompts).toEqual([
+      {
+        sessionId: first.runtimeSessionId,
+        blocks: [{ type: "text", text: "steer this way" }],
+      },
+      {
+        sessionId: first.runtimeSessionId,
+        blocks: [{ type: "text", text: "then do this" }],
+      },
+    ]);
+    first.dispose();
+
+    const secondRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      harnessFactory: () => fakeHarness().harness,
+    });
+    const resumed = await secondRuntime.resumeSession(first.runtimeSessionId, {
+      customTools: [],
+    });
+    expect(resumed.messages()).toEqual([
+      expect.objectContaining({ role: "user", text: "steer this way" }),
+      expect.objectContaining({ role: "user", text: "then do this" }),
+    ]);
+  });
+
   it("routes DSH approval requests through the Core permission handler", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-approval-"));
     const fake = fakeHarness();
@@ -240,6 +312,52 @@ describe("DeepSeek Harness AgentRuntime", () => {
         argsSummary: "run a command",
       })
     );
+  });
+
+  it("emits a native approval only after asynchronous preflight asks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-native-approval-"));
+    const fake = fakeHarness();
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: () => fake.harness,
+    });
+    let preflightStarted!: () => void;
+    const waitingForPreflight = new Promise<void>((resolve) => {
+      preflightStarted = resolve;
+    });
+    let finishPreflight!: (decision: "ask") => void;
+    const preflight = new Promise<"ask">((resolve) => {
+      finishPreflight = resolve;
+    });
+    const request = vi.fn(async () => "allow" as const);
+    const session = await runtime.createSession({
+      customTools: [],
+      permissionHandler: {
+        preflight: async () => {
+          preflightStarted();
+          return preflight;
+        },
+        request,
+      },
+    });
+    await session.prompt("initialize");
+    const events: string[] = [];
+    session.subscribe((event) => events.push(event.type));
+
+    const approval = fake.request("approval/request", {
+      sessionId: session.runtimeSessionId,
+      toolName: "bash",
+      callId: "call-native",
+      reason: "run a command",
+    });
+    await waitingForPreflight;
+    expect(events).toEqual([]);
+    finishPreflight("ask");
+
+    await expect(approval).resolves.toEqual({ outcome: "allowed-once" });
+    expect(request).toHaveBeenCalledOnce();
+    expect(events).toEqual(["permission_requested"]);
   });
 
   it("reports unsupported session operations instead of silently faking them", async () => {

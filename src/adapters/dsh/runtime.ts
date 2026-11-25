@@ -408,6 +408,14 @@ class DshRuntimeSession implements RuntimeSession {
         this.#createOptions,
         (event) => this.#emit(event)
       );
+      const ensureNotCancelled = async () => {
+        if (!this.#closed && !this.#abortRequested) return;
+        await harness.close().catch(() => {});
+        throw new Error(
+          "DeepSeek Harness session was cancelled during initialization."
+        );
+      };
+      await ensureNotCancelled();
       harness.client.onRequest(async (method, params) => {
         if (method !== "approval/request") {
           throw new Error(`Unsupported DeepSeek Harness request: ${method}`);
@@ -428,26 +436,32 @@ class DshRuntimeSession implements RuntimeSession {
             typeof params.reason === "string" ? params.reason : undefined,
           risk: "standard" as const,
         };
-        this.#emit({
-          type: "permission_requested",
-          permissionId,
-          toolName: request.toolName,
-          toolCallId,
-          ...(request.argsSummary ? { argsSummary: request.argsSummary } : {}),
-          risk: request.risk,
-        });
+        const requestApproval = async () => {
+          this.#emit({
+            type: "permission_requested",
+            permissionId,
+            toolName: request.toolName,
+            toolCallId,
+            ...(request.argsSummary
+              ? { argsSummary: request.argsSummary }
+              : {}),
+            risk: request.risk,
+          });
+          return await handler.request(request);
+        };
         if (handler.preflight) {
           const decision = await handler.preflight(request);
           if (decision === "allow") return { outcome: "allowed-once" };
           if (decision === "deny") return { outcome: "rejected" };
         }
-        const decision = await handler.request(request);
+        const decision = await requestApproval();
         return {
           outcome: decision === "allow" ? "allowed-once" : "rejected",
         };
       });
       if (this.#resumePending) {
         await harness.resumeSession(this.runtimeSessionId);
+        await ensureNotCancelled();
         this.#resumePending = false;
       }
       this.#harness = harness;
@@ -504,6 +518,13 @@ class DshRuntimeSession implements RuntimeSession {
     await harness.client.prompt(this.runtimeSessionId, [
       { type: "text", text },
     ]);
+    const message: RuntimeMessage = {
+      id: randomUUID(),
+      role: "user",
+      text,
+    };
+    this.#messages.push(message);
+    this.#persist("message", message);
   }
 
   async followUp(text: string): Promise<void> {
