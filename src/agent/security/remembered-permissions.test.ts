@@ -7,7 +7,11 @@ import {
 
 describe("remembered permissions", () => {
   it("scopes high-risk allow to the argument hash", () => {
-    const ls = { toolName: "bash", args: { command: "ls" }, risk: "high" as const };
+    const ls = {
+      toolName: "bash",
+      args: { command: "ls" },
+      risk: "high" as const,
+    };
     const rm = {
       toolName: "bash",
       args: { command: "rm -rf /" },
@@ -21,13 +25,27 @@ describe("remembered permissions", () => {
     expect(rememberedDecision(map, rm)).toBeUndefined();
   });
 
+  it("does not reuse request-scoped high-risk decisions without arguments", () => {
+    const request = { toolName: "bash", risk: "standard" as const };
+    const requestScoped = {
+      [rememberedPermissionKey(request, "allow")]: "allow" as const,
+    };
+
+    expect(rememberedDecision(requestScoped, request)).toBeUndefined();
+    expect(rememberedDecision({ bash: "allow" }, request)).toBe("allow");
+    expect(rememberedDecision({ "*": "allow" }, request)).toBe("allow");
+  });
+
   it("still honors a session-wide tool deny from PATCH", () => {
     expect(
-      rememberedDecision({ bash: "deny" }, {
-        toolName: "bash",
-        args: { command: "ls" },
-        risk: "high",
-      }),
+      rememberedDecision(
+        { bash: "deny" },
+        {
+          toolName: "bash",
+          args: { command: "ls" },
+          risk: "high",
+        }
+      )
     ).toBe("deny");
   });
 
@@ -41,8 +59,8 @@ describe("remembered permissions", () => {
     expect(
       rememberedDecision(
         { bash: "allow" },
-        { ...bash, args: { command: "rm -rf /" } },
-      ),
+        { ...bash, args: { command: "rm -rf /" } }
+      )
     ).toBe("allow");
   });
 
@@ -56,14 +74,14 @@ describe("remembered permissions", () => {
     expect(
       rememberedDecision(
         { "*": "allow" },
-        { ...bash, args: { command: "git status" } },
-      ),
+        { ...bash, args: { command: "git status" } }
+      )
     ).toBe("allow");
     expect(
       rememberedDecision(
         { "*": "allow", bash: "deny" },
-        { ...bash, args: { command: "git status" } },
-      ),
+        { ...bash, args: { command: "git status" } }
+      )
     ).toBe("deny");
   });
 });
