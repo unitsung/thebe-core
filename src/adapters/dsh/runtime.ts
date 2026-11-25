@@ -272,7 +272,12 @@ class DshRuntimeSession implements RuntimeSession {
     this.#createHarness = input.createHarness;
     this.#unregisterSession = input.unregisterSession;
     this.#resumePending = input.resume;
-    this.#model = input.getModel();
+    this.#model = input.create.model ?? input.getModel();
+    if (this.#model.providerId !== this.#provider) {
+      throw new Error(
+        `DeepSeek Harness runtime is configured for ${this.#provider}, not ${this.#model.providerId}.`
+      );
+    }
   }
 
   #emit(event: NormalizedEvent): void {

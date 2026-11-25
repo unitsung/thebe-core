@@ -60,6 +60,43 @@ function mcpError(
   return { jsonrpc: "2.0", id, error: { code, message } };
 }
 
+function cancelledResponse(id: unknown): {
+  status: number;
+  body: Record<string, unknown>;
+} {
+  return {
+    status: 200,
+    body: mcpResult(id, {
+      content: [{ type: "text", text: "cancelled" }],
+      isError: true,
+    }),
+  };
+}
+
+async function abortable<T>(
+  value: PromiseLike<T> | T,
+  signal: AbortSignal
+): Promise<T> {
+  if (signal.aborted) throw new Error("cancelled");
+  return await new Promise<T>((resolve, reject) => {
+    const abort = () => {
+      signal.removeEventListener("abort", abort);
+      reject(new Error("cancelled"));
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    Promise.resolve(value).then(
+      (result) => {
+        signal.removeEventListener("abort", abort);
+        resolve(result);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", abort);
+        reject(error);
+      }
+    );
+  });
+}
+
 async function readBody(request: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -150,54 +187,75 @@ async function handleSessionMcp(
   const requiresApproval =
     tool.requiresApproval === true ||
     binding.toolsRequiringApproval?.includes(name) === true;
-  if (requiresApproval) {
-    const handler = binding.permissionHandler;
-    if (!handler) {
-      return {
-        status: 200,
-        body: mcpResult(id, {
-          content: [{ type: "text", text: "approval unavailable" }],
-          isError: true,
-        }),
-      };
-    }
-    const callId =
-      typeof params.callId === "string"
-        ? params.callId
-        : `session-tool-${String(id)}`;
-    const permission = {
-      permissionId: `dsh:${name}:${callId}`,
-      toolName: name,
-      toolCallId: callId,
-      args,
-    };
-    binding.emit({
-      type: "permission_requested",
-      permissionId: permission.permissionId,
-      toolName: name,
-      toolCallId: callId,
-      ...(args === undefined
-        ? {}
-        : {
-            argsSummary: JSON.stringify(args).slice(0, 500),
-          }),
-      risk: "standard",
-    });
-    if (handler.preflight) {
-      const decision = await handler.preflight(permission);
-      if (decision === "deny") {
+  binding.active.add(controller);
+  try {
+    if (requiresApproval) {
+      const handler = binding.permissionHandler;
+      if (!handler) {
         return {
           status: 200,
           body: mcpResult(id, {
-            content: [{ type: "text", text: "denied by policy" }],
+            content: [{ type: "text", text: "approval unavailable" }],
             isError: true,
           }),
         };
       }
-      if (
-        decision !== "allow" &&
-        (await handler.request(permission)) !== "allow"
+      const callId =
+        typeof params.callId === "string"
+          ? params.callId
+          : `session-tool-${String(id)}`;
+      const permission = {
+        permissionId: `dsh:${name}:${callId}`,
+        toolName: name,
+        toolCallId: callId,
+        args,
+      };
+      binding.emit({
+        type: "permission_requested",
+        permissionId: permission.permissionId,
+        toolName: name,
+        toolCallId: callId,
+        ...(args === undefined
+          ? {}
+          : {
+              argsSummary: JSON.stringify(args).slice(0, 500),
+            }),
+        risk: "standard",
+      });
+      if (handler.preflight) {
+        const decision = await abortable(
+          handler.preflight(permission),
+          controller.signal
+        );
+        if (controller.signal.aborted) return cancelledResponse(id);
+        if (decision === "deny") {
+          return {
+            status: 200,
+            body: mcpResult(id, {
+              content: [{ type: "text", text: "denied by policy" }],
+              isError: true,
+            }),
+          };
+        }
+        if (
+          decision !== "allow" &&
+          (await abortable(handler.request(permission), controller.signal)) !==
+            "allow"
+        ) {
+          if (controller.signal.aborted) return cancelledResponse(id);
+          return {
+            status: 200,
+            body: mcpResult(id, {
+              content: [{ type: "text", text: "user denied" }],
+              isError: true,
+            }),
+          };
+        }
+      } else if (
+        (await abortable(handler.request(permission), controller.signal)) !==
+        "allow"
       ) {
+        if (controller.signal.aborted) return cancelledResponse(id);
         return {
           status: 200,
           body: mcpResult(id, {
@@ -206,46 +264,28 @@ async function handleSessionMcp(
           }),
         };
       }
-    } else if ((await handler.request(permission)) !== "allow") {
-      return {
-        status: 200,
-        body: mcpResult(id, {
-          content: [{ type: "text", text: "user denied" }],
-          isError: true,
-        }),
-      };
+      if (controller.signal.aborted) return cancelledResponse(id);
     }
-  }
-  binding.active.add(controller);
-  let result: Awaited<ReturnType<CustomToolDefinition["execute"]>>;
-  try {
-    result = await tool.execute(
+    const result = await tool.execute(
       typeof params.callId === "string" ? params.callId : String(id),
       args,
       controller.signal
     );
+    if (controller.signal.aborted) return cancelledResponse(id);
+    return {
+      status: 200,
+      body: mcpResult(id, {
+        content: result.content,
+        ...(result.details ? { structuredContent: result.details } : {}),
+        ...(result.isError ? { isError: true } : {}),
+      }),
+    };
   } catch (error) {
-    if (controller.signal.aborted) {
-      return {
-        status: 200,
-        body: mcpResult(id, {
-          content: [{ type: "text", text: "cancelled" }],
-          isError: true,
-        }),
-      };
-    }
+    if (controller.signal.aborted) return cancelledResponse(id);
     throw error;
   } finally {
     binding.active.delete(controller);
   }
-  return {
-    status: 200,
-    body: mcpResult(id, {
-      content: result.content,
-      ...(result.details ? { structuredContent: result.details } : {}),
-      ...(result.isError ? { isError: true } : {}),
-    }),
-  };
 }
 
 function writeJson(

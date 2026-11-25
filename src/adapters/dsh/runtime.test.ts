@@ -156,6 +156,33 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(resumed.lastAssistantText()).toBe("DSH replied.");
   });
 
+  it("honors the model selected when creating a runtime session", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-model-"));
+    const harnessModels: string[] = [];
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: (input) => {
+        harnessModels.push(input.model);
+        return fakeHarness().harness;
+      },
+    });
+    const session = await runtime.createSession({
+      customTools: [],
+      model: {
+        providerId: "deepseek-official",
+        modelId: "deepseek-v4-pro",
+      },
+    });
+
+    expect(session.currentModel?.()).toEqual({
+      providerId: "deepseek-official",
+      modelId: "deepseek-v4-pro",
+    });
+    await session.prompt("use the selected model");
+    expect(harnessModels).toEqual(["deepseek-v4-pro"]);
+  });
+
   it("routes DSH approval requests through the Core permission handler", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-approval-"));
     const fake = fakeHarness();

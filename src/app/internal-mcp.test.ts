@@ -187,4 +187,73 @@ describe("internal DSH MCP bridge", () => {
       },
     });
   });
+
+  it("does not execute an approved tool after its session is unregistered", async () => {
+    bridge = await startInternalMcpBridge({
+      token: "core-token",
+      handler: {
+        async handle() {
+          throw new Error("global handler should not receive session tools");
+        },
+      },
+    });
+    let approvalRequested!: () => void;
+    const waitingForApproval = new Promise<void>((resolve) => {
+      approvalRequested = resolve;
+    });
+    let approve!: (decision: "allow") => void;
+    const approval = new Promise<"allow">((resolve) => {
+      approve = resolve;
+    });
+    const execute = vi.fn(async () => ({
+      content: [{ type: "text" as const, text: "executed" }],
+    }));
+    const tools = bridge.registerSession("session-approval-cancelled", {
+      customTools: [
+        {
+          name: "approval_bound",
+          label: "Approval bound",
+          description: "Wait for approval before execution",
+          parameters: { type: "object", properties: {} },
+          requiresApproval: true,
+          execute,
+        },
+      ],
+      permissionHandler: {
+        request: async () => {
+          approvalRequested();
+          return approval;
+        },
+      },
+      emit: () => {},
+    });
+
+    const response = fetch(tools.url, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer core-token",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: {
+          name: "approval_bound",
+          arguments: {},
+        },
+      }),
+    });
+    await waitingForApproval;
+    bridge.unregisterSession("session-approval-cancelled");
+    approve("allow");
+
+    await expect((await response).json()).resolves.toMatchObject({
+      result: {
+        content: [{ type: "text", text: "cancelled" }],
+        isError: true,
+      },
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
 });
