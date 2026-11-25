@@ -1,10 +1,28 @@
-import { createServer } from "node:http";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
 import type { AddressInfo } from "node:net";
+import type {
+  CustomToolDefinition,
+  PermissionHandler,
+} from "../agent/runtime/interface.ts";
 
 const MAX_BRIDGE_BODY_BYTES = 10 * 1024 * 1024;
+const SESSION_PATH = /^\/sessions\/([^/]+)\/mcp$/;
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
+
+type SessionBinding = {
+  customTools: readonly CustomToolDefinition[];
+  permissionHandler?: PermissionHandler;
+  toolsRequiringApproval?: readonly string[];
+};
 
 export type InternalMcpBridge = {
   url: string;
+  registerSession(sessionId: string, binding: SessionBinding): { url: string };
+  unregisterSession(sessionId: string): void;
   close(): Promise<void>;
 };
 
@@ -12,45 +30,252 @@ type RequestHandler = {
   handle(request: Request): Promise<Response>;
 };
 
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function bearerToken(request: IncomingMessage): string | undefined {
+  const authorization = request.headers.authorization;
+  if (authorization?.startsWith("Bearer ")) {
+    return authorization.slice("Bearer ".length).trim();
+  }
+  const header = request.headers["x-thebe-token"];
+  return Array.isArray(header) ? header[0] : header;
+}
+
+function mcpResult(id: unknown, result: unknown): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, result };
+}
+
+function mcpError(
+  id: unknown,
+  code: number,
+  message: string
+): Record<string, unknown> {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+async function readBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > MAX_BRIDGE_BODY_BYTES) {
+      throw Object.assign(new Error("request_too_large"), { status: 413 });
+    }
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+async function handleSessionMcp(
+  request: IncomingMessage,
+  binding: SessionBinding
+): Promise<{ status: number; body?: Record<string, unknown> }> {
+  const body = record(JSON.parse(await readBody(request)));
+  const id = body.id ?? null;
+  const method = typeof body.method === "string" ? body.method : "";
+  if (
+    method.startsWith("notifications/") ||
+    (!method && ("result" in body || "error" in body))
+  ) {
+    return { status: 202 };
+  }
+  if (method === "initialize") {
+    const params = record(body.params);
+    return {
+      status: 200,
+      body: mcpResult(id, {
+        protocolVersion:
+          typeof params.protocolVersion === "string"
+            ? params.protocolVersion
+            : "2025-06-18",
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: "thebe-session-tools", version: "0.1.0" },
+      }),
+    };
+  }
+  if (method === "ping") {
+    return { status: 200, body: mcpResult(id, {}) };
+  }
+  if (method === "server/discover") {
+    return {
+      status: 200,
+      body: mcpResult(id, {
+        supportedVersions: [MODERN_PROTOCOL_VERSION, "2025-06-18"],
+        capabilities: { tools: { listChanged: false } },
+        ttlMs: 300_000,
+        cacheScope: "public",
+      }),
+    };
+  }
+  if (method === "tools/list") {
+    return {
+      status: 200,
+      body: mcpResult(id, {
+        tools: binding.customTools.map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          inputSchema: tool.parameters,
+          annotations: {
+            readOnlyHint: tool.requiresApproval !== true,
+            destructiveHint: tool.requiresApproval === true,
+          },
+        })),
+        ttlMs: 300_000,
+        cacheScope: "private",
+      }),
+    };
+  }
+  if (method !== "tools/call") {
+    return { status: 200, body: mcpError(id, -32601, "Method not found") };
+  }
+  const params = record(body.params);
+  const name = typeof params.name === "string" ? params.name : "";
+  const tool = binding.customTools.find((item) => item.name === name);
+  if (!tool) {
+    return {
+      status: 200,
+      body: mcpError(id, -32602, `Unknown tool: ${name}`),
+    };
+  }
+  const args = params.arguments;
+  const requiresApproval =
+    tool.requiresApproval === true ||
+    binding.toolsRequiringApproval?.includes(name) === true;
+  if (requiresApproval) {
+    const handler = binding.permissionHandler;
+    if (!handler) {
+      return {
+        status: 200,
+        body: mcpResult(id, {
+          content: [{ type: "text", text: "approval unavailable" }],
+          isError: true,
+        }),
+      };
+    }
+    const callId =
+      typeof params.callId === "string"
+        ? params.callId
+        : `session-tool-${String(id)}`;
+    const permission = {
+      permissionId: `dsh:${name}:${callId}`,
+      toolName: name,
+      toolCallId: callId,
+      args,
+    };
+    if (handler.preflight) {
+      const decision = await handler.preflight(permission);
+      if (decision === "deny") {
+        return {
+          status: 200,
+          body: mcpResult(id, {
+            content: [{ type: "text", text: "denied by policy" }],
+            isError: true,
+          }),
+        };
+      }
+      if (
+        decision !== "allow" &&
+        (await handler.request(permission)) !== "allow"
+      ) {
+        return {
+          status: 200,
+          body: mcpResult(id, {
+            content: [{ type: "text", text: "user denied" }],
+            isError: true,
+          }),
+        };
+      }
+    } else if ((await handler.request(permission)) !== "allow") {
+      return {
+        status: 200,
+        body: mcpResult(id, {
+          content: [{ type: "text", text: "user denied" }],
+          isError: true,
+        }),
+      };
+    }
+  }
+  const result = await tool.execute(
+    typeof params.callId === "string" ? params.callId : String(id),
+    args
+  );
+  return {
+    status: 200,
+    body: mcpResult(id, {
+      content: result.content,
+      ...(result.details ? { structuredContent: result.details } : {}),
+      ...(result.isError ? { isError: true } : {}),
+    }),
+  };
+}
+
+function writeJson(
+  response: ServerResponse,
+  status: number,
+  body: Record<string, unknown>
+): void {
+  response.writeHead(status, { "content-type": "application/json" });
+  response.end(JSON.stringify(body));
+}
+
 /**
  * A loopback-only HTTP face over the same Core request handler. DSH's MCP
- * client can therefore call the current Core process even when the entry point
- * is the TUI, one-shot CLI, or `thebe-mcp` instead of `dist/serve.js`.
+ * client can therefore call the current Core process and its session-specific
+ * custom tools even when the entry point is the TUI, one-shot CLI, or
+ * `thebe-mcp` instead of `dist/serve.js`.
  */
 export async function startInternalMcpBridge(options: {
+  token: string;
   handler: RequestHandler;
 }): Promise<InternalMcpBridge> {
+  const sessions = new Map<string, SessionBinding>();
+  let port = 0;
   const server = createServer(async (incoming, outgoing) => {
     try {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      for await (const chunk of incoming) {
-        const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-        size += buffer.length;
-        if (size > MAX_BRIDGE_BODY_BYTES) {
-          outgoing.writeHead(413, { "content-type": "application/json" });
-          outgoing.end(JSON.stringify({ error: "request_too_large" }));
+      if (bearerToken(incoming) !== options.token) {
+        writeJson(outgoing, 401, { error: "unauthorized" });
+        return;
+      }
+      const path = new URL(incoming.url ?? "/", `http://127.0.0.1:${port}`)
+        .pathname;
+      const sessionId = SESSION_PATH.exec(path)?.[1];
+      if (sessionId) {
+        const binding = sessions.get(decodeURIComponent(sessionId));
+        if (!binding) {
+          writeJson(outgoing, 404, { error: "unknown session" });
           return;
         }
-        chunks.push(buffer);
-      }
-      const address = server.address() as AddressInfo;
-      const request = new Request(
-        `http://127.0.0.1:${address.port}${incoming.url ?? "/"}`,
-        {
-          method: incoming.method,
-          headers: Object.entries(incoming.headers).flatMap(([key, value]) =>
-            value === undefined
-              ? []
-              : Array.isArray(value)
-                ? value.map((item) => [key, item] as [string, string])
-                : [[key, value] as [string, string]]
-          ),
-          ...(["GET", "HEAD"].includes(incoming.method ?? "GET")
-            ? {}
-            : { body: Buffer.concat(chunks) }),
+        if (incoming.method !== "POST") {
+          writeJson(outgoing, 405, { error: "method_not_allowed" });
+          return;
         }
-      );
+        const response = await handleSessionMcp(incoming, binding);
+        if (response.body) writeJson(outgoing, response.status, response.body);
+        else outgoing.writeHead(response.status).end();
+        return;
+      }
+      if (path !== "/mcp") {
+        writeJson(outgoing, 404, { error: "not_found" });
+        return;
+      }
+      const request = new Request(`http://127.0.0.1:${port}${incoming.url}`, {
+        method: incoming.method,
+        headers: Object.entries(incoming.headers).flatMap(([key, value]) =>
+          value === undefined
+            ? []
+            : Array.isArray(value)
+              ? value.map((item) => [key, item] as [string, string])
+              : [[key, value] as [string, string]]
+        ),
+        ...(["GET", "HEAD"].includes(incoming.method ?? "GET")
+          ? {}
+          : { body: await readBody(incoming) }),
+      });
       const response = await options.handler.handle(request);
       const headers = Object.fromEntries(
         [...response.headers].filter(
@@ -63,12 +288,10 @@ export async function startInternalMcpBridge(options: {
       outgoing.writeHead(response.status, headers);
       outgoing.end(Buffer.from(await response.arrayBuffer()));
     } catch (error) {
-      outgoing.writeHead(500, { "content-type": "application/json" });
-      outgoing.end(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : String(error),
-        })
-      );
+      const status = (error as { status?: unknown }).status === 413 ? 413 : 500;
+      writeJson(outgoing, status, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   });
 
@@ -80,11 +303,20 @@ export async function startInternalMcpBridge(options: {
     });
   });
   server.unref();
-  const address = server.address() as AddressInfo;
+  port = (server.address() as AddressInfo).port;
+  const base = `http://127.0.0.1:${port}`;
   return {
-    url: `http://127.0.0.1:${address.port}/mcp`,
+    url: `${base}/mcp`,
+    registerSession(sessionId, binding) {
+      sessions.set(sessionId, binding);
+      return { url: `${base}/sessions/${encodeURIComponent(sessionId)}/mcp` };
+    },
+    unregisterSession(sessionId) {
+      sessions.delete(sessionId);
+    },
     close: () =>
       new Promise<void>((resolve, reject) => {
+        sessions.clear();
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };

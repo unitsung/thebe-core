@@ -80,6 +80,14 @@ export type DeepSeekHarnessRuntimeOptions = {
   coreMcp?: {
     url: string;
     token: string;
+    registerSession?: (
+      sessionId: string,
+      binding: {
+        customTools: CreateRuntimeSessionOptions["customTools"];
+        permissionHandler?: CreateRuntimeSessionOptions["permissionHandler"];
+        toolsRequiringApproval?: readonly string[];
+      }
+    ) => { url: string };
   };
   /** A container is the process boundary, so do not nest DSH's host sandbox. */
   disableDshSandbox?: boolean;
@@ -88,7 +96,14 @@ export type DeepSeekHarnessRuntimeOptions = {
 
 export type DeepSeekHarnessRuntime = AgentRuntime & {
   /** Point future DSH launches at this Core's MCP surface. */
-  mountCoreMcp(input: { url: string; token: string }): void;
+  mountCoreMcp(input: {
+    url: string;
+    token: string;
+    registerSession?: NonNullable<
+      DeepSeekHarnessRuntimeOptions["coreMcp"]
+    >["registerSession"];
+    unregisterSession?: (sessionId: string) => void;
+  }): void;
 };
 
 const DEFAULT_PROVIDER = "deepseek-official";
@@ -215,6 +230,7 @@ class DshRuntimeSession implements RuntimeSession {
     model: RuntimeModelRef,
     create: CreateRuntimeSessionOptions
   ) => Promise<DshHarnessLike>;
+  readonly #unregisterSession?: (sessionId: string) => void;
   readonly #listeners = new Set<(event: NormalizedEvent) => void>();
   readonly #messages: RuntimeMessage[] = [];
   readonly #events: DshSessionEventLike[] = [];
@@ -243,11 +259,13 @@ class DshRuntimeSession implements RuntimeSession {
       model: RuntimeModelRef,
       create: CreateRuntimeSessionOptions
     ) => Promise<DshHarnessLike>;
+    unregisterSession?: (sessionId: string) => void;
   }) {
     this.runtimeSessionId = input.runtimeSessionId;
     this.#provider = input.provider;
     this.#createOptions = input.create;
     this.#createHarness = input.createHarness;
+    this.#unregisterSession = input.unregisterSession;
     this.#resumePending = input.resume;
     this.#model = input.getModel();
   }
@@ -548,6 +566,7 @@ class DshRuntimeSession implements RuntimeSession {
     if (this.#closed) return;
     this.#abortRequested = this.#active;
     this.#closed = true;
+    this.#unregisterSession?.(this.runtimeSessionId);
     const harness = this.#harness;
     this.#harness = undefined;
     void harness?.close().catch(() => {});
@@ -591,6 +610,7 @@ export function createDeepSeekHarnessRuntime(
   const live = new Map<string, DshRuntimeSession>();
   let quiesced = false;
   let coreMcp = options.coreMcp;
+  let unregisterSessionMcp: ((sessionId: string) => void) | undefined;
 
   function dshEnvironment(): NodeJS.ProcessEnv {
     const scrubbed = sanitizeBashEnv(env);
@@ -640,7 +660,7 @@ export function createDeepSeekHarnessRuntime(
       "    policy: ask",
     ];
     if (create.systemPrompt?.trim()) {
-      const prompt = `${create.systemPrompt}\n\nCore capabilities are mounted through the DeepSeek Harness MCP server named "thebe". Load its tool catalog with the Harness tool-discovery mechanism and honor each MCP tool's permission hints. Do not invent a Core tool that is absent from that server.`;
+      const prompt = `${create.systemPrompt}\n\nCore capabilities are mounted through the DeepSeek Harness MCP servers named "thebe" and "thebe_session_tools". Load their tool catalogs with the Harness tool-discovery mechanism and honor each MCP tool's permission hints. Do not invent a Core tool that is absent from those servers.`;
       patchLines.push(
         "- id: system-prompt",
         "  config:",
@@ -667,6 +687,38 @@ export function createDeepSeekHarnessRuntime(
         "        toolLoading: on-demand",
         "        catalogDescriptionMaxLength: 160"
       );
+      if (create.customTools.length > 0) {
+        if (!coreMcp.registerSession) {
+          throw new Error(
+            "DeepSeek Harness cannot expose session tools without the Core MCP bridge."
+          );
+        }
+        const sessionMcp = coreMcp.registerSession(runtimeSessionId, {
+          customTools: create.customTools,
+          ...(create.permissionHandler
+            ? { permissionHandler: create.permissionHandler }
+            : {}),
+          ...(create.toolsRequiringApproval
+            ? { toolsRequiringApproval: create.toolsRequiringApproval }
+            : {}),
+        });
+        patchLines.push(
+          "    - id: thebe-session-tools",
+          "      name: '@deepseek-ai/dsh-mcp-client'",
+          "      config:",
+          "        transport: streamable-http",
+          "        serverName: thebe_session_tools",
+          `        url: ${JSON.stringify(sessionMcp.url)}`,
+          "        headers:",
+          '          Authorization: "Bearer ${credential:CORE_MCP_BRIDGE_TOKEN}"',
+          "        toolCallTimeoutMs: 60000",
+          "        closeTimeoutMs: 5000",
+          "        expandTemplates: true",
+          "        failOnStartupError: true",
+          "        toolLoading: on-demand",
+          "        catalogDescriptionMaxLength: 160"
+        );
+      }
     }
     const patch = join(home, "thebe-runtime.patch.yml");
     await writeFile(patch, `${patchLines.join("\n")}\n`, {
@@ -700,6 +752,7 @@ export function createDeepSeekHarnessRuntime(
       getModel: () => ({ ...currentModel }),
       createHarness: (model, create) =>
         createHarness(runtimeSessionId, model, create),
+      unregisterSession: (id) => unregisterSessionMcp?.(id),
     });
     live.set(runtimeSessionId, session);
     return session;
@@ -773,6 +826,7 @@ export function createDeepSeekHarnessRuntime(
     runtimeId: DSH_RUNTIME_ID,
     mountCoreMcp(input) {
       coreMcp = { ...input };
+      unregisterSessionMcp = input.unregisterSession;
       for (const session of live.values()) session.credentialsChanged();
     },
     createSession(create) {
@@ -798,6 +852,7 @@ export function createDeepSeekHarnessRuntime(
       const session = live.get(runtimeSessionId);
       live.delete(runtimeSessionId);
       await session?.close().catch(() => {});
+      unregisterSessionMcp?.(runtimeSessionId);
       await rm(join(sessionRoot, runtimeSessionId), {
         recursive: true,
         force: true,

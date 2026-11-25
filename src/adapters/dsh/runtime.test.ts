@@ -220,4 +220,64 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(environment?.CORE_MCP_BRIDGE_TOKEN).toBe("private-token");
     expect((await stat(patch)).mode & 0o777).toBe(0o600);
   });
+
+  it("registers session-specific custom tools on the internal bridge", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-session-tools-"));
+    const fake = fakeHarness();
+    let patchPath: string | undefined;
+    let registered:
+      | {
+          tools: string[];
+          permissionHandler?: PermissionHandler;
+        }
+      | undefined;
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: (input) => {
+        patchPath = input.patches?.[0];
+        return fake.harness;
+      },
+    });
+    const permissionHandler: PermissionHandler = {
+      request: async () => "allow",
+    };
+    runtime.mountCoreMcp({
+      url: "http://127.0.0.1:8787/mcp",
+      token: "private-token",
+      registerSession: (sessionId, binding) => {
+        registered = {
+          tools: binding.customTools.map((tool) => tool.name),
+          ...(binding.permissionHandler
+            ? { permissionHandler: binding.permissionHandler }
+            : {}),
+        };
+        return {
+          url: `http://127.0.0.1:8787/sessions/${sessionId}/mcp`,
+        };
+      },
+    });
+    const session = await runtime.createSession({
+      builtinTools: [],
+      permissionHandler,
+      customTools: [
+        {
+          name: "goal_report",
+          label: "Goal report",
+          description: "Report the checkpoint",
+          parameters: { type: "object" },
+          execute: async () => ({
+            content: [{ type: "text", text: "reported" }],
+          }),
+        },
+      ],
+    });
+    await session.prompt("work");
+
+    expect(registered).toMatchObject({
+      tools: ["goal_report"],
+      permissionHandler,
+    });
+    expect(await readFile(patchPath!, "utf8")).toContain("thebe-session-tools");
+  });
 });

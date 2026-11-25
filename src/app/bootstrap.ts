@@ -49,6 +49,7 @@ import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
 import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
 import { coreRunsInContainer } from "../agent/security/host-security.ts";
+import type { DeepSeekHarnessRuntime } from "../adapters/dsh/runtime.ts";
 import {
   oauthPublicHosts,
   resolveOAuthConfig,
@@ -168,9 +169,7 @@ export async function bootstrapThebe(
 
   const runtimeName = selectRuntimeName(process.env);
   let runtime: AgentRuntime;
-  let mountDshCoreMcp:
-    | ((input: { url: string; token: string }) => void)
-    | undefined;
+  let mountDshCoreMcp: DeepSeekHarnessRuntime["mountCoreMcp"] | undefined;
   if (runtimeName === "dsh") {
     const provider =
       process.env.THEBE_DSH_PROVIDER?.trim() || "deepseek-official";
@@ -366,11 +365,16 @@ export async function bootstrapThebe(
     oauth,
   });
   const internalMcpBridge = mountDshCoreMcp
-    ? await startInternalMcpBridge({ handler: app.handler })
+    ? await startInternalMcpBridge({
+        handler: app.handler,
+        token: tokenResolution.token,
+      })
     : undefined;
   mountDshCoreMcp?.({
     url: internalMcpBridge!.url,
     token: tokenResolution.token,
+    registerSession: internalMcpBridge!.registerSession,
+    unregisterSession: internalMcpBridge!.unregisterSession,
   });
   const disposeRuntimeBridge = async () => {
     await internalMcpBridge?.close().catch(() => {});

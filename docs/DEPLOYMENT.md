@@ -519,8 +519,9 @@ container is the supported release boundary:
   bypass on in the TUI or a graphical client; both ask first. That choice is the host
   default when saved from settings, so schedules and subagents follow it.
 - In DSH mode Core starts a loopback-only internal HTTP face over the same request
-  handler and mounts `/mcp` into each DSH home. It uses the shared token, binds
-  an ephemeral `127.0.0.1` port, and closes with the runtime. The profile patch
+  handler. The face mounts product `/mcp` and a session-scoped tool surface for
+  the current Session's custom tools. It uses the shared token, binds an
+  ephemeral `127.0.0.1` port, and closes with the runtime. The profile patch
   carries a DSH credential reference, not the token itself; the token is passed
   in the child environment for per-request resolution and scrubbed from shell
   subprocesses by DSH.
