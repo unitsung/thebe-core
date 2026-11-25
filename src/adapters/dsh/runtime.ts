@@ -1,6 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync } from "node:fs";
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFileSync, rmSync } from "node:fs";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
 import type {
@@ -480,6 +488,7 @@ class DshRuntimeSession implements RuntimeSession {
           this.#consumeNotification(notification),
       });
       for (const event of result.events) this.#consume(event);
+      this.#emit({ type: "session_end", text: "" });
     } catch (error) {
       if (!this.#abortRequested) {
         this.#emit({
@@ -745,11 +754,11 @@ export function createDeepSeekHarnessRuntime(
 
   async function createHarness(
     runtimeSessionId: string,
+    home: string,
     model: RuntimeModelRef,
     create: CreateRuntimeSessionOptions,
     emit: (event: NormalizedEvent) => void
   ): Promise<DshHarnessLike> {
-    const home = join(sessionRoot, runtimeSessionId);
     const sessionCwd = resolve(create.cwd ?? cwd);
     await mkdir(home, { recursive: true, mode: 0o700 });
     const patchLines = [
@@ -827,26 +836,48 @@ export function createDeepSeekHarnessRuntime(
     create: CreateRuntimeSessionOptions,
     resume: boolean
   ): Promise<RuntimeSession> {
-    const home = join(sessionRoot, runtimeSessionId);
-    await mkdir(home, { recursive: true, mode: 0o700 });
+    const home = create.inMemory
+      ? await mkdtemp(join(tmpdir(), "thebe-dsh-"))
+      : join(sessionRoot, runtimeSessionId);
+    if (!create.inMemory) {
+      await mkdir(home, { recursive: true, mode: 0o700 });
+    }
     let session!: DshRuntimeSession;
-    session = new DshRuntimeSession({
-      runtimeSessionId,
-      transcriptPath: join(home, "thebe-transcript.jsonl"),
-      provider,
-      resume,
-      create,
-      getModel: () => ({ ...currentModel }),
-      createHarness: (model, create, emit) =>
-        createHarness(runtimeSessionId, model, create, emit),
-      disposeSession: () => {
-        if (live.get(runtimeSessionId) === session) {
-          live.delete(runtimeSessionId);
+    try {
+      session = new DshRuntimeSession({
+        runtimeSessionId,
+        transcriptPath: join(home, "thebe-transcript.jsonl"),
+        provider,
+        resume,
+        create,
+        getModel: () => ({ ...currentModel }),
+        createHarness: (model, create, emit) =>
+          createHarness(runtimeSessionId, home, model, create, emit),
+        disposeSession: () => {
+          if (live.get(runtimeSessionId) === session) {
+            live.delete(runtimeSessionId);
+          }
+          liveness.delete(runtimeSessionId);
+          unregisterSessionMcp?.(runtimeSessionId);
+          if (create.inMemory) {
+            try {
+              rmSync(home, { recursive: true, force: true });
+            } catch {
+              // Temporary homes are best-effort cleanup after their harness closes.
+            }
+          }
+        },
+      });
+    } catch (error) {
+      if (create.inMemory) {
+        try {
+          rmSync(home, { recursive: true, force: true });
+        } catch {
+          // Keep the session initialization error as the primary failure.
         }
-        liveness.delete(runtimeSessionId);
-        unregisterSessionMcp?.(runtimeSessionId);
-      },
-    });
+      }
+      throw error;
+    }
     await session.loadTranscript();
     live.set(runtimeSessionId, session);
     return session;

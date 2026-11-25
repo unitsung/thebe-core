@@ -106,7 +106,7 @@ describe("DeepSeek Harness AgentRuntime", () => {
 
     expect(runtime.runtimeId).toBe("deepseek-harness");
     expect(fake.runs).toEqual([[{ type: "text", text: "hello" }]]);
-    expect(events).toEqual(["text_delta", "turn_end"]);
+    expect(events).toEqual(["text_delta", "turn_end", "session_end"]);
     expect(session.lastAssistantText()).toBe("DSH replied.");
     expect(session.messages()).toEqual([
       expect.objectContaining({ role: "user", text: "hello" }),
@@ -240,6 +240,31 @@ describe("DeepSeek Harness AgentRuntime", () => {
     await expect(turn).rejects.toThrow(/cancelled during initialization/);
     expect(fake.runs).toEqual([]);
     expect(fake.closes).toHaveBeenCalledOnce();
+  });
+
+  it("keeps in-memory session homes out of persistent inventory", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-in-memory-"));
+    let sessionHome: string | undefined;
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: (input) => {
+        sessionHome = input.home;
+        return fakeHarness().harness;
+      },
+    });
+    const session = await runtime.createSession({
+      customTools: [],
+      inMemory: true,
+    });
+    expect(await runtime.listSessions()).toEqual([]);
+
+    await session.prompt("temporary summary");
+    expect(sessionHome).toBeDefined();
+    session.dispose();
+
+    expect(await runtime.listSessions()).toEqual([]);
+    await expect(stat(sessionHome!)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("persists steering and follow-up input in the session transcript", async () => {
