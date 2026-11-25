@@ -1,8 +1,9 @@
 import { mkdir, readdir, readFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { writeFileAtomic } from "../../atomic-write.ts";
+import { DEFAULT_TRIGGER_RETENTION } from "../sources/store.ts";
 
-export const DEFAULT_TRIGGER_FANOUT_RETENTION = 1000;
+export const DEFAULT_TRIGGER_FANOUT_RETENTION = DEFAULT_TRIGGER_RETENTION;
 
 const ID_RE = /^[a-f0-9]{32}$/;
 
@@ -87,7 +88,7 @@ export function createTriggerFanoutDispositionStore(
   } = {}
 ): TriggerFanoutDispositionStore {
   const maxItems = Math.max(
-    0,
+    1,
     options.maxItems ?? DEFAULT_TRIGGER_FANOUT_RETENTION
   );
   const memory = new Map<string, TriggerFanoutDisposition>();
@@ -150,12 +151,20 @@ export function createTriggerFanoutDispositionStore(
   }
 
   async function prune(): Promise<void> {
-    while (memory.size > maxItems) {
-      const oldest = memory.keys().next().value;
-      if (!oldest) return;
-      memory.delete(oldest);
+    if (memory.size <= maxItems) return;
+    const oldest = [...memory.values()]
+      .sort(
+        (left, right) =>
+          left.at.localeCompare(right.at) ||
+          left.triggerId.localeCompare(right.triggerId)
+      )
+      .slice(0, memory.size - maxItems);
+    for (const disposition of oldest) {
+      memory.delete(disposition.triggerId);
       if (options.dir) {
-        await unlink(join(options.dir, `${oldest}.json`)).catch(() => {});
+        await unlink(join(options.dir, `${disposition.triggerId}.json`)).catch(
+          () => {}
+        );
       }
     }
   }

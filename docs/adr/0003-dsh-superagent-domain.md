@@ -42,7 +42,9 @@ recipient set, including an empty set, before writing Inputs. A retry resumes
 the same complete set without duplicating Inputs or adding Tickets created
 later. Per-recipient completion is also durable, so pruning a Ticket's bounded
 Input history cannot redeliver an old Trigger. Ended Tickets do not receive
-asynchronous fan-out.
+asynchronous fan-out. The disposition and Trigger stores share the same
+event-time retention boundary, so an out-of-order event cannot become
+replayable after its fan-out decision was pruned.
 
 ## First workflow and evaluation
 

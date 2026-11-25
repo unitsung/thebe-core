@@ -55,4 +55,31 @@ describe("Trigger fan-out dispositions", () => {
       createTriggerFanoutDispositionStore({ dir }).get(triggerId)
     ).resolves.toEqual(planned);
   });
+
+  it("prunes by Trigger time so out-of-order delivery cannot drop a replayable event", async () => {
+    const recentTriggerId = key("trigger", "recent");
+    const olderTriggerId = key("trigger", "older");
+    const oldestTriggerId = key("trigger", "oldest");
+    const store = createTriggerFanoutDispositionStore({ maxItems: 2 });
+
+    await store.plan({
+      triggerId: recentTriggerId,
+      recipients: [],
+      at: "2026-11-25T03:00:00.000Z",
+    });
+    await store.plan({
+      triggerId: olderTriggerId,
+      recipients: [],
+      at: "2026-11-25T02:59:00.000Z",
+    });
+    await store.plan({
+      triggerId: oldestTriggerId,
+      recipients: [],
+      at: "2026-11-25T02:58:00.000Z",
+    });
+
+    await expect(store.get(recentTriggerId)).resolves.toBeDefined();
+    await expect(store.get(olderTriggerId)).resolves.toBeDefined();
+    await expect(store.get(oldestTriggerId)).resolves.toBeUndefined();
+  });
 });

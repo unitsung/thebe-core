@@ -556,7 +556,7 @@ export function createTicketStore(options: {
           disposition = await fanoutDispositions.plan({
             triggerId: options.trigger.id,
             recipients: newestFirst(liveMatches).map((ticket) => ticket.id),
-            at: options.attachedAt ?? new Date().toISOString(),
+            at: options.trigger.at,
           });
         }
         const recipients = disposition.recipients;
