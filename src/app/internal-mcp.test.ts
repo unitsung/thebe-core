@@ -389,4 +389,29 @@ describe("internal DSH MCP bridge", () => {
     expect(permissionIds).toHaveLength(2);
     expect(new Set(permissionIds).size).toBe(2);
   });
+
+  it("runs session cleanup when a binding is replaced or removed", async () => {
+    bridge = await startInternalMcpBridge({
+      token: "core-token",
+      handler: {
+        async handle() {
+          throw new Error("global handler should not receive session tools");
+        },
+      },
+    });
+    const cleanup = vi.fn(async () => {});
+    bridge.registerSession("session-cleanup", {
+      customTools: [],
+      emit: () => {},
+      cleanup,
+    });
+    bridge.registerSession("session-cleanup", {
+      customTools: [],
+      emit: () => {},
+      cleanup,
+    });
+    bridge.unregisterSession("session-cleanup");
+
+    await vi.waitFor(() => expect(cleanup).toHaveBeenCalledTimes(2));
+  });
 });

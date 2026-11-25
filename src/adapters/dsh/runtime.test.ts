@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -547,5 +547,107 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(contents).not.toContain("private-token");
     expect(environment?.CORE_MCP_BRIDGE_TOKEN).toBe("private-token");
     expect((await stat(patch)).mode & 0o777).toBe(0o600);
+  });
+
+  it("bridges configured external MCP tools into DSH", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-external-mcp-"));
+    let registeredTools: string[] = [];
+    const externalMcpFactory = vi.fn(async ({ mcp }) => {
+      expect(mcp.servers()).toEqual([
+        expect.objectContaining({ name: "demo", enabled: true }),
+      ]);
+      return {
+        tools: [
+          {
+            name: "mcp__demo__lookup",
+            label: "Lookup",
+            description: "Look up a value",
+            parameters: { type: "object" },
+            execute: async () => ({
+              content: [{ type: "text" as const, text: "found" }],
+            }),
+          },
+        ],
+        close: async () => {},
+      };
+    });
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: () => fakeHarness().harness,
+      externalMcpFactory,
+    });
+    runtime.mountCoreMcp({
+      token: "core-token",
+      registerSession: (_sessionId, binding) => {
+        registeredTools = binding.customTools.map((tool) => tool.name);
+        return { url: "http://127.0.0.1:8787/session/mcp" };
+      },
+    });
+    const session = await runtime.createSession({
+      customTools: [],
+      mcp: {
+        servers: () => [
+          {
+            name: "demo",
+            url: "https://mcp.example.test",
+            enabled: true,
+          },
+        ],
+        beforeCall: async () => undefined,
+        afterCall: async () => {},
+      },
+    });
+    await session.prompt("use the external tool");
+
+    expect(externalMcpFactory).toHaveBeenCalledOnce();
+    expect(registeredTools).toEqual(["mcp__demo__lookup"]);
+  });
+
+  it("materializes enabled Core skills for the DSH skill provider", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-skills-"));
+    const skillDir = join(root, "skills", "demo");
+    await mkdir(skillDir, { recursive: true });
+    const skillPath = join(skillDir, "SKILL.md");
+    await writeFile(
+      skillPath,
+      "---\nname: demo\ndescription: Demo skill\n---\n\nUse the demo workflow.\n"
+    );
+    let patchPath: string | undefined;
+    let sessionHome: string | undefined;
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory: (input) => {
+        patchPath = input.patches?.[0];
+        sessionHome = input.home;
+        return fakeHarness().harness;
+      },
+    });
+    const session = await runtime.createSession({
+      customTools: [],
+      enabledResources: [
+        {
+          identity: "demo",
+          version: "1",
+          source: skillPath,
+          kind: "skill",
+        },
+      ],
+    });
+    await session.prompt("use the demo skill");
+
+    const patch = await readFile(patchPath!, "utf8");
+    expect(patch).toContain("- id: skill-filesystem");
+    expect(patch).toContain(
+      `- ${JSON.stringify(join(sessionHome!, "thebe-skills"))}`
+    );
+    expect(patch).not.toContain("- id: tool-skill\n  disabled: true");
+    expect(
+      await readFile(
+        join(sessionHome!, "thebe-skills", "demo", "SKILL.md"),
+        "utf8"
+      )
+    ).toContain("Use the demo workflow.");
   });
 });

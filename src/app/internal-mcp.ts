@@ -21,6 +21,7 @@ type SessionBinding = {
   permissionHandler?: PermissionHandler;
   toolsRequiringApproval?: readonly string[];
   emit(event: NormalizedEvent): void;
+  cleanup?: () => void | Promise<void>;
 };
 type RegisteredSession = SessionBinding & { active: Set<AbortController> };
 
@@ -387,22 +388,29 @@ export async function startInternalMcpBridge(options: {
     registerSession(sessionId, binding) {
       const previous = sessions.get(sessionId);
       for (const active of previous?.active ?? []) active.abort();
+      void Promise.resolve(previous?.cleanup?.()).catch(() => {});
       sessions.set(sessionId, { ...binding, active: new Set() });
       return { url: `${base}/sessions/${encodeURIComponent(sessionId)}/mcp` };
     },
     unregisterSession(sessionId) {
-      for (const active of sessions.get(sessionId)?.active ?? []) {
+      const binding = sessions.get(sessionId);
+      for (const active of binding?.active ?? []) {
         active.abort();
       }
       sessions.delete(sessionId);
+      void Promise.resolve(binding?.cleanup?.()).catch(() => {});
     },
-    close: () =>
-      new Promise<void>((resolve, reject) => {
-        for (const binding of sessions.values()) {
-          for (const active of binding.active) active.abort();
-        }
-        sessions.clear();
+    close: async () => {
+      const cleanups: Promise<void>[] = [];
+      for (const binding of sessions.values()) {
+        for (const active of binding.active) active.abort();
+        cleanups.push(Promise.resolve(binding.cleanup?.()).catch(() => {}));
+      }
+      sessions.clear();
+      await Promise.all(cleanups);
+      await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
-      }),
+      });
+    },
   };
 }

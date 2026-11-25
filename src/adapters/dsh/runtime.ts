@@ -6,10 +6,12 @@ import {
   readdir,
   readFile,
   rm,
+  stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import type { HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
 import type {
   AgentRuntime,
@@ -34,6 +36,10 @@ import {
 } from "../../agent/runtime/interface.ts";
 import { sanitizeBashEnv } from "../../agent/security/process-env.ts";
 import { mapDshSessionEvent, type DshSessionEventLike } from "./events.ts";
+import {
+  createExternalMcpSession,
+  type ExternalMcpSession,
+} from "./external-mcp.ts";
 
 export const DSH_RUNTIME_ID = RUNTIME_ID;
 
@@ -95,12 +101,14 @@ export type DeepSeekHarnessRuntimeOptions = {
         permissionHandler?: CreateRuntimeSessionOptions["permissionHandler"];
         toolsRequiringApproval?: readonly string[];
         emit: (event: NormalizedEvent) => void;
+        cleanup?: () => void | Promise<void>;
       }
     ) => { url: string };
   };
   /** A container is the process boundary, so do not nest DSH's host sandbox. */
   disableDshSandbox?: boolean;
   harnessFactory?: DshHarnessFactory;
+  externalMcpFactory?: typeof createExternalMcpSession;
 };
 
 export type DeepSeekHarnessRuntime = AgentRuntime & {
@@ -119,7 +127,8 @@ const DEFAULT_MODELS = ["deepseek-flash", "deepseek-v4-pro"] as const;
 const DEFAULT_CONTEXT_WINDOW = 1_048_576;
 
 function disabledToolRows(
-  builtinTools: readonly string[] | undefined
+  builtinTools: readonly string[] | undefined,
+  hasSkills = false
 ): string[] {
   const builtin = new Set(builtinTools ?? PI_BUILTIN_TOOLS);
   const fs = ["read", "write", "edit"].some((tool) => builtin.has(tool));
@@ -132,7 +141,7 @@ function disabledToolRows(
     ["tool-plugin-manager", false],
     ["tool-web", false],
     ["tool-jobs", false],
-    ["tool-skill", false],
+    ["tool-skill", hasSkills],
     ["tool-agent-team", false],
     ["tool-subagent", false],
     ["tool-subagent-control", false],
@@ -150,6 +159,37 @@ function disabledToolRows(
     if (!enabled) rows.push(`- id: ${id}`, "  disabled: true");
   }
   return rows;
+}
+
+async function materializeEnabledSkills(
+  home: string,
+  enabledResources: CreateRuntimeSessionOptions["enabledResources"]
+): Promise<string | undefined> {
+  const skills = (enabledResources ?? []).filter(
+    (resource) => resource.kind === "skill"
+  );
+  if (skills.length === 0) return undefined;
+  const root = join(home, "thebe-skills");
+  await rm(root, { recursive: true, force: true });
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  for (const [index, resource] of skills.entries()) {
+    const source = resolve(resource.source);
+    const metadata = await stat(source);
+    const safeIdentity =
+      resource.identity.replace(/[^A-Za-z0-9_-]/g, "_") || `skill-${index}`;
+    if (metadata.isDirectory()) {
+      await symlink(source, join(root, safeIdentity), "dir");
+      continue;
+    }
+    if (basename(source) === "SKILL.md") {
+      const directory = join(root, safeIdentity);
+      await mkdir(directory, { mode: 0o700 });
+      await symlink(source, join(directory, "SKILL.md"), "file");
+    } else {
+      await symlink(source, join(root, `${safeIdentity}.md`), "file");
+    }
+  }
+  return root;
 }
 
 function modelDisplayName(modelId: string): string {
@@ -778,6 +818,24 @@ export function createDeepSeekHarnessRuntime(
   ): Promise<DshHarnessLike> {
     const sessionCwd = resolve(create.cwd ?? cwd);
     await mkdir(home, { recursive: true, mode: 0o700 });
+    const skillsRoot = await materializeEnabledSkills(
+      home,
+      create.enabledResources
+    );
+    let externalMcp: ExternalMcpSession | undefined;
+    if (create.mcp) {
+      externalMcp = await (
+        options.externalMcpFactory ?? createExternalMcpSession
+      )({
+        mcp: create.mcp,
+        cwd: sessionCwd,
+        ...(create.permissionHandler
+          ? { permissionHandler: create.permissionHandler }
+          : {}),
+        emit,
+      });
+    }
+    const bridgeTools = [...create.customTools, ...(externalMcp?.tools ?? [])];
     const patchLines = [
       "# Thebe keeps its own permission handler in control.",
       "- id: approval",
@@ -786,7 +844,7 @@ export function createDeepSeekHarnessRuntime(
     ];
     if (create.systemPrompt?.trim()) {
       const prompt =
-        create.customTools.length > 0
+        bridgeTools.length > 0
           ? `${create.systemPrompt}\n\nCore capabilities are mounted through the DeepSeek Harness MCP server named "thebe_session_tools". Load its tool catalog with the Harness tool-discovery mechanism and honor each MCP tool's permission hints. Do not invent a Core tool that is absent from that server.`
           : create.systemPrompt;
       patchLines.push(
@@ -796,23 +854,43 @@ export function createDeepSeekHarnessRuntime(
         `    personaPrefix: ${JSON.stringify(prompt)}`
       );
     }
-    patchLines.push(...disabledToolRows(create.builtinTools));
-    if (create.customTools.length > 0) {
+    patchLines.push(
+      ...disabledToolRows(create.builtinTools, Boolean(skillsRoot))
+    );
+    if (skillsRoot) {
+      patchLines.push(
+        "- id: skill-filesystem",
+        "  config:",
+        "    includeDefaultRoots: false",
+        "    watch: false",
+        "    customSkillDirs:",
+        `      - ${JSON.stringify(skillsRoot)}`
+      );
+    }
+    if (bridgeTools.length > 0) {
       if (!coreMcp?.registerSession) {
+        await externalMcp?.close();
         throw new Error(
           "DeepSeek Harness cannot expose session tools without the Core MCP bridge."
         );
       }
-      const sessionMcp = coreMcp.registerSession(runtimeSessionId, {
-        customTools: create.customTools,
-        ...(create.permissionHandler
-          ? { permissionHandler: create.permissionHandler }
-          : {}),
-        ...(create.toolsRequiringApproval
-          ? { toolsRequiringApproval: create.toolsRequiringApproval }
-          : {}),
-        emit,
-      });
+      let sessionMcp: { url: string };
+      try {
+        sessionMcp = coreMcp.registerSession(runtimeSessionId, {
+          customTools: bridgeTools,
+          ...(create.permissionHandler
+            ? { permissionHandler: create.permissionHandler }
+            : {}),
+          ...(create.toolsRequiringApproval
+            ? { toolsRequiringApproval: create.toolsRequiringApproval }
+            : {}),
+          emit,
+          ...(externalMcp ? { cleanup: () => externalMcp!.close() } : {}),
+        });
+      } catch (error) {
+        await externalMcp?.close();
+        throw error;
+      }
       patchLines.push(
         "- insert:",
         "    - id: thebe-session-tools",
@@ -830,6 +908,8 @@ export function createDeepSeekHarnessRuntime(
         "        toolLoading: on-demand",
         "        catalogDescriptionMaxLength: 160"
       );
+    } else {
+      await externalMcp?.close();
     }
     const patch = join(home, "thebe-runtime.patch.yml");
     await writeFile(patch, `${patchLines.join("\n")}\n`, {

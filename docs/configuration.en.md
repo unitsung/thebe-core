@@ -743,10 +743,10 @@ sent to the model.
 
 External MCP servers go in `.thebe/mcp.json` under `mcpServers` (the global
 `~/.thebe/mcp.json` and `.mcp.json` are also read). Pi sessions connect to them
-through Pi's built-in MCP extension. The current DSH adapter mounts Core's own
-`/mcp` endpoint and a session-scoped custom-tool surface, but does not yet
-translate this per-server inventory into DSH profile rows. Tool names on Pi are
-`mcp__<server>__<tool>`.
+through Pi's built-in MCP extension. DSH sessions use Core's in-process MCP
+client and the authenticated session-scoped bridge, so every external call still
+crosses Core policy, approval, audit and result-redaction hooks. Tool names in
+both runtimes are `mcp__<server>__<tool>`.
 
 ```json
 {

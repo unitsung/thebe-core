@@ -429,8 +429,7 @@ refresh token，吊销 refresh token 后，相关 access token 在下一次 `/mc
 
 ## MCP 服务器
 
-外部 MCP 服务器写在 `.thebe/mcp.json`（`mcpServers`，也读全局 `~/.thebe/mcp.json` 和 `.mcp.json`）。Pi 会话由 Pi 自带的 MCP 扩展连接这些服务器。
-当前 DSH Adapter 会挂载 Core 自己的 `/mcp` 和当前 Session 的自定义工具面，但还没有把这份逐服务器清单转换成 DSH profile 行。Pi 侧工具名为 `mcp__<server>__<tool>`。
+外部 MCP 服务器写在 `.thebe/mcp.json`（`mcpServers`，也读全局 `~/.thebe/mcp.json` 和 `.mcp.json`）。Pi 会话由 Pi 自带的 MCP 扩展连接这些服务器。DSH 会话由 Core 进程内 MCP client 连接，再经需要认证的 Session 专属 bridge 暴露；每次调用仍经过 Core 的 policy、审批、审计和结果脱敏。两种运行时的工具名都是 `mcp__<server>__<tool>`。
 
 ```json
 {
