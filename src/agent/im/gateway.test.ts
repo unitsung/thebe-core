@@ -614,6 +614,41 @@ describe("IM gateway", () => {
     await gateway.stop();
   });
 
+  it("does not download owner media while the main Session is busy", async () => {
+    const { gateway, channel, adapter, errors } = await setupGateway({
+      busy: () => true,
+      busyConfig: { retryMs: 5, ttlMs: 30, noticeMs: 1_000 },
+    });
+    await observeChat(gateway, adapter, channel.id);
+    await gateway.bind({
+      accountId: channel.id,
+      chat: { kind: "direct", id: "42" },
+      role: "owner",
+    });
+    adapter.capabilities.media = true;
+
+    await adapter.emit(
+      inbound({
+        accountId: channel.id,
+        text: "",
+        media: [
+          {
+            kind: "image",
+            id: "queued-photo",
+            mimeType: "image/png",
+          },
+        ],
+        messageId: "queued-media",
+        updateId: "queued-media",
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(errors).toEqual([]);
+    expect(adapter.mediaFetches).toEqual([]);
+    await gateway.stop();
+  });
+
   it("keeps a thread id on the reply", async () => {
     const { gateway, channel, adapter, prompts } = await setupGateway();
     const chat: ImChat = {

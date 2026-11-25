@@ -544,6 +544,12 @@ export function createImGateway(options: ImGatewayOptions) {
       await reply(inbound, "This chat is no longer paired with Thebe.");
       return "done";
     }
+    if (
+      (inbound.media?.length ?? 0) > 0 &&
+      options.agent.isMainSessionBusy?.()
+    ) {
+      return "busy";
+    }
     const adapter = runtimes.get(inbound.accountId)?.adapter;
     const prepared = await prepareInboundMedia(
       inbound,
