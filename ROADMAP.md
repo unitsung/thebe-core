@@ -20,10 +20,10 @@ Core is a homelab tool server with approvals and an audit log, plus an agent for
 It is not a general agent platform or a chat gateway. That shapes the plan:
 
 - Reach other agents through `/mcp` rather than replacing them. Write tools, host gating,
-  irreversible checks, audit, and target-scoped tokens are shipped; an optional Core-side
-  approval queue remains in Later.
+  irreversible checks, audit, and target-scoped tokens are shipped. The calling agent and
+  its client ask their user; a Core-side approval queue is not planned.
 - The built-in agent loop stays for background work, the terminal, and people who have no other
-  agent. Do not grow it into a second Claude Code or Codex.
+  agent. Do not grow it into a second general-purpose agent harness.
 - Keep `/v1` and `/mcp` stable; clients built on them should not need Core-specific changes.
 
 ## Shipped (in 0.1.0)
@@ -133,21 +133,16 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
-- **Core-side approval for writes over `/mcp`.** Writes over `/mcp` are on by default, with a host
-  switch (`THEBE_MCP_WRITES=off`), and the calling agent asks its own user. A stricter option would hold
-  each write until a person approves it in Core (an out-of-band queue, with scoped tokens so
-  the agent cannot approve itself), and run it on approval. Revisit only if someone needs it.
-- **Third-party harnesses behind the same seam (low priority).** Claude Code (Claude Agent SDK, in
-  process) and Codex (`codex app-server`, JSON-RPC) as additional `AgentRuntime`
-  implementations next to Pi, chosen per session, so any `/v1` client keeps
-  one protocol while approvals, the command guard and audit stay in Core. Built-in
-  shell and edit tools of those harnesses stay off unless routed through Core's guard.
-  Needs a runtime registry (today `bootstrap` wires one runtime), an explicit
-  "not supported" marking for Pi-only session operations (fork, revert, steer,
-  compact), and approval over MCP elicitation so write tools can also be offered to
-  external agents on `/mcp`. Check each vendor's current terms before offering
-  subscription sign-in. Revisit only if users ask to chat through their own
-  Claude or Codex subscription; the `/mcp` item above covers most needs first.
+- **DSH runtime behind the same seam (low priority).** Add the DSH Session
+  runtime as an in-process `AgentRuntime` implementation next to Pi, selected
+  per session, so `/v1` keeps one protocol while approvals, the command guard,
+  audit and workspace policy stay in Core. DSH Source/Eval/Ticket orchestration
+  stays unused because Core owns that domain. This needs a runtime registry,
+  an explicit map for unsupported Pi-only Session operations (fork, revert,
+  steer and compact), and parity tests for prompt files, tool events, recovery
+  and cancellation.
+- **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
+  `@anthropic-ai/sandbox-runtime`. The release container does not nest it.
 
 ## Candidate directions (identified, not scheduled)
 
@@ -174,6 +169,8 @@ they are not re-raised as omissions:
 - Arbitrary filesystem browsing, uploads, or unrestricted Artifact paths.
 - A chat-tool `/v1/approvals` collection (diagnose-restart uses `/v1/activity`;
   tool confirmations use `/v1/permissions`).
+- A Core-side approval queue for `/mcp` writes. The calling agent and its client ask their user,
+  while Core enforces token scopes, the host write switch, irreversible checks and audit.
 - A second agent loop, or a Thebe-owned transcript store.
 - Client UI code (screens, DTOs) or native provider clients inside Core.
 - Self-hosted inference; external agent gateways or Python sidecars as dependencies.

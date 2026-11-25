@@ -95,8 +95,9 @@ export function createTriggerStore(options: {
 
   async function prune(): Promise<void> {
     if (memory.size <= maxItems) return;
-    const oldest = [...memory.values()].sort((a, b) =>
-      a.at < b.at ? -1 : a.at > b.at ? 1 : 0
+    const oldest = [...memory.values()].sort(
+      (left, right) =>
+        left.at.localeCompare(right.at) || left.id.localeCompare(right.id)
     );
     for (const old of oldest.slice(0, memory.size - maxItems)) {
       memory.delete(old.id);
