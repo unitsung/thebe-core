@@ -171,11 +171,16 @@ describe("Goal Watchdog integration", () => {
         { timeout: 3000 }
       );
       await flushIo();
-      expect(
-        (await agent.listSubagents(session.thebeSessionId)).some(
-          (run) => run.profileName === "goal-observer"
-        )
-      ).toBe(true);
+      await vi.waitFor(
+        async () => {
+          expect(
+            (await agent.listSubagents(session.thebeSessionId)).some(
+              (run) => run.profileName === "goal-observer"
+            )
+          ).toBe(true);
+        },
+        { timeout: 3000 }
+      );
 
       now += 100;
       await vi.advanceTimersByTimeAsync(50);
