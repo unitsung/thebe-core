@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFileSync } from "node:fs";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { HarnessNotification } from "@deepseek-ai/dsh-sdk-client";
 import type {
@@ -78,7 +79,6 @@ export type DeepSeekHarnessRuntimeOptions = {
   apiKey?: string;
   env?: NodeJS.ProcessEnv;
   coreMcp?: {
-    url: string;
     token: string;
     registerSession?: (
       sessionId: string,
@@ -86,6 +86,7 @@ export type DeepSeekHarnessRuntimeOptions = {
         customTools: CreateRuntimeSessionOptions["customTools"];
         permissionHandler?: CreateRuntimeSessionOptions["permissionHandler"];
         toolsRequiringApproval?: readonly string[];
+        emit: (event: NormalizedEvent) => void;
       }
     ) => { url: string };
   };
@@ -97,7 +98,6 @@ export type DeepSeekHarnessRuntimeOptions = {
 export type DeepSeekHarnessRuntime = AgentRuntime & {
   /** Point future DSH launches at this Core's MCP surface. */
   mountCoreMcp(input: {
-    url: string;
     token: string;
     registerSession?: NonNullable<
       DeepSeekHarnessRuntimeOptions["coreMcp"]
@@ -226,9 +226,11 @@ class DshRuntimeSession implements RuntimeSession {
   readonly runtimeSessionId: string;
   readonly #provider: string;
   readonly #createOptions: CreateRuntimeSessionOptions;
+  readonly #transcriptPath: string;
   readonly #createHarness: (
     model: RuntimeModelRef,
-    create: CreateRuntimeSessionOptions
+    create: CreateRuntimeSessionOptions,
+    emit: (event: NormalizedEvent) => void
   ) => Promise<DshHarnessLike>;
   readonly #unregisterSession?: (sessionId: string) => void;
   readonly #listeners = new Set<(event: NormalizedEvent) => void>();
@@ -251,17 +253,20 @@ class DshRuntimeSession implements RuntimeSession {
 
   constructor(input: {
     runtimeSessionId: string;
+    transcriptPath: string;
     provider: string;
     resume: boolean;
     create: CreateRuntimeSessionOptions;
     getModel: () => RuntimeModelRef;
     createHarness: (
       model: RuntimeModelRef,
-      create: CreateRuntimeSessionOptions
+      create: CreateRuntimeSessionOptions,
+      emit: (event: NormalizedEvent) => void
     ) => Promise<DshHarnessLike>;
     unregisterSession?: (sessionId: string) => void;
   }) {
     this.runtimeSessionId = input.runtimeSessionId;
+    this.#transcriptPath = input.transcriptPath;
     this.#provider = input.provider;
     this.#createOptions = input.create;
     this.#createHarness = input.createHarness;
@@ -280,6 +285,61 @@ class DshRuntimeSession implements RuntimeSession {
     }
   }
 
+  #persist(kind: "event" | "message", value: unknown): void {
+    try {
+      appendFileSync(
+        this.#transcriptPath,
+        `${JSON.stringify({ kind, value })}\n`,
+        { encoding: "utf8", mode: 0o600 }
+      );
+    } catch {
+      // DSH remains authoritative for execution; local read models retry on later writes.
+    }
+  }
+
+  async loadTranscript(): Promise<void> {
+    let text: string;
+    try {
+      text = await readFile(this.#transcriptPath, "utf8");
+    } catch {
+      return;
+    }
+    for (const line of text.split("\n")) {
+      if (!line) continue;
+      try {
+        const row = record(JSON.parse(line));
+        if (row.kind === "message") {
+          const message = record(row.value);
+          if (
+            typeof message.id === "string" &&
+            ["user", "assistant", "tool"].includes(String(message.role)) &&
+            typeof message.text === "string"
+          ) {
+            this.#messages.push(message as RuntimeMessage);
+            if (message.role === "assistant") {
+              this.#lastAssistant = message.text;
+            }
+            if (message.role === "tool") {
+              if (
+                typeof message.toolCallId === "string" &&
+                typeof message.toolName === "string"
+              ) {
+                this.#toolNames.set(message.toolCallId, message.toolName);
+              }
+            }
+          }
+        } else if (row.kind === "event") {
+          const event = record(row.value);
+          if (typeof event.type === "string") {
+            this.#events.push(event as DshSessionEventLike);
+          }
+        }
+      } catch {
+        // A partial final JSONL row is ignored; the next append starts a new row.
+      }
+    }
+  }
+
   #consume(value: DshSessionEventLike): void {
     const key =
       value.seq !== undefined
@@ -288,6 +348,7 @@ class DshRuntimeSession implements RuntimeSession {
     if (this.#seenEvents.has(key)) return;
     this.#seenEvents.add(key);
     this.#events.push(value);
+    this.#persist("event", value);
 
     if (value.type === "tool/call") {
       const data = record(value.data);
@@ -316,7 +377,10 @@ class DshRuntimeSession implements RuntimeSession {
 
     const mapped = mapDshSessionEvent(value, this.#toolNames);
     for (const event of mapped.events) this.#emit(event);
-    if (mapped.message) this.#messages.push(mapped.message);
+    if (mapped.message) {
+      this.#messages.push(mapped.message);
+      this.#persist("message", mapped.message);
+    }
     if (mapped.assistantText !== undefined) {
       this.#lastAssistant = mapped.assistantText;
     }
@@ -336,7 +400,8 @@ class DshRuntimeSession implements RuntimeSession {
     if (!this.#harness) {
       const harness = await this.#createHarness(
         this.#model,
-        this.#createOptions
+        this.#createOptions,
+        (event) => this.#emit(event)
       );
       harness.client.onRequest(async (method, params) => {
         if (method !== "approval/request") {
@@ -412,7 +477,7 @@ class DshRuntimeSession implements RuntimeSession {
 
   async prompt(input: string | PromptInput): Promise<void> {
     const normalized = asPromptInput(input);
-    this.#messages.push({
+    const message: RuntimeMessage = {
       id: randomUUID(),
       role: "user",
       text: normalized.text,
@@ -423,7 +488,9 @@ class DshRuntimeSession implements RuntimeSession {
             })),
           }
         : {}),
-    });
+    };
+    this.#messages.push(message);
+    this.#persist("message", message);
     await this.#run(await promptBlocks(normalized));
   }
 
@@ -648,7 +715,8 @@ export function createDeepSeekHarnessRuntime(
   async function createHarness(
     runtimeSessionId: string,
     model: RuntimeModelRef,
-    create: CreateRuntimeSessionOptions
+    create: CreateRuntimeSessionOptions,
+    emit: (event: NormalizedEvent) => void
   ): Promise<DshHarnessLike> {
     const home = join(sessionRoot, runtimeSessionId);
     const sessionCwd = resolve(create.cwd ?? cwd);
@@ -660,7 +728,10 @@ export function createDeepSeekHarnessRuntime(
       "    policy: ask",
     ];
     if (create.systemPrompt?.trim()) {
-      const prompt = `${create.systemPrompt}\n\nCore capabilities are mounted through the DeepSeek Harness MCP servers named "thebe" and "thebe_session_tools". Load their tool catalogs with the Harness tool-discovery mechanism and honor each MCP tool's permission hints. Do not invent a Core tool that is absent from those servers.`;
+      const prompt =
+        create.customTools.length > 0
+          ? `${create.systemPrompt}\n\nCore capabilities are mounted through the DeepSeek Harness MCP server named "thebe_session_tools". Load its tool catalog with the Harness tool-discovery mechanism and honor each MCP tool's permission hints. Do not invent a Core tool that is absent from that server.`
+          : create.systemPrompt;
       patchLines.push(
         "- id: system-prompt",
         "  config:",
@@ -669,56 +740,39 @@ export function createDeepSeekHarnessRuntime(
       );
     }
     patchLines.push(...disabledToolRows(create.builtinTools));
-    if (coreMcp) {
+    if (create.customTools.length > 0) {
+      if (!coreMcp?.registerSession) {
+        throw new Error(
+          "DeepSeek Harness cannot expose session tools without the Core MCP bridge."
+        );
+      }
+      const sessionMcp = coreMcp.registerSession(runtimeSessionId, {
+        customTools: create.customTools,
+        ...(create.permissionHandler
+          ? { permissionHandler: create.permissionHandler }
+          : {}),
+        ...(create.toolsRequiringApproval
+          ? { toolsRequiringApproval: create.toolsRequiringApproval }
+          : {}),
+        emit,
+      });
       patchLines.push(
         "- insert:",
-        "    - id: thebe-core",
+        "    - id: thebe-session-tools",
         "      name: '@deepseek-ai/dsh-mcp-client'",
         "      config:",
         "        transport: streamable-http",
-        "        serverName: thebe",
-        `        url: ${JSON.stringify(coreMcp.url)}`,
+        "        serverName: thebe_session_tools",
+        `        url: ${JSON.stringify(sessionMcp.url)}`,
         "        headers:",
         '          Authorization: "Bearer ${credential:CORE_MCP_BRIDGE_TOKEN}"',
         "        toolCallTimeoutMs: 60000",
         "        closeTimeoutMs: 5000",
         "        expandTemplates: true",
-        "        failOnStartupError: false",
+        "        failOnStartupError: true",
         "        toolLoading: on-demand",
         "        catalogDescriptionMaxLength: 160"
       );
-      if (create.customTools.length > 0) {
-        if (!coreMcp.registerSession) {
-          throw new Error(
-            "DeepSeek Harness cannot expose session tools without the Core MCP bridge."
-          );
-        }
-        const sessionMcp = coreMcp.registerSession(runtimeSessionId, {
-          customTools: create.customTools,
-          ...(create.permissionHandler
-            ? { permissionHandler: create.permissionHandler }
-            : {}),
-          ...(create.toolsRequiringApproval
-            ? { toolsRequiringApproval: create.toolsRequiringApproval }
-            : {}),
-        });
-        patchLines.push(
-          "    - id: thebe-session-tools",
-          "      name: '@deepseek-ai/dsh-mcp-client'",
-          "      config:",
-          "        transport: streamable-http",
-          "        serverName: thebe_session_tools",
-          `        url: ${JSON.stringify(sessionMcp.url)}`,
-          "        headers:",
-          '          Authorization: "Bearer ${credential:CORE_MCP_BRIDGE_TOKEN}"',
-          "        toolCallTimeoutMs: 60000",
-          "        closeTimeoutMs: 5000",
-          "        expandTemplates: true",
-          "        failOnStartupError: true",
-          "        toolLoading: on-demand",
-          "        catalogDescriptionMaxLength: 160"
-        );
-      }
     }
     const patch = join(home, "thebe-runtime.patch.yml");
     await writeFile(patch, `${patchLines.join("\n")}\n`, {
@@ -746,14 +800,16 @@ export function createDeepSeekHarnessRuntime(
     await mkdir(home, { recursive: true, mode: 0o700 });
     const session = new DshRuntimeSession({
       runtimeSessionId,
+      transcriptPath: join(home, "thebe-transcript.jsonl"),
       provider,
       resume,
       create,
       getModel: () => ({ ...currentModel }),
-      createHarness: (model, create) =>
-        createHarness(runtimeSessionId, model, create),
+      createHarness: (model, create, emit) =>
+        createHarness(runtimeSessionId, model, create, emit),
       unregisterSession: (id) => unregisterSessionMcp?.(id),
     });
+    await session.loadTranscript();
     live.set(runtimeSessionId, session);
     return session;
   }

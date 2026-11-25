@@ -6,6 +6,7 @@ import {
 import type { AddressInfo } from "node:net";
 import type {
   CustomToolDefinition,
+  NormalizedEvent,
   PermissionHandler,
 } from "../agent/runtime/interface.ts";
 
@@ -17,7 +18,9 @@ type SessionBinding = {
   customTools: readonly CustomToolDefinition[];
   permissionHandler?: PermissionHandler;
   toolsRequiringApproval?: readonly string[];
+  emit(event: NormalizedEvent): void;
 };
+type RegisteredSession = SessionBinding & { active: Set<AbortController> };
 
 export type InternalMcpBridge = {
   url: string;
@@ -73,7 +76,8 @@ async function readBody(request: IncomingMessage): Promise<string> {
 
 async function handleSessionMcp(
   request: IncomingMessage,
-  binding: SessionBinding
+  binding: RegisteredSession,
+  controller: AbortController
 ): Promise<{ status: number; body?: Record<string, unknown> }> {
   const body = record(JSON.parse(await readBody(request)));
   const id = body.id ?? null;
@@ -167,6 +171,18 @@ async function handleSessionMcp(
       toolCallId: callId,
       args,
     };
+    binding.emit({
+      type: "permission_requested",
+      permissionId: permission.permissionId,
+      toolName: name,
+      toolCallId: callId,
+      ...(args === undefined
+        ? {}
+        : {
+            argsSummary: JSON.stringify(args).slice(0, 500),
+          }),
+      risk: "standard",
+    });
     if (handler.preflight) {
       const decision = await handler.preflight(permission);
       if (decision === "deny") {
@@ -200,10 +216,28 @@ async function handleSessionMcp(
       };
     }
   }
-  const result = await tool.execute(
-    typeof params.callId === "string" ? params.callId : String(id),
-    args
-  );
+  binding.active.add(controller);
+  let result: Awaited<ReturnType<CustomToolDefinition["execute"]>>;
+  try {
+    result = await tool.execute(
+      typeof params.callId === "string" ? params.callId : String(id),
+      args,
+      controller.signal
+    );
+  } catch (error) {
+    if (controller.signal.aborted) {
+      return {
+        status: 200,
+        body: mcpResult(id, {
+          content: [{ type: "text", text: "cancelled" }],
+          isError: true,
+        }),
+      };
+    }
+    throw error;
+  } finally {
+    binding.active.delete(controller);
+  }
   return {
     status: 200,
     body: mcpResult(id, {
@@ -233,10 +267,15 @@ export async function startInternalMcpBridge(options: {
   token: string;
   handler: RequestHandler;
 }): Promise<InternalMcpBridge> {
-  const sessions = new Map<string, SessionBinding>();
+  const sessions = new Map<string, RegisteredSession>();
   let port = 0;
   const server = createServer(async (incoming, outgoing) => {
     try {
+      const controller = new AbortController();
+      incoming.once("aborted", () => controller.abort());
+      outgoing.once("close", () => {
+        if (!outgoing.writableEnded) controller.abort();
+      });
       if (bearerToken(incoming) !== options.token) {
         writeJson(outgoing, 401, { error: "unauthorized" });
         return;
@@ -254,7 +293,7 @@ export async function startInternalMcpBridge(options: {
           writeJson(outgoing, 405, { error: "method_not_allowed" });
           return;
         }
-        const response = await handleSessionMcp(incoming, binding);
+        const response = await handleSessionMcp(incoming, binding, controller);
         if (response.body) writeJson(outgoing, response.status, response.body);
         else outgoing.writeHead(response.status).end();
         return;
@@ -308,14 +347,22 @@ export async function startInternalMcpBridge(options: {
   return {
     url: `${base}/mcp`,
     registerSession(sessionId, binding) {
-      sessions.set(sessionId, binding);
+      const previous = sessions.get(sessionId);
+      for (const active of previous?.active ?? []) active.abort();
+      sessions.set(sessionId, { ...binding, active: new Set() });
       return { url: `${base}/sessions/${encodeURIComponent(sessionId)}/mcp` };
     },
     unregisterSession(sessionId) {
+      for (const active of sessions.get(sessionId)?.active ?? []) {
+        active.abort();
+      }
       sessions.delete(sessionId);
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
+        for (const binding of sessions.values()) {
+          for (const active of binding.active) active.abort();
+        }
         sessions.clear();
         server.close((error) => (error ? reject(error) : resolve()));
       }),

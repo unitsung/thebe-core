@@ -129,6 +129,33 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(fake.resumes).toEqual(["session-existing"]);
   });
 
+  it("hydrates persisted messages before a resumed prompt", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-transcript-"));
+    const sessionRoot = join(root, "sessions");
+    const firstRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      harnessFactory: () => fakeHarness().harness,
+    });
+    const first = await firstRuntime.createSession({ customTools: [] });
+    await first.prompt("remember this");
+    first.dispose();
+
+    const secondRuntime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot,
+      harnessFactory: () => fakeHarness().harness,
+    });
+    const resumed = await secondRuntime.resumeSession(first.runtimeSessionId, {
+      customTools: [],
+    });
+    expect(resumed.messages()).toEqual([
+      expect.objectContaining({ role: "user", text: "remember this" }),
+      expect.objectContaining({ role: "assistant", text: "DSH replied." }),
+    ]);
+    expect(resumed.lastAssistantText()).toBe("DSH replied.");
+  });
+
   it("routes DSH approval requests through the Core permission handler", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-approval-"));
     const fake = fakeHarness();
@@ -182,49 +209,11 @@ describe("DeepSeek Harness AgentRuntime", () => {
     ).rejects.toThrow(/does not support fork/);
   });
 
-  it("mounts the live Core MCP surface through a private DSH patch", async () => {
-    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-mcp-"));
-    const fake = fakeHarness();
-    let patches: string[] | undefined;
-    let environment: NodeJS.ProcessEnv | undefined;
-    const runtime = createDeepSeekHarnessRuntime({
-      cwd: root,
-      sessionRoot: join(root, "sessions"),
-      harnessFactory: (input) => {
-        patches = input.patches;
-        environment = input.env;
-        return fake.harness;
-      },
-    });
-    runtime.mountCoreMcp({
-      url: "http://127.0.0.1:8787/mcp",
-      token: "private-token",
-    });
-    const session = await runtime.createSession({
-      customTools: [],
-      builtinTools: [],
-    });
-    await session.prompt("use tools");
-
-    expect(patches).toHaveLength(1);
-    const patch = patches![0]!;
-    const contents = await readFile(patch, "utf8");
-    expect(contents).toContain("@deepseek-ai/dsh-mcp-client");
-    expect(contents).toContain("- id: tool-bash");
-    expect(contents).toContain("  disabled: true");
-    expect(contents).toContain("http://127.0.0.1:8787/mcp");
-    expect(contents).toContain(
-      ["$", "{credential:CORE_MCP_BRIDGE_TOKEN}"].join("")
-    );
-    expect(contents).not.toContain("private-token");
-    expect(environment?.CORE_MCP_BRIDGE_TOKEN).toBe("private-token");
-    expect((await stat(patch)).mode & 0o777).toBe(0o600);
-  });
-
   it("registers session-specific custom tools on the internal bridge", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-session-tools-"));
     const fake = fakeHarness();
     let patchPath: string | undefined;
+    let environment: NodeJS.ProcessEnv | undefined;
     let registered:
       | {
           tools: string[];
@@ -236,6 +225,7 @@ describe("DeepSeek Harness AgentRuntime", () => {
       sessionRoot: join(root, "sessions"),
       harnessFactory: (input) => {
         patchPath = input.patches?.[0];
+        environment = input.env;
         return fake.harness;
       },
     });
@@ -243,7 +233,6 @@ describe("DeepSeek Harness AgentRuntime", () => {
       request: async () => "allow",
     };
     runtime.mountCoreMcp({
-      url: "http://127.0.0.1:8787/mcp",
       token: "private-token",
       registerSession: (sessionId, binding) => {
         registered = {
@@ -278,6 +267,16 @@ describe("DeepSeek Harness AgentRuntime", () => {
       tools: ["goal_report"],
       permissionHandler,
     });
-    expect(await readFile(patchPath!, "utf8")).toContain("thebe-session-tools");
+    const patch = patchPath!;
+    const contents = await readFile(patch, "utf8");
+    expect(contents).toContain("thebe-session-tools");
+    expect(contents).toContain("- id: tool-bash");
+    expect(contents).toContain("  disabled: true");
+    expect(contents).toContain(
+      ["$", "{credential:CORE_MCP_BRIDGE_TOKEN}"].join("")
+    );
+    expect(contents).not.toContain("private-token");
+    expect(environment?.CORE_MCP_BRIDGE_TOKEN).toBe("private-token");
+    expect((await stat(patch)).mode & 0o777).toBe(0o600);
   });
 });
