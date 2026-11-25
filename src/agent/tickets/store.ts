@@ -8,6 +8,10 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { directEvalId, key, ticketIdFor } from "./ids.ts";
+import {
+  createTriggerFanoutDispositionStore,
+  type TriggerFanoutDispositionStore,
+} from "./fanout-disposition-store.ts";
 import type {
   Assignment,
   AssignmentState,
@@ -130,8 +134,9 @@ export type TicketStore = {
     triggers?: readonly Trigger[];
   }): Promise<Ticket>;
   /**
-   * Fan-out: attaches a Trigger to every live Ticket subscribed to any of its Threads.
-   * Returns every Ticket that now has the Trigger, including an idempotent retry.
+   * Fan-out: freezes the recipient set as every live Ticket subscribed to any
+   * of the Trigger's Threads, then attaches the Trigger to them. Returns every
+   * Ticket that now has the Trigger, including an idempotent or resumed retry.
    */
   attachTrigger(options: {
     trigger: Trigger;
@@ -162,8 +167,14 @@ export type TicketStore = {
 export function createTicketStore(options: {
   dir?: string;
   maxItems?: number;
+  fanoutDispositions?: TriggerFanoutDispositionStore;
 }): TicketStore {
   const maxItems = options.maxItems ?? DEFAULT_TICKET_RETENTION;
+  const fanoutDispositions =
+    options.fanoutDispositions ??
+    createTriggerFanoutDispositionStore({
+      dir: options.dir ? join(options.dir, "fanout") : undefined,
+    });
   const memory = new Map<string, Ticket>();
   let loaded = !options.dir;
   let chain: Promise<unknown> = Promise.resolve();
@@ -525,24 +536,53 @@ export function createTicketStore(options: {
             )
             .map((ticket) => ticket.id)
         );
-        const matchingTickets = [...memory.values()].filter((ticket) =>
-          ticket.subscriptions.some((sub) =>
-            options.trigger.threads.some(
-              (thread) => normalizeThread(sub) === normalizeThread(thread)
-            )
-          )
-        );
-        const liveMatches: Ticket[] = [];
-        for (const ticket of matchingTickets) {
-          if (
-            !alreadyAttached.has(ticket.id) &&
-            (await options.isLive(ticket))
-          ) {
-            liveMatches.push(ticket);
+        let disposition = await fanoutDispositions.get(options.trigger.id);
+        if (!disposition) {
+          const liveMatches: Ticket[] = [];
+          for (const ticket of memory.values()) {
+            const subscribed = ticket.subscriptions.some((sub) =>
+              options.trigger.threads.some(
+                (thread) => normalizeThread(sub) === normalizeThread(thread)
+              )
+            );
+            if (
+              subscribed &&
+              !alreadyAttached.has(ticket.id) &&
+              (await options.isLive(ticket))
+            ) {
+              liveMatches.push(ticket);
+            }
           }
+          disposition = await fanoutDispositions.plan({
+            triggerId: options.trigger.id,
+            recipients: newestFirst(liveMatches).map((ticket) => ticket.id),
+            at: options.attachedAt ?? new Date().toISOString(),
+          });
         }
-        const targets = newestFirst(liveMatches);
-        for (const target of targets) {
+        const recipients = disposition.recipients;
+        const delivered = new Set(disposition.delivered);
+
+        for (const recipient of recipients) {
+          if (delivered.has(recipient)) continue;
+          const target = memory.get(recipient);
+          if (!target) {
+            await fanoutDispositions.markDelivered(
+              options.trigger.id,
+              recipient
+            );
+            delivered.add(recipient);
+            continue;
+          }
+          if (
+            target.inputs.some((item) => item.triggerId === options.trigger.id)
+          ) {
+            await fanoutDispositions.markDelivered(
+              options.trigger.id,
+              recipient
+            );
+            delivered.add(recipient);
+            continue;
+          }
           const matchingThread =
             target.subscriptions.find((sub) =>
               options.trigger.threads.some(
@@ -580,21 +620,23 @@ export function createTicketStore(options: {
               ? { payload: options.trigger.payload }
               : {}),
           };
-          target.inputs.push(input);
-          target.channels = mergeChannels(target.channels ?? [], [
-            options.trigger.channel,
-          ]);
-          if (target.inputs.length > MAX_INPUTS_PER_TICKET) {
-            target.inputs.shift();
+          const inputs = [...target.inputs, input];
+          if (inputs.length > MAX_INPUTS_PER_TICKET) {
+            inputs.shift();
           }
-          alreadyAttached.add(target.id);
-          await persist(target);
+          const next: Ticket = {
+            ...target,
+            inputs,
+            channels: mergeChannels(target.channels ?? [], [
+              options.trigger.channel,
+            ]),
+          };
+          await persist(next);
+          memory.set(target.id, next);
+          await fanoutDispositions.markDelivered(options.trigger.id, recipient);
+          delivered.add(recipient);
         }
-        return newestFirst(
-          [...memory.values()].filter((ticket) =>
-            alreadyAttached.has(ticket.id)
-          )
-        ).map((ticket) => ticket.id);
+        return [...new Set([...recipients, ...alreadyAttached])];
       });
     },
     async attachToTicket(options) {

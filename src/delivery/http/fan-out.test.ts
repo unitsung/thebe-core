@@ -385,4 +385,49 @@ describe("subscriptions and fan-out", () => {
     expect(after.inputs).toHaveLength(1);
     expect(after.inputs[0].triggerId).toBe(before.inputs[0].triggerId);
   });
+
+  it("does not replay a persisted Source event into a later Ticket", async () => {
+    vi.useFakeTimers();
+    const dir = await mkdtemp(join(tmpdir(), "thebe-fan-out-late-ticket-"));
+    const first = setup({ agentStoreDir: dir });
+    await vi.advanceTimersByTimeAsync(0);
+
+    first.fake.queueTurns(ASKING_REPORT);
+    const original = await first.post("/v1/tickets", {
+      task: "Maintain emby",
+      idempotencyKey: "fan-out-original-ticket",
+      threads: ["resource:container:emby"],
+      allowAsk: true,
+    });
+    const originalTicketId = original.body.ticket.id;
+    await first.app.agent.waitGoal(original.body.goal.id);
+
+    first.world.containers.emby = "exited";
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.waitFor(async () => {
+      const res = await first.call(`/v1/tickets/${originalTicketId}`);
+      expect(res.body.inputs).toHaveLength(1);
+    });
+
+    first.fake.queueTurns(ASKING_REPORT);
+    const later = await first.post("/v1/tickets", {
+      task: "Watch emby after the event",
+      idempotencyKey: "fan-out-later-ticket",
+      threads: ["resource:container:emby"],
+      allowAsk: true,
+    });
+    const laterTicketId = later.body.ticket.id;
+    await first.app.agent.waitGoal(later.body.goal.id);
+
+    const restarted = setup({ agentStoreDir: dir });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.waitFor(async () => {
+      const [originalTicket, laterTicket] = await Promise.all([
+        restarted.call(`/v1/tickets/${originalTicketId}`),
+        restarted.call(`/v1/tickets/${laterTicketId}`),
+      ]);
+      expect(originalTicket.body.inputs).toHaveLength(1);
+      expect(laterTicket.body.inputs).toEqual([]);
+    });
+  });
 });

@@ -1,4 +1,11 @@
-import { mkdtemp } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -386,6 +393,58 @@ describe("ticket fan-out and inputs", () => {
     expect((await store.get(second.id))?.inputs).toHaveLength(1);
   });
 
+  it("does not replay a Trigger to a Ticket created after its first fan-out", async () => {
+    const store = createTicketStore({});
+    const first = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const event = trigger(1);
+
+    expect(
+      await store.attachTrigger({
+        trigger: event,
+        isLive: () => true,
+      })
+    ).toEqual([first.id]);
+
+    const later = await store.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+    expect(
+      await store.attachTrigger({
+        trigger: event,
+        isLive: () => true,
+      })
+    ).toEqual([first.id]);
+    expect((await store.get(first.id))?.inputs).toHaveLength(1);
+    expect((await store.get(later.id))?.inputs).toEqual([]);
+  });
+
+  it("keeps an empty fan-out decision so a later Ticket does not receive an old Trigger", async () => {
+    const store = createTicketStore({});
+    const event = trigger(1);
+    expect(
+      await store.attachTrigger({
+        trigger: event,
+        isLive: () => true,
+      })
+    ).toEqual([]);
+
+    const later = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    expect(
+      await store.attachTrigger({
+        trigger: event,
+        isLive: () => true,
+      })
+    ).toEqual([]);
+    expect((await store.get(later.id))?.inputs).toEqual([]);
+  });
+
   it("fan-out skips the subscribed tickets that are no longer live", async () => {
     const store = createTicketStore({});
     const live = await store.recordDirect({
@@ -504,6 +563,104 @@ describe("ticket fan-out and inputs", () => {
       channel: event.channel,
     });
     expect(loaded?.channels).toEqual([event.channel]);
+  });
+
+  it("persists the recipient set across a restart", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-fanout-restart-"));
+    const firstStore = createTicketStore({ dir });
+    const first = await firstStore.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const event = trigger(1);
+    await firstStore.attachTrigger({
+      trigger: event,
+      isLive: () => true,
+    });
+
+    const later = await firstStore.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+    const secondStore = createTicketStore({ dir });
+    expect(
+      await secondStore.attachTrigger({
+        trigger: event,
+        isLive: () => true,
+      })
+    ).toEqual([first.id]);
+    expect((await secondStore.get(first.id))?.inputs).toHaveLength(1);
+    expect((await secondStore.get(later.id))?.inputs).toEqual([]);
+  });
+
+  it("finishes a partially persisted fan-out from its frozen recipient plan", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-fanout-partial-"));
+    const store = createTicketStore({ dir });
+    const first = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const second = await store.recordDirect({
+      ...request(2),
+      subscriptions: ["resource:container:emby"],
+    });
+    const firstFile = join(dir, `${first.id}.json`);
+    const firstSnapshot = await readFile(firstFile, "utf8");
+
+    // Make the second recipient fail after the first recipient was persisted.
+    await unlink(firstFile);
+    await mkdir(firstFile);
+    await expect(
+      store.attachTrigger({
+        trigger: trigger(1),
+        isLive: () => true,
+        attachedAt: "2026-11-25T03:00:00.000Z",
+      })
+    ).rejects.toThrow();
+
+    await rm(firstFile, { recursive: true, force: true });
+    await writeFile(firstFile, firstSnapshot, "utf8");
+
+    const reopened = createTicketStore({ dir });
+    expect(
+      await reopened.attachTrigger({
+        trigger: trigger(1),
+        isLive: () => false,
+        attachedAt: "2026-11-25T03:05:00.000Z",
+      })
+    ).toEqual([second.id, first.id]);
+    expect((await reopened.get(first.id))?.inputs).toHaveLength(1);
+    expect((await reopened.get(second.id))?.inputs).toHaveLength(1);
+  });
+
+  it("does not redeliver after the bounded Ticket input history prunes the Trigger", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "tickets-fanout-delivered-"));
+    const store = createTicketStore({ dir });
+    const ticket = await store.recordDirect({
+      ...request(1),
+      subscriptions: ["resource:container:emby"],
+    });
+    const event = trigger(1);
+    await store.attachTrigger({
+      trigger: event,
+      isLive: () => true,
+    });
+
+    const ticketFile = join(dir, `${ticket.id}.json`);
+    const saved = JSON.parse(await readFile(ticketFile, "utf8")) as {
+      inputs: unknown[];
+    };
+    saved.inputs = [];
+    await writeFile(ticketFile, `${JSON.stringify(saved)}\n`, "utf8");
+
+    const reopened = createTicketStore({ dir });
+    expect(
+      await reopened.attachTrigger({
+        trigger: event,
+        isLive: () => false,
+      })
+    ).toEqual([ticket.id]);
+    expect((await reopened.get(ticket.id))?.inputs).toEqual([]);
   });
 
   it("keeps input sequence monotonic after pruning the oldest event", async () => {

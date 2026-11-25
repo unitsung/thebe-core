@@ -37,8 +37,12 @@ implementation may remain temporarily behind the Executor boundary, but no new
 Goal vocabulary may enter `CONTEXT.md`, HTTP, MCP, or the App. A compatibility
 shim, if needed, must name its removal version and must not own state.
 Subscription fan-out follows DSH: every live Ticket subscribed to a Trigger's
-Threads receives it as context. A retry returns the same complete set without
-duplicating Inputs. Ended Tickets do not receive asynchronous fan-out.
+Threads receives it as context. The first dispatch durably freezes that
+recipient set, including an empty set, before writing Inputs. A retry resumes
+the same complete set without duplicating Inputs or adding Tickets created
+later. Per-recipient completion is also durable, so pruning a Ticket's bounded
+Input history cannot redeliver an old Trigger. Ended Tickets do not receive
+asynchronous fan-out.
 
 ## First workflow and evaluation
 
