@@ -544,6 +544,36 @@ describe("eval service", () => {
     ).toHaveLength(1);
   });
 
+  it("evaluates a multi-Thread Trigger only on its primary Thread and keeps the rest as Correlation context", async () => {
+    const s = await setup(() =>
+      JSON.stringify({
+        decision: "ignore",
+        matched: [],
+        reason: "checks changed",
+      })
+    );
+    const row = trigger(1, {
+      threads: ["resource:github:pull:7", "resource:github:check:9"],
+    });
+
+    s.service.enqueue([row]);
+    await s.service.idle();
+
+    const decisions = await s.decisions.list();
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0]).toMatchObject({
+      thread: "resource:github:pull:7",
+      triggerIds: [row.id],
+      correlationIds: [expect.stringMatching(/^[a-f0-9]{32}$/)],
+    });
+    expect(s.prompts).toHaveLength(1);
+    expect(s.prompts[0]).toContain('"primaryThread":"resource:github:pull:7"');
+    expect(s.prompts[0]).toContain(
+      '"relatedThreads":["resource:github:check:9"]'
+    );
+    expect(s.prompts[0]).toContain("Correlation adds context and never routes");
+  });
+
   it("the Decision id comes from the Triggers' times, not the clock", async () => {
     const make = async (clockMs: number) => {
       const s = await setup(

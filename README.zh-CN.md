@@ -6,7 +6,7 @@ Thebe Core 是一个带审批和审计日志的 homelab agent 服务端。它连
 
 可以跑在 NAS、迷你主机、树莓派或云服务器上。有三种用法：
 
-- **作为 MCP 服务器**，给你已经在用的 agent 使用。任何能发送 HTTP 请求头的 MCP 客户端都可以列出并调用 Core 的工具。
+- **作为 MCP 服务器**，给你已经在用的 agent 使用。MCP 客户端既可以带 token 调用 HTTP 端点，也可以直接 spawn `thebe-mcp` stdio 入口。
 - **作为终端 agent。** Core 内嵌 [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 运行时，`thebe` 提供 TUI 和一次性 CLI，可以在你指定的工作区里读文件、改文件、执行命令。
 - **通过 HTTP API。** 会话、目标、定时任务、活动流、审批和审计日志，OpenAPI 文档在 `/docs`。
 
@@ -63,7 +63,26 @@ curl -s -X POST -H "X-Thebe-Token: $TOKEN" -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' http://127.0.0.1:8787/mcp
 ```
 
-在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。经 `/mcp` 连接的 agent 也能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。每次写操作都记入审计日志。设置 `THEBE_MCP_WRITES=off` 可以让 `/mcp` 变成只读。想让某个 agent 的权限小于完全访问，就为它单独做一个 token：`thebe token create <名字> --scope mcp:read`（或 `mcp:write`）。这个 token 只能用在 `/mcp`，也可以用 `Authorization: Bearer <token>` 发送。
+在 agent 的 MCP 配置里指向这个地址并带上同样的请求头。需要由宿主直接 spawn 的 stdio MCP 时，用包里独立的 `thebe-mcp`，不用启动容器或 HTTP 监听：
+
+```json
+{
+  "command": "npx",
+  "args": ["-y", "-p", "thebe-core", "thebe-mcp"]
+}
+```
+
+`thebe-mcp` 从 stdin 读逐行 JSON-RPC，stdout 只写协议消息，日志全部走 stderr；工具可见性、写权限、不可逆检查、审计和 quiesce 与 `/mcp` 共用同一条路径。
+
+经 `/mcp` 或 stdio 连接的 agent 能用写工具（重启容器、改歌单、服务商 MCP 的写工具）。这条路径上 Core 不会先问任何人。每个工具都带 `readOnlyHint` 和 `destructiveHint`，要不要问用户由调用方 agent 和它的客户端决定。每次写操作都记入审计日志。设置 `THEBE_MCP_WRITES=off` 可以让 `/mcp` 变成只读。想让某个 agent 的权限小于完全访问，就为它单独做一个 token：`thebe token create <名字> --scope mcp:read`（或 `mcp:write` / `mcp:irreversible`）。这个 token 只能用在 `/mcp`，也可以用 `Authorization: Bearer <token>` 发送。可以重复 `--scope` 组合 broad 与细粒度权限：
+
+```bash
+thebe token create "媒体只读" --scope mcp:read \
+  --scope mcp:tool:container_restart:write \
+  --scope mcp:service:navidrome:write
+```
+
+`tools/list` 和每次调用使用同一套 tool/service 目标及 read/write/irreversible 级别检查。
 
 **在终端里。** `npm run tui` 会构建并启动交互界面。构建之后，`node dist/cli.js`（或包的 `bin`：`thebe`）效果相同；`thebe -p "列出我的容器"` 执行一条提示后退出。`thebe --help` 列出 session 和 MCP 子命令，`thebe doctor` 报告隔离状态。
 

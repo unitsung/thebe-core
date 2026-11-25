@@ -2,9 +2,9 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
-  TOKEN_SCOPES,
   createDeviceToken,
   describeTokenScopes,
+  parseTokenScope,
   readDeviceTokens,
   readTokenUsage,
   revokeAllDeviceTokens,
@@ -13,15 +13,18 @@ import {
   rotateToken,
   tokenFilePath,
   tokenStatus,
+  type TokenScope,
 } from "../http/token-store.ts";
 
 const HELP = `thebe token <command>
 
-  create <name> [--scope mcp:read|mcp:write|mcp:irreversible]
+  create <name> [--scope <scope>]...
                   make a token for one device or agent; shown once, only its hash is kept.
-                  With --scope the token works only on /mcp: mcp:read for read tools,
-                  mcp:write for write tools too, mcp:irreversible also for deletes that
-                  cannot be undone. Without it the token has full access.
+                  With --scope the token works only on /mcp. Broad scopes are mcp:read,
+                  mcp:write and mcp:irreversible. Narrow them with
+                  mcp:tool:<name>[:read|write|irreversible] or
+                  mcp:service:<name>[:read|write|irreversible]. Repeat --scope to combine
+                  a broad read with one targeted write. Without it the token has full access.
   list            the device tokens: name, scope, created, last used
   revoke <name>   remove one device's token; the others keep working
   revoke --all    remove every device token and close the shared one
@@ -42,10 +45,10 @@ THEBE_TOKEN belongs to your environment and is not changed here.`;
 function parseCreateArgs(
   args: readonly string[]
 ):
-  | { ok: true; name: string; scope?: (typeof TOKEN_SCOPES)[number] }
+  | { ok: true; name: string; scopes?: TokenScope[] }
   | { ok: false; problem: string } {
   const words: string[] = [];
-  let scope: (typeof TOKEN_SCOPES)[number] | undefined;
+  const scopes: TokenScope[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
     if (arg !== "--scope" && !arg.startsWith("--scope=")) {
@@ -53,17 +56,21 @@ function parseCreateArgs(
       continue;
     }
     const value = arg === "--scope" ? args[++i] : arg.slice("--scope=".length);
-    const known = TOKEN_SCOPES.find((candidate) => candidate === value);
-    if (!known) {
+    const scope = parseTokenScope(value);
+    if (!value || !scope) {
       return {
         ok: false,
-        problem: `--scope takes ${TOKEN_SCOPES.join(" or ")}.`,
+        problem:
+          "--scope takes mcp:read|write|irreversible, mcp:tool:<name>[:level], or mcp:service:<name>[:level].",
       };
     }
-    if (scope) return { ok: false, problem: "Give --scope once." };
-    scope = known;
+    if (!scopes.includes(scope)) scopes.push(scope);
   }
-  return { ok: true, name: words.join(" "), scope };
+  return {
+    ok: true,
+    name: words.join(" "),
+    ...(scopes.length > 0 ? { scopes } : {}),
+  };
 }
 
 export function runTokenCommand(
@@ -114,7 +121,7 @@ export function runTokenCommand(
       const result = createDeviceToken({
         configDir,
         name: parsed.name,
-        scope: parsed.scope,
+        ...(parsed.scopes ? { scopes: parsed.scopes } : {}),
       });
       if (!result.ok) {
         io.error(

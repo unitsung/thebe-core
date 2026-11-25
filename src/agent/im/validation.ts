@@ -8,12 +8,18 @@ import {
   type ImConversation,
   type ImInbound,
   type ImMediaRef,
+  type ImOutboundMedia,
   type ImPlatform,
   type ImSendMode,
   type ImSender,
 } from "./types.ts";
 
 export const MAX_IM_TEXT = 16_000;
+export const MAX_IM_MEDIA_ITEMS = 8;
+export const MAX_IM_MEDIA_BYTES = 2_000_000;
+/** Keeps the worst-case base64 JSON below the HTTP listener's 10 MB body cap. */
+export const MAX_IM_MEDIA_TOTAL_BYTES = 7_000_000;
+const MAX_IM_MEDIA_BASE64 = Math.ceil((MAX_IM_MEDIA_BYTES * 4) / 3) + 4;
 const MAX_ID = 200;
 const MAX_LABEL = 100;
 const MAX_TITLE = 200;
@@ -196,6 +202,7 @@ export function parseSendInput(value: unknown): {
   accountId: string;
   chat: Pick<ImChat, "kind" | "id">;
   text: string;
+  media?: ImOutboundMedia[];
   mode: ImSendMode;
   replyTo?: string;
   contextToken?: string;
@@ -207,7 +214,16 @@ export function parseSendInput(value: unknown): {
   const row = value as Record<string, unknown>;
   const accountId = requiredId(row.accountId, "accountId");
   const chat = parseImChat(row.chat);
-  const text = requiredText(row.text, "text", MAX_IM_TEXT);
+  const text =
+    row.text === undefined || row.text === null
+      ? ""
+      : typeof row.text === "string" && !row.text.trim()
+        ? ""
+        : requiredText(row.text, "text", MAX_IM_TEXT);
+  const media = parseOutboundMedia(row.media);
+  if (!text && media.length === 0) {
+    throw new ImInputError("send requires text or media");
+  }
   if (
     row.mode !== undefined &&
     row.mode !== "reply" &&
@@ -235,10 +251,101 @@ export function parseSendInput(value: unknown): {
       ...(chat.threadId ? { threadId: chat.threadId } : {}),
     },
     text,
+    ...(media.length > 0 ? { media } : {}),
     mode,
     ...(replyTo ? { replyTo } : {}),
     ...(contextToken ? { contextToken } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
+  };
+}
+
+function parseOutboundMedia(value: unknown): ImOutboundMedia[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_IM_MEDIA_ITEMS) {
+    throw new ImInputError(
+      `media must be an array of at most ${MAX_IM_MEDIA_ITEMS} items`
+    );
+  }
+  let totalBytes = 0;
+  return value.map((entry, index) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new ImInputError(`media[${index}] must be an object`);
+    }
+    const row = entry as Record<string, unknown>;
+    if (
+      row.kind !== "image" &&
+      row.kind !== "audio" &&
+      row.kind !== "video" &&
+      row.kind !== "file"
+    ) {
+      throw new ImInputError(
+        `media[${index}].kind must be image, audio, video or file`
+      );
+    }
+    const mediaType = requiredText(
+      row.mediaType,
+      `media[${index}].mediaType`,
+      100
+    ).toLowerCase();
+    if (!/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/.test(mediaType)) {
+      throw new ImInputError(`media[${index}].mediaType is invalid`);
+    }
+    if (
+      typeof row.data !== "string" ||
+      !row.data ||
+      row.data.length > MAX_IM_MEDIA_BASE64 ||
+      !/^[A-Za-z0-9+/]+={0,2}$/.test(row.data)
+    ) {
+      throw new ImInputError(
+        `media[${index}].data must be base64 of at most ${MAX_IM_MEDIA_BYTES} bytes`
+      );
+    }
+    const decodedBytes = Buffer.from(row.data, "base64").byteLength;
+    if (decodedBytes > MAX_IM_MEDIA_BYTES) {
+      throw new ImInputError(
+        `media[${index}].data must be at most ${MAX_IM_MEDIA_BYTES} bytes`
+      );
+    }
+    totalBytes += decodedBytes;
+    if (totalBytes > MAX_IM_MEDIA_TOTAL_BYTES) {
+      throw new ImInputError(
+        `media must total at most ${MAX_IM_MEDIA_TOTAL_BYTES} bytes`
+      );
+    }
+    const filename = optionalText(
+      row.filename,
+      `media[${index}].filename`,
+      120
+    );
+    return {
+      kind: row.kind,
+      mediaType,
+      data: row.data,
+      ...(filename ? { filename } : {}),
+    };
+  });
+}
+
+export function parseRecallInput(value: unknown): {
+  accountId: string;
+  chat: Pick<ImChat, "kind" | "id" | "threadId">;
+  messageId: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ImInputError("recall must be an object");
+  }
+  const row = value as Record<string, unknown>;
+  const accountId = requiredId(row.accountId, "accountId");
+  const chat = parseImChat(row.chat);
+  const messageId = requiredId(row.messageId, "messageId");
+  return {
+    accountId,
+    chat: {
+      kind: chat.kind,
+      id: chat.id,
+      ...(chat.threadId ? { threadId: chat.threadId } : {}),
+    },
+    messageId,
   };
 }
 

@@ -89,6 +89,16 @@ function setup(options: { now?: () => Date } = {}) {
     if (call.url.endsWith("/messages")) {
       return jsonBody({ id: `out-${fake.calls.length}` });
     }
+    if (call.url.endsWith("/files")) {
+      return jsonBody({ file_info: "qq-file-info" });
+    }
+    if (call.url.endsWith("/photo.png")) {
+      return new Response(
+        new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        { headers: { "content-type": "image/png" } }
+      );
+    }
+    if (call.method === "DELETE") return jsonBody({});
     return jsonBody({ message: "not found" }, 404);
   });
   const inbound: ImInbound[] = [];
@@ -295,6 +305,91 @@ describe("QQ IM adapter", () => {
       msg_seq: 1,
     });
     await context.adapter.stop();
+  });
+
+  it("recalls a group message through the official DELETE endpoint", async () => {
+    const context = setup();
+
+    const result = await context.adapter.recall?.({
+      platform: "qq",
+      accountId: "im-qq-test",
+      chat: { kind: "group", id: "group-1" },
+      messageId: "out-7",
+    });
+
+    expect(result).toEqual({ status: "recalled" });
+    expect(
+      context.calls.find((call) => call.method === "DELETE")
+    ).toMatchObject({
+      url: "https://qq.test/v2/groups/group-1/messages/out-7",
+      authorization: "QQBot qq-access",
+    });
+    expect(context.adapter.capabilities.recall).toBe(true);
+  });
+
+  it("downloads inbound media from an official QQ host", async () => {
+    const context = setup();
+    const fetched = await context.adapter.fetchMedia?.({
+      accountId: "im-qq-test",
+      chat: { kind: "group", id: "group-1" },
+      messageId: "qq-msg-1",
+      media: {
+        kind: "image",
+        id: "https://multimedia.nt.qq.com.cn/photo.png",
+        mimeType: "image/png",
+      },
+    });
+    expect(fetched?.mediaType).toBe("image/png");
+    expect(fetched?.data).toHaveLength(8);
+    expect(
+      context.calls.find((call) => call.url.endsWith("/photo.png"))
+        ?.authorization
+    ).toBeUndefined();
+    expect(context.adapter.capabilities.media).toBe(true);
+  });
+
+  it("uploads rich media and sends it as a passive reply", async () => {
+    const context = setup();
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]).toString("base64");
+    const result = await context.adapter.send({
+      platform: "qq",
+      accountId: "im-qq-test",
+      chat: { kind: "group", id: "group-1" },
+      text: "chart",
+      media: [
+        {
+          kind: "image",
+          mediaType: "image/png",
+          data: png,
+          filename: "chart.png",
+        },
+      ],
+      mode: "reply",
+      replyTo: "qq-msg-1",
+      idempotencyKey: "media-1",
+    });
+    expect(result.status).toBe("sent");
+    expect(
+      context.calls.find((call) => call.url.endsWith("/files"))?.body
+    ).toMatchObject({
+      file_type: 1,
+      file_data: png,
+      file_name: "chart.png",
+      srv_send_msg: false,
+    });
+    expect(
+      context.calls.find((call) =>
+        call.url.endsWith("/v2/groups/group-1/messages")
+      )?.body
+    ).toMatchObject({
+      content: "chart",
+      msg_type: 7,
+      media: { file_info: "qq-file-info" },
+      msg_id: "qq-msg-1",
+      msg_seq: 1,
+    });
   });
 
   it("drops a proactive send and a reply whose window has closed", async () => {

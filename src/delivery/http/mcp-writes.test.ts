@@ -501,6 +501,76 @@ describe("/mcp tools/list by token scope", () => {
       expect(writerSees, shown).toContain(shown);
     }
   });
+
+  it("shows and invokes only the tool or service target a narrow token names", async () => {
+    const targeted = "x".repeat(64);
+    const requests: string[] = [];
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-target-"));
+    createDeviceToken({
+      configDir,
+      name: "PR medic",
+      scopes: [
+        "mcp:service:radarr:read",
+        "mcp:service:petstore:write",
+        "mcp:tool:container_restart:write",
+      ],
+      generate: () => targeted,
+    });
+    const box = setup(
+      true,
+      requests,
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+    const list = await box.handler.handle(
+      new Request("http://127.0.0.1:8787/mcp", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${targeted}`,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      })
+    );
+    const listed = (
+      (await list.json()) as { result: { tools: Array<{ name: string }> } }
+    ).result.tools.map((tool) => tool.name);
+    expect(listed).toEqual(
+      expect.arrayContaining([
+        "mcp:radarr/list_movies",
+        "container_restart",
+        "service_confirm",
+        "service_write",
+      ])
+    );
+    expect(listed).not.toContain("container_list");
+    expect(listed).not.toContain("navidrome_playlist_create");
+    expect(listed).not.toContain("mcp:radarr/delete_movie");
+
+    const inside = await box.call("mcp:radarr/list_movies", {}, targeted);
+    expect(text(inside)).toBe("done");
+    const outside = await box.call("container_list", {}, targeted);
+    expect(outside.result?.isError).toBe(true);
+    expect(text(outside)).toContain("scope");
+    const write = await box.call(
+      "container_restart",
+      { id: "ctr-1" },
+      targeted
+    );
+    expect(write.result?.isError).toBeUndefined();
+    const serviceWrite = await box.call(
+      "service_write",
+      {
+        service: "petstore",
+        method: "POST",
+        path: "/pet",
+        body: { name: "Ada" },
+      },
+      targeted
+    );
+    expect(serviceWrite.result?.isError, text(serviceWrite)).toBeUndefined();
+    expect(requests).toEqual(["POST /pet"]);
+  });
 });
 
 describe("/mcp service_confirm", () => {
@@ -546,6 +616,85 @@ describe("/mcp service_confirm", () => {
     );
     expect(allowed.result?.isError).toBeUndefined();
     expect(requests).toEqual(["DELETE /pet/7"]);
+  });
+
+  it("lets a service-targeted token confirm the operation it previewed", async () => {
+    const targeted = "t".repeat(64);
+    const configDir = await mkdtemp(
+      join(tmpdir(), "thebe-mcp-target-confirm-")
+    );
+    createDeviceToken({
+      configDir,
+      name: "Petstore writer",
+      scope: "mcp:service:petstore:irreversible",
+      generate: () => targeted,
+    });
+    const requests: string[] = [];
+    const { call } = setup(
+      true,
+      requests,
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+
+    const preview = await call(
+      "service__petstore__deletePet",
+      { petId: 7 },
+      targeted
+    );
+    expect(preview.result?.isError).toBeUndefined();
+    const confirmToken =
+      JSON.parse(text(preview)).confirmToken ?? JSON.parse(text(preview)).token;
+    expect(confirmToken).toBeTruthy();
+
+    const confirmed = await call(
+      "service_confirm",
+      { token: confirmToken },
+      targeted
+    );
+    expect(confirmed.result?.isError).toBeUndefined();
+    expect(requests).toEqual(["DELETE /pet/7"]);
+  });
+
+  it("does not lend an irreversible grant from another service to a confirm token", async () => {
+    const full = "f".repeat(64);
+    const crossScoped = "c".repeat(64);
+    const configDir = await mkdtemp(join(tmpdir(), "thebe-mcp-cross-confirm-"));
+    createDeviceToken({
+      configDir,
+      name: "Full previewer",
+      generate: () => full,
+    });
+    createDeviceToken({
+      configDir,
+      name: "Cross scoped",
+      scopes: ["mcp:service:petstore:write", "mcp:service:other:irreversible"],
+      generate: () => crossScoped,
+    });
+    const requests: string[] = [];
+    const { call } = setup(
+      true,
+      requests,
+      [],
+      createTokenVerifier({ configDir, env: {} })
+    );
+
+    const preview = await call(
+      "service__petstore__deletePet",
+      { petId: 7 },
+      full
+    );
+    const confirmToken =
+      JSON.parse(text(preview)).confirmToken ?? JSON.parse(text(preview)).token;
+    const refused = await call(
+      "service_confirm",
+      { token: confirmToken },
+      crossScoped
+    );
+
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("mcp:irreversible");
+    expect(requests).toEqual([]);
   });
 });
 

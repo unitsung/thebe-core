@@ -7,6 +7,22 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- `thebe-mcp` is a first-class stdio MCP entry point and npm bin. It reads
+  newline-delimited JSON-RPC on stdin, keeps stdout protocol-only, reuses the
+  `/mcp` tool and safety path, and quiesces Core on stdin EOF or process signals.
+- MCP device tokens and pre-registered OAuth clients accept repeatable
+  `mcp:tool:<tool>[:read|write|irreversible]` and
+  `mcp:service:<service>[:read|write|irreversible]` scopes. `tools/list` and
+  invocation use the same target check, so a broad read token can add one
+  narrowly scoped write.
+- Telegram, QQ and local `imsg` IM adapters now fetch bounded inbound media and
+  send bounded base64 media. Owner images and inline text/JSON reach the Main
+  Session as `PromptFile`s; unsafe or unsupported media stays metadata. QQ adds
+  official message recall, and iMessage can run entirely through local
+  `imsg watch/send` without a bridge server.
+- Correlation is a durable relation between every Thread that shares a Trigger.
+  The first Thread is primary and owns one Eval; later Threads are fenced context
+  only, and Decisions record their Correlation ids.
 - File storage backends are managed in the `storage` section of
   `~/.thebe/config.json`: OpenList, host-mounted local roots, and native WebDAV.
   `thebe storage list|add|remove|default|test|import-env` edits the section
@@ -65,6 +81,9 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Fixed
 
+- A multi-Thread Trigger no longer queues one Eval per Thread or lets Map
+  insertion order decide which Decision owns it. A recovery scan repairs a
+  missing Correlation file from the immutable Trigger.
 - An IM notification whose gateway cannot start during delivery now returns a retryable failure and stays in the outbox, instead of being reported as sent.
 - The iMessage adapter no longer drops the second of two messages that share the same millisecond timestamp in one poll; it delivers every row in that batch before advancing the cursor.
 - A critical notification now passes a normal notice already held for quiet hours in the same target queue. The held notice still waits until the window ends, and a retry still keeps its place.

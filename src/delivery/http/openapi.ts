@@ -357,11 +357,22 @@ const operations: Operation[] = [
   {
     method: "post",
     path: "/v1/im/send",
-    summary: "Send text through a configured IM channel (local owner control)",
+    summary:
+      "Send text or bounded base64 media through a configured IM channel (local owner control)",
     tag: "system",
     requestBody: { required: true },
     requestSchema: "ImSendRequest",
     responseSchema: "ImSendResult",
+  },
+  {
+    method: "post",
+    path: "/v1/im/recall",
+    summary:
+      "Withdraw an eligible platform message when the IM adapter truthfully supports recall",
+    tag: "system",
+    requestBody: { required: true },
+    requestSchema: "ImRecallRequest",
+    responseSchema: "ImRecallResult",
   },
   {
     method: "post",
@@ -2218,7 +2229,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             media: {
               type: "boolean",
               description:
-                "True only when this adapter can actually send images or files.",
+                "True only when this adapter can fetch inbound media and send bounded images or files.",
             },
             maxTextLength: { type: "integer", minimum: 1 },
             markdown: { type: "boolean" },
@@ -2437,11 +2448,36 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         ImSendRequest: {
           type: "object",
-          required: ["accountId", "chat", "text"],
+          required: ["accountId", "chat"],
           properties: {
             accountId: { type: "string" },
             chat: { $ref: "#/components/schemas/ImChat" },
-            text: { type: "string" },
+            text: {
+              type: "string",
+              description:
+                "Required when media is absent. A caption when media is present.",
+            },
+            media: {
+              type: "array",
+              maxItems: 8,
+              items: {
+                type: "object",
+                required: ["kind", "mediaType", "data"],
+                properties: {
+                  kind: {
+                    type: "string",
+                    enum: ["image", "audio", "video", "file"],
+                  },
+                  mediaType: { type: "string" },
+                  data: {
+                    type: "string",
+                    description:
+                      "Standard base64. Each decoded item is at most 2,000,000 bytes; caller filesystem paths are not accepted.",
+                  },
+                  filename: { type: "string", maxLength: 120 },
+                },
+              },
+            },
             mode: { type: "string", enum: ["reply", "proactive"] },
             replyTo: { type: "string" },
             contextToken: { type: "string" },
@@ -2458,6 +2494,31 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               enum: ["sent", "retry", "discard", "unknown"],
             },
             platformMessageId: { type: "string" },
+            reason: { type: "string" },
+          },
+        },
+        ImRecallRequest: {
+          type: "object",
+          required: ["accountId", "chat", "messageId"],
+          properties: {
+            accountId: { type: "string" },
+            chat: { $ref: "#/components/schemas/ImChat" },
+            messageId: {
+              type: "string",
+              description:
+                "A platform message id Core sent or observed. Platform time and role limits still apply.",
+            },
+          },
+        },
+        ImRecallResult: {
+          type: "object",
+          required: ["ok", "status"],
+          properties: {
+            ok: { type: "boolean" },
+            status: {
+              type: "string",
+              enum: ["recalled", "retry", "discard", "unknown"],
+            },
             reason: { type: "string" },
           },
         },
@@ -4178,6 +4239,12 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
               description: "e.g. resource:container:emby",
             },
             triggerIds: { type: "array", items: { type: "string" } },
+            correlationIds: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "Durable relations that made related Threads available as context to this Eval. Correlation never routes or authorizes.",
+            },
             at: { type: "string", format: "date-time" },
             outcome: {
               type: "string",

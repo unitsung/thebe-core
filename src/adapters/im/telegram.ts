@@ -6,9 +6,18 @@ import type {
   ImCapabilities,
   ImHealth,
   ImInbound,
+  ImMediaFetchInput,
+  ImMediaFetchResult,
+  ImMediaRef,
+  ImOutboundMedia,
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
+import {
+  MediaDownloadLimitError,
+  mediaTypeFromResponse,
+  readBoundedResponseBody,
+} from "./media.ts";
 
 export const TELEGRAM_MAX_TEXT = 4_096;
 const DEFAULT_POLL_TIMEOUT_SECONDS = 50;
@@ -96,8 +105,7 @@ export function createTelegramImAdapter(input: {
     proactive: true,
     replyOnly: false,
     recall: false,
-    // Text is implemented; images and files are not sent yet.
-    media: false,
+    media: true,
     maxTextLength: TELEGRAM_MAX_TEXT,
     markdown: false,
     threads: true,
@@ -360,6 +368,203 @@ export function createTelegramImAdapter(input: {
     };
   }
 
+  function mediaMethod(media: ImOutboundMedia): string {
+    if (media.kind === "image" || media.mediaType.startsWith("image/")) {
+      return "sendPhoto";
+    }
+    if (media.kind === "audio" || media.mediaType.startsWith("audio/")) {
+      return "sendAudio";
+    }
+    if (media.kind === "video" || media.mediaType.startsWith("video/")) {
+      return "sendVideo";
+    }
+    return "sendDocument";
+  }
+
+  async function sendMedia(input: ImSendInput): Promise<ImSendResult> {
+    if (!token) return { status: "discard", reason: "token_missing" };
+    if (controller?.signal.aborted) {
+      return { status: "discard", reason: "channel_stopped" };
+    }
+    const media = input.media ?? [];
+    if (media.length === 0) return sendChunks(input);
+    let lastMessageId: string | undefined;
+    let replyClaimed = false;
+    let captionUsed = false;
+    let delivered = 0;
+    for (const item of media) {
+      let bytes: Buffer;
+      try {
+        bytes = Buffer.from(item.data, "base64");
+      } catch {
+        return { status: "discard", reason: "invalid_media" };
+      }
+      if (bytes.length === 0 || bytes.length > 2_000_000) {
+        return { status: "discard", reason: "invalid_media" };
+      }
+      const form = new FormData();
+      form.set("chat_id", input.chat.id);
+      if (input.chat.threadId) {
+        const threadId = numeric(input.chat.threadId);
+        if (threadId !== undefined)
+          form.set("message_thread_id", String(threadId));
+      }
+      if (input.mode === "reply" && input.replyTo && !replyClaimed) {
+        const replyTo = numeric(input.replyTo);
+        if (replyTo !== undefined) {
+          form.set(
+            "reply_parameters",
+            JSON.stringify({
+              message_id: replyTo,
+              allow_sending_without_reply: true,
+            })
+          );
+          replyClaimed = true;
+        }
+      }
+      const caption = input.text.trim();
+      if (caption && !captionUsed) {
+        form.set("caption", caption.slice(0, 1_024));
+        captionUsed = true;
+      }
+      const method = mediaMethod(item);
+      form.set(
+        method.slice("send".length).toLowerCase(),
+        new Blob([bytes], { type: item.mediaType }),
+        item.filename || `thebe-media-${media.indexOf(item) + 1}`
+      );
+      try {
+        const row = await uploadForm(method, form);
+        const result = record(row.result);
+        const messageId = numeric(result.message_id);
+        if (messageId !== undefined) lastMessageId = String(messageId);
+      } catch (error) {
+        return partialMediaFailure(classificationFor(error), delivered);
+      }
+      delivered += 1;
+    }
+    if (input.text.trim().length > 1_024) {
+      const rest = await sendChunks({
+        ...input,
+        text: input.text.trim().slice(1_024),
+        mode: "proactive",
+        replyTo: undefined,
+        media: undefined,
+      });
+      if (rest.status === "sent" && rest.platformMessageId) {
+        lastMessageId = rest.platformMessageId;
+      }
+      if (rest.status !== "sent") return partialMediaFailure(rest, delivered);
+    }
+    return {
+      status: "sent",
+      ...(lastMessageId ? { platformMessageId: lastMessageId } : {}),
+    };
+  }
+
+  async function uploadForm(
+    method: string,
+    form: FormData
+  ): Promise<Record<string, unknown>> {
+    const signal = combineSignals(
+      controller?.signal,
+      AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    );
+    let response: Response;
+    try {
+      response = await sendFetch(endpoint(method), {
+        method: "POST",
+        body: form,
+        signal,
+      });
+    } catch {
+      throw new TelegramRequestError("network", "telegram upload failed");
+    }
+    const payload = await response.json().catch(() => ({}));
+    const row =
+      payload && typeof payload === "object" && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : {};
+    if (response.ok && row.ok !== false) return row;
+    if (response.status === 401 || response.status === 404) {
+      throw new TelegramRequestError(
+        "unauthorized",
+        safeDescription(row.description)
+      );
+    }
+    if (response.status === 429) {
+      throw new TelegramRequestError("rate_limit", "rate limited", {
+        retryAfterMs: retryAfterFrom(row),
+      });
+    }
+    if (response.status >= 500) {
+      throw new TelegramRequestError("server", "telegram is unavailable");
+    }
+    throw new TelegramRequestError(
+      "bad_request",
+      safeDescription(row.description) || "telegram refused the media"
+    );
+  }
+
+  async function fetchMedia(
+    mediaInput: ImMediaFetchInput
+  ): Promise<ImMediaFetchResult> {
+    const row = await request("getFile", { file_id: mediaInput.media.id });
+    const filePath =
+      typeof record(row.result).file_path === "string"
+        ? String(record(row.result).file_path).trim()
+        : "";
+    if (!filePath || filePath.includes("..")) {
+      throw new TelegramRequestError(
+        "bad_request",
+        "telegram returned no safe file path"
+      );
+    }
+    const encodedPath = filePath
+      .split("/")
+      .map((part) => encodeURIComponent(part))
+      .join("/");
+    const signal = combineSignals(
+      controller?.signal,
+      AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+    );
+    const response = await sendFetch(
+      `${apiBase}/file/bot${token}/${encodedPath}`,
+      { signal }
+    );
+    if (!response.ok) {
+      throw new TelegramRequestError(
+        response.status >= 500 ? "server" : "bad_request",
+        "telegram file download failed"
+      );
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = await readBoundedResponseBody(response, 2_000_000);
+    } catch (error) {
+      if (error instanceof MediaDownloadLimitError) {
+        throw new TelegramRequestError(
+          "bad_request",
+          "telegram file is too large"
+        );
+      }
+      throw error;
+    }
+    if (bytes.byteLength === 0) {
+      throw new TelegramRequestError(
+        "bad_request",
+        "telegram file is too large"
+      );
+    }
+    return {
+      data: bytes,
+      mediaType: mediaTypeFromResponse(response, mediaInput.media.mimeType),
+      ...(filePath.split("/").pop()
+        ? { filename: filePath.split("/").pop()! }
+        : {}),
+    };
+  }
+
   return {
     platform: "telegram",
     capabilities,
@@ -386,7 +591,7 @@ export function createTelegramImAdapter(input: {
     },
     health: async () => ({ ...health }),
     send: async (message) => {
-      const run = sendChain.then(() => sendChunks(message));
+      const run = sendChain.then(() => sendMedia(message));
       sendChain = run.then(
         () => undefined,
         () => undefined
@@ -396,6 +601,18 @@ export function createTelegramImAdapter(input: {
     onInbound: (handler) => {
       inbound = handler;
     },
+    fetchMedia,
+  };
+}
+
+function partialMediaFailure(
+  result: ImSendResult,
+  delivered: number
+): ImSendResult {
+  if (delivered === 0 || result.status === "sent") return result;
+  return {
+    status: "unknown",
+    reason: `telegram delivered ${delivered} attachment${delivered === 1 ? "" : "s"}; ${result.reason}`,
   };
 }
 
@@ -453,8 +670,14 @@ function parseUpdate(
         ? "group"
         : undefined;
   if (!kind) return undefined;
-  const text = typeof message.text === "string" ? message.text.trim() : "";
-  if (!text) return undefined;
+  const text =
+    typeof message.text === "string"
+      ? message.text.trim()
+      : typeof message.caption === "string"
+        ? message.caption.trim()
+        : "";
+  const media = telegramMedia(message);
+  if (!text && media.length === 0) return undefined;
   const chatId = numericId(chat.id);
   const senderId = numericId(from.id);
   if (!chatId || !senderId) return undefined;
@@ -493,9 +716,72 @@ function parseUpdate(
     messageId: String(messageId),
     ...(updateId !== undefined ? { updateId: String(updateId) } : {}),
     text: text.slice(0, MAX_TEXT),
+    ...(media.length ? { media } : {}),
     replyTo: String(messageId),
     receivedAt,
   };
+}
+
+function telegramMedia(message: Record<string, unknown>): ImMediaRef[] {
+  if (Array.isArray(message.photo)) {
+    const photos = message.photo.flatMap((entry) => {
+      const row = record(entry);
+      const id = typeof row.file_id === "string" ? row.file_id : "";
+      return id ? [row] : [];
+    });
+    const photo = photos.some((row) => numeric(row.file_size) !== undefined)
+      ? photos.sort(
+          (left, right) =>
+            (numeric(right.file_size) ?? 0) - (numeric(left.file_size) ?? 0)
+        )[0]
+      : photos.at(-1);
+    const id = typeof photo?.file_id === "string" ? photo.file_id : "";
+    if (id) {
+      return [
+        {
+          kind: "image",
+          id,
+          mimeType: "image/jpeg",
+          ...(numeric(photo?.file_size) !== undefined
+            ? { size: numeric(photo?.file_size) }
+            : {}),
+        },
+      ];
+    }
+  }
+  for (const [key, kind] of [
+    ["document", "file"],
+    ["audio", "audio"],
+    ["voice", "audio"],
+    ["video", "video"],
+    ["video_note", "video"],
+    ["animation", "video"],
+    ["sticker", "image"],
+  ] as const) {
+    const row = record(message[key]);
+    const id = typeof row.file_id === "string" ? row.file_id : "";
+    if (!id) continue;
+    const mime =
+      typeof row.mime_type === "string"
+        ? row.mime_type
+        : key === "sticker"
+          ? "image/webp"
+          : undefined;
+    return [
+      {
+        kind,
+        id,
+        ...(mime ? { mimeType: mime } : {}),
+        ...(numeric(row.file_size) !== undefined
+          ? { size: numeric(row.file_size) }
+          : {}),
+        ...(typeof row.file_name === "string" && row.file_name.trim()
+          ? { filename: row.file_name.trim().slice(0, 120) }
+          : {}),
+      },
+    ];
+  }
+  return [];
 }
 
 function classificationFor(error: unknown): ImSendResult {

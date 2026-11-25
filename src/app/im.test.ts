@@ -59,11 +59,31 @@ describe("IM integration composition", () => {
         {
           platform: "imessage",
           credentials: [
-            { key: "baseUrl", label: "BlueBubbles server URL" },
+            {
+              key: "backend",
+              label: "Backend (imsg or bluebubbles)",
+              required: false,
+            },
+            {
+              key: "cliPath",
+              label: "Local imsg executable (default imsg)",
+              required: false,
+            },
+            {
+              key: "dbPath",
+              label: "Messages database (optional)",
+              required: false,
+            },
+            {
+              key: "baseUrl",
+              label: "BlueBubbles server URL (bluebubbles backend)",
+              required: false,
+            },
             {
               key: "password",
-              label: "Server password",
+              label: "Server password (bluebubbles backend)",
               secret: true,
+              required: false,
             },
           ],
           login: false,
@@ -149,6 +169,36 @@ describe("IM integration composition", () => {
     expect(calls[0]).toContain(
       "https://telegram.test/bottest-token/getUpdates"
     );
+    await gateway.stop();
+  });
+
+  it("seeds the local imsg backend from the environment", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "thebe-im-imsg-"));
+    dirs.push(dir);
+    const factory = (platform: string): ImAdapterFactory => ({
+      platform,
+      credentials: [],
+      create: () => idleAdapter(platform),
+    });
+    const gateway = createImIntegration({
+      agent: { askMainSession: async () => ({ text: "" }) },
+      dir,
+      env: {
+        THEBE_IMESSAGE_BACKEND: "imsg",
+        THEBE_IMSG_PATH: "/opt/homebrew/bin/imsg",
+        THEBE_IMSG_DB_PATH: "/tmp/chat.db",
+      },
+      factories: [factory("imessage")],
+      onError: () => {},
+    });
+    await gateway.start();
+    expect(await gateway.channels()).toEqual([
+      expect.objectContaining({
+        id: "imessage-imsg-env",
+        platform: "imessage",
+        source: "environment",
+      }),
+    ]);
     await gateway.stop();
   });
 });

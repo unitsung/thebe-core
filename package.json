@@ -1,12 +1,15 @@
 {
   "name": "thebe-core",
   "version": "0.1.0",
-  "private": true,
   "description": "Headless homelab agent on a replaceable coding-agent runtime.",
   "license": "Apache-2.0",
   "bin": {
-    "thebe": "./dist/cli.js"
+    "thebe": "./dist/cli.js",
+    "thebe-mcp": "./dist/mcp-stdio.js"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": "./dist/index.js"
@@ -14,6 +17,7 @@
   "scripts": {
     "build": "tsdown",
     "start": "node dist/serve.js",
+    "mcp": "node dist/mcp-stdio.js",
     "token": "node dist/token.js",
     "start:build": "npm run build && node dist/serve.js",
     "start:lan": "node scripts/start-lan.mjs",
@@ -30,7 +34,8 @@
     "cli": "npm run build && node dist/cli.js",
     "smoke": "node scripts/smoke.mjs",
     "check:release": "bash scripts/check-release.sh",
-    "prepare": "husky"
+    "prepare": "husky",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.83",

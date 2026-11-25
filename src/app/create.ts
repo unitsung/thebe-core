@@ -10,7 +10,7 @@ import type {
   MediaLibraryProvider,
   PhotoLibraryProvider,
 } from "../agent/capabilities/media.ts";
-import type { AgentRuntime } from "../agent/runtime/interface.ts";
+import type { AgentRuntime, PromptInput } from "../agent/runtime/interface.ts";
 import { resolveAllowedHosts } from "../delivery/http/bind.ts";
 import { createThebeHttpHandler } from "../delivery/http/handler.ts";
 import { createDeviceRegistry } from "../delivery/http/devices.ts";
@@ -464,7 +464,7 @@ export function createThebeApp(options: {
   });
   const imAgent = {
     askMainSession: (
-      input: string,
+      input: string | PromptInput,
       promptOptions?: { mode?: "prompt" | "followUp" }
     ) => agent.askMainSession(input, promptOptions),
     isMainSessionBusy: () => agent.isBusy(agent.mainSessionId),

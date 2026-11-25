@@ -75,7 +75,30 @@ export function createImIntegration(options: {
   const imessagePassword =
     env.THEBE_IMESSAGE_PASSWORD?.trim() ||
     env.THEBE_BLUEBUBBLES_PASSWORD?.trim();
-  if (imessageBaseUrl && imessagePassword) {
+  const imessageBackend = env.THEBE_IMESSAGE_BACKEND?.trim().toLowerCase();
+  const imsgPath = env.THEBE_IMSG_PATH?.trim();
+  if (
+    imessageBackend === "imsg" ||
+    imessageBackend === "local" ||
+    (!imessageBaseUrl && imsgPath)
+  ) {
+    seed.push({
+      account: {
+        id: "imessage-imsg-env",
+        platform: "imessage",
+        label: "iMessage imsg (environment)",
+        enabled: true,
+        createdAt: now().toISOString(),
+      },
+      credentials: {
+        backend: "imsg",
+        ...(imsgPath ? { cliPath: imsgPath } : {}),
+        ...(env.THEBE_IMSG_DB_PATH?.trim()
+          ? { dbPath: env.THEBE_IMSG_DB_PATH.trim() }
+          : {}),
+      },
+    });
+  } else if (imessageBaseUrl && imessagePassword) {
     seed.push({
       account: {
         id: "imessage-env",
@@ -85,6 +108,7 @@ export function createImIntegration(options: {
         createdAt: now().toISOString(),
       },
       credentials: {
+        backend: "bluebubbles",
         baseUrl: imessageBaseUrl,
         password: imessagePassword,
       },

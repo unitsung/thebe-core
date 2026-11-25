@@ -10,6 +10,11 @@ import type {
   ImSendInput,
   ImSendResult,
 } from "../../agent/im/types.ts";
+import {
+  createImsgLocalAdapter,
+  imsgCursorIdentity,
+  validateImsgCredentials,
+} from "./imsg.ts";
 
 export const IMESSAGE_MAX_TEXT = 10_000;
 const DEFAULT_POLL_INTERVAL_MS = 3_000;
@@ -56,6 +61,17 @@ export function imessageCursorIdentity(
 export function validateImessageCredentials(
   credentials: ImAdapterCredentials
 ): string | undefined {
+  const backend = credentials.backend?.trim().toLowerCase();
+  if (
+    backend &&
+    backend !== "imsg" &&
+    backend !== "local" &&
+    backend !== "bluebubbles" &&
+    backend !== "http"
+  ) {
+    return "backend must be imsg or bluebubbles";
+  }
+  if (isImsgBackend(credentials)) return validateImsgCredentials(credentials);
   if (!imessageBaseUrl(credentials.baseUrl ?? "")) {
     return "baseUrl must be an http or https URL";
   }
@@ -422,33 +438,92 @@ export function createImessageFactory(
     env.THEBE_IMESSAGE_PASSWORD?.trim() ||
     env.THEBE_BLUEBUBBLES_PASSWORD?.trim() ||
     undefined;
+  const defaultImsgPath = env.THEBE_IMSG_PATH?.trim() || undefined;
+  const withDefaults = (
+    credentials: ImAdapterCredentials
+  ): ImAdapterCredentials => ({
+    ...credentials,
+    ...(env.THEBE_IMESSAGE_BACKEND?.trim() && !credentials.backend?.trim()
+      ? { backend: env.THEBE_IMESSAGE_BACKEND.trim() }
+      : {}),
+    ...(credentials.baseUrl?.trim() || !baseUrl ? {} : { baseUrl }),
+    ...(credentials.password?.trim() || !password
+      ? {}
+      : { password: password }),
+    ...(credentials.cliPath?.trim() || !defaultImsgPath
+      ? {}
+      : { cliPath: defaultImsgPath }),
+  });
   return {
     platform: "imessage",
     credentials: [
-      { key: "baseUrl", label: "BlueBubbles server URL" },
-      { key: "password", label: "Server password", secret: true },
+      {
+        key: "backend",
+        label: "Backend (imsg or bluebubbles)",
+        required: false,
+      },
+      {
+        key: "cliPath",
+        label: "Local imsg executable (default imsg)",
+        required: false,
+      },
+      {
+        key: "dbPath",
+        label: "Messages database (optional)",
+        required: false,
+      },
+      {
+        key: "baseUrl",
+        label: "BlueBubbles server URL (bluebubbles backend)",
+        required: false,
+      },
+      {
+        key: "password",
+        label: "Server password (bluebubbles backend)",
+        secret: true,
+        required: false,
+      },
     ],
-    validateCredentials: validateImessageCredentials,
-    cursorIdentity: imessageCursorIdentity,
-    create: (createInput) =>
-      createImessageImAdapter({
+    validateCredentials: (credentials) =>
+      validateImessageCredentials(withDefaults(credentials)),
+    cursorIdentity: (credentials) => {
+      const merged = withDefaults(credentials);
+      return isImsgBackend(merged)
+        ? imsgCursorIdentity(merged)
+        : imessageCursorIdentity(merged);
+    },
+    create: (createInput) => {
+      const credentials = withDefaults(createInput.credentials);
+      if (isImsgBackend(credentials)) {
+        return createImsgLocalAdapter({
+          account: createInput.account,
+          credentials,
+          ...(createInput.cursor ? { cursor: createInput.cursor } : {}),
+          onCursor: createInput.onCursor,
+          ...(createInput.onError ? { onError: createInput.onError } : {}),
+          ...(createInput.now ? { now: createInput.now } : {}),
+        });
+      }
+      return createImessageImAdapter({
         account: createInput.account,
-        credentials: {
-          ...createInput.credentials,
-          ...(createInput.credentials.baseUrl?.trim() || !baseUrl
-            ? {}
-            : { baseUrl }),
-          ...(createInput.credentials.password?.trim() || !password
-            ? {}
-            : { password: password }),
-        },
+        credentials,
         ...(createInput.cursor ? { cursor: createInput.cursor } : {}),
         onCursor: createInput.onCursor,
         ...(createInput.onError ? { onError: createInput.onError } : {}),
         ...(createInput.fetch ? { fetch: createInput.fetch } : {}),
         ...(createInput.now ? { now: createInput.now } : {}),
-      }),
+      });
+    },
   };
+}
+
+function isImsgBackend(credentials: ImAdapterCredentials): boolean {
+  const backend = credentials.backend?.trim().toLowerCase();
+  if (backend === "imsg" || backend === "local") return true;
+  if (backend === "bluebubbles" || backend === "http") return false;
+  return (
+    !credentials.baseUrl?.trim() && (backend === undefined || backend === "")
+  );
 }
 
 export function truncateImessageText(

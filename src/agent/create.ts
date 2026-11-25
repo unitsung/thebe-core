@@ -20,6 +20,7 @@ import {
 import { createSourceRunner } from "./sources/runner.ts";
 import { createTriggerStore } from "./sources/store.ts";
 import type { Trigger } from "./sources/types.ts";
+import { createCorrelationStore } from "./correlations/store.ts";
 import { createDecisionStore } from "./eval/decision-store.ts";
 import { createEvalDispositionStore } from "./eval/disposition-store.ts";
 import { createPolicyStore } from "./eval/policy-store.ts";
@@ -248,6 +249,11 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   const triggerStore = createTriggerStore({
     dir: options.agentStoreDir
       ? join(options.agentStoreDir, "triggers")
+      : undefined,
+  });
+  const correlationStore = createCorrelationStore({
+    dir: options.agentStoreDir
+      ? join(options.agentStoreDir, "correlations")
       : undefined,
   });
   const decisionStore = createDecisionStore({
@@ -495,6 +501,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   }
 
   async function dispatchTriggers(triggers: readonly Trigger[]): Promise<void> {
+    await correlationStore.record(triggers);
     const unattached: Trigger[] = [];
     const explicit: Trigger[] = [];
     for (const trigger of triggers) {
@@ -558,6 +565,7 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
   async function recoverSourceTriggers(): Promise<void> {
     if (enabledSources.length === 0) return;
     const rows = await triggerStore.list();
+    await correlationStore.record(rows);
     const unattached: Trigger[] = [];
     const explicit: Trigger[] = [];
     for (const trigger of rows) {
@@ -586,7 +594,10 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
     .then(async (requeues) => {
       for (const requeue of requeues) {
         const trigger = await triggerStore.get(requeue.triggerId);
-        if (trigger) evalService.requeue(trigger, requeue.id);
+        if (trigger) {
+          await correlationStore.record([trigger]);
+          evalService.requeue(trigger, requeue.id);
+        }
       }
     })
     .catch(() => {
@@ -824,6 +835,8 @@ export function createThebeAgent(options: CreateThebeAgentOptions): ThebeAgent {
       return candidates.dismiss(input.decisionId, input.reason);
     },
     async requeueTrigger(triggerId) {
+      const trigger = await triggerStore.get(triggerId);
+      if (trigger) await correlationStore.record([trigger]);
       return evalRouting.requeueTrigger(triggerId, "api");
     },
     async unsubscribeThread(thread) {

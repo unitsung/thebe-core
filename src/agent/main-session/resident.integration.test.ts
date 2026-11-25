@@ -164,9 +164,11 @@ describe("resident main Session integration", () => {
       expect(state.backgroundPrompts()[0]).toContain(
         "resource:container:sonarr"
       );
-      expect(
-        (await state.agent.getBackgroundBudgetSummary()).usage.counted
-      ).toBeGreaterThan(0);
+      await vi.waitFor(async () => {
+        expect(
+          (await state.agent.getBackgroundBudgetSummary()).usage.counted
+        ).toBeGreaterThan(0);
+      });
     } finally {
       await state.agent.quiesce();
     }

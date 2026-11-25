@@ -1,4 +1,5 @@
 import { key } from "../tickets/ids.ts";
+import { correlationFor } from "../correlations/store.ts";
 import type { Trigger } from "../sources/types.ts";
 import {
   buildAssessmentPrompt,
@@ -148,18 +149,18 @@ export function createEvalService(options: {
   ): void {
     for (const trigger of triggers) {
       const requeueIds = [...(requeueIdsByTrigger.get(trigger.id) ?? [])];
-      for (const thread of trigger.threads) {
-        const list = pending.get(thread) ?? [];
-        const existing = list.find((row) => row.trigger.id === trigger.id);
-        if (existing) {
-          existing.requeueIds = [
-            ...new Set([...existing.requeueIds, ...requeueIds]),
-          ];
-        } else {
-          list.push({ trigger, requeueIds });
-        }
-        pending.set(thread, list);
+      const thread = trigger.threads[0];
+      if (!thread) continue;
+      const list = pending.get(thread) ?? [];
+      const existing = list.find((row) => row.trigger.id === trigger.id);
+      if (existing) {
+        existing.requeueIds = [
+          ...new Set([...existing.requeueIds, ...requeueIds]),
+        ];
+      } else {
+        list.push({ trigger, requeueIds });
       }
+      pending.set(thread, list);
     }
     startDrain();
   }
@@ -212,6 +213,12 @@ export function createEvalService(options: {
     const version = policyVersion(policy, options.sources);
     const latest = triggers[triggers.length - 1]!.at;
     const triggerIds = triggers.map((row) => row.id);
+    const correlationIds = triggers
+      .flatMap((row) => {
+        const correlation = correlationFor(row);
+        return correlation ? [correlation.id] : [];
+      })
+      .sort();
     // Built from the Triggers' own times, never the clock: a re-run after a crash is the same Decision.
     const evalId = key(
       "eval",
@@ -226,6 +233,7 @@ export function createEvalService(options: {
       evalId,
       thread,
       triggerIds,
+      ...(correlationIds.length > 0 ? { correlationIds } : {}),
       ...(requeueIds.length > 0 ? { requeueIds } : {}),
       at: latest,
       policyVersion: version,

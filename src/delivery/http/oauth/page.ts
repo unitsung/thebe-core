@@ -115,8 +115,19 @@ function scopeDescription(scope: string): string {
     case "offline_access":
       return "Stay connected after this browser session ends.";
     default:
+      if (scope.startsWith("mcp:tool:")) {
+        return `Only the named MCP tool, at ${scopeLevel(scope)} access.`;
+      }
+      if (scope.startsWith("mcp:service:")) {
+        return `Only tools from the named MCP service, at ${scopeLevel(scope)} access.`;
+      }
       return "Requested OAuth permission.";
   }
+}
+
+function scopeLevel(scope: string): string {
+  const level = scope.slice(scope.lastIndexOf(":") + 1);
+  return level === "write" || level === "irreversible" ? level : "read";
 }
 
 function html(value: string): string {
