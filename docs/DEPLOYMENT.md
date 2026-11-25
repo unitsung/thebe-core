@@ -650,7 +650,7 @@ check.
 ## 12. What has been verified on this checkout
 
 - Local gates pass on macOS with Node 24 and the `npm` install: `tsc --noEmit`,
-  `oxlint`, `tsdown` (bundling four Node ESM entries into `dist/`), the full
+  `oxlint`, `tsdown` (bundling six Node ESM entries into `dist/`), the full
   Vitest suite, and `scripts/smoke.mjs` (8/8 checks,
   including SIGTERM exit `0` and a settings write surviving a Core restart).
 - OAuth directional tests pass locally, including PKCE, scope narrowing, JWT
