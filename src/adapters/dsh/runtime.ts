@@ -287,6 +287,7 @@ class DshRuntimeSession implements RuntimeSession {
   readonly #seenEvents = new Set<string>();
   readonly #toolNames = new Map<string, string>();
   #harness: DshHarnessLike | undefined;
+  #harnessInitialization: Promise<DshHarnessLike> | undefined;
   #resumePending: boolean;
   #active = false;
   #abortRequested = false;
@@ -449,80 +450,95 @@ class DshRuntimeSession implements RuntimeSession {
     this.#consume(event as DshSessionEventLike);
   }
 
+  async #initializeHarness(generation: number): Promise<DshHarnessLike> {
+    const harness = await this.#createHarness(
+      this.#model,
+      this.#createOptions,
+      (event) => this.#emit(event)
+    );
+    const ensureNotCancelled = async () => {
+      if (
+        !this.#closed &&
+        !this.#abortRequested &&
+        generation === this.#generation
+      ) {
+        return;
+      }
+      await harness.close().catch(() => {});
+      throw new Error(
+        "DeepSeek Harness session was cancelled during initialization."
+      );
+    };
+    await ensureNotCancelled();
+    harness.client.onRequest(async (method, params) => {
+      if (method !== "approval/request") {
+        throw new Error(`Unsupported DeepSeek Harness request: ${method}`);
+      }
+      const handler = this.#createOptions.permissionHandler;
+      if (!handler) return { outcome: "rejected" };
+      const permissionId = randomUUID();
+      const toolCallId =
+        typeof params.callId === "string"
+          ? params.callId
+          : `dsh-${permissionId}`;
+      const request = {
+        permissionId,
+        toolName:
+          typeof params.toolName === "string" ? params.toolName : "tool",
+        toolCallId,
+        argsSummary:
+          typeof params.reason === "string" ? params.reason : undefined,
+        risk: "standard" as const,
+      };
+      const requestApproval = async () => {
+        this.#emit({
+          type: "permission_requested",
+          permissionId,
+          toolName: request.toolName,
+          toolCallId,
+          ...(request.argsSummary ? { argsSummary: request.argsSummary } : {}),
+          risk: request.risk,
+        });
+        return await handler.request(request);
+      };
+      if (handler.preflight) {
+        const decision = await handler.preflight(request);
+        if (decision === "allow") return { outcome: "allowed-once" };
+        if (decision === "deny") return { outcome: "rejected" };
+      }
+      const decision = await requestApproval();
+      return {
+        outcome: decision === "allow" ? "allowed-once" : "rejected",
+      };
+    });
+    if (this.#resumePending) {
+      await harness.resumeSession(this.runtimeSessionId);
+      await ensureNotCancelled();
+      this.#resumePending = false;
+    }
+    this.#harness = harness;
+    return harness;
+  }
+
   async #engine(): Promise<DshHarnessLike> {
     if (this.#closed) throw new Error("DeepSeek Harness session is closed.");
+    if (this.#harness) return this.#harness;
+
     const generation = this.#generation;
-    if (!this.#harness) {
-      const harness = await this.#createHarness(
-        this.#model,
-        this.#createOptions,
-        (event) => this.#emit(event)
+    let initialization = this.#harnessInitialization;
+    if (!initialization) {
+      initialization = Promise.resolve().then(() =>
+        this.#initializeHarness(generation)
       );
-      const ensureNotCancelled = async () => {
-        if (
-          !this.#closed &&
-          !this.#abortRequested &&
-          generation === this.#generation
-        ) {
-          return;
-        }
-        await harness.close().catch(() => {});
-        throw new Error(
-          "DeepSeek Harness session was cancelled during initialization."
-        );
-      };
-      await ensureNotCancelled();
-      harness.client.onRequest(async (method, params) => {
-        if (method !== "approval/request") {
-          throw new Error(`Unsupported DeepSeek Harness request: ${method}`);
-        }
-        const handler = this.#createOptions.permissionHandler;
-        if (!handler) return { outcome: "rejected" };
-        const permissionId = randomUUID();
-        const toolCallId =
-          typeof params.callId === "string"
-            ? params.callId
-            : `dsh-${permissionId}`;
-        const request = {
-          permissionId,
-          toolName:
-            typeof params.toolName === "string" ? params.toolName : "tool",
-          toolCallId,
-          argsSummary:
-            typeof params.reason === "string" ? params.reason : undefined,
-          risk: "standard" as const,
-        };
-        const requestApproval = async () => {
-          this.#emit({
-            type: "permission_requested",
-            permissionId,
-            toolName: request.toolName,
-            toolCallId,
-            ...(request.argsSummary
-              ? { argsSummary: request.argsSummary }
-              : {}),
-            risk: request.risk,
-          });
-          return await handler.request(request);
-        };
-        if (handler.preflight) {
-          const decision = await handler.preflight(request);
-          if (decision === "allow") return { outcome: "allowed-once" };
-          if (decision === "deny") return { outcome: "rejected" };
-        }
-        const decision = await requestApproval();
-        return {
-          outcome: decision === "allow" ? "allowed-once" : "rejected",
-        };
-      });
-      if (this.#resumePending) {
-        await harness.resumeSession(this.runtimeSessionId);
-        await ensureNotCancelled();
-        this.#resumePending = false;
-      }
-      this.#harness = harness;
+      this.#harnessInitialization = initialization;
     }
-    return this.#harness;
+    try {
+      return await initialization;
+    } finally {
+      if (this.#harnessInitialization === initialization) {
+        this.#harnessInitialization = undefined;
+      }
+    }
   }
 
   async #run(input: string | unknown[]): Promise<void> {
@@ -590,6 +606,8 @@ class DshRuntimeSession implements RuntimeSession {
 
   async abort(): Promise<void> {
     const wasActive = this.#active;
+    this.#generation += 1;
+    this.#harnessInitialization = undefined;
     this.#abortRequested = wasActive;
     const harness = this.#harness;
     this.#harness = undefined;
@@ -644,6 +662,8 @@ class DshRuntimeSession implements RuntimeSession {
         `DeepSeek Harness runtime is configured for ${this.#provider}, not ${model.providerId}.`
       );
     }
+    this.#generation += 1;
+    this.#harnessInitialization = undefined;
     const harness = this.#harness;
     this.#harness = undefined;
     this.#resumePending = true;
@@ -714,6 +734,8 @@ class DshRuntimeSession implements RuntimeSession {
 
   dispose(): void {
     if (this.#closed) return;
+    this.#generation += 1;
+    this.#harnessInitialization = undefined;
     this.#abortRequested = this.#active;
     this.#closed = true;
     this.#disposeSession?.();
@@ -729,6 +751,7 @@ class DshRuntimeSession implements RuntimeSession {
 
   async suspend(): Promise<void> {
     this.#generation += 1;
+    this.#harnessInitialization = undefined;
     const harness = this.#harness;
     if (!harness) return;
     this.#harness = undefined;
@@ -741,6 +764,8 @@ class DshRuntimeSession implements RuntimeSession {
   }
 
   credentialsChanged(): void {
+    this.#generation += 1;
+    this.#harnessInitialization = undefined;
     const harness = this.#harness;
     this.#harness = undefined;
     this.#resumePending = true;

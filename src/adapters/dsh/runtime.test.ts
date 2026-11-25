@@ -242,6 +242,48 @@ describe("DeepSeek Harness AgentRuntime", () => {
     expect(fake.closes).toHaveBeenCalledOnce();
   });
 
+  it("shares harness initialization between a prompt and steering input", async () => {
+    const root = await mkdtemp(join(tmpdir(), "thebe-dsh-shared-init-"));
+    const promptHarness = fakeHarness();
+    const duplicateHarness = fakeHarness();
+    let harnessStarted!: () => void;
+    const waitingForHarness = new Promise<void>((resolve) => {
+      harnessStarted = resolve;
+    });
+    let finishHarness!: (harness: DshHarnessLike) => void;
+    const deferredHarness = new Promise<DshHarnessLike>((resolve) => {
+      finishHarness = resolve;
+    });
+    const harnessFactory = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        harnessStarted();
+        return await deferredHarness;
+      })
+      .mockReturnValueOnce(duplicateHarness.harness);
+    const runtime = createDeepSeekHarnessRuntime({
+      cwd: root,
+      sessionRoot: join(root, "sessions"),
+      harnessFactory,
+    });
+    const session = await runtime.createSession({ customTools: [] });
+
+    const turn = session.prompt("start the turn");
+    await waitingForHarness;
+    const steering = session.steer("guide the turn");
+    finishHarness(promptHarness.harness);
+    await Promise.all([turn, steering]);
+
+    expect(harnessFactory).toHaveBeenCalledOnce();
+    expect(promptHarness.prompts).toEqual([
+      {
+        sessionId: session.runtimeSessionId,
+        blocks: [{ type: "text", text: "guide the turn" }],
+      },
+    ]);
+    expect(duplicateHarness.prompts).toEqual([]);
+  });
+
   it("keeps in-memory session homes out of persistent inventory", async () => {
     const root = await mkdtemp(join(tmpdir(), "thebe-dsh-in-memory-"));
     let sessionHome: string | undefined;
