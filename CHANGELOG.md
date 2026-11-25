@@ -7,6 +7,11 @@ All notable changes to Thebe Core are documented here. The format is based on
 
 ### Added
 
+- DeepSeek Harness (`@deepseek-ai/dsh`) is the default `AgentRuntime`, driven
+  through the official SDK profile over stdio JSON-RPC. Each Core Session gets
+  an isolated DSH home, Core approvals are forwarded to the SDK, and a
+  loopback-only internal HTTP bridge mounts Core's `/mcp` tools in every entry
+  point. `THEBE_RUNTIME=pi` keeps the Pi compatibility backend.
 - `thebe-mcp` is a first-class stdio MCP entry point and npm bin. It reads
   newline-delimited JSON-RPC on stdin, keeps stdout protocol-only, reuses the
   `/mcp` tool and safety path, and quiesces Core on stdin EOF or process signals.
@@ -59,10 +64,11 @@ All notable changes to Thebe Core are documented here. The format is based on
   hands the workspace to the independent reviewer and continues with another
   checkpoint instead of failing the whole Goal. The web and MCP request schemas,
   schedule validation, and CLI-visible limits use the same rule.
-- The Pi runtime packages are pinned to `@earendil-works/*` `1.5.2`, which
-  raises `undici` and `minimatch` past the currently audited vulnerable ranges.
-  The transitive `node-forge` lock moves to `1.4.3`. The sandbox runtime still
-  pins `zod` 3, whose audit advisory has no compatible upstream fix yet.
+- The Pi compatibility runtime packages are pinned to `@earendil-works/*`
+  `1.6.0`. DSH's pinned MCP SDK and `fflate` transitive ranges are overridden to
+  audited releases, and the production dependency audit remains clean. Pi keeps
+  the `@anthropic-ai/sandbox-runtime` host file/network boundary; DSH currently
+  owns a file-only sandbox, so host network parity remains a tracked gap.
 - Emby and Jellyfin share one adapter. They speak the same MediaBrowser REST API and differ only in the path prefix and how the key is sent, so `MediaBrowserAdapter("emby" | "jellyfin", options)` and `createMediaBrowserProviderFromEnv(flavor)` replace `EmbyAdapter`, `JellyfinAdapter` and their two env readers (the environment variables are unchanged). A Jellyfin-style `/api` suffix on an Emby address is now trimmed too.
 - A tool says itself whether a call asks first (`requiresApproval`), and a session's approval list and the policy's allow-list are made from the tools it builds. They used to be restated, option by option, in three places in the session setup, so a new tool had to be added to all three.
 - The audit record of a call that asks for approval (a write) now has a `summary`: its arguments, redacted and cut to 200 characters, so a write an executor made without asking (`POST /containers/emby/restart` on `docker`) can be read afterwards. Reads keep only the hash. `GET /v1/audit` returns it and the App shows it on the record's page.

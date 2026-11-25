@@ -7,12 +7,12 @@ Thebe Core 是一个带审批和审计日志的 homelab agent 服务端。它连
 可以跑在 NAS、迷你主机、树莓派或云服务器上。有三种用法：
 
 - **作为 MCP 服务器**，给你已经在用的 agent 使用。MCP 客户端既可以带 token 调用 HTTP 端点，也可以直接 spawn `thebe-mcp` stdio 入口。
-- **作为终端 agent。** Core 内嵌 [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 运行时，`thebe` 提供 TUI 和一次性 CLI，可以在你指定的工作区里读文件、改文件、执行命令。
+- **作为终端 agent。** Core 默认通过 `AgentRuntime` 接缝运行 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)，`thebe` 提供 TUI 和一次性 CLI，可以在你指定的工作区里读文件、改文件、执行命令。设置 `THEBE_RUNTIME=pi` 可继续使用兼容的内嵌 [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) 后端。
 - **通过 HTTP API。** 会话、目标、定时任务、活动流、审批和审计日志，OpenAPI 文档在 `/docs`。
 
 名字来自木星的卫星 Thebe（木卫十四），读作 /ˈθiːbi/。
 
-> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。Claude Code、Codex 和 OpenCode 都已在真实会话里列出并调用过 `/mcp` 的工具，官方 MCP TypeScript SDK 也通过了 initialize、列工具、调用工具。在把 Core 暴露到本机以外之前，请先读 [SECURITY.md](SECURITY.md)。
+> **状态：预发布。** 还没有打版本标签。测试套件和容器冒烟测试都能通过，但各服务集成（Emby、Jellyfin、Immich、Navidrome、OpenList、qBittorrent、aria2、Prowlarr、Arcane）目前是用录制的响应和 mock 测的，还没有在每个产品的真实版本上逐一验证。Claude Code、Codex 和 OpenCode 都已在真实会话里列出并调用过 `/mcp` 的工具，官方 MCP TypeScript SDK 也通过了 initialize、列工具、调用工具。DeepSeek Harness 上游仍是 developer preview，Core 目前只接入其 SDK 能表达的 Session 生命周期子集。在把 Core 暴露到本机以外之前，请先读 [SECURITY.md](SECURITY.md)。
 
 ## 能做什么
 
@@ -52,7 +52,7 @@ cp .env.example .env
 THEBE_WORKSPACE_DIR=/srv/thebe-workspace npm run start:build
 ```
 
-Core 不自带模型：在终端界面里用 `/settings`，或通过 `GET /v1/provider` 登录一个模型服务商，然后按[配置指南](docs/configuration.md)连接你的服务。
+Core 不自带模型。默认 DSH 运行时使用 `DEEPSEEK_API_KEY` 和 `deepseek-official` 模型；Pi 兼容运行时可以在终端界面里用 `/settings`，或通过 `GET /v1/provider` 使用更广的模型服务商。然后按[配置指南](docs/configuration.md)连接你的服务。
 
 ## 怎么用
 

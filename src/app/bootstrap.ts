@@ -35,9 +35,14 @@ import { createNotificationAdapters } from "./notifications.ts";
 import { loadNotificationChannelConfig } from "../agent/notifications/channel-config.ts";
 import type { ThebeAgent } from "../agent/interface.ts";
 import type { ContainerInfoProvider } from "../agent/capabilities/containers.ts";
-import { createPiCodingAgentRuntime } from "../adapters/pi/runtime.ts";
 import type { AgentRuntime } from "../agent/runtime/interface.ts";
 import { loadThebeUserConfig } from "../adapters/pi/config/user-config.ts";
+import {
+  selectDeepSeekHarnessModel,
+  selectRuntimeBootstrap,
+  selectRuntimeName,
+} from "./runtime-registry.ts";
+import { startInternalMcpBridge } from "./internal-mcp.ts";
 import {
   createOpenListBackgroundTaskProvider,
   createOpenListStrmRepairProvider,
@@ -47,6 +52,8 @@ import { createQBittorrentBackgroundTaskProviderFromEnv } from "../adapters/qbit
 import { createJsonAgentSettingsStore } from "../agent/settings/store.ts";
 import { createJsonMemoryStore } from "../agent/memory/store.ts";
 import { disposeOsSandbox } from "../agent/security/os-sandbox.ts";
+import { coreRunsInContainer } from "../agent/security/host-security.ts";
+import type { DeepSeekHarnessRuntime } from "../adapters/dsh/runtime.ts";
 import {
   oauthPublicHosts,
   resolveOAuthConfig,
@@ -87,8 +94,8 @@ export type BootstrapOptions = {
 };
 
 /**
- * Shared factory for serve / CLI / TUI. Loads `.env.local`, embeds Pi via
- * AgentRuntime, and returns a agent service — never spawns the Pi CLI.
+ * Shared factory for serve / CLI / TUI. Loads `.env.local`, selects DSH or the
+ * Pi compatibility runtime through AgentRuntime, and returns an agent service.
  */
 export async function bootstrapThebe(
   options?: BootstrapOptions
@@ -137,23 +144,20 @@ export async function bootstrapThebe(
   const requireArcane = options?.requireArcane ?? false;
   const baseUrl = process.env.ARCANE_BASE_URL;
   const arcaneKey = process.env.ARCANE_API_KEY;
-  const openaiKey = process.env.OPENAI_API_KEY;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const deepseekKey = process.env.DEEPSEEK_API_KEY;
 
   if (requireArcane && (!baseUrl || !arcaneKey)) {
     failEnv("Missing ARCANE_BASE_URL or ARCANE_API_KEY", fromDir);
   }
 
-  let defaultModel = options?.model;
-  let primaryApiKey: { providerId: string; key: string } | undefined;
-
-  if (openaiKey) {
-    primaryApiKey = { providerId: "openai", key: openaiKey };
-    defaultModel ??= { providerId: "openai", modelId: "gpt-4o" };
-  } else if (anthropicKey) {
-    primaryApiKey = { providerId: "anthropic", key: anthropicKey };
-    defaultModel ??= { providerId: "anthropic", modelId: "claude-sonnet-4" };
-  }
+  const runtimeName = selectRuntimeName(process.env);
+  const runtimeBootstrap = selectRuntimeBootstrap(
+    runtimeName,
+    options?.model,
+    process.env
+  );
+  let defaultModel = runtimeBootstrap.model;
+  const primaryApiKey = runtimeBootstrap.primaryApiKey;
 
   const agentDir =
     process.env.THEBE_AGENT_DIR ??
@@ -163,28 +167,62 @@ export async function bootstrapThebe(
     process.env.THEBE_SESSION_DIR ??
     join(process.env.HOME ?? ".", ".thebe", "sessions");
 
-  const runtime = await createPiCodingAgentRuntime({
-    cwd: workspacePath,
-    sessionDir,
-    agentDir,
-    apiKey: primaryApiKey,
-    model: defaultModel,
-  });
+  let runtime: AgentRuntime;
+  let mountDshCoreMcp: DeepSeekHarnessRuntime["mountCoreMcp"] | undefined;
+  if (runtimeName === "dsh") {
+    const provider =
+      process.env.THEBE_DSH_PROVIDER?.trim() || "deepseek-official";
+    const model = selectDeepSeekHarnessModel(
+      options?.model?.modelId,
+      process.env
+    );
+    if (options?.model && options.model.providerId !== provider) {
+      throw new Error(
+        `THEBE_RUNTIME=dsh requires a ${provider} model, not ${options.model.providerId}.`
+      );
+    }
+    const { createDeepSeekHarnessRuntime } =
+      await import("../adapters/dsh/runtime.ts");
+    const dshRuntime = createDeepSeekHarnessRuntime({
+      cwd: workspacePath,
+      sessionRoot:
+        process.env.THEBE_DSH_HOME?.trim() || join(agentDir, "dsh-sessions"),
+      provider,
+      model,
+      ...(deepseekKey ? { apiKey: deepseekKey } : {}),
+      disableDshSandbox: coreRunsInContainer(),
+    });
+    runtime = dshRuntime;
+    mountDshCoreMcp = dshRuntime.mountCoreMcp;
+    defaultModel = { providerId: provider, modelId: model };
+  } else {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const { createPiCodingAgentRuntime } =
+      await import("../adapters/pi/runtime.ts");
+    runtime = await createPiCodingAgentRuntime({
+      cwd: workspacePath,
+      sessionDir,
+      agentDir,
+      apiKey: primaryApiKey,
+      model: defaultModel,
+    });
 
-  if (openaiKey) {
-    await applyThebeApiKey(runtime.auth(), "openai", openaiKey);
-  }
-  if (anthropicKey) {
-    await applyThebeApiKey(runtime.auth(), "anthropic", anthropicKey);
-  }
-  if (!defaultModel) {
-    const available = await runtime.listAvailableModels();
-    const selected = available[0];
-    if (selected)
-      defaultModel = {
-        providerId: selected.providerId,
-        modelId: selected.modelId,
-      };
+    if (openaiKey) {
+      await applyThebeApiKey(runtime.auth(), "openai", openaiKey);
+    }
+    if (anthropicKey) {
+      await applyThebeApiKey(runtime.auth(), "anthropic", anthropicKey);
+    }
+    if (!defaultModel) {
+      const available = await runtime.listAvailableModels();
+      const selected = available[0];
+      if (selected)
+        defaultModel = {
+          providerId: selected.providerId,
+          modelId: selected.modelId,
+        };
+    }
   }
 
   const arcaneEnvironmentId = arcaneEnvironmentIdFromEnv();
@@ -327,6 +365,21 @@ export async function bootstrapThebe(
     ],
     oauth,
   });
+  const internalMcpBridge = mountDshCoreMcp
+    ? await startInternalMcpBridge({
+        handler: app.handler,
+        token: tokenResolution.token,
+      })
+    : undefined;
+  mountDshCoreMcp?.({
+    token: tokenResolution.token,
+    registerSession: internalMcpBridge!.registerSession,
+    unregisterSession: internalMcpBridge!.unregisterSession,
+  });
+  const disposeRuntimeBridge = async () => {
+    await internalMcpBridge?.close().catch(() => {});
+    await disposeOsSandbox();
+  };
 
   return {
     runtime,
@@ -341,7 +394,7 @@ export async function bootstrapThebe(
     token: tokenResolution.token,
     tokenGenerated: tokenResolution.generated,
     tokenPath: tokenResolution.path,
-    disposeSandboxVms: disposeOsSandbox,
+    disposeSandboxVms: disposeRuntimeBridge,
     ...(oauth ? { oauth } : {}),
   };
 }

@@ -87,6 +87,17 @@ export {
 export { createAgentStore } from "./agent/store.ts";
 export { createPiCodingAgentRuntime } from "./adapters/pi/runtime.ts";
 export {
+  createDeepSeekHarnessRuntime,
+  type DeepSeekHarnessRuntimeOptions,
+  type DeepSeekHarnessRuntime,
+} from "./adapters/dsh/runtime.ts";
+export {
+  AGENT_RUNTIME_NAMES,
+  selectRuntimeName,
+  type AgentRuntimeName,
+} from "./app/runtime-registry.ts";
+export {
+  DSH_RUNTIME_ID,
   PI_BUILTIN_TOOLS,
   PI_RUNTIME_ID,
   TOOLS_REQUIRING_APPROVAL,

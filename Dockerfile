@@ -21,7 +21,7 @@
 
 # Pinned base: exact Node patch plus the multi-arch manifest-list digest, so the
 # image is reproducible. Bump NODE_IMAGE (and this digest) to update Node.
-ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2f02ea1dbbc2ca920407d46d7ec7f87b20
+ARG NODE_IMAGE=node:24.22.3-bookworm-slim@sha256:873f586f3794f52281bd039bf02c048a0be08fde619338f9941bad1eb6b34530
 
 FROM ${NODE_IMAGE} AS build
 WORKDIR /app

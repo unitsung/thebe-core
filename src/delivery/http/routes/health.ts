@@ -15,6 +15,7 @@ export async function handleHealthEventsCompatibility(
     return json({
       ok: true,
       version: context.version,
+      runtimeId: context.agent?.runtime.runtimeId ?? null,
       capabilities: [
         ...(context.agent
           ? ["tickets", "main-session", "policy", "decisions"]

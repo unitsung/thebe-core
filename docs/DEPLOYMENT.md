@@ -5,7 +5,7 @@ Shape: **one container** that runs `node dist/serve.js` against a mounted data
 directory. A host service is
 possible for development, but the container is the supported release shape.
 
-> 中文速览：Core 以单个容器交付；所有持久状态在 `deploy/data`（配置、Pi agent、
+> 中文速览：Core 以单个容器交付；所有持久状态在 `deploy/data`（配置、运行时数据、
 > 会话元数据、输出），工作区默认挂 `./workspace` 到 `/workspace`；token 首次启动
 > 自动生成并打印，本机 / 私网 / `.local` / Tailscale `.ts.net` 的 Host 自动放行；
 > 对外只发布 loopback 端口，用 Tailscale Serve 或反向代理终止 TLS；需要接
@@ -28,8 +28,8 @@ curl -s -H "X-Thebe-Token: $TOKEN" http://127.0.0.1:8787/v1/health
 The container publishes `127.0.0.1:8787` only, and mounts:
 
 ```text
-deploy/data      → /data      config.json, Pi agent files, session metadata, outputs
-$THEBE_WORKSPACE → /workspace the only tree the agent may touch
+deploy/data      → /data      config.json, runtime data, session metadata, outputs
+$THEBE_WORKSPACE → /workspace the Core file-tool boundary
 ```
 
 Everything durable lives under `/data`, so backup, upgrade, and rollback all
@@ -136,11 +136,13 @@ enable it by default. This never pushes.
 | ---------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ENV=production`                                                              | yes                      | Enables the production token check and hardens defaults                                                                                                                                                             |
 | `THEBE_TOKEN`                                                                      | no                       | Shared secret; clients send it as `X-Thebe-Token` or `Authorization: Bearer`. Generated and persisted on first start when unset, then printed once                                                                  |
+| `THEBE_RUNTIME`                                                                    | no (`dsh`)               | `dsh` runs DeepSeek Harness through the official SDK profile. `pi` selects the Pi compatibility runtime. Any other value fails startup.                                                                             |
+| `DEEPSEEK_API_KEY` / `THEBE_DSH_PROVIDER` / `THEBE_DSH_MODEL`                      | DSH model use            | DSH credential, provider route, and initial model. Defaults are `deepseek-official` and `deepseek-flash`.                                                                                                           |
 | `THEBE_HOST`                                                                       | container: `0.0.0.0`     | Bind address; default `127.0.0.1`                                                                                                                                                                                   |
 | `THEBE_MCP_PORT` / `THEBE_MCP_HOST`                                                | no (off)                 | A second listener for `/mcp` and, when OAuth is enabled, its public protocol endpoints (`/v1`, `/openapi.json`, `/docs` answer `404`). Expose this one, not `THEBE_PORT`; `THEBE_MCP_HOST` defaults to `THEBE_HOST` |
 | `THEBE_PORT`                                                                       | no (8787)                | Bind port                                                                                                                                                                                                           |
 | `THEBE_ALLOWED_HOSTS`                                                              | no                       | Extra Host-header names. Loopback, private addresses, `.local`, and Tailscale `.ts.net` names are trusted automatically; `*` accepts any Host (disables the DNS-rebinding check)                                    |
-| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | The only tree the agent may read/write                                                                                                                                                                              |
+| `THEBE_WORKSPACE_DIR`                                                              | container: `/workspace`  | Core file-tool authorization boundary. Runtime processes also see the writable `/data` mount; see §5.                                                                                                               |
 | `THEBE_CONFIG_DIR`, `THEBE_AGENT_DIR`, `THEBE_AGENT_STORE_DIR`, `THEBE_OUTPUT_DIR` | container: under `/data` | Durable state locations                                                                                                                                                                                             |
 | `THEBE_OAUTH_ISSUER`                                                               | no (OAuth off)           | Stable public origin of the embedded authorization server, with no path. Enables OAuth; HTTPS is required except on loopback                                                                                        |
 | `THEBE_MCP_RESOURCE_URL`                                                           | no (`${issuer}/mcp`)     | Public OAuth resource identifier; its path must be exactly `/mcp`, and it must use HTTPS outside loopback                                                                                                           |
@@ -498,20 +500,32 @@ shared token and `THEBE_TOKEN` have full access.
 
 ## 5. Process isolation boundary
 
-Core and its Pi runtime do **not** provide an OS sandbox by themselves. The
-container is the release boundary:
+The selected runtime and the Core process are different boundaries. The
+container is the supported release boundary:
 
 - `read_only: true` root filesystem, `cap_drop: ALL`,
   `no-new-privileges:true`, `/tmp` on tmpfs.
-- Only `/data` and `/workspace` are writable; `/workspace` is the single
-  authorization boundary (`THEBE_WORKSPACE_DIR`).
+- Only `/data` and `/workspace` are writable. Core file tools use
+  `/workspace` as their authorization boundary. A process started by the
+  runtime can still see both mounts, so `/data` confidentiality depends on the
+  container, OS account, approvals and the runtime sandbox.
 - Leave `THEBE_SANDBOX` unset in the container. Core sees `/.dockerenv` or
-  `/run/.containerenv` and does not start a second sandbox. A host install
-  uses the OS sandbox by default; `THEBE_SANDBOX=off` is the only escape
-  hatch. See `docs/configuration.en.md`.
+  `/run/.containerenv` and does not start a second sandbox. The Pi compatibility
+  runtime uses `@anthropic-ai/sandbox-runtime` by default on a host. DSH owns a
+  file-only host sandbox and remains approval-gated, but the current DSH SDK
+  adapter has no Core-equivalent network allowlist. See
+  `docs/configuration.en.md`.
 - `THEBE_FULL_ACCESS` is ignored. It does not start Core in bypass. Turn
   bypass on in the TUI or a graphical client; both ask first. That choice is the host
   default when saved from settings, so schedules and subagents follow it.
+- In DSH mode Core starts a loopback-only internal HTTP face. Its
+  session-scoped bridge exposes the current Session's custom tools and enabled
+  external MCP tools. Core owns external connections and applies policy,
+  approval, audit and result redaction before forwarding them. The face uses the
+  shared token, binds an ephemeral `127.0.0.1` port, and closes with the runtime.
+  The profile patch carries a DSH credential reference, not the token itself;
+  the token is passed in the child environment for per-request resolution and
+  scrubbed from shell subprocesses by DSH.
 - Choosing the host-service path instead means you provide the dedicated user
   (no login shell, no sudo) and the filesystem permissions yourself.
 
@@ -523,14 +537,14 @@ thebe doctor                              # the CLI prints the same report offli
 curl -s -H "X-Thebe-Token: $THEBE_TOKEN" http://127.0.0.1:8787/v1/system/isolation
 ```
 
-The report shows `sandbox.mode` (`off` or `os`) and whether it is **enforced**.
-Inside the container the mode stays `off` when the variable is unset. On a host,
-`os` is enforced only when the sandbox dependencies are present; if they are
-missing, bash commands are refused and `thebe doctor` exits 1. There is no
-silent unsandboxed run. `warnings` lists relaxed layers (`THEBE_ALLOWED_HOSTS=*`),
-and Core prints each as a `SECURITY:` line at startup. `thebe doctor` also exits
-non-zero when the workspace is missing. A leftover `THEBE_SANDBOX` value other
-than `off` is ignored.
+The report also shows `runtimeId` and `sandbox.mode` (`off`, `os` or `dsh`) and whether it is
+**enforced**. Inside the container the mode stays `off` when the variable is
+unset. `os` is the Pi host sandbox and is enforced only when its dependencies
+are present. `dsh` is runtime-owned and is not probed by Core. `warnings` lists
+relaxed layers and, for DSH, the host network-coverage gap; Core prints each as
+a `SECURITY:` line at startup. `thebe doctor` also exits non-zero when the
+workspace is missing or the selected Pi OS sandbox dependencies are absent. A
+leftover `THEBE_SANDBOX` value other than `off` is ignored.
 
 ## 6. Health check and graceful shutdown
 
@@ -586,7 +600,7 @@ tar -xzf thebe-core-YYYYMMDD.tgz -C deploy      # recreates deploy/data
 docker compose up -d
 ```
 
-The archive contains `config.json`, Pi agent credentials under `data/agent`,
+The archive contains `config.json`, runtime credentials and state under `data/agent`,
 session metadata, and when OAuth is enabled `data/config/oauth-keys.json`,
 `oauth-state.json`, and `oauth-pairing.json`, so treat it as a secret
 (`chmod 600`). Restoring without the agent directory would silently log the

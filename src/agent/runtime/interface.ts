@@ -2,12 +2,12 @@
  * The Thebe-owned runtime seam.
  *
  * Agent and delivery code depend on these contracts, while runtimes adapt
- * their own session, model, and event representations here. Pi is the only
- * runtime; keep this module dependency-free so the Pi implementation stays
- * behind this boundary and tests or a Pi version upgrade do not change the
- * contract seen by callers.
+ * their own session, model, and event representations here. Keep this module
+ * dependency-free so the DSH and Pi implementations stay behind this boundary
+ * and tests or runtime upgrades do not change the contract seen by callers.
  */
 export const PI_RUNTIME_ID = "pi-coding-agent";
+export const DSH_RUNTIME_ID = "deepseek-harness";
 
 export type NormalizedEvent =
   | { type: "text_delta"; text: string }

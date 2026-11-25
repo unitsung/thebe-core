@@ -189,6 +189,7 @@ const env = {
   NODE_ENV: "production",
   THEBE_HOST: "127.0.0.1",
   THEBE_PORT: String(port),
+  THEBE_RUNTIME: "pi",
   THEBE_TOKEN: token,
   THEBE_ALLOWED_HOSTS: "127.0.0.1",
   THEBE_WEB_SEARCH_URL: `http://127.0.0.1:${modelPort}/search`,
@@ -399,7 +400,7 @@ try {
   );
   const settings = (await request("/v1/settings/agent")).data;
   check(
-    settings.permissionMode === "ask" && settings.persistence.enabled,
+    settings.permissionMode === "manual" && settings.persistence.enabled,
     "effective settings and persistence"
   );
   const changed = await request(
@@ -590,7 +591,10 @@ try {
   const error = await request(`/v1/session/${errorId}/prompt`, {
     text: "FIXTURE_ERROR",
   });
-  check(error.status === 500, "provider failure remains a failure");
+  check(
+    error.status === 502 && error.data.code === "provider_auth_failed",
+    "provider failure remains a failure"
+  );
   const retried = await request(`/v1/session/${errorId}/prompt`, {
     text: "FIXTURE_PLAIN",
   });

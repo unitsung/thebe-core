@@ -16,20 +16,29 @@ Thebe 的用户配置文件默认位于：
 ~/.thebe/notification-config.json
 ```
 
-Pi Adapter 使用的 agent 文件默认位于：
+默认的 DeepSeek Harness（DSH）运行时为每个 Core Session 使用独立的 DSH home，位于：
+
+```text
+~/.thebe/agent/dsh-sessions/auth.json
+~/.thebe/agent/dsh-sessions/<runtime-session-id>/
+```
+
+通过 TUI 或 `/v1/auth` 设置的 DSH API key 保存在 owner-only 的 `auth.json` 中；环境变量中的 key 优先使用。
+
+设置 `THEBE_RUNTIME=pi` 时，Pi 兼容 Adapter 使用的 agent 文件位于：
 
 ```text
 ~/.thebe/agent/
 ```
 
-该目录包含 `models.json`、`auth.json` 等由 Pi Adapter 管理的文件。Thebe 的界面和 Agent 设置应写入 `config.json`，不要直接混入 Pi agent 文件。
+该目录可包含 `models.json`、`auth.json` 等由 Pi Adapter 管理的文件。Thebe 的界面和 Agent 设置应写入 `config.json`，不要直接混入运行时目录。
 
 部署与运维请看 `docs/DEPLOYMENT.md`：容器部署形态、生产环境变量、HTTPS/Tailscale、进程隔离边界、健康检查与优雅退出、升级/回滚、备份/恢复、发布冒烟测试与 CI 发布门禁。
 
 ## 在 TUI 中管理配置
 
 - `/config`：使用外部编辑器打开 `config.json`。文件不存在时会安全创建。编辑器退出后，Thebe 恢复 TUI 并重新绘制界面。
-- `/config path`：显示 Thebe 配置文件、Pi agent 目录、工作区和文档输出目录的实际路径。
+- `/config path`：显示 Thebe 配置文件、运行时数据目录、工作区和文档输出目录的实际路径。
 - `/settings`：在 TUI 内修改常用设置。
 - `/notifications`：在 TUI 内配置通知通道凭据；输入密钥时字符会隐藏，`/notifications list` 只显示是否配置，`/notifications path` 显示文件路径。
 
@@ -126,19 +135,27 @@ export EDITOR=vim
 ```bash
 export THEBE_CONFIG_DIR=/path/to/thebe-config
 export THEBE_AGENT_DIR=/path/to/pi-agent
+export THEBE_RUNTIME=dsh
+export DEEPSEEK_API_KEY=...
 export THEBE_AGENT_STORE_DIR=/path/to/thebe-session-metadata
 export THEBE_WORKSPACE_DIR=/path/to/project
 export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 ```
 
+- `THEBE_RUNTIME` 默认 `dsh`，通过官方 DeepSeek Harness SDK profile 运行。设为 `pi` 使用内嵌 Pi 兼容运行时。其它值会使启动失败。
+- `DEEPSEEK_API_KEY` 是默认 `deepseek-official` DSH provider 使用的 API key。
+- `THEBE_DSH_PROVIDER` / `THEBE_DSH_MODEL` 设置 DSH provider 和初始模型，默认分别为 `deepseek-official` 与 `deepseek-flash`。
+- `THEBE_DSH_MODELS` 是逗号分隔的 DSH 模型列表；未设置 `THEBE_DSH_MODEL` 时第一项为默认值。
+- `THEBE_DSH_HOME` 可覆盖 DSH home 根目录，默认 `$THEBE_AGENT_DIR/dsh-sessions`；目录中的 `auth.json` 保存 TUI 或 API 设置的 owner-only provider key。
+- 运行时选择是进程级的。已有 Session 的 transcript 和协议不会原地迁移；在逐 Session 运行时路由完成前，持久 Session 要继续使用创建它的运行时。
 - `THEBE_CONFIG_DIR` 改变 Thebe 配置目录，配置文件将位于 `$THEBE_CONFIG_DIR/config.json`。
-- `THEBE_AGENT_DIR` 单独改变 Pi agent 文件目录。
+- `THEBE_AGENT_DIR` 改变运行时数据目录。Pi 在这里保存 agent 文件；DSH 在 `dsh-sessions/auth.json` 保存 provider key，并在各 Session home 下保存状态。
 - `THEBE_AGENT_STORE_DIR` 单独改变 Thebe 的会话与 Goal/子代理元数据目录；不存储 Pi transcript。
 - `THEBE_WORKSPACE_DIR` 在未设置配置文件 `workspacePath` 时提供 Thebe 文件工具和 TUI 的工作区；两者都未设置时 Thebe 拒绝启动，不会回退到进程启动目录。
 - `THEBE_TOOL_RESULT_COMPACTION` 可选，默认关闭。设为 `on` 时，每次调用模型前把模型已经据以回答过的工具结果缩短（本轮约 3000 字符，更早的轮次约 1200 字符，更早轮次的图片会被去掉）；模型最后一条消息之后新到的结果保持完整，会话记录不变。它减小输入，但会改写服务商已经见过的文本，从改写处起丢失提示缓存命中，所以只在输入体积比缓存复用更重要时开启。
 - `THEBE_OUTPUT_DIR` 设置用户明确要求保存生成文档时的默认目录；配置文件中的 `outputDirectory` 优先级更高。
-- 只设置 `THEBE_CONFIG_DIR` 时，Pi agent 目录默认为 `$THEBE_CONFIG_DIR/agent`。
-- `THEBE_SESSION_DIR` 设置 Pi 运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
+- 只设置 `THEBE_CONFIG_DIR` 时，运行时数据目录默认为 `$THEBE_CONFIG_DIR/agent`。
+- `THEBE_SESSION_DIR` 设置 Pi 兼容运行时保存会话 transcript 的目录，默认 `~/.thebe/sessions`。容器镜像里它位于 `HOME`（`/data/home`）之下，随 `/data` 卷保留。
 - Eval 的 `auto` 不是环境变量，是策略里的接单模式：默认 `observe`，只记录「本来会做什么」，不动手；选了 `auto` 才行动。规则就是授权，没有名单：规则判断「值得」，Core 就生成一张工单（Ticket），交给执行器（能用 Core 的全部家庭运维工具，不带 shell 和文件编辑，怎么做自己规划；它的 reviewer 只拿不改东西的工具）。工单的范围（Mandate）从事件涉及的资源推出，不是模型说了算。写操作逐次判断：落在范围内的服务上、且不是不可逆（`DELETE`、`deleteFiles` 之类，用网关同一个分类器）就直接执行，否则立刻被拒、工单转给你，不会挂起等审批。能改策略的只有 App 和你自己的令牌，`/mcp` 令牌够不到。
 - `auto` 有三道保险，用来防止无人值守时失控，不是调优参数，数字也没有实测依据：同一条线程 1 小时内最多接单 3 次（第 4 次只在「观察」页记「本来会接单」，原因 `thread_limit`）；Eval 每小时最多问模型 60 次，超过后每个事件仍记一条 Decision，原因 `assessment_limit`，`THEBE_EVAL_MAX_PER_HOUR` 可改，`0` 不限；重启后只评估 24 小时内的事件。模型不可用、回复无法解析或达到小时上限时，Decision 记为 `unavailable`；同一次故障只推送一次，直到之后有一次成功的 Assessment 才重新允许提示。
 - 后台模型工作还有每日预算：输入、输出和 cache-write 计入，cache-read 单独展示但不扣预算；用户自己的聊天不计入。默认每天 1,000,000 tokens，可用 `THEBE_BACKGROUND_TOKEN_BUDGET` 或 `PUT /v1/usage/budget` 调整，`0` 会暂停后台模型工作。告警阈值默认为 50%、80%、90%、100%（`THEBE_BACKGROUND_TOKEN_BUDGET_THRESHOLDS` 可配，支持小数或百分数），达到 50%、80%、90% 时推送预警提醒，达到 100% 耗尽时自动暂停并推送一次，每个阈值每天去重一次；次日 UTC 零点恢复。`GET /v1/usage/summary` 返回当天用量、估算美元成本、阈值状态、暂停状态和最近 30 天；满 15 天后会给出一次「日 p95 的两倍」建议，接受前不会改预算。
@@ -415,8 +432,7 @@ refresh token，吊销 refresh token 后，相关 access token 在下一次 `/mc
 
 ## MCP 服务器
 
-外部 MCP 服务器写在 `.thebe/mcp.json`（`mcpServers`，也读全局 `~/.thebe/mcp.json` 和 `.mcp.json`）。模型会话由 Pi 自带的 MCP 扩展
-连接这些服务器，Core 不自己维护 MCP 连接；工具名为 `mcp__<server>__<tool>`。
+外部 MCP 服务器写在 `.thebe/mcp.json`（`mcpServers`，也读全局 `~/.thebe/mcp.json` 和 `.mcp.json`）。Pi 会话由 Pi 自带的 MCP 扩展连接这些服务器。DSH 会话由 Core 进程内 MCP client 连接，再经需要认证的 Session 专属 bridge 暴露；每次调用仍经过 Core 的 policy、审批、审计和结果脱敏。两种运行时的工具名都是 `mcp__<server>__<tool>`。
 
 ```json
 {
@@ -771,10 +787,12 @@ export THEBE_IMESSAGE_PASSWORD=...
 
 ## 命令沙箱
 
-模型跑的 `bash` 和 Core 进程不是同一层边界。没有后端菜单。
+模型工具和 Core 进程不是同一层边界。沙箱由 `THEBE_RUNTIME` 选择。
 
-- **容器部署**（发布形态）：检测到 `/.dockerenv` 或 `/run/.containerenv` 就不启动沙箱。不要设置 `THEBE_SANDBOX`。不要在容器里再套 bubblewrap 或虚拟机。
-- **装在宿主上**：默认用钉死的 `@anthropic-ai/sandbox-runtime`（和 Claude Code 同一套 Seatbelt / bubblewrap）。TUI 设置和图形客户端的 Agent 设置里可以关掉，关掉前会确认；命令守卫仍然开着。这不是 bypass，也没有自动跳过权限。`THEBE_SANDBOX=off` 和容器部署会强制关闭，界面改不了。会话或宿主默认里的完全访问（`bypassPermissions`，TUI 和图形客户端会先确认）同样会拿掉沙箱。
+- **容器部署**（发布形态）：检测到 `/.dockerenv` 或 `/run/.containerenv` 就不启动嵌套的宿主沙箱。不要设置 `THEBE_SANDBOX`，也不要在容器里再套 bubblewrap 或虚拟机。DSH 仍通过 Core permission handler 逐次询问。
+- **Pi 兼容宿主运行时**：`THEBE_RUNTIME=pi` 使用钉死的 `@anthropic-ai/sandbox-runtime`（Seatbelt / bubblewrap）。TUI 设置和图形客户端可关闭宿主默认沙箱，关闭前会确认；`THEBE_SANDBOX=off` 和容器部署会强制关闭。完全访问同样会拿掉沙箱。
+- **默认 DSH 宿主运行时**：DeepSeek Harness 自己提供文件沙箱，通常为 `workspace-write`，Core 把 DSH 的审批请求交给 Core permission handler。DSH 当前的 sandbox 词汇只覆盖文件效果；Core 的宿主网络 allowlist 和 Seatbelt/bubblewrap wrapper 只覆盖 Pi，不覆盖 DSH 原生工具。DSH 宿主网络隔离仍是待补齐边界。
+- DSH 审批请求只带工具名，不带参数。Core 能等待人的批准，但参数级 `CommandRisk` 规则无法检查 DSH 原生 shell 命令。应保留 `manual` 并依赖 DSH 文件沙箱；带参数的审批已列为 SDK parity 缺口。
 
 `os`、`auto`、`vm`、`gondolin`、`bwrap`、`docker`、`seatbelt` 以及任何其它值都当作没设置：宿主仍用 OS 沙箱，容器里仍关闭。不再映射，也不再因此启动失败。
 
@@ -784,6 +802,6 @@ export THEBE_IMESSAGE_PASSWORD=...
 - 读：默认放开，拒绝 `~/.ssh`、`~/.aws`、`~/.gnupg`、`~/.thebe`。
 - 网络：允许名单，默认空，跟 Claude Code 一样。沙箱里的 `bash` 第一次访问某个域名会问你。允许一次只对这条命令有效；记住之后写入 `config.json` 的 `sandboxAllowedDomains`，以后不再问。拒绝并记住写入 `sandboxDeniedDomains`。同时有两条沙箱命令时无法判断是哪一条，这次访问直接拒绝。`web_search` 不走这份名单。bypass 不进沙箱，网络全开。
 
-依赖没装齐时命令会被拒绝，不会退回去直接执行。Linux 需要 bubblewrap、socat 和 ripgrep；macOS 用系统的 `sandbox-exec`，不需要 ripgrep。`thebe doctor` 在这种情况下退出码为 1。`GET /v1/system/isolation` 的 `sandbox.mode` 只有 `off` 和 `os`，不再返回 `backends`。
+Pi 沙箱依赖没装齐时命令会被拒绝，不会退回去直接执行。Linux 需要 bubblewrap、socat 和 ripgrep；macOS 用系统的 `sandbox-exec`，钉死的 runtime 不需要 ripgrep。`thebe doctor` 在这种情况下退出码为 1。`GET /v1/system/isolation` 的 `sandbox.mode` 为 `off`、`os` 或 `dsh`。`dsh` 由 runtime 自身管理，Core 不探测其内部后端，并会在报告中明确提示网络覆盖缺口。
 
 命令守卫、工作区约束和 Docker API 守卫（特权容器、宿主根与 `docker.sock` 挂载、volume prune）始终开启，没有开关。

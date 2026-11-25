@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildIsolationReport } from "./isolation.ts";
+import { DSH_RUNTIME_ID } from "../runtime/interface.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "thebe-isolation-"));
 const ready = { errors: [], warnings: [] };
@@ -107,5 +108,25 @@ describe("buildIsolationReport", () => {
       dependencies: ready,
     });
     expect(report.warnings).toEqual([]);
+  });
+
+  it("reports the runtime-owned DSH file sandbox and its network gap", () => {
+    const report = buildIsolationReport({
+      env: {},
+      runtimeId: DSH_RUNTIME_ID,
+      workspacePath: dir,
+      inContainer: false,
+    });
+    expect(report.sandbox).toMatchObject({
+      mode: "dsh",
+      enforced: true,
+      fallback: false,
+      verified: false,
+    });
+    expect(report.runtimeId).toBe(DSH_RUNTIME_ID);
+    expect(report.sandbox.reason).toContain("DeepSeek Harness");
+    expect(report.warnings).toEqual([
+      expect.stringContaining("network allowlist does not cover"),
+    ]);
   });
 });

@@ -4,7 +4,7 @@ import { buildIsolationReport } from "../../../agent/security/isolation.ts";
 
 /** System lifecycle controls and the running-session compatibility view. */
 export async function handleSystemRoutes(
-  context: ThebeHttpContext,
+  context: ThebeHttpContext
 ): Promise<Response | undefined> {
   const { request, path, agent } = context;
   if (request.method === "GET" && path === "/v1/system/status") {
@@ -12,7 +12,10 @@ export async function handleSystemRoutes(
   }
   if (request.method === "GET" && path === "/v1/system/isolation") {
     return json(
-      buildIsolationReport({ workspacePath: context.workspacePath }),
+      buildIsolationReport({
+        workspacePath: context.workspacePath,
+        runtimeId: agent?.runtime.runtimeId,
+      })
     );
   }
   if (

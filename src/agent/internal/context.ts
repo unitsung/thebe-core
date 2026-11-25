@@ -470,7 +470,10 @@ export function createAgentContext(inputOptions: CreateThebeAgentOptions) {
     if (resolveHostSecurity().sandboxMode !== "os") return false;
     const now = Date.now();
     if (!sandboxChecked || now - sandboxChecked.at > 60_000) {
-      const { sandbox } = buildIsolationReport({ workspacePath });
+      const { sandbox } = buildIsolationReport({
+        workspacePath,
+        runtimeId: options.runtime.runtimeId,
+      });
       sandboxChecked = {
         at: now,
         enforced: sandbox.enforced && !sandbox.fallback,

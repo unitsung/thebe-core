@@ -46,6 +46,7 @@ Options:
   --default                Make the added storage backend the default
   -h, --help               Show help
 
-Architecture: embeds Pi via createAgentSession / AgentRuntime. Does not spawn
-the Pi CLI. Arcane, auth, AgentStore, and PolicyEngine stay Thebe-owned.
+Architecture: the default AgentRuntime drives the DeepSeek Harness SDK profile;
+THEBE_RUNTIME=pi selects the embedded Pi compatibility runtime. Arcane, auth,
+AgentStore, PolicyEngine, approvals, and audit stay Thebe-owned.
 `;

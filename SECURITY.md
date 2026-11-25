@@ -24,8 +24,18 @@ Thebe Core is designed to run on your own hardware:
 - **Loopback by default.** The supported container publishes `127.0.0.1:8787`
   only. Put non-loopback access behind TLS (Tailscale Serve/Funnel or a reverse
   proxy) and add every host name to `THEBE_ALLOWED_HOSTS`.
-- **One container boundary.** Run Core in its container, with the workspace
-  (`THEBE_WORKSPACE_DIR`) as the only tree the agent may read or write.
+- **One container boundary.** Run Core in its container with a read-only root,
+  no capabilities, `no-new-privileges`, and only `/data` plus
+  `THEBE_WORKSPACE_DIR` writable. Core file tools use the workspace as their
+  authorization boundary; a runtime process can still see the mounted `/data`
+  tree.
+- **Runtime sandbox boundary.** Pi on a host uses the pinned Anthropic sandbox
+  for file and host network policy. Default DSH has a runtime-owned file sandbox
+  and fails unsupported session operations closed, but its current SDK profile
+  does not expose a Core-equivalent network allowlist. `/v1/system/isolation`
+  reports this as `sandbox.mode: "dsh"` with a warning. Do not treat it as
+  network isolation. DSH approval requests also omit the tool arguments, so
+  Core's argument-level command-risk rules cannot inspect those native calls.
 - **Approval by default.** Permission mode defaults to `manual` (ask each time);
   shell commands are risk-graded before they run, tool output and MCP data are
   treated as untrusted, and secrets are redacted. An append-only audit log
@@ -48,5 +58,6 @@ Thebe Core is designed to run on your own hardware:
   sandbox and approval for one session. Graphical clients and the TUI ask before turning it
   on; the HTTP API accepts it from any token holder.
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full operational security
-guidance, including TLS, backups, and secret handling.
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for operational security guidance
+and [docs/SANDBOX.md](docs/SANDBOX.md) for the current sandbox matrix and open
+gaps.

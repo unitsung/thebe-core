@@ -9,7 +9,7 @@ import { SERVICE_API_WRITE_TOOL_NAME } from "../capabilities/service-api.ts";
 
 export function isHighRiskTool(
   toolName: string,
-  risk?: PermissionRequest["risk"],
+  risk?: PermissionRequest["risk"]
 ): boolean {
   return (
     risk === "high" ||
@@ -30,7 +30,7 @@ export function isHighRiskTool(
 export function rememberedPermissionKey(
   request: Pick<PermissionRequest, "toolName" | "args" | "risk">,
   response: "allow" | "deny",
-  scope: PermissionRememberScope = "request",
+  scope: PermissionRememberScope = "request"
 ): string {
   if (scope === "conversation") {
     return "*";
@@ -47,13 +47,18 @@ export function rememberedPermissionKey(
 
 export function rememberedDecision(
   map: Record<string, "allow" | "deny"> | undefined,
-  request: Pick<PermissionRequest, "toolName" | "args" | "risk">,
+  request: Pick<PermissionRequest, "toolName" | "args" | "risk">
 ): "allow" | "deny" | undefined {
   if (!map) {
     return undefined;
   }
+  // Native runtimes may ask approval without exposing arguments. For a
+  // high-risk tool, `{}` is not an identity for a request, so a remembered
+  // request-level decision must not become a tool-wide decision.
   const scoped =
-    map[`${request.toolName}:${hashParameters(request.args ?? {})}`];
+    request.args === undefined && isHighRiskTool(request.toolName, request.risk)
+      ? undefined
+      : map[`${request.toolName}:${hashParameters(request.args ?? {})}`];
   if (scoped) {
     return scoped;
   }

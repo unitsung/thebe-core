@@ -39,9 +39,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.83",
+    "@deepseek-ai/dsh-sdk-client": "0.2.3-alpha.2",
     "@earendil-works/pi-coding-agent": "^1.6.0",
     "@earendil-works/pi-mcp": "^1.6.0",
     "@earendil-works/pi-tui": "^1.6.0",
+    "@modelcontextprotocol/client": "2.4.0",
     "chalk": "^6.0.1",
     "jose": "^6.2.16",
     "oidc-provider": "^9.13.3",
@@ -68,10 +70,13 @@
   "overrides": {
     "@anthropic-ai/sandbox-runtime": {
       "zod": "4.6.7"
-    }
+    },
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
+    "fflate": "0.8.3"
   },
   "engines": {
-    "node": ">=24.0.0"
+    "node": "^24.22.3 || >=26.13.1"
   },
   "scarfSettings": {
     "enabled": false
