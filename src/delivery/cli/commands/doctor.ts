@@ -1,6 +1,11 @@
 import { loadEnvLocal } from "../../../app/config/env.ts";
 import { loadThebeConfig } from "../../tui/settings/config.ts";
 import { buildIsolationReport } from "../../../agent/security/isolation.ts";
+import {
+  DSH_RUNTIME_ID,
+  PI_RUNTIME_ID,
+} from "../../../agent/runtime/interface.ts";
+import { selectRuntimeName } from "../../../app/runtime-registry.ts";
 
 /**
  * `thebe doctor` — report the effective isolation posture without starting the
@@ -17,7 +22,11 @@ export async function runDoctor(): Promise<number> {
     config?.workspacePath?.trim() ||
     process.env.THEBE_WORKSPACE_DIR?.trim() ||
     null;
-  const report = buildIsolationReport({ workspacePath });
+  const runtimeName = selectRuntimeName(process.env);
+  const report = buildIsolationReport({
+    workspacePath,
+    runtimeId: runtimeName === "dsh" ? DSH_RUNTIME_ID : PI_RUNTIME_ID,
+  });
   const { sandbox, workspace } = report;
 
   const lines: string[] = [];

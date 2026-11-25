@@ -295,12 +295,18 @@ async function stopCore(core, { timeoutMs = 10_000 } = {}) {
   return result;
 }
 
-async function readChecks(run, { baseUrl, token }) {
+async function readChecks(run, { baseUrl, token, expectedRuntimeId }) {
   await run("GET /v1/health with token", async () => {
     const res = await request(baseUrl, { path: "/v1/health", token });
     assert(res.status === 200, `status ${res.status}`);
     assert(res.json?.ok === true, `body ${res.text.slice(0, 120)}`);
-    return `version=${res.json?.version ?? "unknown"}`;
+    if (expectedRuntimeId) {
+      assert(
+        res.json?.runtimeId === expectedRuntimeId,
+        `expected ${expectedRuntimeId}, got ${res.json?.runtimeId ?? "none"}`
+      );
+    }
+    return `version=${res.json?.version ?? "unknown"} runtime=${res.json.runtimeId}`;
   });
   await run("protected route rejects a missing token", async () => {
     const res = await request(baseUrl, { path: "/v1/activity" });
@@ -403,7 +409,14 @@ export async function main(argv = process.argv.slice(2)) {
       console.log(
         `smoke: spawned Core at ${first.baseUrl} (data ${dirs.root})`
       );
-      await readChecks(run, { baseUrl: first.baseUrl, token });
+      await readChecks(run, {
+        baseUrl: first.baseUrl,
+        token,
+        expectedRuntimeId:
+          process.env.THEBE_RUNTIME?.trim().toLowerCase() === "pi"
+            ? "pi-coding-agent"
+            : "deepseek-harness",
+      });
       await writeChecks(run, { baseUrl: first.baseUrl, token });
       await run("SIGTERM drains and exits 0", async () => {
         const { code } = await stopCore(first);

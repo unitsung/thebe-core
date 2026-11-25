@@ -19,32 +19,47 @@ Notification channel credentials live in:
 ~/.thebe/notification-config.json
 ```
 
-Files managed by the Pi runtime adapter (`models.json`, `auth.json`, and so on) live in:
+When `THEBE_RUNTIME=pi`, files managed by the Pi compatibility adapter
+(`models.json`, `auth.json`, and so on) live in:
 
 ```text
 ~/.thebe/agent/
 ```
 
-UI and agent settings belong in `config.json`; do not mix them into the Pi agent
-files. Configuration files can contain provider addresses and the agent
-directory can contain credentials. Never commit or share them.
+The default DSH runtime gives every Core Session its own DSH home under:
+
+```text
+~/.thebe/agent/dsh-sessions/<runtime-session-id>/
+```
+
+UI and agent settings belong in `config.json`; do not mix them into a runtime
+home. Configuration files can contain provider addresses and runtime homes can
+contain credentials. Never commit or share them.
 
 Override the defaults with environment variables:
 
 ```bash
 export THEBE_CONFIG_DIR=/path/to/thebe-config
 export THEBE_AGENT_DIR=/path/to/pi-agent
+export THEBE_RUNTIME=dsh
+export DEEPSEEK_API_KEY=...
 export THEBE_AGENT_STORE_DIR=/path/to/thebe-session-metadata
 export THEBE_WORKSPACE_DIR=/path/to/project
 export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 ```
 
-- `THEBE_CONFIG_DIR`: the config directory; the file is `$THEBE_CONFIG_DIR/config.json`. When only this is set, the Pi agent directory defaults to `$THEBE_CONFIG_DIR/agent`.
-- `THEBE_AGENT_DIR`: the Pi agent files only.
+- `THEBE_RUNTIME`: `dsh` by default, backed by the official DeepSeek Harness SDK profile. Set `pi` to use the embedded Pi compatibility runtime. Any other value fails startup.
+- `DEEPSEEK_API_KEY`: API key used by the default `deepseek-official` DSH provider.
+- `THEBE_DSH_PROVIDER` / `THEBE_DSH_MODEL`: DSH provider and initial model. Defaults are `deepseek-official` and `deepseek-flash`.
+- `THEBE_DSH_MODELS`: optional comma-separated model ids exposed by the DSH runtime. The first is the default when `THEBE_DSH_MODEL` is unset.
+- `THEBE_DSH_HOME`: optional root for per-Session DSH homes. Defaults to `$THEBE_AGENT_DIR/dsh-sessions`.
+- Runtime selection is process-wide. Existing Session metadata does not switch transcripts or protocols in place; use the same runtime that created a persisted Session until per-session runtime routing ships.
+- `THEBE_CONFIG_DIR`: the config directory; the file is `$THEBE_CONFIG_DIR/config.json`. When only this is set, the runtime data directory defaults to `$THEBE_CONFIG_DIR/agent`.
+- `THEBE_AGENT_DIR`: runtime data. Pi stores its agent files here; DSH stores per-Session homes below it.
 - `THEBE_AGENT_STORE_DIR`: session, goal, and subagent metadata. Pi transcripts are not stored here.
 - `THEBE_WORKSPACE_DIR`: the workspace for file tools and the TUI when `workspacePath` is not set in the config file. If neither is set, Core refuses to start; it never falls back to the process working directory.
 - `THEBE_OUTPUT_DIR`: the default directory for generated documents the user explicitly asks to save. `outputDirectory` in the config file takes precedence.
-- `THEBE_SESSION_DIR`: where the Pi runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
+- `THEBE_SESSION_DIR`: where the Pi compatibility runtime keeps session transcripts. Defaults to `~/.thebe/sessions`. The container image keeps it under `HOME` (`/data/home`), so it survives with the `/data` volume.
 - `THEBE_MCP_WRITES`: whether an agent connected over `/mcp` may call write tools: `container_restart`, the Navidrome playlist writes, a provider MCP server's write tools, and the preview-and-confirm calls of a configured service API. **On by default.** Set `off` (or `deny`/`false`/`0`/`no`) to make `/mcp` read-only; a client cannot change this for itself. Core does not ask anyone first on this path. Each tool carries `readOnlyHint` and `destructiveHint`, and asking the user is up to the calling agent and its client. A provider MCP server's tool counts as a write unless its permission is `read`, which Core takes from the `readTools` you list for that server in `.thebe/mcp.json` or from a server-level `permission: "read"` — not from the server's own `readOnlyHint`. A restart leaves a normal receipt whose approval source is `mcp_client`, and every write is written to the audit log.
 - `THEBE_AUDIT_PATH`: the append-only audit log (JSON lines: method, parameter hash, result, duration; no arguments or output). Defaults to `audit.jsonl` in the agent store directory. `GET /v1/audit` reads it back.
 - `THEBE_TOOL_RESULT_COMPACTION` (optional, off by default): set `on` to shorten, before each model call, tool results the model has already answered from (to about 3000 characters in the same turn, about 1200 from earlier turns; images from earlier turns are dropped). Results that arrived after the model's last message stay whole and the session record is unchanged. It lowers input size but rewrites text the provider has already seen, which forfeits prompt-cache hits from that point, so enable it only when input size matters more than cache reuse.
@@ -54,7 +69,7 @@ export THEBE_OUTPUT_DIR=/path/to/project/.thebe/outputs
 In the TUI:
 
 - `/config` opens `config.json` in your external editor (created safely if missing).
-- `/config path` prints the real paths of the config file, Pi agent directory, workspace, and output directory.
+- `/config path` prints the real paths of the config file, runtime data directory, workspace, and output directory.
 - `/settings` edits common settings.
 - `/notifications` edits notification channel credentials. Secret input is masked; `/notifications list` shows only whether fields are set, and `/notifications path` prints the file path.
 
@@ -260,10 +275,15 @@ export THEBE_IMESSAGE_PASSWORD=...
 
 ## Model providers and sign-in
 
-Model providers are managed by the Pi runtime adapter. List and configure them
-from the TUI settings or through `GET /v1/provider`; credentials are kept in the
-agent directory, never in `config.json`. `POST /v1/provider/{id}/test` checks a
-provider with a real probe.
+The default DSH runtime exposes the `deepseek-official` provider. Set
+`DEEPSEEK_API_KEY` in the service environment or write the key through the
+runtime auth API. DSH itself is a developer preview; the current Core adapter
+does not expose DSH account OAuth through `/v1/provider`.
+
+With `THEBE_RUNTIME=pi`, model providers are managed by the Pi compatibility
+adapter. List and configure them from the TUI settings or through
+`GET /v1/provider`; credentials are kept in the agent directory, never in
+`config.json`. `POST /v1/provider/{id}/test` checks a provider with a real probe.
 
 ## MCP OAuth gateway
 
@@ -722,9 +742,10 @@ sent to the model.
 ## MCP servers
 
 External MCP servers go in `.thebe/mcp.json` under `mcpServers` (the global
-`~/.thebe/mcp.json` and `.mcp.json` are also read). Model sessions connect to
-them through Pi's built-in MCP extension; Core does not keep MCP connections of
-its own. Tool names are `mcp__<server>__<tool>`.
+`~/.thebe/mcp.json` and `.mcp.json` are also read). Pi sessions connect to them
+through Pi's built-in MCP extension. The current DSH adapter mounts Core's own
+`/mcp` endpoint but does not yet translate this per-server inventory into DSH
+profile rows. Tool names on Pi are `mcp__<server>__<tool>`.
 
 ```json
 {
@@ -821,10 +842,14 @@ The model reads untrusted content (web pages, tool output, remote MCP), so in th
 
 ## Command sandbox
 
-Model `bash` and the Core process are different boundaries. There is no backend menu.
+Model tools and the Core process are different boundaries. Sandbox ownership
+depends on `THEBE_RUNTIME`.
 
 - **Container deployment** (the release shape): `/.dockerenv` or `/run/.containerenv` means no sandbox is started. Leave `THEBE_SANDBOX` unset. Do not nest bubblewrap or a VM inside the container.
-- **Host install**: the default is pinned `@anthropic-ai/sandbox-runtime` (the same Seatbelt / bubblewrap Claude Code uses). The TUI settings menu and a graphical client's Agent settings can turn it off, and both ask first; the command guard stays on. That is not bypass, and there is no automatic bypass. `THEBE_SANDBOX=off` and a container force it off, and the switch cannot override that. Full access (`bypassPermissions`, confirmed in the TUI or a graphical client) also lifts the sandbox.
+- **Pi compatibility host install**: `THEBE_RUNTIME=pi` uses pinned `@anthropic-ai/sandbox-runtime` (Seatbelt on macOS, bubblewrap on Linux). The TUI settings menu and a graphical client's Agent settings can turn it off, and both ask first; the command guard stays on. That is not bypass. `THEBE_SANDBOX=off` and a container force it off. Full access (`bypassPermissions`, confirmed in the TUI or a graphical client) also lifts the sandbox.
+- **Default DSH host install**: DeepSeek Harness owns its file sandbox, normally `workspace-write`, and Core forwards its approval requests to the Core permission handler. DSH's sandbox vocabulary covers file effects only. The Core host network allowlist and Seatbelt/bubblewrap wrapper apply to the Pi runtime, not to DSH's native tools. Treat DSH-host network enforcement as an open boundary until a DSH network provider is installed.
+- DSH approval requests expose the tool name but not its arguments. Core can require the person's decision, but its argument-level `CommandRisk` rules cannot inspect a DSH-native shell command. Use the DSH sandbox and keep the session in `manual`; argument-bearing approvals are a tracked SDK parity gap.
+- **Container**: DSH runs without a nested host sandbox. The container mounts and Docker hardening are the process boundary, while DSH approval remains `ask`.
 
 `os`, `auto`, `vm`, `gondolin`, `bwrap`, `docker`, `seatbelt` and any other value are ignored, the same as leaving the variable unset: a host still uses the OS sandbox, and a container still stays off. They are not mapped, and they do not fail startup.
 
@@ -834,7 +859,12 @@ The policy is fixed, not an environment variable:
 - Read: open, except `~/.ssh`, `~/.aws`, `~/.gnupg` and `~/.thebe`.
 - Network: an allowlist, empty by default, the same shape as Claude Code. Sandboxed `bash` asks the first time it reaches a host. Allowing once covers that command; remembering the host writes `sandboxAllowedDomains` in `config.json` and later commands are not asked. A remembered denial writes `sandboxDeniedDomains`. Two sandboxed commands at once cannot be told apart, so that connection is denied. `web_search` does not use this list. Bypass does not enter the sandbox, so its network is open.
 
-A missing dependency refuses the command instead of running it bare. Linux needs bubblewrap, socat and ripgrep; macOS uses `sandbox-exec` and does not need ripgrep. `thebe doctor` exits 1 in that case. `GET /v1/system/isolation` reports `sandbox.mode` as `off` or `os` and no longer returns `backends`.
+A missing Pi sandbox dependency refuses the command instead of running it bare.
+Linux needs bubblewrap, socat and ripgrep; macOS uses `sandbox-exec` and does not
+need ripgrep in the pinned runtime. `thebe doctor` exits 1 in that case.
+`GET /v1/system/isolation` reports `sandbox.mode` as `off`, `os`, or `dsh`.
+`dsh` is runtime-owned and not probed by Core, and its report includes the
+network-coverage warning.
 
 The command guard, the workspace confinement and the Docker API guard (privileged containers, host-root and
 `docker.sock` mounts, volume prune) are always on and have no switches.

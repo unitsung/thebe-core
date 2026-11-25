@@ -1853,10 +1853,16 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
         },
         Health: {
           type: "object",
-          required: ["ok", "version", "capabilities"],
+          required: ["ok", "version", "runtimeId", "capabilities"],
           properties: {
             ok: { type: "boolean" },
             version: { type: "string" },
+            runtimeId: {
+              type: "string",
+              nullable: true,
+              description:
+                "Active AgentRuntime id, such as deepseek-harness or pi-coding-agent.",
+            },
             capabilities: {
               type: "array",
               items: { type: "string" },
@@ -3754,7 +3760,7 @@ export function createOpenApiDocument(version: string): OpenApiDocument {
             sandboxEnabled: {
               type: "boolean",
               description:
-                "Effective OS sandbox for host bash. False inside a container, when THEBE_SANDBOX=off, or when turned off here. Default true on a host.",
+                "Pi compatibility runtime preference for its host OS sandbox. The default DSH runtime owns a separate file-sandbox policy. False inside a container, when THEBE_SANDBOX=off, or when turned off here.",
             },
             sandboxAllowedDomains: {
               type: "array",

@@ -17,6 +17,7 @@ describe("listenThebeHttp", () => {
       await expect(res.json()).resolves.toEqual({
         ok: true,
         version: "0.1.0",
+        runtimeId: null,
         capabilities: [],
       });
       expect(bind.startsWith("127.0.0.1:")).toBe(true);

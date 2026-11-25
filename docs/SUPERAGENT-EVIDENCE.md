@@ -5,14 +5,16 @@ acceptance criteria. The domain model follows ADR 0003. [ADR 0003](adr/0003-dsh-
 
 ## Primary sources and Core implications
 
-- **Ticket and Assignment.** DSH gives a Ticket a succession of Assignments.
+- **Ticket and Assignment.** The DSH superagent reference bundle gives a Ticket
+  a succession of Assignments. DeepSeek Harness itself is the runtime.
   On host restart it ends running Assignments and starts replacements with a
   recovery note that directs the Executor to inspect external state before
   repeating an action. Waiting and review states can survive the restart.
   Core's restart criterion is a stable Ticket identity, preserved history and
   at most one active Assignment, with deliberate pauses and stops respected.
-  [DSH domain](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/001-domain.md)
-  [DSH execution and restart](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/003-execution.md#restart)
+  [DSH superagent domain reference](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/001-domain.md)
+  [DSH superagent execution and restart](https://github.com/deepseek-ai/dsh-superagent-prototype/blob/8c32a9dc5d72c033816c6a8110b37f40cf94fba4/docs/003-execution.md#restart)
+  [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 
 - **Execution recovery.** Mastra 1.84 introduces experimental incremental
   storage for durable and evented execution. Its release notes distinguish

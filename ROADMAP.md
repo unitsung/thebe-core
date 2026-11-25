@@ -30,16 +30,21 @@ It is not a general agent platform or a chat gateway. That shapes the plan:
 
 **Runtime and delivery**
 
-- The reasoning loop is `pi-coding-agent`, reached through the `AgentRuntime`
-  interface; Core ships no second loop.
+- The default reasoning loop is DeepSeek Harness (DSH), reached through the
+  `AgentRuntime` interface. Pi remains available with `THEBE_RUNTIME=pi`.
+  Core still ships no second reasoning loop of its own.
 - Delivery surfaces: terminal TUI (`node dist/tui.js`), a one-shot CLI, the HTTP
   `/v1` API, and an MCP endpoint `/mcp`.
 
 **Conversations and durable work**
 
-- Sessions (create, resume, fork, compact, export, steer, follow-up, model
-  selection, revert), prompts, Goals, Workers/subagents, schedules, and
-  normalized events.
+- Sessions, prompts, Goals, Workers/subagents, schedules, and normalized
+  events. Pi supports the full create/resume/fork/compact/export/steer/
+  follow-up/model-selection/revert surface. The current DSH SDK adapter
+  supports create, resume, prompt, steer, follow-up, compaction, model selection
+  between launches, export of observed events, and normalized tool/text events.
+  DSH-protocol gaps such as fork, revert, and per-tool cancellation fail
+  explicitly.
 - Product HTTP: capability runs, Activity feed, Goals, Workers, pending
   permissions, Skills, MCP lifecycle, enabled resources, permission mode, Agent
   settings, Artifacts, audit, push device registration, and provider OAuth
@@ -133,16 +138,18 @@ Named after the first beta.
   not as new built-in `vendor.tool` modules; Core adds a built-in adapter only
   where it owns the semantics (the approval → execute → verify → receipt action
   path, as with containers and diagnosis).
-- **DSH runtime behind the same seam (low priority).** Add the DSH Session
-  runtime as an in-process `AgentRuntime` implementation next to Pi, selected
-  per session, so `/v1` keeps one protocol while approvals, the command guard,
-  audit and workspace policy stay in Core. DSH Source/Eval/Ticket orchestration
-  stays unused because Core owns that domain. This needs a runtime registry,
-  an explicit map for unsupported Pi-only Session operations (fork, revert,
-  steer and compact), and parity tests for prompt files, tool events, recovery
-  and cancellation.
-- **Sandbox follow-ups.** A host network allowlist, if one is needed, stays inside
-  `@anthropic-ai/sandbox-runtime`. The release container does not nest it.
+- **DSH runtime parity.** The DeepSeek Harness SDK is still a developer preview.
+  Add the missing fork, revert, per-tool cancellation, historical transcript
+  replay, argument-bearing approval requests, per-session runtime selection,
+  enabled-resource parity and per-server MCP translation as the upstream
+  protocol exposes them. DSH Source/Eval/Ticket orchestration remains unused
+  because Core owns that domain.
+- **Sandbox boundary alignment.** Pi's host network allowlist and live
+  Seatbelt/bubblewrap checks are implemented. DSH currently provides a
+  runtime-owned file sandbox but no corresponding network vocabulary, and the
+  release container has no egress policy. Align DSH-host network enforcement and
+  decide whether the supported deployment needs container egress restrictions.
+  The current matrix and verified boundaries are in [docs/SANDBOX.md](docs/SANDBOX.md).
 
 ## Candidate directions (identified, not scheduled)
 

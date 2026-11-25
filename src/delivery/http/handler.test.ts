@@ -121,6 +121,7 @@ describe("Thebe HTTP handler", () => {
     await expect(json(res)).resolves.toEqual({
       ok: true,
       version: "0.1.0",
+      runtimeId: null,
       capabilities: [],
     });
   });

@@ -15,6 +15,7 @@ const listen = resolveThebeListen(process.env);
 
 const {
   handler: app,
+  runtime,
   version,
   agent,
   token,
@@ -28,7 +29,10 @@ const {
   allowedHosts: listen.allowedHosts,
 });
 
-const isolation = buildIsolationReport({ workspacePath });
+const isolation = buildIsolationReport({
+  workspacePath,
+  runtimeId: runtime.runtimeId,
+});
 for (const warning of isolation.warnings) {
   console.warn(`SECURITY: ${warning}`);
 }

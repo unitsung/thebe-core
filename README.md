@@ -7,12 +7,12 @@ Thebe Core is a homelab agent server with approvals and an audit log. It connect
 Run it on a NAS, a mini PC, a Raspberry Pi or a cloud server. Use it three ways:
 
 - **As an MCP server** for the agent you already use. Clients can call the HTTP endpoint with a token or spawn the `thebe-mcp` stdio bin.
-- **As a terminal agent.** Core embeds the [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) runtime, so `thebe` gives you a TUI and a one-shot CLI that can read files, edit files and run commands in a workspace you choose.
+- **As a terminal agent.** Core runs [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) through the `AgentRuntime` seam by default, so `thebe` gives you a TUI and a one-shot CLI that can read files, edit files and run commands in a workspace you choose. Set `THEBE_RUNTIME=pi` to keep the compatible embedded [pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) backend.
 - **Through its HTTP API.** Sessions, goals, schedules, an activity feed, approvals and the audit log, documented in OpenAPI at `/docs`.
 
 The name comes from Thebe, a moon of Jupiter (Jupiter XIV), pronounced /ˈθiːbi/.
 
-> **Status: first release (0.1.0).** The test suite and the container smoke test pass, and the operator has run Core on a real server. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
+> **Status: first release (0.1.0).** The test suite and the container smoke test pass, and the operator has run Core on a real server. Claude Code, Codex and OpenCode have listed and called `/mcp` tools in real sessions, and the official MCP TypeScript SDK passes initialize, list and call. DeepSeek Harness is a developer preview upstream and Core currently exposes only the SDK-compatible subset of its session lifecycle. Read [SECURITY.md](SECURITY.md) before exposing Core beyond your own machine.
 
 ## What it can do
 
@@ -52,7 +52,7 @@ cp .env.example .env
 THEBE_WORKSPACE_DIR=/srv/thebe-workspace npm run start:build
 ```
 
-Core does not ship a model. Sign in to a provider from the terminal UI (`/settings`) or through `GET /v1/provider`, then connect your services with the [configuration guide](docs/configuration.en.md).
+Core does not ship a model. The default DSH runtime uses `DEEPSEEK_API_KEY` and `deepseek-official` models; the Pi compatibility runtime can sign in to its wider provider catalog from the terminal UI (`/settings`) or through `GET /v1/provider`. Connect services with the [configuration guide](docs/configuration.en.md).
 
 ## Using Core
 
